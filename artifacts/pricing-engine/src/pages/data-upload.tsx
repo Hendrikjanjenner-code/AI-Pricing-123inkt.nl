@@ -3,6 +3,7 @@ import { useListUploads } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Upload, FileSpreadsheet, CheckCircle2, AlertCircle, Clock, Loader2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
