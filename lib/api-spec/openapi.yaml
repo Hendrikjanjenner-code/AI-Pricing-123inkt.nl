@@ -1,22 +1,45 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: AI Pricing Decision Engine API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication
+  - name: products
+    description: Product/SKU management
+  - name: categories
+    description: Category management
+  - name: recommendations
+    description: Pricing recommendations
+  - name: dashboard
+    description: Dashboard KPIs and charts
+  - name: uploads
+    description: CSV data uploads
+  - name: data-quality
+    description: Data quality checks
+  - name: substitutions
+    description: Substitution monitoring
+  - name: model-health
+    description: Model health and runs
+  - name: exports
+    description: Export functionality
+  - name: users
+    description: User management
+  - name: skus
+    description: SKU deep dive
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +47,794 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/login:
+    post:
+      operationId: loginUser
+      tags: [auth]
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      operationId: logoutUser
+      tags: [auth]
+      summary: Logout
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /auth/me:
+    get:
+      operationId: getCurrentUser
+      tags: [auth]
+      summary: Get current user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Get dashboard KPI summary
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
+  /dashboard/charts/margin-by-category:
+    get:
+      operationId: getMarginByCategory
+      tags: [dashboard]
+      summary: Margin uplift grouped by category
+      responses:
+        "200":
+          description: Margin by category
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CategoryMarginItem"
+
+  /dashboard/charts/recs-by-strategy:
+    get:
+      operationId: getRecsByStrategy
+      tags: [dashboard]
+      summary: Recommendation count by strategy type
+      responses:
+        "200":
+          description: Recs by strategy
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StrategyCountItem"
+
+  /dashboard/charts/confidence-distribution:
+    get:
+      operationId: getConfidenceDistribution
+      tags: [dashboard]
+      summary: Confidence score distribution
+      responses:
+        "200":
+          description: Confidence distribution buckets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConfidenceBucket"
+
+  /dashboard/charts/price-change-distribution:
+    get:
+      operationId: getPriceChangeDistribution
+      tags: [dashboard]
+      summary: Price change % distribution
+      responses:
+        "200":
+          description: Price change distribution
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PriceChangeBucket"
+
+  /products:
+    get:
+      operationId: listProducts
+      tags: [products]
+      summary: List all products/SKUs
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: strategy_type
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: lifecycle_status
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: search
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: page
+          in: query
+          schema:
+            type: ["integer", "null"]
+        - name: page_size
+          in: query
+          schema:
+            type: ["integer", "null"]
+      responses:
+        "200":
+          description: Product list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductListResponse"
+
+  /products/{id}:
+    get:
+      operationId: getProduct
+      tags: [products]
+      summary: Get product by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Product detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    patch:
+      operationId: updateProduct
+      tags: [products]
+      summary: Update product metadata
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProductRequest"
+      responses:
+        "200":
+          description: Updated product
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+
+  /categories:
+    get:
+      operationId: listCategories
+      tags: [categories]
+      summary: List all categories
+      responses:
+        "200":
+          description: Category list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Category"
+
+  /category-strategies:
+    get:
+      operationId: listCategoryStrategies
+      tags: [categories]
+      summary: List category-strategy mappings
+      responses:
+        "200":
+          description: Category strategy mappings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CategoryStrategy"
+
+  /category-strategies/{id}:
+    put:
+      operationId: updateCategoryStrategy
+      tags: [categories]
+      summary: Update category strategy mapping
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCategoryStrategyRequest"
+      responses:
+        "200":
+          description: Updated mapping
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CategoryStrategy"
+
+  /recommendations:
+    get:
+      operationId: listRecommendations
+      tags: [recommendations]
+      summary: List pricing recommendations
+      parameters:
+        - name: date
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: category
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: strategy_type
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: approval_status
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: safety_status
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: search
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: page
+          in: query
+          schema:
+            type: ["integer", "null"]
+        - name: page_size
+          in: query
+          schema:
+            type: ["integer", "null"]
+        - name: sort_by
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: sort_dir
+          in: query
+          schema:
+            type: ["string", "null"]
+      responses:
+        "200":
+          description: Recommendation list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecommendationListResponse"
+
+  /recommendations/{id}:
+    get:
+      operationId: getRecommendation
+      tags: [recommendations]
+      summary: Get recommendation detail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Recommendation detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecommendationDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /recommendations/{id}/approve:
+    post:
+      operationId: approveRecommendation
+      tags: [recommendations]
+      summary: Approve a recommendation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Approved recommendation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Recommendation"
+
+  /recommendations/{id}/reject:
+    post:
+      operationId: rejectRecommendation
+      tags: [recommendations]
+      summary: Reject a recommendation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RejectRequest"
+      responses:
+        "200":
+          description: Rejected recommendation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Recommendation"
+
+  /recommendations/{id}/override:
+    patch:
+      operationId: overrideRecommendation
+      tags: [recommendations]
+      summary: Manually override recommended price
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OverrideRequest"
+      responses:
+        "200":
+          description: Overridden recommendation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Recommendation"
+
+  /recommendations/bulk-approve:
+    post:
+      operationId: bulkApproveRecommendations
+      tags: [recommendations]
+      summary: Bulk approve recommendations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkIdsRequest"
+      responses:
+        "200":
+          description: Bulk approve result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkActionResult"
+
+  /model-runs:
+    get:
+      operationId: listModelRuns
+      tags: [model-health]
+      summary: List model runs
+      responses:
+        "200":
+          description: Model run history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ModelRun"
+
+    post:
+      operationId: triggerModelRun
+      tags: [model-health]
+      summary: Trigger a new model run
+      responses:
+        "200":
+          description: Model run started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelRun"
+
+  /model-health:
+    get:
+      operationId: getModelHealth
+      tags: [model-health]
+      summary: Get model health summary
+      responses:
+        "200":
+          description: Model health
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelHealth"
+
+  /data-quality:
+    get:
+      operationId: getDataQuality
+      tags: [data-quality]
+      summary: Get data quality report
+      responses:
+        "200":
+          description: Data quality issues
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataQualityReport"
+
+  /uploads:
+    get:
+      operationId: listUploads
+      tags: [uploads]
+      summary: List import jobs
+      responses:
+        "200":
+          description: Import jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ImportJob"
+
+  /uploads/products:
+    post:
+      operationId: uploadProducts
+      tags: [uploads]
+      summary: Upload product master CSV
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/FileUploadRequest"
+      responses:
+        "200":
+          description: Upload result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResult"
+
+  /uploads/sales:
+    post:
+      operationId: uploadSales
+      tags: [uploads]
+      summary: Upload sales history CSV
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/FileUploadRequest"
+      responses:
+        "200":
+          description: Upload result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResult"
+
+  /uploads/prices:
+    post:
+      operationId: uploadPrices
+      tags: [uploads]
+      summary: Upload own price history CSV
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/FileUploadRequest"
+      responses:
+        "200":
+          description: Upload result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResult"
+
+  /uploads/competitor-prices:
+    post:
+      operationId: uploadCompetitorPrices
+      tags: [uploads]
+      summary: Upload competitor prices CSV from PriceShape
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/FileUploadRequest"
+      responses:
+        "200":
+          description: Upload result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResult"
+
+  /uploads/inventory:
+    post:
+      operationId: uploadInventory
+      tags: [uploads]
+      summary: Upload inventory/stock CSV
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/FileUploadRequest"
+      responses:
+        "200":
+          description: Upload result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResult"
+
+  /uploads/substitutions:
+    post:
+      operationId: uploadSubstitutions
+      tags: [uploads]
+      summary: Upload substitution mapping CSV
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/FileUploadRequest"
+      responses:
+        "200":
+          description: Upload result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResult"
+
+  /uploads/basket-affinity:
+    post:
+      operationId: uploadBasketAffinity
+      tags: [uploads]
+      summary: Upload basket affinity CSV
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/FileUploadRequest"
+      responses:
+        "200":
+          description: Upload result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResult"
+
+  /uploads/price-rules:
+    post:
+      operationId: uploadPriceRules
+      tags: [uploads]
+      summary: Upload min/max price rules CSV
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/FileUploadRequest"
+      responses:
+        "200":
+          description: Upload result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadResult"
+
+  /substitutions:
+    get:
+      operationId: listSubstitutions
+      tags: [substitutions]
+      summary: List A-brand/private-label substitution pairs
+      responses:
+        "200":
+          description: Substitution pairs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SubstitutionPair"
+
+  /skus/{id}/history:
+    get:
+      operationId: getSkuHistory
+      tags: [skus]
+      summary: Get SKU historical data for deep dive
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: SKU history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SkuHistory"
+
+  /exports/recommendations:
+    get:
+      operationId: exportRecommendations
+      tags: [exports]
+      summary: Export approved recommendations as CSV for PriceShape
+      parameters:
+        - name: date
+          in: query
+          schema:
+            type: ["string", "null"]
+      responses:
+        "200":
+          description: CSV export metadata/confirmation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportResult"
+
+  /users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      summary: List all users
+      responses:
+        "200":
+          description: User list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+
+    post:
+      operationId: createUser
+      tags: [users]
+      summary: Create a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: Created user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /users/{id}:
+    patch:
+      operationId: updateUser
+      tags: [users]
+      summary: Update user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRequest"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+    delete:
+      operationId: deleteUser
+      tags: [users]
+      summary: Delete user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -31,6 +842,658 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+      required: [message]
+
+    LoginRequest:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+      required: [username, password]
+
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        token:
+          type: string
+      required: [user, token]
+
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        email:
+          type: string
+        full_name:
+          type: string
+        role:
+          type: string
+          enum: [admin, pricing_manager, analyst, viewer]
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+      required: [id, username, email, role, is_active]
+
+    CreateUserRequest:
+      type: object
+      properties:
+        username:
+          type: string
+        email:
+          type: string
+        full_name:
+          type: string
+        password:
+          type: string
+        role:
+          type: string
+          enum: [admin, pricing_manager, analyst, viewer]
+      required: [username, email, password, role]
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        email:
+          type: ["string", "null"]
+        full_name:
+          type: ["string", "null"]
+        role:
+          type: ["string", "null"]
+        is_active:
+          type: ["boolean", "null"]
+
+    Product:
+      type: object
+      properties:
+        sku_id:
+          type: string
+        product_name:
+          type: string
+        brand:
+          type: ["string", "null"]
+        category:
+          type: ["string", "null"]
+        subcategory:
+          type: ["string", "null"]
+        product_group:
+          type: ["string", "null"]
+        is_private_label:
+          type: boolean
+        is_a_brand:
+          type: boolean
+        lifecycle_status:
+          type: ["string", "null"]
+          enum: ["active", "end_of_life", "clearance", "new", null]
+        strategy_type:
+          type: ["string", "null"]
+          enum: ["SUBSTITUTION_PORTFOLIO", "COMPETITOR_INDEX", "MARGIN_OPTIMIZATION", "STOCK_CLEARANCE", "BASKET_BUILDER", "VOLUME_DISCOUNT", "REPEAT_PURCHASE", "LOW_VELOCITY", null]
+        cost_price:
+          type: ["number", "null"]
+        min_price:
+          type: ["number", "null"]
+        max_price:
+          type: ["number", "null"]
+        current_price:
+          type: ["number", "null"]
+        stock_quantity:
+          type: ["integer", "null"]
+        data_quality_score:
+          type: ["number", "null"]
+      required: [sku_id, product_name, is_private_label, is_a_brand]
+
+    ProductListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Product"
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+      required: [items, total, page, page_size]
+
+    UpdateProductRequest:
+      type: object
+      properties:
+        strategy_type:
+          type: ["string", "null"]
+        lifecycle_status:
+          type: ["string", "null"]
+        min_price:
+          type: ["number", "null"]
+        max_price:
+          type: ["number", "null"]
+        cost_price:
+          type: ["number", "null"]
+
+    Category:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        parent_category:
+          type: ["string", "null"]
+        default_strategy:
+          type: ["string", "null"]
+        sku_count:
+          type: integer
+      required: [id, name, sku_count]
+
+    CategoryStrategy:
+      type: object
+      properties:
+        id:
+          type: integer
+        category:
+          type: string
+        subcategory:
+          type: ["string", "null"]
+        strategy_type:
+          type: string
+        notes:
+          type: ["string", "null"]
+        updated_at:
+          type: ["string", "null"]
+        updated_by:
+          type: ["string", "null"]
+      required: [id, category, strategy_type]
+
+    UpdateCategoryStrategyRequest:
+      type: object
+      properties:
+        strategy_type:
+          type: string
+        notes:
+          type: ["string", "null"]
+      required: [strategy_type]
+
+    Recommendation:
+      type: object
+      properties:
+        id:
+          type: integer
+        date:
+          type: string
+        sku_id:
+          type: string
+        product_name:
+          type: string
+        category:
+          type: ["string", "null"]
+        strategy_type:
+          type: ["string", "null"]
+        current_price:
+          type: ["number", "null"]
+        recommended_price:
+          type: ["number", "null"]
+        recommended_change_pct:
+          type: ["number", "null"]
+        expected_units:
+          type: ["number", "null"]
+        expected_revenue:
+          type: ["number", "null"]
+        expected_margin:
+          type: ["number", "null"]
+        expected_margin_uplift:
+          type: ["number", "null"]
+        confidence_score:
+          type: ["number", "null"]
+        reason_code:
+          type: ["string", "null"]
+        safety_status:
+          type: ["string", "null"]
+          enum: ["ok", "warning", "blocked", null]
+        approval_status:
+          type: ["string", "null"]
+          enum: ["pending", "approved", "rejected", "overridden", null]
+        approved_by:
+          type: ["string", "null"]
+        pushed_to_priceshape:
+          type: boolean
+        model_version:
+          type: ["string", "null"]
+      required: [id, date, sku_id, product_name, pushed_to_priceshape]
+
+    RecommendationListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Recommendation"
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        pending_count:
+          type: integer
+        approved_count:
+          type: integer
+        rejected_count:
+          type: integer
+      required: [items, total, page, page_size, pending_count, approved_count, rejected_count]
+
+    RecommendationDetail:
+      type: object
+      properties:
+        recommendation:
+          $ref: "#/components/schemas/Recommendation"
+        product:
+          $ref: "#/components/schemas/Product"
+        competitor_prices:
+          type: array
+          items:
+            $ref: "#/components/schemas/CompetitorPrice"
+        input_factors:
+          type: object
+          additionalProperties: true
+        safety_rules_applied:
+          type: array
+          items:
+            type: string
+        audit_trail:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEntry"
+      required: [recommendation, product, competitor_prices, safety_rules_applied, audit_trail]
+
+    CompetitorPrice:
+      type: object
+      properties:
+        competitor_name:
+          type: string
+        price:
+          type: number
+        date:
+          type: string
+        url:
+          type: ["string", "null"]
+      required: [competitor_name, price, date]
+
+    AuditEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+        action:
+          type: string
+        performed_by:
+          type: ["string", "null"]
+        timestamp:
+          type: string
+        details:
+          type: ["string", "null"]
+      required: [id, action, timestamp]
+
+    RejectRequest:
+      type: object
+      properties:
+        reason:
+          type: ["string", "null"]
+
+    OverrideRequest:
+      type: object
+      properties:
+        override_price:
+          type: number
+        reason:
+          type: ["string", "null"]
+      required: [override_price]
+
+    BulkIdsRequest:
+      type: object
+      properties:
+        ids:
+          type: array
+          items:
+            type: integer
+      required: [ids]
+
+    BulkActionResult:
+      type: object
+      properties:
+        affected:
+          type: integer
+        message:
+          type: string
+      required: [affected, message]
+
+    DashboardSummary:
+      type: object
+      properties:
+        total_margin_uplift:
+          type: number
+        total_recommendations:
+          type: integer
+        avg_confidence_score:
+          type: number
+        safety_warnings_count:
+          type: integer
+        approved_count:
+          type: integer
+        rejected_count:
+          type: integer
+        pending_count:
+          type: integer
+        estimated_revenue_impact:
+          type: number
+        estimated_margin_impact:
+          type: number
+        last_model_run:
+          type: ["string", "null"]
+        model_version:
+          type: ["string", "null"]
+        data_quality_score:
+          type: number
+      required:
+        - total_margin_uplift
+        - total_recommendations
+        - avg_confidence_score
+        - safety_warnings_count
+        - approved_count
+        - rejected_count
+        - pending_count
+        - estimated_revenue_impact
+        - estimated_margin_impact
+        - data_quality_score
+
+    CategoryMarginItem:
+      type: object
+      properties:
+        category:
+          type: string
+        margin_uplift:
+          type: number
+        recommendation_count:
+          type: integer
+      required: [category, margin_uplift, recommendation_count]
+
+    StrategyCountItem:
+      type: object
+      properties:
+        strategy_type:
+          type: string
+        count:
+          type: integer
+        avg_confidence:
+          type: number
+      required: [strategy_type, count, avg_confidence]
+
+    ConfidenceBucket:
+      type: object
+      properties:
+        bucket:
+          type: string
+        count:
+          type: integer
+      required: [bucket, count]
+
+    PriceChangeBucket:
+      type: object
+      properties:
+        bucket:
+          type: string
+        count:
+          type: integer
+      required: [bucket, count]
+
+    ModelHealth:
+      type: object
+      properties:
+        last_run_at:
+          type: ["string", "null"]
+        skus_processed:
+          type: integer
+        skus_skipped:
+          type: integer
+        avg_confidence:
+          type: number
+        data_quality_score:
+          type: number
+        model_version:
+          type: string
+        status:
+          type: string
+          enum: [healthy, degraded, error, not_run]
+        errors:
+          type: array
+          items:
+            type: string
+        warnings:
+          type: array
+          items:
+            type: string
+      required: [skus_processed, skus_skipped, avg_confidence, data_quality_score, model_version, status, errors, warnings]
+
+    ModelRun:
+      type: object
+      properties:
+        id:
+          type: integer
+        started_at:
+          type: string
+        completed_at:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [running, completed, failed]
+        skus_processed:
+          type: integer
+        skus_skipped:
+          type: integer
+        model_version:
+          type: string
+        error_message:
+          type: ["string", "null"]
+      required: [id, started_at, status, skus_processed, skus_skipped, model_version]
+
+    DataQualityReport:
+      type: object
+      properties:
+        overall_score:
+          type: number
+        total_skus:
+          type: integer
+        issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/DataQualityIssue"
+        summary:
+          type: object
+          additionalProperties:
+            type: integer
+      required: [overall_score, total_skus, issues, summary]
+
+    DataQualityIssue:
+      type: object
+      properties:
+        sku_id:
+          type: ["string", "null"]
+        issue_type:
+          type: string
+        severity:
+          type: string
+          enum: [error, warning, info]
+        message:
+          type: string
+        affected_count:
+          type: ["integer", "null"]
+      required: [issue_type, severity, message]
+
+    ImportJob:
+      type: object
+      properties:
+        id:
+          type: integer
+        upload_type:
+          type: string
+        filename:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+        rows_processed:
+          type: integer
+        rows_failed:
+          type: integer
+        error_message:
+          type: ["string", "null"]
+        uploaded_by:
+          type: ["string", "null"]
+        created_at:
+          type: string
+      required: [id, upload_type, filename, status, rows_processed, rows_failed, created_at]
+
+    FileUploadRequest:
+      type: object
+      properties:
+        filename:
+          type: string
+
+    UploadResult:
+      type: object
+      properties:
+        job_id:
+          type: integer
+        rows_processed:
+          type: integer
+        rows_failed:
+          type: integer
+        warnings:
+          type: array
+          items:
+            type: string
+        message:
+          type: string
+      required: [job_id, rows_processed, rows_failed, warnings, message]
+
+    SubstitutionPair:
+      type: object
+      properties:
+        id:
+          type: integer
+        a_brand_sku:
+          type: string
+        a_brand_name:
+          type: string
+        private_label_sku:
+          type: string
+        private_label_name:
+          type: string
+        a_brand_price:
+          type: ["number", "null"]
+        private_label_price:
+          type: ["number", "null"]
+        price_gap_pct:
+          type: ["number", "null"]
+        sales_shift_pct:
+          type: ["number", "null"]
+        margin_shift_pct:
+          type: ["number", "null"]
+        opportunity_score:
+          type: ["number", "null"]
+      required: [id, a_brand_sku, a_brand_name, private_label_sku, private_label_name]
+
+    SkuHistory:
+      type: object
+      properties:
+        sku_id:
+          type: string
+        product_name:
+          type: string
+        price_history:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeSeriesPoint"
+        sales_history:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeSeriesPoint"
+        margin_history:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeSeriesPoint"
+        stock_history:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeSeriesPoint"
+        competitor_price_history:
+          type: array
+          items:
+            $ref: "#/components/schemas/CompetitorTimeSeriesPoint"
+        recommendation_history:
+          type: array
+          items:
+            $ref: "#/components/schemas/Recommendation"
+      required:
+        - sku_id
+        - product_name
+        - price_history
+        - sales_history
+        - margin_history
+        - stock_history
+        - competitor_price_history
+        - recommendation_history
+
+    TimeSeriesPoint:
+      type: object
+      properties:
+        date:
+          type: string
+        value:
+          type: number
+      required: [date, value]
+
+    CompetitorTimeSeriesPoint:
+      type: object
+      properties:
+        date:
+          type: string
+        competitor_name:
+          type: string
+        value:
+          type: number
+      required: [date, competitor_name, value]
+
+    ExportResult:
+      type: object
+      properties:
+        exported_count:
+          type: integer
+        date:
+          type: string
+        download_url:
+          type: string
+        filename:
+          type: string
+      required: [exported_count, date, download_url, filename]

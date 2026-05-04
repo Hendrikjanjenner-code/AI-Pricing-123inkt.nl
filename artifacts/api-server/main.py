@@ -1,0 +1,63 @@
+"""
+AI Pricing Decision Engine — FastAPI main entry point.
+Registers all API routers under the /api prefix.
+"""
+import os
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+
+from database import engine, Base
+from seed import seed_database
+from routes import (
+    auth, products, categories, recommendations,
+    dashboard, uploads, data_quality, substitutions,
+    model_health, exports, users, skus
+)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Create tables and seed on startup
+    Base.metadata.create_all(bind=engine)
+    seed_database()
+    yield
+
+
+app = FastAPI(
+    title="AI Pricing Decision Engine",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Health check at /api/healthz
+from fastapi.routing import APIRouter
+health_router = APIRouter(prefix="/api")
+
+@health_router.get("/healthz")
+def health_check():
+    return {"status": "ok"}
+
+app.include_router(health_router)
+
+# All domain routers (each defines its own /api prefix)
+app.include_router(auth.router)
+app.include_router(products.router)
+app.include_router(categories.router)
+app.include_router(recommendations.router)
+app.include_router(dashboard.router)
+app.include_router(uploads.router)
+app.include_router(data_quality.router)
+app.include_router(substitutions.router)
+app.include_router(model_health.router)
+app.include_router(exports.router)
+app.include_router(users.router)
+app.include_router(skus.router)

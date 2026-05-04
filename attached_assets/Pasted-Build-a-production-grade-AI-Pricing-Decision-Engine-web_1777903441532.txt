@@ -1,0 +1,312 @@
+Build a production-grade AI Pricing Decision Engine web app for a large multi-category e-commerce company like 123inkt.
+
+The company sells much more than ink and printers: categories include ink/toner, office supplies, paper, packaging materials, cleaning products, canteen supplies, electronics/accessories, furniture, and other B2B/B2C office-related products.
+
+The app must be built as a serious pilot/MVP, not a toy demo.
+
+Tech stack:
+- Backend: Python FastAPI
+- Frontend: React
+- Database: PostgreSQL
+- ML/model layer: pandas, numpy, scikit-learn
+- Authentication: simple login system
+- File import/export: CSV
+- Deployment-ready structure for Replit
+
+Core goal:
+Create a Pricing Decision Engine that gives daily price recommendations per SKU, explains why, shows expected margin impact, applies safety rules, and exports approved recommendations to CSV for tools like PriceShape.
+
+App concept:
+The app should not use one generic pricing model for all products. It must classify each SKU into a pricing strategy type based on category and product behavior.
+
+Pricing strategy types:
+1. SUBSTITUTION_PORTFOLIO
+   Used for ink/toner or products with strong A-brand/private-label substitution.
+2. COMPETITOR_INDEX
+   Used for highly competitive products where market price matters.
+3. MARGIN_OPTIMIZATION
+   Used for products where margin is more important than volume.
+4. STOCK_CLEARANCE
+   Used for overstock, slow-moving or end-of-life products.
+5. BASKET_BUILDER
+   Used for products that help increase order value or are commonly bought with other products.
+6. VOLUME_DISCOUNT
+   Used for paper, packaging and high-volume B2B products.
+7. REPEAT_PURCHASE
+   Used for recurring products like cleaning, canteen and office supplies.
+8. LOW_VELOCITY
+   Used for furniture and slower-moving products.
+
+Main user roles:
+- Admin
+- Pricing Manager
+- Analyst
+- Viewer
+
+Main pages:
+1. Dashboard
+2. Data Upload
+3. Data Quality
+4. SKU Management
+5. Category Strategy Mapping
+6. Pricing Recommendations
+7. Recommendation Detail
+8. SKU Deep Dive
+9. Substitution Monitor
+10. Model Health
+11. Export to PriceShape
+12. Settings
+
+Database tables:
+Create PostgreSQL schema with these tables:
+
+- users
+- dim_product
+- dim_category
+- category_strategy_mapping
+- map_substitution
+- fact_sales_daily
+- fact_price_daily
+- fact_competitor_price_daily
+- fact_inventory_daily
+- fact_basket_affinity
+- fact_pricing_recommendation_daily
+- pricing_experiment_groups
+- import_jobs
+- model_runs
+- audit_log
+
+Important product fields:
+- sku_id
+- product_name
+- brand
+- category
+- subcategory
+- product_group
+- is_private_label
+- is_a_brand
+- lifecycle_status
+- strategy_type
+- cost_price
+- min_price
+- max_price
+
+Data upload:
+Allow users to upload CSV files for:
+- product master
+- sales history
+- own prices
+- competitor prices from PriceShape
+- stock/inventory
+- substitution mapping
+- basket affinity
+- min/max price rules
+
+Data quality checks:
+Show warnings for:
+- missing cost price
+- missing min/max price
+- missing category
+- missing strategy type
+- missing competitor data
+- missing stock data
+- duplicate SKU rows
+- negative margins
+- products with too little sales history
+- substitution products without valid mapping
+
+Pricing model:
+Implement a modular pricing engine.
+
+Each strategy type should have its own function:
+
+1. SUBSTITUTION_PORTFOLIO:
+   - Estimate own-price elasticity
+   - Estimate substitution impact between A-brand and private label
+   - Optimize total portfolio margin, not just single SKU margin
+
+2. COMPETITOR_INDEX:
+   - Compare own price against lowest and average competitor price
+   - Recommend price based on target price index
+   - Avoid race-to-the-bottom behavior
+
+3. MARGIN_OPTIMIZATION:
+   - Estimate demand sensitivity
+   - Recommend margin-maximizing price within min/max guardrails
+
+4. STOCK_CLEARANCE:
+   - If stock is high and velocity is low, recommend controlled price decrease
+   - Use maximum discount limits
+
+5. BASKET_BUILDER:
+   - Keep price competitive if the product contributes to basket value
+   - Use basket affinity data
+
+6. VOLUME_DISCOUNT:
+   - Recommend price tiers or lower price when volume elasticity is strong
+   - Useful for paper, packaging and high-volume B2B products
+
+7. REPEAT_PURCHASE:
+   - Avoid aggressive price increases that risk recurring customers
+   - Optimize for stable margin and retention
+
+8. LOW_VELOCITY:
+   - Avoid frequent price changes
+   - Prioritize margin, stock age and availability
+
+Recommendation output fields:
+- date
+- sku_id
+- current_price
+- recommended_price
+- recommended_change_pct
+- expected_units
+- expected_revenue
+- expected_margin
+- expected_margin_uplift
+- confidence_score
+- reason_code
+- strategy_type
+- safety_status
+- approval_status
+- approved_by
+- pushed_to_priceshape
+- model_version
+
+Safety rules:
+Always apply these before showing recommendations:
+- no price below cost unless explicitly allowed
+- no price below min_price
+- no price above max_price
+- max daily price increase: 5%
+- max daily price decrease: 5%
+- no recommendation for out-of-stock SKUs unless strategy is STOCK_CLEARANCE
+- flag low-confidence recommendations
+- flag products with insufficient data
+- flag extreme competitor price differences
+- allow manual override
+
+Reason codes:
+Generate clear reason codes such as:
+- MARGIN_UPSIDE_PRICE_INCREASE
+- COMPETITOR_PRICE_PRESSURE
+- KEEP_PRICE_LOW_CONFIDENCE
+- STOCK_CLEARANCE_DISCOUNT
+- PRIVATE_LABEL_SUBSTITUTION_OPPORTUNITY
+- BASKET_BUILDER_KEEP_COMPETITIVE
+- REPEAT_PURCHASE_PRICE_STABILITY
+- LOW_VELOCITY_MARGIN_PROTECTION
+- MIN_PRICE_GUARDRAIL_APPLIED
+- MAX_PRICE_GUARDRAIL_APPLIED
+- OUT_OF_STOCK_NO_CHANGE
+
+Dashboard:
+Create KPI cards:
+- total expected margin uplift
+- number of recommendations
+- average confidence score
+- number of safety warnings
+- approved recommendations
+- rejected recommendations
+- estimated revenue impact
+- estimated margin impact
+
+Charts:
+- margin uplift by category
+- recommendation count by strategy type
+- confidence distribution
+- price change distribution
+- AI vs control performance
+- house brand/private label share where relevant
+- stock risk overview
+
+Pricing Recommendations page:
+Create a filterable and sortable table with:
+- SKU
+- product name
+- category
+- strategy type
+- current price
+- recommended price
+- change %
+- expected margin uplift
+- confidence
+- reason code
+- safety status
+- approve/reject buttons
+- detail button
+
+Recommendation Detail page:
+Show:
+- explanation of recommendation
+- input factors
+- model confidence
+- current price vs competitor prices
+- historical sales
+- margin impact
+- safety rules applied
+- audit trail
+
+SKU Deep Dive:
+Show:
+- price history
+- sales history
+- margin history
+- stock history
+- competitor price history
+- recommendation history
+
+Substitution Monitor:
+For products with substitution mappings:
+- show A-brand to private-label pairs
+- show price gap
+- show sales shift
+- show margin shift
+- show opportunity score
+
+Model Health:
+Show:
+- last model run
+- number of SKUs processed
+- number of SKUs skipped
+- average confidence
+- data quality score
+- model version
+- errors and warnings
+
+Export:
+Allow approved recommendations to be exported as CSV for PriceShape with fields:
+- sku_id
+- recommended_price
+- min_price
+- max_price
+- reason_code
+- confidence_score
+- approved_by
+- date
+
+Also create a sample dataset so the app can run immediately with demo data.
+
+Code requirements:
+- Use clean modular architecture
+- Backend and frontend separated
+- Include API routes for all major entities
+- Include database migrations or schema initialization
+- Include seed/demo data
+- Include comments explaining model logic
+- Include error handling
+- Include validation for CSV uploads
+- Make UI clean, professional and suitable for business users
+- Do not make it look like a generic AI chatbot
+- The app should feel like a pricing operations platform
+
+Deliverables:
+- Full working Replit project
+- Backend FastAPI server
+- React frontend
+- PostgreSQL schema
+- Demo data
+- CSV import/export
+- Pricing model engine
+- Dashboard
+- Recommendation workflow
