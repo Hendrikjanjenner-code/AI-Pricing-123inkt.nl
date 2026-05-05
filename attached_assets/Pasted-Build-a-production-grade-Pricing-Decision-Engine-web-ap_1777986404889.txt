@@ -1,0 +1,260 @@
+Build a production-grade Pricing Decision Engine web app for a multi-category e-commerce company like :contentReference[oaicite:0]{index=0}.
+
+Important:
+This is NOT a demo or toy app. It must be structured as a scalable, clean, modular system.
+
+Tech stack:
+- Backend: Python FastAPI
+- Frontend: React (simple but professional UI)
+- Database: PostgreSQL
+- ORM: SQLAlchemy
+- Data handling: pandas
+- No AI chatbot UI
+
+Goal:
+Create the foundation of a pricing operations platform that:
+- ingests pricing-related data
+- validates data quality
+- stores structured pricing data
+- supports SKU-level analysis
+- is ready for advanced pricing logic (AI, competition engine later)
+
+Do NOT implement advanced pricing logic yet.
+Focus on clean structure, data layer, APIs and UI.
+
+---
+
+# CORE STRUCTURE
+
+Create this folder structure:
+
+backend/
+  app/
+    main.py
+    database.py
+    models/
+    schemas/
+    api/
+    services/
+    core/
+  requirements.txt
+
+frontend/
+  src/
+    pages/
+    components/
+    services/
+
+---
+
+# DATABASE SCHEMA (PostgreSQL)
+
+Create these tables:
+
+dim_product:
+- sku_id (PK)
+- product_name
+- brand
+- category
+- subcategory
+- product_group
+- is_private_label
+- is_a_brand
+- lifecycle_status
+- cost_price
+- min_price
+- max_price
+- created_at
+
+fact_sales_daily:
+- date
+- sku_id
+- channel
+- units_sold
+- revenue
+- margin
+- orders
+- sessions
+- conversions
+
+fact_price_daily:
+- date
+- sku_id
+- channel
+- own_price
+- pricing_rule
+
+fact_inventory_daily:
+- date
+- sku_id
+- stock_on_hand
+- stock_status
+
+fact_competitor_price_daily:
+- date
+- sku_id
+- competitor_name
+- competitor_price
+- in_stock
+- delivery_days
+
+import_jobs:
+- job_id
+- file_type
+- status
+- created_at
+- completed_at
+- error_message
+
+---
+
+# BACKEND (FastAPI)
+
+Implement APIs:
+
+/products
+- GET all products
+- POST create product
+
+/sales
+- POST upload sales CSV
+
+/prices
+- POST upload own prices CSV
+
+/competitors
+- POST upload competitor prices CSV
+
+/inventory
+- POST upload stock CSV
+
+/data-quality
+- GET overview of data issues
+
+---
+
+# DATA UPLOAD
+
+Allow CSV uploads for:
+- products
+- sales
+- prices
+- competitors
+- inventory
+
+Validate:
+- required columns
+- data types
+- duplicate rows
+- missing SKU
+- negative values
+
+Store upload results in import_jobs table.
+
+---
+
+# DATA QUALITY CHECKS
+
+Create a service that flags:
+
+- missing cost_price
+- missing min_price / max_price
+- missing category
+- missing stock data
+- missing competitor data
+- products with very low sales volume
+- negative margins
+
+Expose via:
+/data-quality endpoint
+
+---
+
+# FRONTEND (React)
+
+Create pages:
+
+1. Dashboard
+2. Data Upload
+3. Products
+4. Data Quality
+
+---
+
+# DASHBOARD
+
+Show:
+- number of SKUs
+- number of SKUs with missing data
+- number of uploads
+- simple charts:
+  - sales over time
+  - top products by revenue
+
+---
+
+# DATA UPLOAD PAGE
+
+Allow user to:
+- upload CSV files
+- see upload status
+- see errors per file
+
+---
+
+# PRODUCTS PAGE
+
+Table with:
+- SKU
+- name
+- category
+- brand
+- cost_price
+- min_price
+- max_price
+
+---
+
+# DATA QUALITY PAGE
+
+Show:
+- list of issues
+- grouped by type
+- affected SKUs
+
+---
+
+# DEMO DATA
+
+Include sample data for:
+- ink/toner
+- pencils
+- binders (ordners)
+- paper
+- cleaning supplies
+- furniture
+
+---
+
+# REQUIREMENTS
+
+- Clean modular code
+- Clear separation of concerns
+- Error handling
+- Logging
+- Comments explaining structure
+- Ready to extend with pricing logic and competition engine
+
+---
+
+# IMPORTANT
+
+Do NOT:
+- build pricing algorithms yet
+- build competition logic yet
+- overcomplicate frontend
+
+Focus on:
+- strong backend structure
+- clean data model
+- reliable ingestion layer
