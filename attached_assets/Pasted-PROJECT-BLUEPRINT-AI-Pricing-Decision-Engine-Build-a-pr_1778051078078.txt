@@ -1,0 +1,313 @@
+PROJECT BLUEPRINT — AI Pricing Decision Engine
+
+Build a production-grade Replit web app for an AI-supported Pricing Decision Engine for a multi-category e-commerce company.
+
+The app must support:
+1. AI pricing research
+2. Internal price optimization
+3. External market positioning
+4. Competition Intelligence
+5. Pricing recommendations
+6. KPI dashboards
+7. A/B test monitoring
+8. CSV export for pricing tools such as PriceShape
+
+Tech stack:
+- Backend: Python FastAPI
+- Frontend: React
+- Database: PostgreSQL
+- ORM: SQLAlchemy
+- Data processing: pandas, numpy
+- ML foundation: scikit-learn
+- File upload/export: CSV
+- Authentication: simple role-based login
+
+User roles:
+- Admin
+- Pricing Manager
+- Analyst
+- Viewer
+
+Main app concept:
+This is not a generic AI chatbot.
+This is a pricing operations platform.
+
+The system should answer:
+- Which SKU needs a price change?
+- Why?
+- Based on which internal and external signals?
+- What is the expected margin impact?
+- How reliable is the recommendation?
+- Which competitors matter for pricing?
+- Which competitors should be ignored?
+
+CORE MODULES
+
+1. Data Foundation
+Purpose:
+Create a reliable data layer.
+
+Tables:
+- dim_product
+- dim_category
+- fact_sales_daily
+- fact_price_daily
+- fact_inventory_daily
+- fact_competitor_offer_daily
+- map_substitution
+- fact_basket_affinity
+- import_jobs
+- audit_log
+
+CSV uploads:
+- products
+- sales history
+- own prices
+- inventory
+- competitor data
+- substitution mapping
+- basket affinity
+
+Data quality checks:
+- missing cost price
+- missing min/max price
+- missing category
+- missing stock data
+- missing competitor data
+- duplicate SKU rows
+- negative margins
+- low sales history
+- invalid competitor matches
+
+2. Competition Intelligence Engine
+Purpose:
+Determine which competitors are relevant for pricing.
+
+Important:
+Competition is based on pricing impact, not assortment overlap.
+
+Calculate per SKU:
+- product_comparability_score
+- price_sensitivity_score
+- substitution_score
+- competitor_relevance_score
+- competitor_price_reliability_score
+- basket_dependency_score
+- strategic_importance_score
+- pcis_score
+
+PCIS = Pricing Competition Impact Score.
+
+Competition classes:
+- 0.00–0.20 Ignore
+- 0.20–0.45 Monitor
+- 0.45–0.70 Influence
+- 0.70–0.85 Strong
+- 0.85–1.00 Critical
+
+Use category-specific logic:
+- Ink/toner: high substitution relevance
+- Paper: high price/volume sensitivity
+- Writing supplies: high comparability
+- Binders/ordners: lower direct competition weight
+- Cleaning/canteen: repeat-purchase logic
+- Furniture: low-velocity, margin-driven logic
+
+Do not use the lowest competitor price by default.
+Use weighted median competitor reference price.
+
+Exclude competitors when:
+- out of stock
+- poor match confidence
+- different pack size
+- extreme outlier
+- bad delivery
+- low relevance
+- margin guardrails would be broken
+
+Reason codes:
+- COMPETITOR_IGNORED_OUT_OF_STOCK
+- COMPETITOR_IGNORED_BAD_MATCH
+- COMPETITOR_IGNORED_OUTLIER
+- COMPETITOR_IGNORED_LOW_RELEVANCE
+- COMPETITOR_IGNORED_DIFFERENT_PACK_SIZE
+- COMPETITOR_IGNORED_BAD_DELIVERY
+
+3. AI Pricing Model
+Purpose:
+Support pricing decisions with measurable signals.
+
+Model components:
+- own-price elasticity
+- substitution impact
+- competitor pressure
+- basket impact
+- stock position
+- margin optimization
+- price guardrails
+
+Strategy types:
+- SUBSTITUTION_PORTFOLIO
+- COMPETITOR_INDEX
+- MARGIN_OPTIMIZATION
+- STOCK_CLEARANCE
+- BASKET_BUILDER
+- VOLUME_DISCOUNT
+- REPEAT_PURCHASE
+- LOW_VELOCITY
+
+4. Recommendation Engine
+Purpose:
+Generate daily pricing recommendations.
+
+Output per SKU:
+- current_price
+- recommended_price
+- recommended_change_pct
+- expected_units
+- expected_revenue
+- expected_margin
+- expected_margin_uplift
+- confidence_score
+- strategy_type
+- reason_code
+- safety_status
+- approval_status
+
+Safety rules:
+- never below cost unless explicitly allowed
+- never below min_price
+- never above max_price
+- max daily increase 5%
+- max daily decrease 5%
+- no recommendation for out-of-stock SKUs unless clearance
+- flag low confidence
+- flag insufficient data
+- allow manual override
+
+Reason codes:
+- MARGIN_UPSIDE_PRICE_INCREASE
+- COMPETITOR_PRICE_PRESSURE
+- PRIVATE_LABEL_SUBSTITUTION_OPPORTUNITY
+- STOCK_CLEARANCE_DISCOUNT
+- BASKET_BUILDER_KEEP_COMPETITIVE
+- REPEAT_PURCHASE_PRICE_STABILITY
+- LOW_VELOCITY_MARGIN_PROTECTION
+- KEEP_PRICE_LOW_CONFIDENCE
+
+5. Dashboards
+
+Pages:
+1. Executive Dashboard
+2. Data Upload
+3. Data Quality
+4. Products
+5. Competition Intelligence
+6. SKU Competition Detail
+7. Pricing Recommendations
+8. Recommendation Detail
+9. SKU Deep Dive
+10. A/B Test Monitor
+11. Model Health
+12. Export to PriceShape
+
+Executive Dashboard:
+- margin uplift
+- revenue impact
+- conversion impact
+- number of recommendations
+- average confidence
+- safety warnings
+- AI vs control performance
+
+Competition Dashboard:
+- average PCIS
+- Strong/Critical SKUs
+- ignored competitor signals
+- downward pressure SKUs
+- upward opportunity SKUs
+- price index distribution
+- competitor exclusion reasons
+
+Pricing Recommendations:
+- filterable table
+- approve/reject workflow
+- reason codes
+- confidence score
+- export approved recommendations
+
+A/B Test Monitor:
+- AI group vs control group
+- margin uplift
+- revenue difference
+- conversion difference
+- category impact
+- statistical confidence indicator
+
+6. Export
+Create CSV export for PriceShape:
+
+Fields:
+- sku_id
+- recommended_price
+- min_price
+- max_price
+- reason_code
+- confidence_score
+- approved_by
+- date
+
+BUILD ORDER FOR REPLIT
+
+Prompt 1 — Foundation
+Build the backend, frontend, database schema, demo data, CSV upload, data quality checks, dashboard and product table. Do not implement pricing logic yet.
+
+Prompt 2 — Competition Intelligence
+Add PCIS scoring, competitor reference price, excluded competitor logic, competition classes, reason codes and Competition Intelligence dashboards.
+
+Prompt 3 — Pricing Model
+Add elasticity, substitution, margin optimization, stock logic and category strategy mapping.
+
+Prompt 4 — Recommendation Engine
+Generate price recommendations with confidence scores, reason codes, safety rules and approval workflow.
+
+Prompt 5 — A/B Test & KPI
+Add experiment groups, AI vs control dashboard, margin uplift, revenue impact and conversion impact.
+
+Prompt 6 — Export
+Add approved recommendation export to CSV for PriceShape.
+
+REPLIT START PROMPT
+
+Build the foundation of a production-grade AI Pricing Decision Engine web app.
+
+Use:
+- FastAPI backend
+- React frontend
+- PostgreSQL database
+- SQLAlchemy ORM
+- pandas for CSV handling
+
+Create a clean modular architecture.
+
+Do not build advanced pricing logic yet.
+First build the data foundation.
+
+Implement:
+- database schema
+- demo data
+- CSV uploads
+- data quality checks
+- product table
+- dashboard
+- import job tracking
+
+The app is for a multi-category e-commerce pricing team and must be ready to extend with:
+- Competition Intelligence
+- AI pricing models
+- pricing recommendations
+- A/B testing
+- PriceShape export
+
+Make the UI professional and business-oriented.
+Do not create a chatbot interface.
