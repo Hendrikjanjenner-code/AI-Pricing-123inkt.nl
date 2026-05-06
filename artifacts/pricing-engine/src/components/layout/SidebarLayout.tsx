@@ -11,22 +11,49 @@ import {
   Activity,
   Layers,
   ArrowRightLeft,
-  Download
+  Download,
+  Crosshair,
+  FlaskConical,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-const navItems = [
-  { href: "/", label: "Dashboard", icon: BarChart3 },
-  { href: "/recommendations", label: "Recommendations", icon: List },
-  { href: "/skus", label: "SKUs", icon: Box },
-  { href: "/categories", label: "Category Rules", icon: Layers },
-  { href: "/substitutions", label: "Substitutions", icon: ArrowRightLeft },
-  { href: "/model-health", label: "Model Health", icon: Activity },
-  { href: "/data-quality", label: "Data Quality", icon: Database },
-  { href: "/data-upload", label: "Data Upload", icon: Upload },
-  { href: "/export", label: "Export to PriceShape", icon: Download },
-  { href: "/settings", label: "Settings", icon: Settings },
+const navGroups = [
+  {
+    label: "Operations",
+    items: [
+      { href: "/", label: "Dashboard", icon: BarChart3 },
+      { href: "/recommendations", label: "Recommendations", icon: List },
+      { href: "/skus", label: "SKUs", icon: Box },
+    ],
+  },
+  {
+    label: "Intelligence",
+    items: [
+      { href: "/competition", label: "Competition Intelligence", icon: Crosshair },
+      { href: "/ab-tests", label: "A/B Test Monitor", icon: FlaskConical },
+      { href: "/substitutions", label: "Substitutions", icon: ArrowRightLeft },
+    ],
+  },
+  {
+    label: "Configuration",
+    items: [
+      { href: "/categories", label: "Category Rules", icon: Layers },
+      { href: "/model-health", label: "Model Health", icon: Activity },
+    ],
+  },
+  {
+    label: "Data",
+    items: [
+      { href: "/data-quality", label: "Data Quality", icon: Database },
+      { href: "/data-upload", label: "Data Upload", icon: Upload },
+      { href: "/export", label: "Export to PriceShape", icon: Download },
+      { href: "/settings", label: "Settings", icon: Settings },
+    ],
+  },
 ];
+
+// Flat list for header title lookup
+const navItems = navGroups.flatMap((g) => g.items);
 
 export function SidebarLayout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
@@ -42,26 +69,30 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
           Pricing Engine
         </div>
         
-        <div className="flex-1 overflow-y-auto py-6 flex flex-col gap-1 px-4">
-          <div className="text-xs font-semibold text-sidebar-foreground/50 uppercase tracking-wider mb-2 px-2">
-            Operations
-          </div>
-          {navItems.map((item) => {
-            const isActive = location === item.href;
-            const Icon = item.icon;
-            return (
-              <Link key={item.href} href={item.href}>
-                <div className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer ${
-                  isActive 
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground" 
-                    : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-                }`}>
-                  <Icon className="w-4 h-4" />
-                  {item.label}
-                </div>
-              </Link>
-            );
-          })}
+        <div className="flex-1 overflow-y-auto py-4 flex flex-col gap-0 px-3">
+          {navGroups.map((group) => (
+            <div key={group.label} className="mb-3">
+              <div className="text-xs font-semibold text-sidebar-foreground/40 uppercase tracking-wider mb-1 px-2">
+                {group.label}
+              </div>
+              {group.items.map((item) => {
+                const isActive = location === item.href || (item.href !== "/" && location.startsWith(item.href));
+                const Icon = item.icon;
+                return (
+                  <Link key={item.href} href={item.href}>
+                    <div className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer ${
+                      isActive
+                        ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                        : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                    }`}>
+                      <Icon className="w-4 h-4 shrink-0" />
+                      {item.label}
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </div>
 
         <div className="p-4 border-t border-sidebar-border bg-sidebar-accent/20">
@@ -83,7 +114,7 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
       <main className="flex-1 flex flex-col overflow-hidden bg-background">
         <header className="h-16 border-b bg-card flex items-center justify-between px-8 shrink-0">
           <div className="font-semibold text-foreground">
-             {navItems.find(i => i.href === location)?.label || "Workspace"}
+             {navItems.find(i => i.href === "/" ? location === "/" : location.startsWith(i.href))?.label || "Workspace"}
           </div>
         </header>
         <div className="flex-1 overflow-auto p-8">

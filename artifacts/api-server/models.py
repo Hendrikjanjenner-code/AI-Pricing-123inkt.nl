@@ -203,3 +203,63 @@ class AuditLog(Base):
     details = Column(Text)
     old_value = Column(JSON)
     new_value = Column(JSON)
+
+
+class SkuCompetitionScore(Base):
+    """PCIS — Pricing Competition Impact Score — per SKU."""
+    __tablename__ = "sku_competition_score"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    run_date = Column(Date, nullable=False)
+    product_comparability_score = Column(Float, default=0.0)
+    price_sensitivity_score = Column(Float, default=0.0)
+    substitution_score = Column(Float, default=0.0)
+    competitor_relevance_score = Column(Float, default=0.0)
+    competitor_price_reliability_score = Column(Float, default=0.0)
+    basket_dependency_score = Column(Float, default=0.0)
+    strategic_importance_score = Column(Float, default=0.0)
+    pcis_score = Column(Float, default=0.0)
+    competition_class = Column(String(50))  # Ignore, Monitor, Influence, Strong, Critical
+    reference_price = Column(Numeric(10, 4))   # Weighted median competitor reference price
+    price_index = Column(Float)                # own_price / reference_price
+    competitors_used = Column(Integer, default=0)
+    competitors_excluded = Column(Integer, default=0)
+    excluded_reasons = Column(JSON)            # {reason_code: count}
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AbTest(Base):
+    """A/B test experiment definition."""
+    __tablename__ = "ab_tests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date)
+    status = Column(String(50), default="active")  # active, completed, paused
+    ai_group_sku_count = Column(Integer, default=0)
+    control_group_sku_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AbTestResult(Base):
+    """Per-SKU A/B test result: AI group vs CONTROL group."""
+    __tablename__ = "ab_test_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    test_id = Column(Integer, ForeignKey("ab_tests.id"), nullable=False)
+    sku_id = Column(String(100), nullable=False, index=True)
+    group_type = Column(String(20), nullable=False)   # AI or CONTROL
+    baseline_price = Column(Numeric(10, 4))
+    current_price = Column(Numeric(10, 4))
+    baseline_units = Column(Float)
+    current_units = Column(Float)
+    baseline_revenue = Column(Numeric(12, 4))
+    current_revenue = Column(Numeric(12, 4))
+    baseline_margin = Column(Numeric(12, 4))
+    current_margin = Column(Numeric(12, 4))
+    baseline_conversion_rate = Column(Float)
+    current_conversion_rate = Column(Float)
+    created_at = Column(DateTime, default=datetime.utcnow)

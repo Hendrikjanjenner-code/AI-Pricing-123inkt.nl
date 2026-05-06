@@ -46,15 +46,18 @@ artifacts/
       exports.py       GET /exports/recommendations (+ /download)
       users.py         GET/POST/PATCH/DELETE /users
       skus.py          GET /skus/{id}/history
+      competition.py   GET /competition/summary|skus|skus/{id}|charts/*
+      ab_tests.py      GET /ab-tests, GET /ab-tests/{id}
     engine/
-      pricing_engine.py   Main orchestrator (run_pricing_engine)
-      strategies.py       8 strategy implementations
-      safety_rules.py     Safety guardrails
+      pricing_engine.py      Main orchestrator (run_pricing_engine)
+      strategies.py          8 strategy implementations
+      safety_rules.py        Safety guardrails
+      competition_engine.py  PCIS scoring (7 sub-scores → competition class)
 
   pricing-engine/      React + Vite frontend
     src/
       lib/auth.tsx     AuthContext + JWT token management
-      pages/           12 pages (login, dashboard, recommendations, etc.)
+      pages/           15 pages (login, dashboard, recommendations, competition, ab-tests, etc.)
       components/      Sidebar layout, ProtectedRoute, UI components
 
 lib/
@@ -115,9 +118,11 @@ pnpm run typecheck
 - `fact_sales_daily`, `fact_price_daily`, `fact_competitor_price_daily`
 - `fact_inventory_daily`, `fact_basket_affinity`
 - `fact_pricing_recommendation_daily` — 24 seeded recommendations
+- `sku_competition_score` — 26 PCIS scores (backfilled via backfill_new_tables.py)
+- `ab_tests`, `ab_test_results` — 1 test · 26 SKU results (13 AI / 13 CONTROL)
 - `model_runs`, `import_jobs`, `audit_log`
 
-## Frontend Pages (12)
+## Frontend Pages (15)
 
 1. `/` — Dashboard (KPIs + 4 Recharts charts)
 2. `/recommendations` — Filterable table, bulk approve
@@ -131,6 +136,15 @@ pnpm run typecheck
 10. `/model-health` — Last run, trigger new run
 11. `/export` — Export approved recommendations as CSV for PriceShape
 12. `/settings` — User management (admin only)
+13. `/competition` — PCIS scores, price index, class distribution (filterable SKU table + 2 charts)
+14. `/competition/:sku_id` — PCIS sub-score bars + radar chart + competitor price table
+15. `/ab-tests` — AI vs CONTROL uplift, margin/revenue/conversion KPIs, statistical confidence
+
+## Gotchas
+
+- Seed guard (`if users.count() > 0: return`) means new tables won't seed on existing DBs.
+  Run `python artifacts/api-server/backfill_new_tables.py` after adding new seeded tables.
+- New pages (competition, ab-tests) use direct `fetch()` with Bearer token, not generated hooks.
 
 ## Environment Variables
 

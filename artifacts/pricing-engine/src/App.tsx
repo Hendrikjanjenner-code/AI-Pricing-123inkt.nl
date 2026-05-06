@@ -20,6 +20,9 @@ import Substitutions from "@/pages/substitutions";
 import ModelHealth from "@/pages/model-health";
 import Export from "@/pages/export";
 import Settings from "@/pages/settings";
+import Competition from "@/pages/competition";
+import CompetitionDetail from "@/pages/competition-detail";
+import AbTests from "@/pages/ab-tests";
 
 const queryClient = new QueryClient();
 
@@ -62,6 +65,15 @@ function Router() {
       </Route>
       <Route path="/settings">
         <ProtectedRoute><Settings /></ProtectedRoute>
+      </Route>
+      <Route path="/competition">
+        <ProtectedRoute><Competition /></ProtectedRoute>
+      </Route>
+      <Route path="/competition/:sku_id">
+        <ProtectedRoute><CompetitionDetail /></ProtectedRoute>
+      </Route>
+      <Route path="/ab-tests">
+        <ProtectedRoute><AbTests /></ProtectedRoute>
       </Route>
       <Route component={NotFound} />
     </Switch>

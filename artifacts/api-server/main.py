@@ -12,7 +12,7 @@ from seed import seed_database
 from routes import (
     auth, products, categories, recommendations,
     dashboard, uploads, data_quality, substitutions,
-    model_health, exports, users, skus
+    model_health, exports, users, skus, competition, ab_tests
 )
 
 
@@ -61,3 +61,5 @@ app.include_router(model_health.router)
 app.include_router(exports.router)
 app.include_router(users.router)
 app.include_router(skus.router)
+app.include_router(competition.router)
+app.include_router(ab_tests.router)
