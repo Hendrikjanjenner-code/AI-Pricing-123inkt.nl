@@ -10,20 +10,33 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { format } from "date-fns";
-import { Search, CheckCircle, XCircle, AlertCircle, FileSearch, ArrowRight } from "lucide-react";
+import { Search, CheckCircle, XCircle, AlertCircle, FileSearch } from "lucide-react";
 
-export default function Recommendations() {
+const STRATEGIE_LABELS: Record<string, string> = {
+  SUBSTITUTION_PORTFOLIO: "Substitutieportfolio",
+  COMPETITOR_INDEX: "Concurrentie-index",
+  MARGIN_OPTIMIZATION: "Margeoptimalisatie",
+  STOCK_CLEARANCE: "Voorraadopruiming",
+  BASKET_BUILDER: "Winkelmandbouwer",
+  VOLUME_DISCOUNT: "Volumekorting",
+  REPEAT_PURCHASE: "Herhalingsaankoop",
+  LOW_VELOCITY: "Laag volume",
+  PRIVATE_LABEL_PUSH: "Huismerk push",
+  PORTFOLIO_MARGIN_OPTIMIZATION: "Portfolio margeopt.",
+  TRAFFIC_TO_MARGIN_SWITCH: "Traffic → marge",
+};
+
+export default function Prijsadviezen() {
   const [page, setPage] = useState(1);
-  const [search, setSearch] = useState("");
+  const [zoekterm, setZoekterm] = useState("");
   const [status, setStatus] = useState<string>("pending");
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [geselecteerd, setGeselecteerd] = useState<Set<number>>(new Set());
 
   const { data, isLoading } = useListRecommendations({
     params: {
       page,
       page_size: 50,
-      search: search || null,
+      search: zoekterm || null,
       approval_status: status !== "all" ? status : null,
     }
   });
@@ -31,71 +44,72 @@ export default function Recommendations() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const approveMut = useApproveRecommendation();
-  const rejectMut = useRejectRecommendation();
-  const bulkApproveMut = useBulkApproveRecommendations();
+  const goedkeurenMut = useApproveRecommendation();
+  const afwijzenMut = useRejectRecommendation();
+  const bulkGoedkeurenMut = useBulkApproveRecommendations();
 
-  const handleApprove = async (id: number) => {
+  const handleGoedkeuren = async (id: number) => {
     try {
-      await approveMut.mutateAsync({ id });
+      await goedkeurenMut.mutateAsync({ id });
       queryClient.invalidateQueries({ queryKey: ["/api/recommendations"] });
-      toast({ title: "Approved recommendation" });
-    } catch (err) {
-      toast({ title: "Error", variant: "destructive" });
+      toast({ title: "Advies goedgekeurd" });
+    } catch {
+      toast({ title: "Fout bij goedkeuren", variant: "destructive" });
     }
   };
 
-  const handleReject = async (id: number) => {
+  const handleAfwijzen = async (id: number) => {
     try {
-      await rejectMut.mutateAsync({ id, data: { reason: "Manual rejection" } });
+      await afwijzenMut.mutateAsync({ id, data: { reason: "Handmatig afgewezen" } });
       queryClient.invalidateQueries({ queryKey: ["/api/recommendations"] });
-      toast({ title: "Rejected recommendation" });
-    } catch (err) {
-      toast({ title: "Error", variant: "destructive" });
+      toast({ title: "Advies afgewezen" });
+    } catch {
+      toast({ title: "Fout bij afwijzen", variant: "destructive" });
     }
   };
 
-  const handleBulkApprove = async () => {
-    if (selectedIds.size === 0) return;
+  const handleBulkGoedkeuren = async () => {
+    if (geselecteerd.size === 0) return;
     try {
-      await bulkApproveMut.mutateAsync({ data: { ids: Array.from(selectedIds) } });
+      await bulkGoedkeurenMut.mutateAsync({ data: { ids: Array.from(geselecteerd) } });
       queryClient.invalidateQueries({ queryKey: ["/api/recommendations"] });
-      setSelectedIds(new Set());
-      toast({ title: `Approved ${selectedIds.size} recommendations` });
-    } catch (err) {
-      toast({ title: "Error", variant: "destructive" });
+      setGeselecteerd(new Set());
+      toast({ title: `${geselecteerd.size} adviezen goedgekeurd` });
+    } catch {
+      toast({ title: "Fout bij bulk goedkeuren", variant: "destructive" });
     }
   };
 
-  const toggleSelectAll = () => {
+  const toggleAlles = () => {
     if (!data?.items) return;
-    if (selectedIds.size === data.items.length) {
-      setSelectedIds(new Set());
+    if (geselecteerd.size === data.items.length) {
+      setGeselecteerd(new Set());
     } else {
-      setSelectedIds(new Set(data.items.map(i => i.id)));
+      setGeselecteerd(new Set(data.items.map(i => i.id)));
     }
   };
 
-  const toggleSelect = (id: number) => {
-    const next = new Set(selectedIds);
+  const toggleSelectie = (id: number) => {
+    const next = new Set(geselecteerd);
     if (next.has(id)) next.delete(id);
     else next.add(id);
-    setSelectedIds(next);
+    setGeselecteerd(next);
   };
 
-  const formatCurrency = (val: number | null | undefined) => 
-    val != null ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'EUR' }).format(val) : '-';
-  
-  const formatPct = (val: number | null | undefined) => 
+  const formatBedrag = (val: number | null | undefined) =>
+    val != null ? new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(val) : '-';
+
+  const formatPct = (val: number | null | undefined) =>
     val != null ? `${(val * 100).toFixed(1)}%` : '-';
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-tight">Pricing Recommendations</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Prijsadviezen</h1>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={handleBulkApprove} disabled={selectedIds.size === 0 || bulkApproveMut.isPending}>
-            <CheckCircle className="mr-2 h-4 w-4" /> Bulk Approve ({selectedIds.size})
+          <Button variant="outline" onClick={handleBulkGoedkeuren}
+            disabled={geselecteerd.size === 0 || bulkGoedkeurenMut.isPending}>
+            <CheckCircle className="mr-2 h-4 w-4" /> Alles goedkeuren ({geselecteerd.size})
           </Button>
         </div>
       </div>
@@ -103,11 +117,11 @@ export default function Recommendations() {
       <div className="flex items-center gap-4 bg-card p-4 border rounded-md">
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input 
-            placeholder="Search SKU or product..." 
-            className="pl-9 bg-background" 
-            value={search}
-            onChange={e => setSearch(e.target.value)}
+          <Input
+            placeholder="Zoek op SKU of productnaam..."
+            className="pl-9 bg-background"
+            value={zoekterm}
+            onChange={e => setZoekterm(e.target.value)}
           />
         </div>
         <div className="w-48">
@@ -116,10 +130,10 @@ export default function Recommendations() {
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Statuses</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
-              <SelectItem value="approved">Approved</SelectItem>
-              <SelectItem value="rejected">Rejected</SelectItem>
+              <SelectItem value="all">Alle statussen</SelectItem>
+              <SelectItem value="pending">In behandeling</SelectItem>
+              <SelectItem value="approved">Goedgekeurd</SelectItem>
+              <SelectItem value="rejected">Afgewezen</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -130,69 +144,61 @@ export default function Recommendations() {
           <TableHeader>
             <TableRow>
               <TableHead className="w-12">
-                <Checkbox 
-                  checked={data?.items?.length ? selectedIds.size === data.items.length : false}
-                  onCheckedChange={toggleSelectAll}
+                <Checkbox
+                  checked={data?.items?.length ? geselecteerd.size === data.items.length : false}
+                  onCheckedChange={toggleAlles}
                 />
               </TableHead>
               <TableHead>SKU</TableHead>
               <TableHead>Product</TableHead>
-              <TableHead>Strategy</TableHead>
-              <TableHead className="text-right">Current</TableHead>
-              <TableHead className="text-right">Recommended</TableHead>
-              <TableHead className="text-right">Change</TableHead>
-              <TableHead className="text-right">Margin Uplift</TableHead>
-              <TableHead className="text-center">Conf.</TableHead>
-              <TableHead className="text-center">Safety</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              <TableHead>Strategie</TableHead>
+              <TableHead className="text-right">Huidige prijs</TableHead>
+              <TableHead className="text-right">Geadviseerde prijs</TableHead>
+              <TableHead className="text-right">Wijziging</TableHead>
+              <TableHead className="text-right">Margeverbetering</TableHead>
+              <TableHead className="text-center">Betr.</TableHead>
+              <TableHead className="text-center">Veiligheid</TableHead>
+              <TableHead className="text-right">Acties</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               Array.from({ length: 10 }).map((_, i) => (
                 <TableRow key={i}>
-                  <TableCell><Skeleton className="h-4 w-4" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-16" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-48" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-24" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-12 ml-auto" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-12 ml-auto" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-12 ml-auto" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-16 ml-auto" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-8 mx-auto" /></TableCell>
-                  <TableCell><Skeleton className="h-4 w-16 mx-auto" /></TableCell>
-                  <TableCell><Skeleton className="h-8 w-24 ml-auto" /></TableCell>
+                  {Array.from({ length: 11 }).map((__, j) => (
+                    <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
+                  ))}
                 </TableRow>
               ))
             ) : data?.items?.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={11} className="h-32 text-center text-muted-foreground">
-                  No recommendations found.
+                  Geen adviezen gevonden.
                 </TableCell>
               </TableRow>
             ) : data?.items?.map((rec) => (
               <TableRow key={rec.id} className="group cursor-pointer hover:bg-muted/50">
                 <TableCell onClick={(e) => e.stopPropagation()}>
-                  <Checkbox 
-                    checked={selectedIds.has(rec.id)}
-                    onCheckedChange={() => toggleSelect(rec.id)}
+                  <Checkbox
+                    checked={geselecteerd.has(rec.id)}
+                    onCheckedChange={() => toggleSelectie(rec.id)}
                   />
                 </TableCell>
                 <TableCell className="font-mono text-xs">{rec.sku_id}</TableCell>
-                <TableCell className="font-medium max-w-[200px] truncate" title={rec.product_name}>
+                <TableCell className="font-medium max-w-[180px] truncate" title={rec.product_name}>
                   {rec.product_name}
                 </TableCell>
                 <TableCell>
                   <Badge variant="outline" className="text-[10px] font-normal">
-                    {rec.strategy_type?.replace(/_/g, ' ')}
+                    {STRATEGIE_LABELS[rec.strategy_type || ""] || rec.strategy_type?.replace(/_/g, ' ')}
                   </Badge>
                 </TableCell>
-                <TableCell className="text-right tabular-nums">{formatCurrency(rec.current_price)}</TableCell>
-                <TableCell className="text-right tabular-nums font-medium text-primary">{formatCurrency(rec.recommended_price)}</TableCell>
+                <TableCell className="text-right tabular-nums">{formatBedrag(rec.current_price)}</TableCell>
+                <TableCell className="text-right tabular-nums font-medium text-primary">{formatBedrag(rec.recommended_price)}</TableCell>
                 <TableCell className={`text-right tabular-nums ${(rec.recommended_change_pct || 0) > 0 ? 'text-emerald-600' : 'text-destructive'}`}>
                   {formatPct(rec.recommended_change_pct)}
                 </TableCell>
-                <TableCell className="text-right tabular-nums text-emerald-600">{formatCurrency(rec.expected_margin_uplift)}</TableCell>
+                <TableCell className="text-right tabular-nums text-emerald-600">{formatBedrag(rec.expected_margin_uplift)}</TableCell>
                 <TableCell className="text-center">
                   <Badge variant={rec.confidence_score && rec.confidence_score > 0.8 ? "secondary" : "outline"}>
                     {formatPct(rec.confidence_score)}
@@ -200,28 +206,32 @@ export default function Recommendations() {
                 </TableCell>
                 <TableCell className="text-center">
                   {rec.safety_status === 'ok' && <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-200">OK</Badge>}
-                  {rec.safety_status === 'warning' && <Badge variant="outline" className="text-amber-600 border-amber-200 bg-amber-50">WARN</Badge>}
-                  {rec.safety_status === 'blocked' && <Badge variant="destructive">BLOCKED</Badge>}
+                  {rec.safety_status === 'warning' && <Badge variant="outline" className="text-amber-600 border-amber-200 bg-amber-50">WAARSCH.</Badge>}
+                  {rec.safety_status === 'blocked' && <Badge variant="destructive">GEBLOKKEERD</Badge>}
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                    <Link href={`/recommendations/${rec.id}`}>
+                    <Link href={`/prijsadviezen/${rec.id}`}>
                       <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
                         <FileSearch className="h-4 w-4" />
                       </Button>
                     </Link>
                     {rec.approval_status === 'pending' && (
                       <>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50" onClick={() => handleApprove(rec.id)}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                          onClick={() => handleGoedkeuren(rec.id)}>
                           <CheckCircle className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleReject(rec.id)}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => handleAfwijzen(rec.id)}>
                           <XCircle className="h-4 w-4" />
                         </Button>
                       </>
                     )}
                     {rec.approval_status !== 'pending' && (
-                      <Badge variant="outline" className="uppercase text-[10px] ml-2">{rec.approval_status}</Badge>
+                      <Badge variant="outline" className="uppercase text-[10px] ml-2">
+                        {rec.approval_status === 'approved' ? 'Goedgekeurd' : rec.approval_status === 'rejected' ? 'Afgewezen' : rec.approval_status}
+                      </Badge>
                     )}
                   </div>
                 </TableCell>
@@ -230,13 +240,15 @@ export default function Recommendations() {
           </TableBody>
         </Table>
       </div>
-      
+
       {data && data.total > data.page_size && (
         <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <div>Showing {(data.page - 1) * data.page_size + 1} to Math.min(data.page * data.page_size, data.total) of {data.total} entries</div>
+          <div>
+            {(data.page - 1) * data.page_size + 1}–{Math.min(data.page * data.page_size, data.total)} van {data.total} adviezen
+          </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Previous</Button>
-            <Button variant="outline" size="sm" disabled={page * data.page_size >= data.total} onClick={() => setPage(p => p + 1)}>Next</Button>
+            <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Vorige</Button>
+            <Button variant="outline" size="sm" disabled={page * data.page_size >= data.total} onClick={() => setPage(p => p + 1)}>Volgende</Button>
           </div>
         </div>
       )}

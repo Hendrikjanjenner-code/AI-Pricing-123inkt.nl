@@ -6,23 +6,26 @@ import { AuthProvider } from "@/lib/auth";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import NotFound from "@/pages/not-found";
 
-// Pages
+// Pagina's
 import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
-import Recommendations from "@/pages/recommendations";
-import RecommendationDetail from "@/pages/recommendations/detail";
-import Skus from "@/pages/skus";
-import SkuDetail from "@/pages/skus/detail";
-import Categories from "@/pages/categories";
-import DataUpload from "@/pages/data-upload";
-import DataQuality from "@/pages/data-quality";
-import Substitutions from "@/pages/substitutions";
-import ModelHealth from "@/pages/model-health";
-import Export from "@/pages/export";
-import Settings from "@/pages/settings";
-import Competition from "@/pages/competition";
-import CompetitionDetail from "@/pages/competition-detail";
-import AbTests from "@/pages/ab-tests";
+import Prijsadviezen from "@/pages/recommendations";
+import PrijsadviesDetail from "@/pages/recommendations/detail";
+import Producten from "@/pages/skus";
+import ProductDetail from "@/pages/skus/detail";
+import Categorieen from "@/pages/categories";
+import Gegevensintegratie from "@/pages/data-upload";
+import Datakwaliteit from "@/pages/data-quality";
+import Substitutiemonitor from "@/pages/substitutions";
+import Modelgezondheid from "@/pages/model-health";
+import ExportPrijsShape from "@/pages/export";
+import Instellingen from "@/pages/settings";
+import ConcurrentieIntelligence from "@/pages/competition";
+import ConcurrentieDetail from "@/pages/competition-detail";
+import AbTestMonitor from "@/pages/ab-tests";
+import SkuConcurrentieAnalyse from "@/pages/sku-concurrentie";
+import Elasticiteitsmonitor from "@/pages/elasticiteit";
+import HuismerkImpact from "@/pages/huismerk-impact";
 
 const queryClient = new QueryClient();
 
@@ -33,47 +36,98 @@ function Router() {
       <Route path="/">
         <ProtectedRoute><Dashboard /></ProtectedRoute>
       </Route>
+      {/* Prijsadviezen */}
+      <Route path="/prijsadviezen">
+        <ProtectedRoute><Prijsadviezen /></ProtectedRoute>
+      </Route>
+      <Route path="/prijsadviezen/:id">
+        <ProtectedRoute><PrijsadviesDetail /></ProtectedRoute>
+      </Route>
+      {/* Backwards compat */}
       <Route path="/recommendations">
-        <ProtectedRoute><Recommendations /></ProtectedRoute>
+        <ProtectedRoute><Prijsadviezen /></ProtectedRoute>
       </Route>
       <Route path="/recommendations/:id">
-        <ProtectedRoute><RecommendationDetail /></ProtectedRoute>
+        <ProtectedRoute><PrijsadviesDetail /></ProtectedRoute>
+      </Route>
+      {/* Producten / SKU's */}
+      <Route path="/producten">
+        <ProtectedRoute><Producten /></ProtectedRoute>
+      </Route>
+      <Route path="/producten/:id">
+        <ProtectedRoute><ProductDetail /></ProtectedRoute>
       </Route>
       <Route path="/skus">
-        <ProtectedRoute><Skus /></ProtectedRoute>
+        <ProtectedRoute><Producten /></ProtectedRoute>
       </Route>
       <Route path="/skus/:id">
-        <ProtectedRoute><SkuDetail /></ProtectedRoute>
+        <ProtectedRoute><ProductDetail /></ProtectedRoute>
       </Route>
-      <Route path="/categories">
-        <ProtectedRoute><Categories /></ProtectedRoute>
+      {/* Concurrentie */}
+      <Route path="/concurrentie">
+        <ProtectedRoute><ConcurrentieIntelligence /></ProtectedRoute>
       </Route>
-      <Route path="/data-upload">
-        <ProtectedRoute><DataUpload /></ProtectedRoute>
-      </Route>
-      <Route path="/data-quality">
-        <ProtectedRoute><DataQuality /></ProtectedRoute>
-      </Route>
-      <Route path="/substitutions">
-        <ProtectedRoute><Substitutions /></ProtectedRoute>
-      </Route>
-      <Route path="/model-health">
-        <ProtectedRoute><ModelHealth /></ProtectedRoute>
-      </Route>
-      <Route path="/export">
-        <ProtectedRoute><Export /></ProtectedRoute>
-      </Route>
-      <Route path="/settings">
-        <ProtectedRoute><Settings /></ProtectedRoute>
+      <Route path="/concurrentie/:sku_id">
+        <ProtectedRoute><ConcurrentieDetail /></ProtectedRoute>
       </Route>
       <Route path="/competition">
-        <ProtectedRoute><Competition /></ProtectedRoute>
+        <ProtectedRoute><ConcurrentieIntelligence /></ProtectedRoute>
       </Route>
       <Route path="/competition/:sku_id">
-        <ProtectedRoute><CompetitionDetail /></ProtectedRoute>
+        <ProtectedRoute><ConcurrentieDetail /></ProtectedRoute>
+      </Route>
+      {/* Nieuwe analyse-pagina's */}
+      <Route path="/sku-concurrentie">
+        <ProtectedRoute><SkuConcurrentieAnalyse /></ProtectedRoute>
+      </Route>
+      <Route path="/elasticiteit">
+        <ProtectedRoute><Elasticiteitsmonitor /></ProtectedRoute>
+      </Route>
+      <Route path="/huismerk-impact">
+        <ProtectedRoute><HuismerkImpact /></ProtectedRoute>
+      </Route>
+      {/* Overige pagina's */}
+      <Route path="/categorieen">
+        <ProtectedRoute><Categorieen /></ProtectedRoute>
+      </Route>
+      <Route path="/categories">
+        <ProtectedRoute><Categorieen /></ProtectedRoute>
+      </Route>
+      <Route path="/gegevensintegratie">
+        <ProtectedRoute><Gegevensintegratie /></ProtectedRoute>
+      </Route>
+      <Route path="/data-upload">
+        <ProtectedRoute><Gegevensintegratie /></ProtectedRoute>
+      </Route>
+      <Route path="/datakwaliteit">
+        <ProtectedRoute><Datakwaliteit /></ProtectedRoute>
+      </Route>
+      <Route path="/data-quality">
+        <ProtectedRoute><Datakwaliteit /></ProtectedRoute>
+      </Route>
+      <Route path="/substituties">
+        <ProtectedRoute><Substitutiemonitor /></ProtectedRoute>
+      </Route>
+      <Route path="/substitutions">
+        <ProtectedRoute><Substitutiemonitor /></ProtectedRoute>
+      </Route>
+      <Route path="/modelgezondheid">
+        <ProtectedRoute><Modelgezondheid /></ProtectedRoute>
+      </Route>
+      <Route path="/model-health">
+        <ProtectedRoute><Modelgezondheid /></ProtectedRoute>
+      </Route>
+      <Route path="/export">
+        <ProtectedRoute><ExportPrijsShape /></ProtectedRoute>
+      </Route>
+      <Route path="/instellingen">
+        <ProtectedRoute><Instellingen /></ProtectedRoute>
+      </Route>
+      <Route path="/settings">
+        <ProtectedRoute><Instellingen /></ProtectedRoute>
       </Route>
       <Route path="/ab-tests">
-        <ProtectedRoute><AbTests /></ProtectedRoute>
+        <ProtectedRoute><AbTestMonitor /></ProtectedRoute>
       </Route>
       <Route component={NotFound} />
     </Switch>

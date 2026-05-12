@@ -1,0 +1,256 @@
+Bouw verder op de bestaande Nederlandstalige AI Pricing Decision Engine.
+
+Verwerk expliciet de nieuwste functionele eisen:
+
+1. Definitie van concurrentie
+Concurrentie mag niet worden gedefinieerd als “partij die hetzelfde product verkoopt”.
+Definieer concurrentie als:
+
+“Elke partij, prijs, product of alternatief dat invloed heeft op onze optimale prijsbeslissing of op de keuze van de klant.”
+
+Ondersteun vier concurrentielagen:
+- Directe concurrentie: exacte SKU-overlap
+- Functionele concurrentie: ander product, zelfde behoefte
+- Categorieconcurrentie: alternatief binnen dezelfde categorie
+- Interne concurrentie: eigen producten, vooral huismerk versus A-merk
+
+Maak dit zichtbaar in de app op SKU-niveau.
+
+2. Belangrijkste concurrenten per SKU
+Voeg een Nederlandstalige pagina toe:
+
+“SKU Concurrentie Analyse”
+
+Per SKU moet zichtbaar zijn:
+- top concurrenten
+- ranking
+- Competitor Influence Score (CIS)
+- prijs concurrent
+- prijsverschil
+- voorraadstatus
+- CSRS-score
+- CSS-score
+- status: Actief / Monitoren / Negeren
+- reden waarom concurrent wel of niet meetelt
+
+CIS-formule:
+CIS =
+  competitor_relevance_score
+* competitor_sustainability_score
+* competitor_stock_reliability_score
+* product_comparability_score
+* price_sensitivity_score
+
+Classificatie:
+- >0.80 = Primaire concurrent
+- 0.60–0.80 = Sterke concurrent
+- 0.40–0.60 = Secundaire concurrent
+- 0.20–0.40 = Zwakke concurrent
+- <0.20 = Negeren
+
+3. Concurrentievoorraad integratie
+Voeg CSRS toe: Competitor Stock Reliability Score.
+
+CSRS-formule:
+CSRS =
+  0.40 * availability_rate
++ 0.25 * delivery_speed_score
++ 0.20 * stock_stability_score
++ 0.15 * listing_consistency_score
+
+Gebruik CSRS om concurrenten te wegen of uit te sluiten.
+
+Regels:
+- CSRS < 0.25 → negeren
+- 0.25–0.60 → monitoren / afzwakken
+- >= 0.60 → normaal meenemen
+
+Reason codes:
+- COMPETITOR_IGNORED_OUT_OF_STOCK
+- COMPETITOR_IGNORED_BAD_DELIVERY
+- COMPETITOR_IGNORED_UNSTABLE_STOCK
+- COMPETITOR_IGNORED_UNSTABLE_LISTING
+- COMPETITOR_DOWNWEIGHTED_UNSTABLE_STOCK
+- COMPETITOR_INCLUDED_STOCK_RELIABLE
+
+4. Concurrentieprijs duurzaamheid
+Voeg CSS toe: Competitor Sustainability Score.
+
+Doel:
+Bepalen of een lage concurrentieprijs duurzaam en geloofwaardig is.
+
+Factoren:
+- prijsafwijking ten opzichte van markt
+- prijsvolatiliteit
+- voorraadgedrag
+- type concurrent
+- leverbetrouwbaarheid
+
+Een lage prijs met lage CSS mag niet automatisch tot prijsverlaging leiden.
+
+Voorbeeld:
+Onze prijs toner = €250
+Concurrentprijs = €199
+Als CSS laag en CSRS laag zijn:
+- niet automatisch volgen
+- concurrent status = Monitoren of Negeren
+- reason code = LOW_PRICE_LOW_STOCK_RELIABILITY
+- pricing action = WATCH_ONLY_LOW_STOCK_RELIABILITY
+
+5. Weighted competitor reference price
+Gebruik nooit standaard de laagste concurrentieprijs.
+
+Bepaal competitor_reference_price als weighted median.
+
+Weight:
+competitor_weight =
+  competitor_relevance_score
+* competitor_price_reliability_score
+* competitor_sustainability_score
+* competitor_stock_reliability_score
+
+Toon in de UI:
+- welke concurrenten zijn meegenomen
+- welke concurrenten zijn uitgesloten
+- waarom
+- uiteindelijke gewogen referentieprijs
+
+6. Elasticiteit
+Voeg een Nederlandstalige elasticiteitsectie toe.
+
+Toon per SKU:
+- eigen prijselasticiteit
+- cross-elasticiteit
+- competitieve elasticiteit
+- interne substitutie-elasticiteit
+- Elasticity Confidence Score
+
+Elasticiteit is contextafhankelijk en moet rekening houden met:
+- categorie
+- prijsvariatie
+- salesvolume
+- concurrentiedruk PCIS
+- voorraadbetrouwbaarheid CSRS
+- huismerk/A-merk substitutie
+- basket-impact
+
+Classificeer confidence:
+- >0.80 = hoog betrouwbaar
+- 0.50–0.80 = bruikbaar
+- <0.50 = laag betrouwbaar
+
+7. Huismerk en interne concurrentie
+123inkt werkt met veel huismerkproducten. Voeg daarom interne concurrentie expliciet toe.
+
+Nieuwe concepten:
+- Internal Competition Score
+- Internal Substitution Value (ISV)
+- internal_margin_gap
+- internal_switch_probability
+- recommended_internal_action
+
+ISV =
+internal_switch_probability * internal_margin_gap
+
+Gebruik dit voor A-merk versus huismerk beslissingen.
+
+Voorbeeld:
+A-merk toner heeft externe prijsdruk, maar hoge interne substitutie naar huismerk.
+Dan hoeft de A-merkprijs niet automatisch omlaag.
+Mogelijke actie:
+- prijs behouden
+- huismerk sterker positioneren
+- portfolio-marge optimaliseren
+
+Nieuwe strategy types:
+- PRIVATE_LABEL_PUSH
+- PORTFOLIO_MARGIN_OPTIMIZATION
+- TRAFFIC_TO_MARGIN_SWITCH
+
+8. Recommendation Engine uitbreiden
+Prijsadviezen moeten verklaren:
+- belangrijkste externe concurrent
+- genegeerde concurrenten
+- interne concurrentie/huismerkimpact
+- elasticiteit
+- PCIS
+- CIS
+- CSS
+- CSRS
+- expected margin impact
+
+Nieuwe reason codes:
+- PRIMARY_COMPETITOR_PRESSURE
+- IGNORED_LOW_CSS
+- IGNORED_LOW_CSRS
+- PRIVATE_LABEL_MARGIN_OPPORTUNITY
+- INTERNAL_SUBSTITUTION_HIGH
+- PORTFOLIO_MARGIN_PROTECTION
+- ELASTICITY_LOW_CONFIDENCE
+- COMPETITION_SIGNAL_WEAK
+- WATCH_ONLY_LOW_STOCK_RELIABILITY
+
+9. UI moet volledig Nederlands zijn
+Gebruik Nederlandse labels, knoppen en uitlegteksten.
+
+Voorbeelden:
+- Dashboard
+- Producten
+- Data upload
+- Datakwaliteit
+- Concurrentie Analyse
+- SKU Concurrentie Detail
+- Prijsadviezen
+- Elasticiteit
+- Huismerk Impact
+- Modelgezondheid
+- Export naar PriceShape
+
+Knoppen:
+- Goedkeuren
+- Afwijzen
+- Exporteren
+- Details bekijken
+- Advies berekenen
+- Concurrentie analyseren
+
+10. Demo-data uitbreiden
+Voeg demo-data toe voor:
+- toner van €250 met concurrent op €199 maar lage CSS/CSRS
+- A-merk product met huismerk alternatief
+- potloden met hoge concurrentie-impact
+- ordners met lagere directe concurrentie-impact
+- meubelproduct met lage PCIS
+- papier met hoge prijsgevoeligheid
+
+11. Technische implementatie
+Voeg of update backend modules:
+- competition_engine.py
+- competitor_influence.py
+- stock_reliability.py
+- sustainability_score.py
+- elasticity_engine.py
+- internal_competition.py
+- recommendation_engine.py
+
+Voeg of update API endpoints:
+- GET /api/concurrentie
+- GET /api/concurrentie/sku/{sku_id}
+- GET /api/elasticiteit/sku/{sku_id}
+- GET /api/huismerk-impact/sku/{sku_id}
+- GET /api/prijsadviezen
+- POST /api/prijsadviezen/berekenen
+- GET /api/export/priceshape
+
+12. Belangrijkste doel
+De app moet duidelijk aantonen:
+
+- Niet elke lage concurrentieprijs is echte concurrentiedruk.
+- Voorraadbetrouwbaarheid bepaalt of een concurrent meetelt.
+- Duurzaamheid van prijs bepaalt of we moeten reageren.
+- Per SKU kunnen we zien wie onze belangrijkste concurrenten zijn.
+- Elasticiteit wordt zichtbaar met confidence.
+- Huismerkproducten en interne substitutie zijn essentieel voor pricing.
+- Prijsadvies wordt portfolio-gedreven, niet blind concurrentie-gedreven.
+
+Maak de app robuust, zakelijk, Nederlandstalig en geschikt als basis voor een echte pricing pilot.

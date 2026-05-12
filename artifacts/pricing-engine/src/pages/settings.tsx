@@ -13,47 +13,54 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Trash2, UserPlus } from "lucide-react";
 
-export default function Settings() {
-  const { data: users, isLoading } = useListUsers();
-  const createMut = useCreateUser();
-  const deleteMut = useDeleteUser();
-  const updateMut = useUpdateUser();
+const ROL_LABELS: Record<string, string> = {
+  admin: "Beheerder",
+  pricing_manager: "Prijsmanager",
+  analyst: "Analist",
+  viewer: "Lezer",
+};
+
+export default function Instellingen() {
+  const { data: gebruikers, isLoading } = useListUsers();
+  const aanmakenMut = useCreateUser();
+  const verwijderenMut = useDeleteUser();
+  const bijwerkenMut = useUpdateUser();
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
   const [open, setOpen] = useState(false);
-  const [formData, setFormData] = useState({ username: '', email: '', password: '', role: 'viewer', full_name: '' });
+  const [formulier, setFormulier] = useState({ username: '', email: '', password: '', role: 'viewer', full_name: '' });
 
-  const handleCreate = async () => {
+  const handleAanmaken = async () => {
     try {
-      await createMut.mutateAsync({ data: formData as any });
+      await aanmakenMut.mutateAsync({ data: formulier as any });
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
       setOpen(false);
-      setFormData({ username: '', email: '', password: '', role: 'viewer', full_name: '' });
-      toast({ title: "User created" });
-    } catch (err) {
-      toast({ title: "Error creating user", variant: "destructive" });
+      setFormulier({ username: '', email: '', password: '', role: 'viewer', full_name: '' });
+      toast({ title: "Gebruiker aangemaakt" });
+    } catch {
+      toast({ title: "Fout bij aanmaken gebruiker", variant: "destructive" });
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if(!confirm("Are you sure you want to delete this user?")) return;
+  const handleVerwijderen = async (id: number) => {
+    if (!confirm("Weet je zeker dat je deze gebruiker wilt verwijderen?")) return;
     try {
-      await deleteMut.mutateAsync({ id });
+      await verwijderenMut.mutateAsync({ id });
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
-      toast({ title: "User deleted" });
-    } catch (err) {
-      toast({ title: "Error deleting user", variant: "destructive" });
+      toast({ title: "Gebruiker verwijderd" });
+    } catch {
+      toast({ title: "Fout bij verwijderen", variant: "destructive" });
     }
   };
 
-  const handleRoleChange = async (id: number, role: string) => {
+  const handleRolWijzigen = async (id: number, rol: string) => {
     try {
-      await updateMut.mutateAsync({ id, data: { role } });
+      await bijwerkenMut.mutateAsync({ id, data: { role: rol } });
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
-      toast({ title: "Role updated" });
-    } catch (err) {
-      toast({ title: "Error updating role", variant: "destructive" });
+      toast({ title: "Rol bijgewerkt" });
+    } catch {
+      toast({ title: "Fout bij bijwerken rol", variant: "destructive" });
     }
   };
 
@@ -61,35 +68,35 @@ export default function Settings() {
     <div className="space-y-6 max-w-5xl">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">System Settings</h1>
-          <p className="text-muted-foreground mt-1">Manage users and access control.</p>
+          <h1 className="text-2xl font-bold tracking-tight">Systeeminstellingen</h1>
+          <p className="text-muted-foreground mt-1">Beheer gebruikers en toegangsrechten.</p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
-            <Button><UserPlus className="w-4 h-4 mr-2"/> Add User</Button>
+            <Button><UserPlus className="w-4 h-4 mr-2" /> Gebruiker toevoegen</Button>
           </DialogTrigger>
           <DialogContent>
-            <DialogHeader><DialogTitle>Add New User</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle>Nieuwe gebruiker toevoegen</DialogTitle></DialogHeader>
             <div className="space-y-4 py-4">
-              <div className="space-y-2"><Label>Username</Label><Input value={formData.username} onChange={e => setFormData(f=>({ ...f, username: e.target.value}))}/></div>
-              <div className="space-y-2"><Label>Full Name</Label><Input value={formData.full_name} onChange={e => setFormData(f=>({ ...f, full_name: e.target.value}))}/></div>
-              <div className="space-y-2"><Label>Email</Label><Input type="email" value={formData.email} onChange={e => setFormData(f=>({ ...f, email: e.target.value}))}/></div>
-              <div className="space-y-2"><Label>Password</Label><Input type="password" value={formData.password} onChange={e => setFormData(f=>({ ...f, password: e.target.value}))}/></div>
-              <div className="space-y-2"><Label>Role</Label>
-                <Select value={formData.role} onValueChange={v => setFormData(f=>({ ...f, role: v}))}>
-                  <SelectTrigger><SelectValue/></SelectTrigger>
+              <div className="space-y-2"><Label>Gebruikersnaam</Label><Input value={formulier.username} onChange={e => setFormulier(f => ({ ...f, username: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>Volledige naam</Label><Input value={formulier.full_name} onChange={e => setFormulier(f => ({ ...f, full_name: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>E-mailadres</Label><Input type="email" value={formulier.email} onChange={e => setFormulier(f => ({ ...f, email: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>Wachtwoord</Label><Input type="password" value={formulier.password} onChange={e => setFormulier(f => ({ ...f, password: e.target.value }))} /></div>
+              <div className="space-y-2"><Label>Rol</Label>
+                <Select value={formulier.role} onValueChange={v => setFormulier(f => ({ ...f, role: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="admin">Admin</SelectItem>
-                    <SelectItem value="pricing_manager">Pricing Manager</SelectItem>
-                    <SelectItem value="analyst">Analyst</SelectItem>
-                    <SelectItem value="viewer">Viewer</SelectItem>
+                    <SelectItem value="admin">Beheerder</SelectItem>
+                    <SelectItem value="pricing_manager">Prijsmanager</SelectItem>
+                    <SelectItem value="analyst">Analist</SelectItem>
+                    <SelectItem value="viewer">Lezer</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={()=>setOpen(false)}>Cancel</Button>
-              <Button onClick={handleCreate} disabled={createMut.isPending || !formData.username || !formData.password}>Create</Button>
+              <Button variant="outline" onClick={() => setOpen(false)}>Annuleren</Button>
+              <Button onClick={handleAanmaken} disabled={aanmakenMut.isPending || !formulier.username || !formulier.password}>Aanmaken</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -97,31 +104,27 @@ export default function Settings() {
 
       <Card>
         <CardHeader>
-          <CardTitle>User Management</CardTitle>
+          <CardTitle>Gebruikersbeheer</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>User</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Role</TableHead>
+                <TableHead>Gebruiker</TableHead>
+                <TableHead>E-mail</TableHead>
+                <TableHead>Rol</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead className="text-right">Acties</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
-                 Array.from({ length: 3 }).map((_, i) => (
+                Array.from({ length: 3 }).map((_, i) => (
                   <TableRow key={i}>
-                    <TableCell><Skeleton className="h-4 w-32" /></TableCell>
-                    <TableCell><Skeleton className="h-4 w-48" /></TableCell>
-                    <TableCell><Skeleton className="h-8 w-32" /></TableCell>
-                    <TableCell><Skeleton className="h-6 w-16" /></TableCell>
-                    <TableCell><Skeleton className="h-8 w-8 ml-auto" /></TableCell>
+                    {[1,2,3,4,5].map(j => <TableCell key={j}><Skeleton className="h-8 w-full" /></TableCell>)}
                   </TableRow>
                 ))
-              ) : users?.map((user) => (
+              ) : gebruikers?.map((user) => (
                 <TableRow key={user.id}>
                   <TableCell>
                     <div className="font-medium">{user.full_name || user.username}</div>
@@ -129,23 +132,26 @@ export default function Settings() {
                   </TableCell>
                   <TableCell>{user.email}</TableCell>
                   <TableCell>
-                    <Select value={user.role} onValueChange={(v) => handleRoleChange(user.id, v)}>
+                    <Select value={user.role} onValueChange={(v) => handleRolWijzigen(user.id, v)}>
                       <SelectTrigger className="w-[180px] h-8 text-xs">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="admin">Admin</SelectItem>
-                        <SelectItem value="pricing_manager">Pricing Manager</SelectItem>
-                        <SelectItem value="analyst">Analyst</SelectItem>
-                        <SelectItem value="viewer">Viewer</SelectItem>
+                        <SelectItem value="admin">Beheerder</SelectItem>
+                        <SelectItem value="pricing_manager">Prijsmanager</SelectItem>
+                        <SelectItem value="analyst">Analist</SelectItem>
+                        <SelectItem value="viewer">Lezer</SelectItem>
                       </SelectContent>
                     </Select>
                   </TableCell>
                   <TableCell>
-                    {user.is_active ? <Badge variant="secondary" className="bg-emerald-50 text-emerald-600">Active</Badge> : <Badge variant="outline">Inactive</Badge>}
+                    {user.is_active
+                      ? <Badge variant="secondary" className="bg-emerald-50 text-emerald-600">Actief</Badge>
+                      : <Badge variant="outline">Inactief</Badge>}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button variant="ghost" size="icon" className="text-destructive hover:bg-destructive/10 h-8 w-8" onClick={() => handleDelete(user.id)} disabled={deleteMut.isPending}>
+                    <Button variant="ghost" size="icon" className="text-destructive hover:bg-destructive/10 h-8 w-8"
+                      onClick={() => handleVerwijderen(user.id)} disabled={verwijderenMut.isPending}>
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </TableCell>

@@ -263,3 +263,107 @@ class AbTestResult(Base):
     baseline_conversion_rate = Column(Float)
     current_conversion_rate = Column(Float)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CompetitorInfluenceScore(Base):
+    """
+    CIS — Competitor Influence Score — per concurrent per SKU.
+    Bevat ook CSRS (voorraadbetrouwbaarheid) en CSS (duurzaamheid prijs).
+    """
+    __tablename__ = "competitor_influence_scores"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    competitor_name = Column(String(255), nullable=False)
+    run_date = Column(Date, nullable=False)
+
+    # Concurrentielaag: direct, functioneel, categorie, intern
+    competition_layer = Column(String(50), default="direct")
+
+    # CIS sub-scores
+    competitor_relevance_score = Column(Float, default=0.0)
+    product_comparability_score = Column(Float, default=0.0)
+    price_sensitivity_score = Column(Float, default=0.0)
+    # CSRS sub-scores
+    availability_rate = Column(Float, default=0.0)
+    delivery_speed_score = Column(Float, default=0.0)
+    stock_stability_score = Column(Float, default=0.0)
+    listing_consistency_score = Column(Float, default=0.0)
+    # CSS sub-scores
+    price_deviation_score = Column(Float, default=0.0)
+    price_volatility_score = Column(Float, default=0.0)
+    competitor_type_score = Column(Float, default=0.0)
+    delivery_reliability_score = Column(Float, default=0.0)
+
+    # Samengestelde scores
+    csrs_score = Column(Float, default=0.0)  # Competitor Stock Reliability Score
+    css_score = Column(Float, default=0.0)   # Competitor Sustainability Score
+    cis_score = Column(Float, default=0.0)   # Competitor Influence Score
+
+    # Classificatie
+    cis_class = Column(String(50))  # Primaire/Sterke/Secundaire/Zwakke/Negeren
+    status = Column(String(50))     # Actief/Monitoren/Negeren
+    reason_code = Column(String(100))
+    pricing_action = Column(String(100))
+
+    # Prijs data
+    competitor_price = Column(Numeric(10, 4))
+    price_vs_own_pct = Column(Float)
+    competitor_weight = Column(Float, default=0.0)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SkuElasticity(Base):
+    """Prijselasticiteit per SKU — eigen, kruis, concurrentie, intern."""
+    __tablename__ = "sku_elasticity"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    run_date = Column(Date, nullable=False)
+
+    own_price_elasticity = Column(Float)          # Eigen prijselasticiteit
+    cross_elasticity = Column(Float)              # Kruiselasticiteit met markt
+    competitive_elasticity = Column(Float)        # Gevoeligheid voor concurrentieprijs
+    internal_substitution_elasticity = Column(Float)  # Overstap naar huismerk
+
+    elasticity_confidence_score = Column(Float, default=0.0)
+    confidence_class = Column(String(50))         # hoog_betrouwbaar / bruikbaar / laag_betrouwbaar
+
+    # Context-factoren gebruikt
+    category = Column(String(255))
+    pcis_score_used = Column(Float)
+    csrs_score_used = Column(Float)
+    sales_volume_30d = Column(Float)
+    price_variation_30d = Column(Float)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class InternalCompetitionScore(Base):
+    """
+    Interne concurrentie: A-merk vs huismerk (ISV — Internal Substitution Value).
+    ISV = internal_switch_probability * internal_margin_gap
+    """
+    __tablename__ = "internal_competition_scores"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)          # A-merk SKU
+    paired_sku_id = Column(String(100), nullable=False, index=True)   # Huismerk SKU
+    run_date = Column(Date, nullable=False)
+
+    internal_switch_probability = Column(Float, default=0.0)
+    internal_margin_gap = Column(Float, default=0.0)   # Margverschil per eenheid
+    isv = Column(Float, default=0.0)                   # ISV = prob * gap
+
+    # Aanbevolen actie
+    recommended_internal_action = Column(String(100))  # PRIVATE_LABEL_PUSH / etc.
+    action_reason = Column(Text)
+
+    # Prijsdruk context
+    a_brand_price = Column(Numeric(10, 4))
+    private_label_price = Column(Numeric(10, 4))
+    a_brand_margin_pct = Column(Float)
+    private_label_margin_pct = Column(Float)
+
+    created_at = Column(DateTime, default=datetime.utcnow)

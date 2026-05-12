@@ -4,6 +4,20 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 import { ArrowUpRight, ArrowDownRight, AlertTriangle, CheckCircle2, ShieldAlert } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 
+const STRATEGIE_LABELS: Record<string, string> = {
+  SUBSTITUTION_PORTFOLIO: "Substitutieportfolio",
+  COMPETITOR_INDEX: "Concurrentie-index",
+  MARGIN_OPTIMIZATION: "Margeoptimalisatie",
+  STOCK_CLEARANCE: "Voorraadopruiming",
+  BASKET_BUILDER: "Winkelmandbouwer",
+  VOLUME_DISCOUNT: "Volumekorting",
+  REPEAT_PURCHASE: "Herhalingsaankoop",
+  LOW_VELOCITY: "Laag volume",
+  PRIVATE_LABEL_PUSH: "Huismerk push",
+  PORTFOLIO_MARGIN_OPTIMIZATION: "Portfolio margeoptimalisatie",
+  TRAFFIC_TO_MARGIN_SWITCH: "Traffic naar marge",
+};
+
 export default function Dashboard() {
   const { data: summary, isLoading: loadingSummary } = useGetDashboardSummary();
   const { data: marginData } = useGetMarginByCategory();
@@ -11,14 +25,14 @@ export default function Dashboard() {
   const { data: confData } = useGetConfidenceDistribution();
   const { data: priceData } = useGetPriceChangeDistribution();
 
-  const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(val);
-  const formatNumber = (val: number) => new Intl.NumberFormat('en-US').format(val);
+  const formatBedrag = (val: number) => new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(val);
+  const formatGetal = (val: number) => new Intl.NumberFormat('nl-NL').format(val);
 
   const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))'];
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold tracking-tight">Morning Briefing</h1>
+      <h1 className="text-3xl font-bold tracking-tight">Dagelijks overzicht</h1>
 
       {loadingSummary ? (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -28,42 +42,42 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Est. Margin Uplift</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">Verwachte margeverbetering</CardTitle>
               <ArrowUpRight className="h-4 w-4 text-emerald-500" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-emerald-600">{formatCurrency(summary.estimated_margin_impact)}</div>
-              <p className="text-xs text-muted-foreground mt-1">Based on pending recs</p>
+              <div className="text-2xl font-bold text-emerald-600">{formatBedrag(summary.estimated_margin_impact)}</div>
+              <p className="text-xs text-muted-foreground mt-1">Op basis van openstaande adviezen</p>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Pending Recs</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">Openstaande adviezen</CardTitle>
               <CheckCircle2 className="h-4 w-4 text-primary" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{formatNumber(summary.pending_count)}</div>
-              <p className="text-xs text-muted-foreground mt-1">Out of {summary.total_recommendations} total</p>
+              <div className="text-2xl font-bold">{formatGetal(summary.pending_count)}</div>
+              <p className="text-xs text-muted-foreground mt-1">Van {summary.total_recommendations} in totaal</p>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Avg Confidence</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground">Gem. betrouwbaarheid</CardTitle>
               <ActivityIcon className="h-4 w-4 text-primary" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{(summary.avg_confidence_score * 100).toFixed(1)}%</div>
-              <p className="text-xs text-muted-foreground mt-1">Model health {summary.data_quality_score > 80 ? 'optimal' : 'degraded'}</p>
+              <p className="text-xs text-muted-foreground mt-1">Modelkwaliteit {summary.data_quality_score > 80 ? 'optimaal' : 'verminderd'}</p>
             </CardContent>
           </Card>
           <Card className="border-destructive/50">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-destructive">Safety Warnings</CardTitle>
+              <CardTitle className="text-sm font-medium text-destructive">Veiligheidswaarschuwingen</CardTitle>
               <ShieldAlert className="h-4 w-4 text-destructive" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-destructive">{formatNumber(summary.safety_warnings_count)}</div>
-              <p className="text-xs text-muted-foreground mt-1">Require manual review</p>
+              <div className="text-2xl font-bold text-destructive">{formatGetal(summary.safety_warnings_count)}</div>
+              <p className="text-xs text-muted-foreground mt-1">Handmatige controle vereist</p>
             </CardContent>
           </Card>
         </div>
@@ -72,7 +86,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
-            <CardTitle>Margin Uplift by Category</CardTitle>
+            <CardTitle>Margeverbetering per categorie</CardTitle>
           </CardHeader>
           <CardContent className="h-[300px]">
             {marginData ? (
@@ -80,7 +94,7 @@ export default function Dashboard() {
                 <BarChart data={marginData}>
                   <XAxis dataKey="category" fontSize={12} tickLine={false} axisLine={false} />
                   <YAxis fontSize={12} tickLine={false} axisLine={false} tickFormatter={(v) => `€${v}`} />
-                  <Tooltip formatter={(value: number) => [`€${value}`, 'Margin Uplift']} cursor={{fill: 'var(--muted)'}} />
+                  <Tooltip formatter={(value: number) => [`€${value}`, 'Margeverbetering']} cursor={{fill: 'var(--muted)'}} />
                   <Bar dataKey="margin_uplift" fill="var(--primary)" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -90,27 +104,27 @@ export default function Dashboard() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Recommendations by Strategy</CardTitle>
+            <CardTitle>Adviezen per strategie</CardTitle>
           </CardHeader>
           <CardContent className="h-[300px]">
             {recsData ? (
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={recsData}
+                    data={recsData.map((d: any) => ({ ...d, name: STRATEGIE_LABELS[d.strategy_type] || d.strategy_type }))}
                     cx="50%"
                     cy="50%"
                     innerRadius={60}
                     outerRadius={100}
                     paddingAngle={2}
                     dataKey="count"
-                    nameKey="strategy_type"
+                    nameKey="name"
                   >
-                    {recsData.map((entry, index) => (
+                    {recsData.map((_: any, index: number) => (
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip />
+                  <Tooltip formatter={(val: number, name: string) => [val, name]} />
                 </PieChart>
               </ResponsiveContainer>
             ) : <Skeleton className="w-full h-full" />}
@@ -119,7 +133,7 @@ export default function Dashboard() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Price Change Distribution</CardTitle>
+            <CardTitle>Verdeling prijswijzigingen</CardTitle>
           </CardHeader>
           <CardContent className="h-[300px]">
             {priceData ? (
@@ -137,7 +151,7 @@ export default function Dashboard() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Model Confidence</CardTitle>
+            <CardTitle>Modelbetrouwbaarheid</CardTitle>
           </CardHeader>
           <CardContent className="h-[300px]">
             {confData ? (
@@ -159,18 +173,8 @@ export default function Dashboard() {
 
 function ActivityIcon(props: any) {
   return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
     </svg>
   );
