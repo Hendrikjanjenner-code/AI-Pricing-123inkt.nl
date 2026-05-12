@@ -5,6 +5,8 @@ import { useGetCurrentUser, setAuthTokenGetter } from "@workspace/api-client-rea
 // Initialize auth token getter
 setAuthTokenGetter(() => localStorage.getItem("auth_token"));
 
+export const getAuthToken = (): string => localStorage.getItem("auth_token") || "";
+
 export const setAuthToken = (token: string | null) => {
   if (token) {
     localStorage.setItem("auth_token", token);

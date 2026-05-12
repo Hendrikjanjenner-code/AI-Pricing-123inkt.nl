@@ -1,0 +1,572 @@
+Bouw verder op de bestaande Nederlandstalige AI Pricing Decision Engine.
+
+Doel:
+Maak PriceShape niet noodzakelijk door eigen modules toe te voegen voor:
+1. scraping
+2. product matching
+3. monitoring
+4. price execution
+
+De app moet concurrentiedata zelf kunnen verzamelen, matchen, beoordelen, monitoren en exporteren of uitvoeren.
+
+Belangrijk:
+Respecteer robots.txt, rate limits, websitevoorwaarden en wettelijke beperkingen.
+Scrape alleen publieke productinformatie en bouw duidelijke throttling, logging en error handling in.
+Geen omzeiling van anti-bot systemen.
+
+---
+
+MODULE 1 — SCRAPING ENGINE
+
+Maak een module:
+backend/app/services/scraping_engine.py
+
+Doel:
+Publieke productdata ophalen van ingestelde concurrenten.
+
+Ondersteun per concurrent:
+- naam
+- basis-url
+- categorie-url
+- product-url
+- scraping methode
+- CSS selectors
+- frequentie
+- actief/inactief
+
+Te verzamelen velden:
+- competitor_id
+- competitor_name
+- competitor_sku
+- product_url
+- product_title
+- brand
+- EAN indien beschikbaar
+- MPN indien beschikbaar
+- price_inc_vat
+- shipping_cost
+- total_price_inc_vat
+- stock_status
+- delivery_text
+- delivery_days
+- pack_size
+- unit_quantity
+- seller_name
+- scraped_at
+- raw_html_hash
+- scrape_status
+
+Scraping methodes:
+- requests + BeautifulSoup voor simpele pagina’s
+- Playwright optioneel voor JavaScript pagina’s
+- CSV/API-import fallback per concurrent
+
+Belangrijke functies:
+- scrape_competitor_product()
+- scrape_competitor_category()
+- parse_price()
+- parse_stock_status()
+- parse_delivery_days()
+- normalize_pack_size()
+- detect_scrape_changes()
+- save_scrape_result()
+
+Voeg throttling toe:
+- max requests per minuut per domein
+- random delay
+- retry met exponential backoff
+- duidelijke foutmeldingen
+
+Reason codes:
+- SCRAPE_SUCCESS
+- SCRAPE_FAILED_TIMEOUT
+- SCRAPE_FAILED_SELECTOR_MISSING
+- SCRAPE_FAILED_BLOCKED
+- SCRAPE_SKIPPED_ROBOTS
+- SCRAPE_FAILED_INVALID_PRICE
+
+---
+
+MODULE 2 — PRODUCT MATCHING ENGINE
+
+Maak een module:
+backend/app/services/matching_engine.py
+
+Doel:
+Concurrentieproducten matchen aan onze SKU’s.
+
+Matching mag niet alleen op titel.
+Gebruik meerdere signalen.
+
+Matching signalen:
+- EAN match
+- MPN match
+- merk
+- producttitel similarity
+- categorie
+- verpakkingseenheid
+- aantal stuks
+- inhoud/volume
+- kleur/formaat
+- producttype
+- handmatige mapping
+
+Match types:
+- EXACT_MATCH
+- STRONG_MATCH
+- PROBABLE_MATCH
+- FUNCTIONAL_MATCH
+- NO_MATCH
+
+Match confidence:
+0.00–1.00
+
+Voorbeeldregels:
+- EAN gelijk → hoge score
+- MPN gelijk + merk gelijk → hoge score
+- titel vergelijkbaar maar pack size anders → lagere score
+- pack size afwijkend → waarschuwing
+- alleen categorie gelijk → geen directe match, mogelijk functioneel alternatief
+
+Belangrijke functies:
+- match_competitor_offer_to_sku()
+- calculate_title_similarity()
+- calculate_pack_size_similarity()
+- calculate_brand_similarity()
+- calculate_identifier_match_score()
+- calculate_final_match_confidence()
+- create_manual_match_override()
+- explain_match()
+
+Output:
+- own_sku_id
+- competitor_offer_id
+- match_type
+- match_confidence
+- match_reason
+- pack_size_warning
+- manual_override
+
+Reason codes:
+- MATCH_EXACT_EAN
+- MATCH_EXACT_MPN
+- MATCH_STRONG_TITLE_BRAND
+- MATCH_PACK_SIZE_DIFFERENCE
+- MATCH_LOW_CONFIDENCE
+- MATCH_MANUAL_OVERRIDE
+- MATCH_REJECTED
+
+---
+
+MODULE 3 — COMPETITOR MONITORING ENGINE
+
+Maak een module:
+backend/app/services/monitoring_engine.py
+
+Doel:
+Concurrentieprijzen, voorraad en leverbetrouwbaarheid over tijd monitoren.
+
+Bereken:
+- prijsontwikkeling per concurrent
+- prijsvolatiliteit
+- voorraadbetrouwbaarheid CSRS
+- prijsduurzaamheid CSS
+- outlier detectie
+- listing stabiliteit
+- delivery stability
+- nieuwe concurrenten
+- verdwenen concurrenten
+
+CSRS:
+Competitor Stock Reliability Score
+
+CSRS =
+  0.40 * availability_rate
++ 0.25 * delivery_speed_score
++ 0.20 * stock_stability_score
++ 0.15 * listing_consistency_score
+
+CSS:
+Competitor Sustainability Score
+
+Gebruik factoren:
+- prijsafwijking ten opzichte van markt
+- prijsvolatiliteit
+- voorraadgedrag
+- type concurrent
+- leverbetrouwbaarheid
+
+Monitoring alerts:
+- COMPETITOR_PRICE_DROPPED
+- COMPETITOR_PRICE_INCREASED
+- LOW_PRICE_LOW_STOCK_RELIABILITY
+- COMPETITOR_OUT_OF_STOCK
+- COMPETITOR_BACK_IN_STOCK
+- COMPETITOR_LISTING_DISAPPEARED
+- COMPETITOR_NEW_ENTRY
+- COMPETITOR_PRICE_OUTLIER
+- COMPETITOR_DELIVERY_WORSENED
+- COMPETITOR_STOCK_RELIABILITY_DECLINED
+
+Belangrijke functies:
+- calculate_price_trend()
+- calculate_price_volatility()
+- calculate_csrs()
+- calculate_css()
+- detect_price_outlier()
+- detect_listing_disappearance()
+- detect_new_competitor_offer()
+- generate_monitoring_alerts()
+
+Maak een pagina:
+“Concurrentie Monitoring”
+
+Toon:
+- recente prijsdalingen
+- grote prijsverschillen
+- lage prijs + lage voorraadbetrouwbaarheid
+- concurrenten die uit voorraad zijn
+- concurrenten die terug op voorraad zijn
+- outliers
+- scrape errors
+
+---
+
+MODULE 4 — EXECUTION ENGINE
+
+Maak een module:
+backend/app/services/execution_engine.py
+
+Doel:
+Goedgekeurde prijsadviezen uitvoeren zonder PriceShape.
+
+Ondersteun eerst:
+- CSV export
+- API-ready connectorinterface
+- handmatige goedkeuring
+- audit log
+
+Execution modes:
+- MANUAL_EXPORT
+- API_PUSH_READY
+- DRY_RUN
+- BLOCKED_BY_GUARDRAIL
+
+Prijsadvies mag nooit direct automatisch live zonder approval.
+
+Execution flow:
+1. Recommendation wordt berekend
+2. Safety rules worden toegepast
+3. Pricing Manager keurt goed
+4. Execution job wordt aangemaakt
+5. Exportbestand of API-payload wordt gegenereerd
+6. Status wordt bijgewerkt
+7. Audit log wordt gevuld
+
+Safety rules:
+- niet onder kostprijs
+- niet onder min_price
+- niet boven max_price
+- max stijging per dag 5%
+- max daling per dag 5%
+- geen actie bij lage confidence
+- geen actie bij ontbrekende data
+- geen actie bij onbetrouwbare concurrentiesignalen
+- altijd rollback mogelijk maken
+
+Output CSV:
+- sku_id
+- old_price
+- new_price
+- change_pct
+- min_price
+- max_price
+- reason_code
+- confidence_score
+- approved_by
+- approved_at
+- execution_status
+
+API connector interface:
+Maak generieke klasse:
+PriceExecutionConnector
+
+Met methodes:
+- validate_payload()
+- push_prices()
+- rollback_prices()
+- get_execution_status()
+
+Maak dummy connector:
+DemoCommerceConnector
+
+Geen echte externe API nodig, maar structuur moet klaar zijn.
+
+---
+
+DATABASE UITBREIDINGEN
+
+Maak of update tabellen:
+
+dim_competitor:
+- competitor_id
+- competitor_name
+- base_url
+- competitor_type
+- default_relevance_score
+- channel_relevance
+- scraping_enabled
+- active
+
+competitor_scrape_config:
+- config_id
+- competitor_id
+- page_type
+- url_pattern
+- title_selector
+- price_selector
+- stock_selector
+- delivery_selector
+- ean_selector
+- mpn_selector
+- pack_size_selector
+- active
+
+fact_scrape_result:
+- scrape_id
+- competitor_id
+- product_url
+- scraped_at
+- scrape_status
+- product_title
+- brand
+- ean
+- mpn
+- price_inc_vat
+- shipping_cost
+- total_price_inc_vat
+- stock_status
+- delivery_text
+- delivery_days
+- pack_size
+- raw_html_hash
+- error_message
+
+fact_competitor_offer_daily:
+- date
+- own_sku_id
+- competitor_id
+- competitor_sku
+- product_url
+- competitor_price_inc_vat
+- shipping_cost
+- total_price_inc_vat
+- in_stock
+- delivery_days
+- match_type
+- match_confidence
+- pack_size
+- source
+- created_at
+
+product_match:
+- match_id
+- own_sku_id
+- competitor_id
+- competitor_sku
+- competitor_url
+- match_type
+- match_confidence
+- match_reason
+- manual_override
+- approved_by
+- active
+
+fact_monitoring_alert:
+- alert_id
+- date
+- own_sku_id
+- competitor_id
+- alert_type
+- severity
+- message
+- resolved
+- created_at
+
+price_execution_job:
+- job_id
+- created_at
+- created_by
+- execution_mode
+- status
+- approved_count
+- rejected_count
+- export_file_path
+- error_message
+
+price_execution_line:
+- line_id
+- job_id
+- sku_id
+- old_price
+- new_price
+- change_pct
+- status
+- reason_code
+- rollback_price
+
+audit_log:
+- audit_id
+- user_id
+- action
+- entity_type
+- entity_id
+- old_value
+- new_value
+- created_at
+
+---
+
+FRONTEND PAGINA’S
+
+Voeg Nederlandstalige pagina’s toe:
+
+1. Scraping Configuratie
+- concurrenten beheren
+- selectors beheren
+- test scrape uitvoeren
+- scrape status bekijken
+
+2. Product Matching
+- voorgestelde matches
+- match confidence
+- handmatig goedkeuren/afwijzen
+- pack size waarschuwingen
+- uitleg waarom match is gemaakt
+
+3. Concurrentie Monitoring
+- prijsalerts
+- voorraadalerts
+- outliers
+- listing verdwenen
+- lage prijs + lage CSRS
+
+4. Uitvoering Prijswijzigingen
+- goedgekeurde adviezen
+- dry run
+- CSV export
+- execution jobs
+- rollback overzicht
+
+5. Audit Log
+- wie heeft wat goedgekeurd
+- welke prijs is aangepast
+- wanneer
+- waarom
+
+---
+
+API ENDPOINTS
+
+Scraping:
+- GET /api/scraping/configs
+- POST /api/scraping/configs
+- POST /api/scraping/test
+- POST /api/scraping/run
+- GET /api/scraping/results
+
+Matching:
+- GET /api/matching/suggestions
+- POST /api/matching/run
+- POST /api/matching/approve
+- POST /api/matching/reject
+- POST /api/matching/manual
+
+Monitoring:
+- GET /api/monitoring/alerts
+- POST /api/monitoring/run
+- GET /api/monitoring/sku/{sku_id}
+
+Execution:
+- GET /api/execution/jobs
+- POST /api/execution/dry-run
+- POST /api/execution/export-csv
+- POST /api/execution/push
+- POST /api/execution/rollback/{job_id}
+
+Audit:
+- GET /api/audit-log
+
+---
+
+UI TAAL
+
+Alles in het Nederlands.
+
+Labels:
+- Scraping Configuratie
+- Concurrent beheren
+- Test scrape
+- Product Matching
+- Match vertrouwen
+- Handmatig koppelen
+- Concurrentie Monitoring
+- Prijsalerts
+- Voorraadbetrouwbaarheid
+- Uitvoering Prijswijzigingen
+- Exporteren
+- Dry run
+- Terugdraaien
+- Audit log
+
+---
+
+BELANGRIJKE BUSINESSREGELS
+
+1. Een lage concurrentieprijs is geen reden om automatisch te volgen.
+2. Een concurrent zonder voorraad telt niet als harde concurrentiedruk.
+3. Een slechte productmatch mag nooit pricing beïnvloeden.
+4. De laagste prijs is niet automatisch de referentieprijs.
+5. Prijswijzigingen vereisen approval.
+6. Alle beslissingen moeten uitlegbaar zijn.
+7. Alle acties moeten in audit log staan.
+8. Scraping moet respectvol en veilig gebeuren.
+
+---
+
+DEMO DATA
+
+Voeg demo toe:
+- toner eigen prijs €250
+- concurrent A prijs €235, goede voorraad, hoge CSRS
+- concurrent B prijs €199, lage CSRS, lage CSS
+- concurrent C prijs €210, out-of-stock
+- potloden met hoge match confidence
+- ordners met lagere PCIS ondanks aanbodoverlap
+- huismerk alternatief voor A-merk toner
+
+Laat in de UI duidelijk zien:
+- concurrent B wordt niet gevolgd ondanks €199
+- concurrent A wordt primaire concurrent
+- referentieprijs is weighted median, niet minimumprijs
+- prijsadvies beschermt marge
+
+---
+
+EINDDOEL
+
+De app moet PriceShape functioneel kunnen vervangen voor:
+- concurrentiedata verzamelen
+- producten matchen
+- markt monitoren
+- prijsadviezen uitvoeren
+
+Maar de app moet slimmer zijn dan een standaard repricer door:
+- PCIS
+- CIS
+- CSS
+- CSRS
+- elasticiteit
+- interne substitutie
+- huismerkimpact
+- portfolio-margin logic

@@ -6,7 +6,7 @@ import { AuthProvider } from "@/lib/auth";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import NotFound from "@/pages/not-found";
 
-// Pagina's
+// Bestaande pagina's
 import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
 import Prijsadviezen from "@/pages/recommendations";
@@ -27,6 +27,13 @@ import SkuConcurrentieAnalyse from "@/pages/sku-concurrentie";
 import Elasticiteitsmonitor from "@/pages/elasticiteit";
 import HuismerkImpact from "@/pages/huismerk-impact";
 
+// Nieuwe module-pagina's
+import ScrapingConfiguratie from "@/pages/scraping-configuratie";
+import ProductMatching from "@/pages/product-matching";
+import ConcurrentieMonitoring from "@/pages/concurrentie-monitoring";
+import Uitvoering from "@/pages/uitvoering";
+import AuditLogPage from "@/pages/audit-log";
+
 const queryClient = new QueryClient();
 
 function Router() {
@@ -36,6 +43,7 @@ function Router() {
       <Route path="/">
         <ProtectedRoute><Dashboard /></ProtectedRoute>
       </Route>
+
       {/* Prijsadviezen */}
       <Route path="/prijsadviezen">
         <ProtectedRoute><Prijsadviezen /></ProtectedRoute>
@@ -43,13 +51,13 @@ function Router() {
       <Route path="/prijsadviezen/:id">
         <ProtectedRoute><PrijsadviesDetail /></ProtectedRoute>
       </Route>
-      {/* Backwards compat */}
       <Route path="/recommendations">
         <ProtectedRoute><Prijsadviezen /></ProtectedRoute>
       </Route>
       <Route path="/recommendations/:id">
         <ProtectedRoute><PrijsadviesDetail /></ProtectedRoute>
       </Route>
+
       {/* Producten / SKU's */}
       <Route path="/producten">
         <ProtectedRoute><Producten /></ProtectedRoute>
@@ -63,7 +71,8 @@ function Router() {
       <Route path="/skus/:id">
         <ProtectedRoute><ProductDetail /></ProtectedRoute>
       </Route>
-      {/* Concurrentie */}
+
+      {/* Concurrentie-intelligentie (PCIS) */}
       <Route path="/concurrentie">
         <ProtectedRoute><ConcurrentieIntelligence /></ProtectedRoute>
       </Route>
@@ -76,7 +85,8 @@ function Router() {
       <Route path="/competition/:sku_id">
         <ProtectedRoute><ConcurrentieDetail /></ProtectedRoute>
       </Route>
-      {/* Nieuwe analyse-pagina's */}
+
+      {/* CIS / Elasticiteit / Huismerk */}
       <Route path="/sku-concurrentie">
         <ProtectedRoute><SkuConcurrentieAnalyse /></ProtectedRoute>
       </Route>
@@ -86,6 +96,24 @@ function Router() {
       <Route path="/huismerk-impact">
         <ProtectedRoute><HuismerkImpact /></ProtectedRoute>
       </Route>
+
+      {/* Nieuwe modules */}
+      <Route path="/scraping">
+        <ProtectedRoute><ScrapingConfiguratie /></ProtectedRoute>
+      </Route>
+      <Route path="/product-matching">
+        <ProtectedRoute><ProductMatching /></ProtectedRoute>
+      </Route>
+      <Route path="/monitoring">
+        <ProtectedRoute><ConcurrentieMonitoring /></ProtectedRoute>
+      </Route>
+      <Route path="/uitvoering">
+        <ProtectedRoute><Uitvoering /></ProtectedRoute>
+      </Route>
+      <Route path="/audit-log">
+        <ProtectedRoute><AuditLogPage /></ProtectedRoute>
+      </Route>
+
       {/* Overige pagina's */}
       <Route path="/categorieen">
         <ProtectedRoute><Categorieen /></ProtectedRoute>
@@ -129,6 +157,7 @@ function Router() {
       <Route path="/ab-tests">
         <ProtectedRoute><AbTestMonitor /></ProtectedRoute>
       </Route>
+
       <Route component={NotFound} />
     </Switch>
   );

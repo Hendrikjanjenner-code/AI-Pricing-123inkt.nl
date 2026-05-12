@@ -17,6 +17,11 @@ import {
   TrendingDown,
   Target,
   LineChart,
+  Globe,
+  Link2,
+  Bell,
+  Zap,
+  ClipboardList,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -36,6 +41,21 @@ const navGroepen = [
       { href: "/sku-concurrentie", label: "SKU Concurrentie (CIS)", icon: Target },
       { href: "/elasticiteit", label: "Elasticiteitsmonitor", icon: TrendingDown },
       { href: "/huismerk-impact", label: "Huismerk Impact (ISV)", icon: ArrowRightLeft },
+    ],
+  },
+  {
+    label: "Dataverzameling",
+    items: [
+      { href: "/scraping", label: "Scraping Configuratie", icon: Globe },
+      { href: "/product-matching", label: "Product Matching", icon: Link2 },
+      { href: "/monitoring", label: "Concurrentie Monitoring", icon: Bell },
+    ],
+  },
+  {
+    label: "Uitvoering",
+    items: [
+      { href: "/uitvoering", label: "Uitvoering Prijswijzigingen", icon: Zap },
+      { href: "/audit-log", label: "Audit Log", icon: ClipboardList },
     ],
   },
   {

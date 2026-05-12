@@ -367,3 +367,161 @@ class InternalCompetitionScore(Base):
     private_label_margin_pct = Column(Float)
 
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─── Module 1: Scraping ─────────────────────────────────────────────────────
+
+class DimCompetitor(Base):
+    """Geconfigureerde concurrenten voor de scraping engine."""
+    __tablename__ = "dim_competitor"
+
+    competitor_id = Column(Integer, primary_key=True, index=True)
+    competitor_name = Column(String(255), nullable=False, unique=True)
+    base_url = Column(String(500))
+    competitor_type = Column(String(50), default="online")
+    default_relevance_score = Column(Float, default=0.5)
+    channel_relevance = Column(JSON)
+    scraping_enabled = Column(Boolean, default=True)
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CompetitorScrapeConfig(Base):
+    """CSS-selector configuratie voor een concurrent-pagina."""
+    __tablename__ = "competitor_scrape_config"
+
+    config_id = Column(Integer, primary_key=True, index=True)
+    competitor_id = Column(Integer, ForeignKey("dim_competitor.competitor_id"), nullable=False)
+    page_type = Column(String(50), default="product")
+    url_pattern = Column(Text)
+    title_selector = Column(String(500))
+    price_selector = Column(String(500))
+    stock_selector = Column(String(500))
+    delivery_selector = Column(String(500))
+    ean_selector = Column(String(500))
+    mpn_selector = Column(String(500))
+    pack_size_selector = Column(String(500))
+    scrape_method = Column(String(50), default="requests")
+    requests_per_minute = Column(Integer, default=10)
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FactScrapeResult(Base):
+    """Ruwe scrape-uitkomst per product-URL."""
+    __tablename__ = "fact_scrape_result"
+
+    scrape_id = Column(Integer, primary_key=True, index=True)
+    competitor_id = Column(Integer, ForeignKey("dim_competitor.competitor_id"), nullable=False, index=True)
+    product_url = Column(Text)
+    scraped_at = Column(DateTime, default=datetime.utcnow, index=True)
+    scrape_status = Column(String(50))
+    product_title = Column(String(1000))
+    brand = Column(String(255))
+    ean = Column(String(50))
+    mpn = Column(String(100))
+    price_inc_vat = Column(Numeric(10, 4))
+    shipping_cost = Column(Numeric(10, 4))
+    total_price_inc_vat = Column(Numeric(10, 4))
+    stock_status = Column(String(100))
+    delivery_text = Column(String(500))
+    delivery_days = Column(Integer)
+    pack_size = Column(String(100))
+    unit_quantity = Column(Float)
+    seller_name = Column(String(255))
+    raw_html_hash = Column(String(64))
+    error_message = Column(Text)
+
+
+class FactCompetitorOfferDaily(Base):
+    """Dagelijks gematcht concurrent-aanbod per eigen SKU."""
+    __tablename__ = "fact_competitor_offer_daily"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False, index=True)
+    own_sku_id = Column(String(100), nullable=False, index=True)
+    competitor_id = Column(Integer, ForeignKey("dim_competitor.competitor_id"), nullable=False)
+    competitor_sku = Column(String(200))
+    product_url = Column(Text)
+    competitor_price_inc_vat = Column(Numeric(10, 4))
+    shipping_cost = Column(Numeric(10, 4))
+    total_price_inc_vat = Column(Numeric(10, 4))
+    in_stock = Column(Boolean)
+    delivery_days = Column(Integer)
+    match_type = Column(String(50))
+    match_confidence = Column(Float)
+    pack_size = Column(String(100))
+    source = Column(String(50), default="scraper")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─── Module 2: Product Matching ──────────────────────────────────────────────
+
+class ProductMatch(Base):
+    """Koppeling eigen SKU ↔ concurrent aanbod."""
+    __tablename__ = "product_match"
+
+    match_id = Column(Integer, primary_key=True, index=True)
+    own_sku_id = Column(String(100), nullable=False, index=True)
+    competitor_id = Column(Integer, ForeignKey("dim_competitor.competitor_id"), nullable=False)
+    competitor_sku = Column(String(200))
+    competitor_url = Column(Text)
+    match_type = Column(String(50))
+    match_confidence = Column(Float)
+    match_reason = Column(Text)
+    pack_size_warning = Column(Boolean, default=False)
+    manual_override = Column(Boolean, default=False)
+    approved_by = Column(String(100))
+    approved_at = Column(DateTime)
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─── Module 3: Monitoring ─────────────────────────────────────────────────────
+
+class FactMonitoringAlert(Base):
+    """Monitoring-alerts voor concurrentieprijzen en -voorraad."""
+    __tablename__ = "fact_monitoring_alert"
+
+    alert_id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False, index=True)
+    own_sku_id = Column(String(100), index=True)
+    competitor_id = Column(Integer, ForeignKey("dim_competitor.competitor_id"))
+    alert_type = Column(String(100))
+    severity = Column(String(20))
+    message = Column(Text)
+    resolved = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─── Module 4: Execution ──────────────────────────────────────────────────────
+
+class PriceExecutionJob(Base):
+    """Uitvoering-batch voor goedgekeurde prijswijzigingen."""
+    __tablename__ = "price_execution_job"
+
+    job_id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    created_by = Column(String(100))
+    execution_mode = Column(String(50))
+    status = Column(String(50), default="aangemaakt")
+    approved_count = Column(Integer, default=0)
+    rejected_count = Column(Integer, default=0)
+    export_file_path = Column(String(500))
+    error_message = Column(Text)
+
+
+class PriceExecutionLine(Base):
+    """Eén SKU-prijsregel binnen een uitvoering-batch."""
+    __tablename__ = "price_execution_line"
+
+    line_id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, ForeignKey("price_execution_job.job_id"), nullable=False, index=True)
+    sku_id = Column(String(100), nullable=False)
+    old_price = Column(Numeric(10, 4))
+    new_price = Column(Numeric(10, 4))
+    change_pct = Column(Float)
+    status = Column(String(50), default="gepland")
+    reason_code = Column(String(100))
+    rollback_price = Column(Numeric(10, 4))
+    created_at = Column(DateTime, default=datetime.utcnow)

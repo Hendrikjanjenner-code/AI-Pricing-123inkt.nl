@@ -13,7 +13,8 @@ from routes import (
     auth, products, categories, recommendations,
     dashboard, uploads, data_quality, substitutions,
     model_health, exports, users, skus, competition, ab_tests,
-    concurrentie, elasticiteit, huismerk
+    concurrentie, elasticiteit, huismerk,
+    scraping, matching, monitoring, execution, audit_log
 )
 
 
@@ -67,3 +68,8 @@ app.include_router(ab_tests.router)
 app.include_router(concurrentie.router)
 app.include_router(elasticiteit.router)
 app.include_router(huismerk.router)
+app.include_router(scraping.router)
+app.include_router(matching.router)
+app.include_router(monitoring.router)
+app.include_router(execution.router)
+app.include_router(audit_log.router)
