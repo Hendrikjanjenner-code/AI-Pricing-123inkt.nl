@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { SidebarLayout } from "@/components/layout/SidebarLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -81,8 +80,7 @@ export default function AuditLogPage() {
   const filterOpties = data?.filter_opties || {};
 
   return (
-    <SidebarLayout>
-      <div className="space-y-6">
+    <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">Audit Log</h1>
@@ -211,7 +209,6 @@ export default function AuditLogPage() {
             )}
           </div>
         )}
-      </div>
-    </SidebarLayout>
+    </div>
   );
 }
