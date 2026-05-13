@@ -1,0 +1,504 @@
+Bouw verder op de bestaande Nederlandstalige AI Pricing Decision Engine.
+
+Voeg een volledig geïntegreerde Traffic & Demand Intelligence Engine toe.
+
+Doel:
+De app moet niet alleen sales en marge analyseren, maar ook traffic, conversie en externe marktvraag meten.
+
+De engine moet antwoord geven op:
+1. Hoeveel traffic krijgt een SKU/categorie op 123inkt?
+2. Hoe goed converteert deze traffic?
+3. Daalt conversie en waarom?
+4. Is er externe zoekvraag in Google of andere zoekmachines?
+5. Is er veel marktvraag maar weinig eigen traffic?
+6. Moeten we pricing, promoties of marketing aanpassen?
+7. Hoe beïnvloedt traffic de Internal BCG, External BCG en Hybrid BCG?
+
+---
+
+INTERNE TRAFFIC DATA
+
+Voeg ondersteuning toe voor interne traffic per SKU en categorie.
+
+Velden:
+- date
+- entity_type (SKU/CATEGORY)
+- entity_id
+- pageviews
+- sessions
+- unique_visitors
+- clicks
+- add_to_cart
+- orders
+- units_sold
+- revenue
+- margin
+- bounce_rate
+- avg_time_on_page
+- internal_search_count
+- internal_search_term
+- channel
+- device_type
+
+Bereken:
+- conversion_rate
+- add_to_cart_rate
+- revenue_per_visitor
+- margin_per_visitor
+- traffic_growth
+- conversion_trend
+- traffic_quality_score
+
+---
+
+EXTERNE SEARCH DEMAND DATA
+
+Voeg ondersteuning toe voor externe zoekvraag per SKU/categorie.
+
+Databronnen kunnen later zijn:
+- Google Search Console
+- Google Ads Keyword Planner
+- Google Trends
+- SEO tools
+- SEA data
+- marketplace search data
+
+Maak eerst CSV/API-ready importstructuur.
+
+Velden:
+- date
+- entity_type (SKU/CATEGORY)
+- entity_id
+- keyword
+- keyword_type (BRAND/GENERIC/EAN/MPN/CATEGORY)
+- search_volume
+- impressions
+- clicks
+- ctr
+- average_position
+- trend_index
+- competition_level
+- cpc_estimate
+- source
+
+Bereken:
+- external_demand_score
+- search_trend_score
+- keyword_opportunity_score
+- own_visibility_score
+- search_gap_score
+
+---
+
+NIEUWE SCORES
+
+1. Demand Signal Score
+Meet totale vraag naar SKU/categorie.
+
+Gebaseerd op:
+- extern zoekvolume
+- zoektrend
+- interne site search
+- pageviews
+- categoriebezoeken
+
+2. Conversion Health Score
+Meet hoe gezond de conversie is.
+
+Gebaseerd op:
+- conversion_rate
+- add_to_cart_rate
+- revenue_per_visitor
+- margin_per_visitor
+- bounce_rate
+- voorraadstatus
+- prijspositie
+
+3. Traffic Opportunity Score
+Meet waar extra traffic waardevol is.
+
+Logica:
+search demand hoog
++ eigen traffic laag
++ marge hoog
++ goede voorraad
+= hoge opportunity
+
+4. Conversion Risk Score
+Meet waar conversie verdacht daalt.
+
+Logica:
+traffic stabiel of stijgend
++ conversie dalend
++ prijsindex stijgend of concurrentiedruk stijgend
+= hoog risico
+
+5. Search Gap Score
+Meet verschil tussen marktvraag en eigen zichtbaarheid.
+
+Logica:
+hoog zoekvolume
++ lage eigen impressies/clicks/pageviews
+= gemiste kans
+
+---
+
+DATABASE UITBREIDINGEN
+
+Maak tabellen:
+
+fact_traffic_daily
+- date
+- entity_type
+- entity_id
+- pageviews
+- sessions
+- unique_visitors
+- clicks
+- add_to_cart
+- orders
+- units_sold
+- revenue
+- margin
+- bounce_rate
+- avg_time_on_page
+- internal_search_count
+- channel
+- device_type
+- created_at
+
+fact_search_demand_daily
+- date
+- entity_type
+- entity_id
+- keyword
+- keyword_type
+- search_volume
+- impressions
+- clicks
+- ctr
+- average_position
+- trend_index
+- competition_level
+- cpc_estimate
+- source
+- created_at
+
+fact_traffic_intelligence_daily
+- date
+- entity_type
+- entity_id
+- demand_signal_score
+- conversion_health_score
+- traffic_opportunity_score
+- conversion_risk_score
+- search_gap_score
+- traffic_growth
+- conversion_trend
+- reason_code
+- explanation_nl
+- created_at
+
+---
+
+BACKEND MODULES
+
+Maak modules:
+
+backend/app/services/traffic_engine.py
+backend/app/services/search_demand_engine.py
+backend/app/services/conversion_monitoring.py
+backend/app/services/traffic_bcg_overlay.py
+backend/app/services/traffic_promotion_overlay.py
+backend/app/services/traffic_pricing_overlay.py
+
+Functies:
+- calculate_conversion_rate()
+- calculate_margin_per_visitor()
+- calculate_demand_signal_score()
+- calculate_conversion_health_score()
+- calculate_traffic_opportunity_score()
+- calculate_conversion_risk_score()
+- calculate_search_gap_score()
+- detect_conversion_drop()
+- detect_search_demand_opportunity()
+- apply_traffic_to_bcg()
+- apply_traffic_to_promotion_advice()
+- apply_traffic_to_pricing_advice()
+- generate_traffic_explanation_nl()
+
+---
+
+API ENDPOINTS
+
+Voeg toe:
+
+GET /api/traffic
+GET /api/traffic/sku/{sku_id}
+GET /api/traffic/categorie/{category}
+POST /api/traffic/import
+
+GET /api/search-demand
+GET /api/search-demand/sku/{sku_id}
+GET /api/search-demand/categorie/{category}
+POST /api/search-demand/import
+
+GET /api/conversie/signalen
+POST /api/traffic/berekenen
+
+---
+
+INTEGRATIE MET BCG
+
+Traffic moet BCG beïnvloeden.
+
+Internal BCG:
+- traffic_growth verhoogt Growth Potential Score
+- margin_per_visitor verhoogt Internal Business Strength
+- dalende conversie verlaagt confidence
+
+External BCG:
+- search_volume en trend_index verhogen Market Opportunity Score
+- search_gap_score verhoogt Question Mark kans
+- hoge externe vraag + lage eigen performance = marktpotentie
+
+Hybrid BCG:
+- hoge demand + lage concurrentiedruk = pricing power
+- hoge demand + hoge concurrentiedruk = defensieve pricing
+- hoge search gap = marketing/promotie opportunity
+
+---
+
+INTEGRATIE MET PROMOTIES
+
+Promotieadvies moet traffic meenemen.
+
+Regels:
+
+IF search_demand_score hoog
+AND own_traffic laag
+AND margin hoog
+THEN adviseer marketing/promotion push
+
+IF traffic hoog
+AND conversion laag
+AND price_index hoog
+THEN adviseer prijs/promotietest
+
+IF traffic hoog
+AND conversion hoog
+AND margin laag
+THEN beperk promoties
+
+IF nieuwe SKU
+AND search_demand hoog
+THEN launch promotion adviseren
+
+IF search_demand laag
+AND stock hoog
+THEN clearance overwegen
+
+---
+
+INTEGRATIE MET PRICING
+
+Prijsadvies moet traffic meenemen.
+
+Regels:
+
+IF traffic stabiel
+AND conversion daalt
+AND PCIS hoog
+THEN concurrentie/prijssignaal versterken
+
+IF traffic hoog
+AND conversion hoog
+AND elasticiteit laag
+THEN prijsverhoging testen
+
+IF search_demand hoog
+AND eigen traffic laag
+THEN niet automatisch prijs verlagen; eerst traffic opportunity tonen
+
+IF conversion daalt
+AND CSRS concurrent hoog
+AND competitor price lager
+THEN prijsdruk serieus nemen
+
+---
+
+SIGNALEN / ALERTS
+
+Voeg alerts toe:
+
+CONVERSION_DROP_DETECTED
+TRAFFIC_DROP_DETECTED
+SEARCH_DEMAND_HIGH_LOW_TRAFFIC
+HIGH_TRAFFIC_LOW_CONVERSION
+HIGH_SEARCH_GAP
+TRAFFIC_OPPORTUNITY_HIGH
+PRICING_POWER_FROM_DEMAND
+PROMOTION_NEEDED_FOR_TRAFFIC
+NEW_SKU_HIGH_SEARCH_DEMAND
+CATEGORY_DEMAND_RISING
+CATEGORY_DEMAND_DECLINING
+
+---
+
+FRONTEND PAGINA’S
+
+Voeg Nederlandstalige pagina’s toe:
+
+1. Traffic Dashboard
+2. Conversie Monitoring
+3. Search Demand Analyse
+4. SKU Traffic Detail
+5. Categorie Traffic Analyse
+6. Traffic Opportunity Dashboard
+7. Search Gap Analyse
+
+---
+
+TRAFFIC DASHBOARD
+
+KPI cards:
+- totale sessies
+- conversieratio
+- omzet per bezoeker
+- marge per bezoeker
+- SKU’s met conversiedaling
+- SKU’s met hoge search gap
+- categorieën met stijgende vraag
+- traffic opportunities
+
+Grafieken:
+- traffic trend
+- conversie trend
+- margin per visitor trend
+- demand signal per categorie
+- conversion risk per categorie
+- search gap top 20
+
+---
+
+SKU TRAFFIC DETAIL
+
+Toon per SKU:
+- pageviews
+- sessions
+- conversie
+- add-to-cart rate
+- revenue per visitor
+- margin per visitor
+- externe zoekvraag
+- search gap
+- PCIS
+- prijsindex
+- elasticiteit
+- promotieadvies
+- BCG-classificatie
+- aanbeveling
+
+---
+
+SEARCH DEMAND ANALYSE
+
+Toon:
+- zoekvolume per keyword
+- brand/generic/EAN/MPN verdeling
+- trendontwikkeling
+- eigen zichtbaarheid
+- search gap
+- recommended action
+
+Acties:
+- meer promoten
+- SEO/SEA push
+- prijs testen
+- launch promotion
+- geen actie
+
+---
+
+CONVERSIE MONITORING
+
+Tabel:
+- SKU/categorie
+- traffic trend
+- conversion trend
+- conversion risk score
+- mogelijke oorzaak
+- advies
+
+Mogelijke oorzaken:
+- prijs te hoog
+- concurrentiedruk
+- voorraadprobleem
+- lage relevantie
+- slechte promotie
+- marktinteresse daalt
+
+---
+
+DEMO DATA
+
+Voeg demo toe:
+
+1. SKU met hoge traffic maar dalende conversie
+- oorzaak: concurrent goedkoper met hoge CSRS
+- advies: prijs/promotie testen
+
+2. SKU met hoog zoekvolume maar lage eigen traffic
+- advies: SEO/SEA/promotie push
+
+3. SKU met hoge traffic, hoge conversie en lage elasticiteit
+- advies: prijsverhoging testen
+
+4. Nieuwe SKU met hoge zoekvraag
+- advies: launch promotion
+
+5. Categorie met dalende externe vraag
+- advies: voorraad/promotie voorzichtig
+
+---
+
+UI TAAL
+
+Alles volledig Nederlands.
+
+Gebruik labels:
+- Traffic
+- Conversie
+- Zoekvraag
+- Zoekvolume
+- Search gap
+- Vraagpotentie
+- Conversierisico
+- Traffic opportunity
+- Marge per bezoeker
+- Omzet per bezoeker
+- Interne zoekopdrachten
+- Externe marktvraag
+- Aanbevolen actie
+
+---
+
+BELANGRIJKSTE DOEL
+
+De app moet duidelijk maken:
+
+- Hoeveel vraag er intern en extern is
+- Of traffic goed converteert
+- Waar conversie daalt
+- Of een SKU veel gezocht wordt in de markt
+- Waar eigen traffic achterblijft bij marktvraag
+- Hoe traffic pricing, promoties en BCG beïnvloedt
+- Welke SKU’s/categorieën extra commerciële aandacht verdienen
+
+De Traffic & Demand Intelligence Engine moet volledig geïntegreerd zijn met:
+- Pricing Engine
+- Competition Engine
+- Elasticity Engine
+- BCG Intelligence Engine
+- Promotion Intelligence Engine
+- Private Label Intelligence

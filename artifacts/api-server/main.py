@@ -16,6 +16,7 @@ from routes import (
     concurrentie, elasticiteit, huismerk,
     scraping, matching, monitoring, execution, audit_log,
     bcg,
+    traffic, search_demand,
 )
 
 
@@ -75,3 +76,6 @@ app.include_router(monitoring.router)
 app.include_router(execution.router)
 app.include_router(audit_log.router)
 app.include_router(bcg.router)
+app.include_router(traffic.router)
+app.include_router(traffic.conversie_router)
+app.include_router(search_demand.router)

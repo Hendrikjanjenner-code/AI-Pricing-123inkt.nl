@@ -42,6 +42,13 @@ import BcgHybrid from "@/pages/bcg-hybrid";
 import BcgHuismerk from "@/pages/bcg-huismerk";
 import BcgPricingPower from "@/pages/bcg-pricing-power";
 import BcgSkuDetail from "@/pages/bcg-sku-detail";
+import TrafficDashboard from "@/pages/traffic-dashboard";
+import ConversieMonitoring from "@/pages/conversie-monitoring";
+import SearchDemand from "@/pages/search-demand";
+import TrafficSkuDetail from "@/pages/traffic-sku-detail";
+import TrafficCategorie from "@/pages/traffic-categorie";
+import TrafficOpportunity from "@/pages/traffic-opportunity";
+import SearchGap from "@/pages/search-gap";
 
 const queryClient = new QueryClient();
 
@@ -144,6 +151,32 @@ function Router() {
       </Route>
       <Route path="/bcg/pricing-power">
         <ProtectedRoute><BcgPricingPower /></ProtectedRoute>
+      </Route>
+
+      {/* Traffic & Demand Intelligence */}
+      <Route path="/traffic/dashboard">
+        <ProtectedRoute><TrafficDashboard /></ProtectedRoute>
+      </Route>
+      <Route path="/traffic/conversie">
+        <ProtectedRoute><ConversieMonitoring /></ProtectedRoute>
+      </Route>
+      <Route path="/traffic/search-demand">
+        <ProtectedRoute><SearchDemand /></ProtectedRoute>
+      </Route>
+      <Route path="/traffic/sku/:sku_id">
+        <ProtectedRoute><TrafficSkuDetail /></ProtectedRoute>
+      </Route>
+      <Route path="/traffic/categorie/:category">
+        <ProtectedRoute><TrafficCategorie /></ProtectedRoute>
+      </Route>
+      <Route path="/traffic/categorie">
+        <ProtectedRoute><TrafficCategorie /></ProtectedRoute>
+      </Route>
+      <Route path="/traffic/opportunity">
+        <ProtectedRoute><TrafficOpportunity /></ProtectedRoute>
+      </Route>
+      <Route path="/traffic/search-gap">
+        <ProtectedRoute><SearchGap /></ProtectedRoute>
       </Route>
 
       {/* Overige pagina's */}

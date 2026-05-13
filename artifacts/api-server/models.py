@@ -592,3 +592,84 @@ class FactPrivateLabelIntelligence(Base):
     paired_sku_name = Column(String(500))
 
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─── Traffic & Demand Intelligence Engine ─────────────────────────────────────
+
+class FactTrafficDaily(Base):
+    """Dagelijkse interne traffic per SKU of categorie."""
+    __tablename__ = "fact_traffic_daily"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False, index=True)
+    entity_type = Column(String(20), nullable=False)   # SKU / CATEGORY
+    entity_id = Column(String(200), nullable=False, index=True)
+
+    pageviews = Column(Integer, default=0)
+    sessions = Column(Integer, default=0)
+    unique_visitors = Column(Integer, default=0)
+    clicks = Column(Integer, default=0)
+    add_to_cart = Column(Integer, default=0)
+    orders = Column(Integer, default=0)
+    units_sold = Column(Integer, default=0)
+    revenue = Column(Numeric(12, 4))
+    margin = Column(Numeric(12, 4))
+    bounce_rate = Column(Float)                    # 0.0–1.0
+    avg_time_on_page = Column(Float)               # seconden
+    internal_search_count = Column(Integer, default=0)
+    channel = Column(String(50))                   # organic / paid / direct / email / social
+    device_type = Column(String(20))               # desktop / mobile / tablet
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FactSearchDemandDaily(Base):
+    """Externe zoekvraag per keyword, SKU of categorie."""
+    __tablename__ = "fact_search_demand_daily"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False, index=True)
+    entity_type = Column(String(20), nullable=False)
+    entity_id = Column(String(200), nullable=False, index=True)
+
+    keyword = Column(String(500), nullable=False)
+    keyword_type = Column(String(20))              # BRAND / GENERIC / EAN / MPN / CATEGORY
+    search_volume = Column(Integer, default=0)     # maandelijks zoekvolume
+    impressions = Column(Integer, default=0)       # eigen vertoningen
+    clicks = Column(Integer, default=0)            # eigen klikken
+    ctr = Column(Float)                            # klikratio eigen vertoningen
+    average_position = Column(Float)               # gemiddelde eigen positie
+    trend_index = Column(Float)                    # 0.0–1.0 (Google Trends-stijl)
+    competition_level = Column(Float)              # 0.0–1.0
+    cpc_estimate = Column(Numeric(8, 4))           # geschatte CPC in €
+    source = Column(String(50))                    # google / bing / amazon / gsc
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FactTrafficIntelligenceDaily(Base):
+    """Dagelijkse traffic intelligence scores per SKU of categorie."""
+    __tablename__ = "fact_traffic_intelligence_daily"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False, index=True)
+    entity_type = Column(String(20), nullable=False)
+    entity_id = Column(String(200), nullable=False, index=True)
+    entity_name = Column(String(500))
+
+    # Vijf kernscores (0.00–1.00)
+    demand_signal_score = Column(Float)            # DSS — totale vraag
+    conversion_health_score = Column(Float)        # CHS — conversiegezondheid
+    traffic_opportunity_score = Column(Float)      # TOS — traffic kansen
+    conversion_risk_score = Column(Float)          # CRS — conversierisico
+    search_gap_score = Column(Float)               # SGS — zoekgap
+
+    # Trends
+    traffic_growth = Column(Float)                 # % groei t.o.v. vorige periode
+    conversion_trend = Column(Float)               # % verandering conversieratio
+
+    # Signaal en uitleg
+    reason_code = Column(String(100))              # CONVERSION_DROP_DETECTED / ...
+    explanation_nl = Column(Text)                  # Nederlandse uitleg
+
+    created_at = Column(DateTime, default=datetime.utcnow)

@@ -25,6 +25,9 @@ import {
   LayoutGrid,
   Tag,
   Sigma,
+  TrendingUp,
+  SearchIcon,
+  BarChart2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -70,6 +73,16 @@ const navGroepen = [
       { href: "/bcg/hybrid", label: "Hybrid Pricing Matrix", icon: Sigma },
       { href: "/bcg/huismerk", label: "Huismerk Intelligence", icon: Tag },
       { href: "/bcg/pricing-power", label: "Pricing Power", icon: Zap },
+    ],
+  },
+  {
+    label: "Traffic & Demand",
+    items: [
+      { href: "/traffic/dashboard",    label: "Traffic Dashboard",    icon: TrendingUp },
+      { href: "/traffic/conversie",    label: "Conversie Monitoring", icon: Activity },
+      { href: "/traffic/search-demand",label: "Search Demand",        icon: SearchIcon },
+      { href: "/traffic/opportunity",  label: "Traffic Opportunity",  icon: Target },
+      { href: "/traffic/search-gap",   label: "Search Gap Analyse",   icon: BarChart2 },
     ],
   },
   {
