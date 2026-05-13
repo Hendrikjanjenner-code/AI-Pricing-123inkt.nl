@@ -57,6 +57,13 @@ import EconomieDashboard from "@/pages/economie-dashboard";
 import ManagementRapportages from "@/pages/management-rapportages";
 import BcgTransities from "@/pages/bcg-transities";
 
+// Cost Change & Break-even Intelligence Engine
+import KostprijswijzigingDashboard from "@/pages/kostprijswijziging";
+import BreakEvenAnalyse from "@/pages/break-even-analyse";
+import PpfsAnalyse from "@/pages/ppfs-analyse";
+import MarketingVsKorting from "@/pages/marketing-vs-korting";
+import Margebescherming from "@/pages/margebescherming";
+
 const queryClient = new QueryClient();
 
 function Router() {
@@ -259,6 +266,23 @@ function Router() {
       </Route>
       <Route path="/ab-tests">
         <ProtectedRoute><AbTestMonitor /></ProtectedRoute>
+      </Route>
+
+      {/* Cost Change & Break-even Intelligence */}
+      <Route path="/kostprijswijziging">
+        <ProtectedRoute><KostprijswijzigingDashboard /></ProtectedRoute>
+      </Route>
+      <Route path="/break-even">
+        <ProtectedRoute><BreakEvenAnalyse /></ProtectedRoute>
+      </Route>
+      <Route path="/ppfs">
+        <ProtectedRoute><PpfsAnalyse /></ProtectedRoute>
+      </Route>
+      <Route path="/marketing-vs-korting">
+        <ProtectedRoute><MarketingVsKorting /></ProtectedRoute>
+      </Route>
+      <Route path="/margebescherming">
+        <ProtectedRoute><Margebescherming /></ProtectedRoute>
       </Route>
 
       <Route component={NotFound} />

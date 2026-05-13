@@ -18,7 +18,7 @@ from routes import (
     bcg,
     traffic, search_demand,
     cost, procurement, economic, reporting, bcg_transitions,
-    category_hierarchy,
+    category_hierarchy, break_even,
 )
 
 
@@ -87,3 +87,4 @@ app.include_router(economic.router)
 app.include_router(reporting.router)
 app.include_router(bcg_transitions.router)
 app.include_router(category_hierarchy.router)
+app.include_router(break_even.router)

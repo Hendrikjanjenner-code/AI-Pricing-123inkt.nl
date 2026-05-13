@@ -1,0 +1,613 @@
+Bouw verder op de bestaande Nederlandstalige AI Pricing Decision Engine.
+
+Voeg een volledig geïntegreerde Cost Change & Break-even Intelligence Engine toe.
+
+Doel:
+De app moet niet alleen reageren op prijswijzigingen van leveranciers, maar intelligent bepalen:
+
+1. Moet een inkoopprijsverhoging volledig worden doorberekend?
+2. Is een prijsverhoging commercieel verstandig?
+3. Moet extra marketing worden ingezet in plaats van prijsverhoging?
+4. Wat is het break-even punt van een prijsverlaging?
+5. Hoeveel extra afzet is nodig om een prijsverlaging of aanbieding terug te verdienen?
+6. Wat is het effect op marge, traffic, conversie en portfolio?
+7. Hoe beïnvloedt dit:
+- Internal BCG
+- External BCG
+- Promotion Intelligence
+- Traffic & Demand
+- Elasticiteit
+- Huismerkstrategie
+
+---
+
+BELANGRIJKE BUSINESSVRAAG
+
+Voorbeeld:
+
+Inkoopprijs SKU stijgt met 15%.
+
+De engine mag NIET automatisch aannemen:
+
+“Verkoopprijs moet ook +15%.”
+
+In plaats daarvan moet het model analyseren:
+
+- elasticiteit
+- concurrentiedruk
+- pricing power
+- traffic
+- conversie
+- search demand
+- BCG status
+- marge-impact
+- huismerkimpact
+- marketing efficiency
+- break-even afzet
+
+Mogelijke uitkomsten:
+
+1. Volledig doorberekenen
+2. Gedeeltelijk doorberekenen
+3. Niet doorberekenen
+4. Extra marketing inzetten
+5. Promotie starten
+6. Huismerk pushen
+7. Portfolio-marge beschermen
+8. SKU afbouwen
+
+---
+
+NIEUWE ENGINE
+
+Maak:
+
+backend/app/services/cost_change_engine.py
+backend/app/services/break_even_engine.py
+backend/app/services/price_pass_through_engine.py
+backend/app/services/marketing_margin_engine.py
+
+---
+
+COST CHANGE INTELLIGENCE
+
+Voeg ondersteuning toe voor:
+
+- inkoopprijsverhogingen
+- inkoopprijsverlagingen
+- transportkostenstijgingen
+- valuta-effecten
+- supplier surcharges
+- dropshipping cost changes
+- fulfilment cost changes
+- marketing cost changes
+
+Velden:
+- current_cost_price
+- previous_cost_price
+- cost_change_pct
+- transport_cost
+- fulfillment_cost
+- marketing_cost
+- operational_cost
+- total_unit_cost
+- gross_margin
+- net_margin
+- contribution_margin
+
+---
+
+PRICE PASS-THROUGH INTELLIGENCE
+
+Voeg nieuwe score toe:
+
+Price Pass-through Feasibility Score (PPFS)
+
+Vraag:
+“Hoe realistisch is het om deze kostenstijging door te berekenen?”
+
+Gebaseerd op:
+- elasticiteit
+- PCIS
+- CIS
+- CSRS
+- CSS
+- pricing power
+- demand signal
+- conversion health
+- BCG status
+- search demand
+- concurrentiepositie
+- merksterkte
+- huismerkpositie
+
+Schaal:
+0.00–1.00
+
+Interpretatie:
+
+0.80–1.00
+→ grote kans dat prijsverhoging mogelijk is
+
+0.60–0.80
+→ gedeeltelijke prijsverhoging waarschijnlijk mogelijk
+
+0.40–0.60
+→ voorzichtig verhogen/testen
+
+0.00–0.40
+→ prijsverhoging risicovol
+
+---
+
+BREAK-EVEN ENGINE
+
+BELANGRIJK:
+Wanneer prijsverlagingen plaatsvinden moet de app berekenen:
+
+“Hoeveel extra afzet is minimaal nodig om break-even te blijven?”
+
+Ondersteun:
+- normale prijsverlaging
+- promotie
+- bundel
+- staffel
+- quantity discount
+- launch promotion
+- category promotion
+
+---
+
+BREAK-EVEN BEREKENINGEN
+
+Bereken:
+
+1. Break-even extra afzet
+2. Break-even omzet
+3. Break-even traffic
+4. Break-even conversie
+5. Break-even marketing spend
+6. Break-even basket impact
+
+---
+
+BELANGRIJKE FORMULES
+
+Break-even units:
+
+break_even_extra_units =
+margin_loss / new_unit_margin
+
+Waarbij:
+
+margin_loss =
+(old_margin_per_unit - new_margin_per_unit)
+× expected_units
+
+---
+
+Break-even traffic:
+
+break_even_extra_traffic =
+break_even_extra_units / conversion_rate
+
+---
+
+Break-even conversion uplift:
+
+required_conversion_uplift =
+required_units_growth / current_traffic
+
+---
+
+MARKETING VS PRIJSVERLAGING
+
+Het model moet actief analyseren:
+
+“Is meer marketing slimmer dan prijsverlaging?”
+
+Voorbeeld:
+
+Optie A:
+- prijs -10%
+- marge daalt sterk
+
+Optie B:
+- prijs gelijk
+- SEO/SEA verhogen
+- meer traffic genereren
+
+De engine moet beide scenario’s vergelijken.
+
+Nieuwe score:
+
+Marketing Efficiency vs Discount Score (MEDS)
+
+Vraag:
+“Wat levert meer op:
+extra marketing of prijsverlaging?”
+
+Gebaseerd op:
+- conversion rate
+- CAC
+- ROAS
+- elasticity
+- pricing power
+- traffic opportunity
+- search demand
+- margin after marketing
+
+---
+
+NIEUWE ADVIEZEN
+
+Voeg pricing acties toe:
+
+- FULL_PASS_THROUGH
+- PARTIAL_PASS_THROUGH
+- NO_PASS_THROUGH
+- TEST_PRICE_INCREASE
+- PROTECT_MARGIN
+- PUSH_TRAFFIC_INSTEAD
+- PUSH_SEO
+- PUSH_SEA
+- START_PROMOTION
+- LAUNCH_PRIVATE_LABEL_PUSH
+- REDUCE_PRICE
+- MAINTAIN_PRICE
+- CLEARANCE
+
+---
+
+NIEUWE SCORES
+
+1. Price Pass-through Feasibility Score (PPFS)
+2. Break-even Difficulty Score (BEDS)
+3. Marketing Efficiency vs Discount Score (MEDS)
+4. Margin Protection Score (MPS)
+5. Demand Recovery Score (DRS)
+
+---
+
+MARGIN PROTECTION INTELLIGENCE
+
+Voeg logica toe:
+
+IF supplier_cost_increase >= 10%
+AND elasticity low
+AND pricing_power high
+THEN advise:
+FULL_PASS_THROUGH
+
+IF supplier_cost_increase >= 10%
+AND elasticity high
+AND competition_pressure high
+THEN advise:
+PARTIAL_PASS_THROUGH
+OR
+PUSH_TRAFFIC_INSTEAD
+
+IF margin after marketing remains healthy
+THEN marketing push may be preferable over discount
+
+IF break_even_extra_units extremely high
+THEN reject discount/promotion
+
+---
+
+BREAK-EVEN WAARSCHUWINGEN
+
+Voeg alerts toe:
+
+BREAK_EVEN_TOO_HIGH
+DISCOUNT_NOT_RECOVERABLE
+PROMOTION_MARGIN_RISK
+PRICE_INCREASE_HIGH_RISK
+PRICE_INCREASE_ACCEPTABLE
+MARKETING_BETTER_THAN_DISCOUNT
+HIGH_VOLUME_REQUIRED_FOR_BREAK_EVEN
+LOW_MARGIN_AFTER_DISCOUNT
+SUPPLIER_COST_SHOCK
+MARGIN_PROTECTION_REQUIRED
+
+---
+
+DATABASE UITBREIDINGEN
+
+Maak tabellen:
+
+fact_cost_change_daily
+- date
+- sku_id
+- previous_cost_price
+- current_cost_price
+- cost_change_pct
+- transport_cost
+- operational_cost
+- marketing_cost
+- gross_margin
+- net_margin
+- contribution_margin
+
+fact_break_even_analysis_daily
+- date
+- sku_id
+- current_price
+- proposed_price
+- current_margin_per_unit
+- new_margin_per_unit
+- margin_loss
+- break_even_extra_units
+- break_even_extra_revenue
+- break_even_extra_traffic
+- required_conversion_uplift
+- break_even_difficulty_score
+- recommendation
+- created_at
+
+fact_price_pass_through_daily
+- date
+- sku_id
+- supplier_cost_change_pct
+- proposed_price_change_pct
+- ppfs_score
+- elasticity
+- pricing_power_score
+- competition_pressure
+- recommendation
+- reason_code
+- created_at
+
+fact_marketing_vs_discount_daily
+- date
+- sku_id
+- scenario_type
+- expected_revenue
+- expected_margin
+- expected_traffic
+- expected_conversion
+- expected_roas
+- meds_score
+- recommended_strategy
+- created_at
+
+---
+
+BACKEND FUNCTIES
+
+Maak functies:
+
+- calculate_break_even_units()
+- calculate_break_even_traffic()
+- calculate_break_even_conversion()
+- calculate_margin_loss()
+- calculate_price_pass_through_feasibility()
+- compare_marketing_vs_discount()
+- calculate_margin_protection_score()
+- simulate_supplier_cost_increase()
+- simulate_price_reduction()
+- simulate_promotion_break_even()
+- generate_break_even_explanation_nl()
+
+---
+
+SIMULATIES
+
+Voeg simulatiemodule toe.
+
+Gebruiker moet kunnen simuleren:
+
+1. Inkoopprijs +15%
+2. Verkoopprijs +5%
+3. Verkoopprijs +10%
+4. Extra SEO budget
+5. Extra SEA budget
+6. Nieuwe promotie
+7. Bundelkorting
+8. Huismerk push
+
+Toon:
+- marge-effect
+- break-even afzet
+- break-even traffic
+- conversievereiste
+- expected demand impact
+- BCG impact
+- pricing risk
+- recommendation
+
+---
+
+FRONTEND PAGINA’S
+
+Voeg toe:
+
+1. Cost Change Dashboard
+2. Break-even Analyse
+3. Supplier Cost Impact
+4. Marketing vs Discount Simulator
+5. Margin Protection Dashboard
+6. Price Pass-through Analyse
+
+---
+
+BREAK-EVEN ANALYSE PAGINA
+
+Toon per SKU:
+- huidige prijs
+- nieuwe prijs
+- huidige marge
+- nieuwe marge
+- verlies per unit
+- benodigde extra afzet
+- benodigde extra traffic
+- benodigde conversie uplift
+- risico
+- aanbevolen actie
+
+Gebruik:
+- groene signalen
+- rode signalen
+- pijltjes omhoog/omlaag
+- waarschuwingen
+
+---
+
+MARKETING VS DISCOUNT SIMULATOR
+
+Vergelijk scenario’s:
+
+Scenario A:
+Prijsverlaging
+
+Scenario B:
+Meer SEO
+
+Scenario C:
+Meer SEA
+
+Scenario D:
+Combinatie promotie + marketing
+
+Toon:
+- expected revenue
+- expected margin
+- expected traffic
+- expected conversion
+- ROAS
+- break-even difficulty
+- recommendation
+
+---
+
+PRICING GRID INTEGRATIE
+
+Voeg nieuwe kolommen toe:
+
+- Inkoopprijs oud
+- Inkoopprijs nieuw
+- Inkoopprijs wijziging %
+- PPFS
+- Break-even extra afzet
+- Break-even extra traffic
+- Break-even difficulty
+- Marketing vs Discount advies
+- Margin Protection Score
+
+Gebruik kleurcodering:
+- rood bij hoge break-even moeilijkheid
+- groen bij gezonde marge
+- oranje bij risicovolle prijsverlaging
+
+---
+
+BCG INTEGRATIE
+
+Internal Star:
+→ prijsverhoging eerder mogelijk
+→ marge beschermen
+
+Cash Cow:
+→ minimale korting
+→ pricing power benutten
+
+Question Mark:
+→ pricing testen
+→ marketing experimenten
+
+Dog:
+→ geen zware marketinginvesteringen
+→ clearance mogelijk
+
+Private Label Star:
+→ prijsdruk op A-merk vermijden
+→ huismerk pushen
+
+---
+
+TRAFFIC & DEMAND INTEGRATIE
+
+IF search demand hoog
+AND conversion goed
+THEN prijsverhoging mogelijk
+
+IF traffic laag
+AND conversion hoog
+THEN marketing push overwegen
+
+IF conversion daalt
+AFTER price increase
+THEN pricing risk verhogen
+
+IF break_even_extra_traffic unrealistic
+THEN reject discount
+
+---
+
+DEMO DATA
+
+Voeg demo toe:
+
+1. SKU met +15% supplier cost
+→ advies: gedeeltelijk doorberekenen
+
+2. SKU met hoge elasticiteit
+→ prijsverhoging afgeraden
+
+3. SKU waar marketing slimmer is dan korting
+→ advies: PUSH_SEO / PUSH_SEA
+
+4. SKU met prijsverlaging
+→ break-even vereist +38% extra afzet
+
+5. Huismerk SKU
+→ marge beschermen via internal substitution
+
+6. SKU met lage concurrentiedruk
+→ FULL_PASS_THROUGH
+
+---
+
+UI TAAL
+
+Alles volledig Nederlands.
+
+Gebruik labels:
+- Inkoopprijs wijziging
+- Break-even afzet
+- Break-even traffic
+- Benodigde conversie uplift
+- Margebescherming
+- Doorberekenbaarheid
+- Marketing versus korting
+- Verwachte marge-impact
+- Verwachte traffic-impact
+- Verwachte afzetimpact
+- Risico prijsverhoging
+- Risico prijsverlaging
+- Aanbevolen strategie
+
+---
+
+BELANGRIJKSTE DOEL
+
+De app moet intelligent bepalen:
+
+- Of kostenverhogingen moeten worden doorberekend
+- Hoeveel prijsverhoging verstandig is
+- Wanneer marketing slimmer is dan korting
+- Hoeveel extra afzet nodig is voor break-even
+- Wanneer promoties commercieel onverstandig zijn
+- Hoe pricing, marketing en marge samenhangen
+- Hoe supplier cost shocks strategisch moeten worden opgevangen
+
+De Cost Change & Break-even Intelligence Engine moet volledig geïntegreerd zijn met:
+- Pricing Engine
+- Competition Engine
+- Elasticity Engine
+- BCG Intelligence Engine
+- Promotion Intelligence Engine
+- Traffic & Demand Intelligence
+- Forecasting Engine
+- Procurement Engine
+- Private Label Intelligence

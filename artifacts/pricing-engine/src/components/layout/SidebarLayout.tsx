@@ -35,6 +35,10 @@ import {
   Globe2,
   FileText,
   GitBranch,
+  ArrowUpDown,
+  Calculator,
+  Scale,
+  Shield,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -99,6 +103,16 @@ const navGroepen = [
       { href: "/kosten/dashboard", label: "Kosten Dashboard", icon: DollarSign },
       { href: "/kosten/marketing", label: "Marketing Efficiency", icon: Megaphone },
       { href: "/kosten/operationeel", label: "Operationele Complexiteit", icon: Cpu },
+    ],
+  },
+  {
+    label: "Cost Change & Break-even",
+    items: [
+      { href: "/kostprijswijziging", label: "Inkoopprijswijziging", icon: ArrowUpDown },
+      { href: "/ppfs", label: "Doorberekenbaarheid (PPFS)", icon: Scale },
+      { href: "/break-even", label: "Break-even Analyse", icon: Calculator },
+      { href: "/marketing-vs-korting", label: "Marketing vs. Korting", icon: Megaphone },
+      { href: "/margebescherming", label: "Margebescherming", icon: Shield },
     ],
   },
   {

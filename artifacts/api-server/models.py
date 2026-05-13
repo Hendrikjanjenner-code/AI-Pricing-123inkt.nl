@@ -952,3 +952,148 @@ class DimCategoryHierarchy(Base):
     category_level = Column(Integer, nullable=False)    # 1=categorie / 2=subcategorie / 3=sub-subcategorie
     active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ── Cost Change & Break-even Intelligence Engine ─────────────────────────────
+
+class FactCostChangeDaily(Base):
+    """Dagelijkse inkoopprijswijzigingen en kostenstructuurmutaties per SKU."""
+    __tablename__ = "fact_cost_change_daily"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    date = Column(Date, nullable=False, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    sku_name = Column(String(500))
+    category = Column(String(255))
+
+    # Inkoopprijswijziging
+    previous_cost_price = Column(Numeric(10, 4))
+    current_cost_price = Column(Numeric(10, 4))
+    cost_change_pct = Column(Float)            # % wijziging inkoopprijs
+    cost_change_type = Column(String(100))     # SUPPLIER / TRANSPORT / CURRENCY / SURCHARGE / FULFILMENT / MARKETING
+
+    # Kostencomponenten (absolute bedragen)
+    transport_cost = Column(Numeric(10, 4))
+    fulfillment_cost = Column(Numeric(10, 4))
+    marketing_cost = Column(Numeric(10, 4))
+    operational_cost = Column(Numeric(10, 4))
+    total_unit_cost = Column(Numeric(10, 4))
+
+    # Prijzen & marges
+    current_selling_price = Column(Numeric(10, 4))
+    gross_margin = Column(Float)               # %
+    net_margin = Column(Float)                 # %
+    contribution_margin = Column(Float)        # absolute EUR
+
+    # Scores
+    ppfs_score = Column(Float)                 # Price Pass-through Feasibility Score 0–1
+    mps_score = Column(Float)                  # Margin Protection Score 0–1
+    severity = Column(String(50))              # KRITIEK / HOOG / MEDIUM / LAAG
+    aanbeveling = Column(String(100))          # FULL_PASS_THROUGH / PARTIAL / NO_PASS_THROUGH / ...
+    reason_nl = Column(Text)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FactBreakEvenAnalysisDaily(Base):
+    """Break-even analyse: hoeveel extra afzet nodig bij prijsverlaging/promotie."""
+    __tablename__ = "fact_break_even_analysis_daily"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    date = Column(Date, nullable=False, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    sku_name = Column(String(500))
+    category = Column(String(255))
+
+    # Scenario
+    scenario_type = Column(String(100))        # PRICE_REDUCTION / PROMOTION / BUNDLE / LAUNCH / CATEGORY_PROMO
+    current_price = Column(Numeric(10, 4))
+    proposed_price = Column(Numeric(10, 4))
+    price_change_pct = Column(Float)
+
+    # Marges
+    current_margin_per_unit = Column(Numeric(10, 4))
+    new_margin_per_unit = Column(Numeric(10, 4))
+    margin_loss_per_unit = Column(Numeric(10, 4))
+    current_units_sold = Column(Integer)
+
+    # Break-even berekeningen
+    break_even_extra_units = Column(Float)     # extra eenheden nodig
+    break_even_extra_units_pct = Column(Float) # % meer dan huidige afzet
+    break_even_extra_revenue = Column(Numeric(12, 4))
+    break_even_extra_traffic = Column(Float)   # extra bezoekers nodig
+    required_conversion_uplift = Column(Float) # % conversie uplift nodig
+
+    # Scores
+    break_even_difficulty_score = Column(Float)  # BEDS 0–1
+    beds_label = Column(String(50))              # HAALBAAR / MOEILIJK / ONMOGELIJK
+    aanbeveling = Column(String(100))
+    waarschuwing = Column(String(200))           # alert code
+    toelichting_nl = Column(Text)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FactPricePassThroughDaily(Base):
+    """Price Pass-through Feasibility Score (PPFS) per SKU per dag."""
+    __tablename__ = "fact_price_pass_through_daily"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    date = Column(Date, nullable=False, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    sku_name = Column(String(500))
+    category = Column(String(255))
+
+    # Leveranciersinformatie
+    supplier_cost_change_pct = Column(Float)       # % inkoopprijswijziging
+    proposed_price_change_pct = Column(Float)      # % voorgestelde verkoopprijswijziging
+    pass_through_ratio = Column(Float)             # voorstel / inkoopwijziging
+
+    # Scores & sub-factoren
+    ppfs_score = Column(Float)                     # 0–1
+    ppfs_label = Column(String(50))                # STERK / GOED / MATIG / RISICOVOL
+    elasticity_score = Column(Float)               # 0–1 (laag = inelastisch = makkelijker)
+    pricing_power_score = Column(Float)            # 0–1
+    competition_pressure = Column(Float)           # 0–1 (hoog = moeilijk)
+    bcg_factor = Column(Float)                     # 0–1
+    demand_factor = Column(Float)                  # 0–1
+    conversion_health = Column(Float)              # 0–1
+
+    # Uitkomst
+    recommendation = Column(String(100))
+    reason_code = Column(String(100))
+    toelichting_nl = Column(Text)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FactMarketingVsDiscountDaily(Base):
+    """Vergelijking marketing-push vs prijsverlaging per SKU."""
+    __tablename__ = "fact_marketing_vs_discount_daily"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    date = Column(Date, nullable=False, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    sku_name = Column(String(500))
+    category = Column(String(255))
+
+    # Scenario
+    scenario_type = Column(String(100))            # PRICE_REDUCTION / PUSH_SEO / PUSH_SEA / COMBINED
+
+    # Verwachte uitkomsten
+    expected_revenue = Column(Numeric(12, 4))
+    expected_margin = Column(Float)                # %
+    expected_margin_eur = Column(Numeric(12, 4))
+    expected_traffic = Column(Integer)
+    expected_conversion = Column(Float)
+    expected_roas = Column(Float)
+    expected_extra_units = Column(Integer)
+
+    # Scores
+    meds_score = Column(Float)                     # Marketing Efficiency vs Discount Score 0–1
+    drs_score = Column(Float)                      # Demand Recovery Score 0–1
+
+    recommended_strategy = Column(String(100))
+    toelichting_nl = Column(Text)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
