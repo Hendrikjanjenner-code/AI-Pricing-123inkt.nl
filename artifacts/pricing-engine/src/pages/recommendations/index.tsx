@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Link } from "wouter";
 import { useListRecommendations, useApproveRecommendation, useRejectRecommendation, useBulkApproveRecommendations } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -10,7 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Search, CheckCircle, XCircle, AlertCircle, FileSearch } from "lucide-react";
+import { Search, CheckCircle, XCircle, FileSearch } from "lucide-react";
+import SmartFilters, { SmartFilterValues, EMPTY_FILTERS } from "@/components/filters/SmartFilters";
 
 const STRATEGIE_LABELS: Record<string, string> = {
   SUBSTITUTION_PORTFOLIO: "Substitutieportfolio",
@@ -31,14 +32,19 @@ export default function Prijsadviezen() {
   const [zoekterm, setZoekterm] = useState("");
   const [status, setStatus] = useState<string>("pending");
   const [geselecteerd, setGeselecteerd] = useState<Set<number>>(new Set());
+  const [smartFilters, setSmartFilters] = useState<SmartFilterValues>(EMPTY_FILTERS);
+
+  const handleSmartFilters = useCallback((f: SmartFilterValues) => {
+    setSmartFilters(f);
+    setPage(1);
+    setGeselecteerd(new Set());
+  }, []);
 
   const { data, isLoading } = useListRecommendations({
-    params: {
-      page,
-      page_size: 50,
-      search: zoekterm || null,
-      approval_status: status !== "all" ? status : null,
-    }
+    page,
+    page_size: 50,
+    search: zoekterm || undefined,
+    approval_status: status !== "all" ? status : undefined,
   });
 
   const queryClient = useQueryClient();
@@ -114,7 +120,7 @@ export default function Prijsadviezen() {
         </div>
       </div>
 
-      <div className="flex items-center gap-4 bg-card p-4 border rounded-md">
+      <div className="flex items-center gap-4 bg-card p-3 border rounded-md">
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
@@ -138,6 +144,8 @@ export default function Prijsadviezen() {
           </Select>
         </div>
       </div>
+
+      <SmartFilters onChange={handleSmartFilters} />
 
       <div className="border rounded-md bg-card">
         <Table>

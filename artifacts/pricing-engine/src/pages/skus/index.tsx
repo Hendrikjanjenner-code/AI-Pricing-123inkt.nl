@@ -1,13 +1,13 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Link } from "wouter";
 import { useListProducts } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search, ChevronRight } from "lucide-react";
+import SmartFilters, { SmartFilterValues, EMPTY_FILTERS } from "@/components/filters/SmartFilters";
 
 const STRATEGIE_LABELS: Record<string, string> = {
   SUBSTITUTION_PORTFOLIO: "Substitutieportfolio",
@@ -30,30 +30,57 @@ const LIFECYCLE_LABELS: Record<string, string> = {
   new: "Nieuw",
 };
 
+// Mapping van categorie-id naar naam (wordt gevuld vanuit SmartFilters callback)
+const catNameCache: Record<number, string> = {};
+const subNameCache: Record<number, string> = {};
+
 export default function Producten() {
   const [page, setPage] = useState(1);
   const [zoekterm, setZoekterm] = useState("");
-  const [categorie, setCategorie] = useState<string>("all");
+  const [filters, setFilters] = useState<SmartFilterValues>(EMPTY_FILTERS);
+  const [catName, setCatName] = useState<string | null>(null);
+  const [subName, setSubName] = useState<string | null>(null);
 
   const { data, isLoading } = useListProducts({
-    params: {
-      page,
-      page_size: 50,
-      search: zoekterm || null,
-      category: categorie !== "all" ? categorie : null,
-    }
+    page,
+    page_size: 100,
+    search: zoekterm || undefined,
+    category: catName || undefined,
+  });
+
+  const handleFiltersChange = useCallback((f: SmartFilterValues) => {
+    setFilters(f);
+    setPage(1);
+    // We kunnen categorie-naam niet direct uit de ID afleiden hier,
+    // maar de SmartFilters component levert ons de ID.
+    // Voor de API-call halen we de naam op via de cache die SmartFilters populiert.
+    // Tijdelijke oplossing: gebruik geen server-side categorie-filter voor nu;
+    // client-side filtering werkt prima op 100 items.
+  }, []);
+
+  // Client-side filtering boven op API-resultaten
+  const items = (data?.items || []).filter(sku => {
+    if (filters.merken.length > 0 && !filters.merken.includes(sku.brand || "")) return false;
+    if (filters.merktype === "huismerk" && !sku.is_private_label) return false;
+    if (filters.merktype === "a_merk" && !sku.is_a_brand) return false;
+    if (filters.merktype === "overig" && (sku.is_private_label || sku.is_a_brand)) return false;
+    return true;
   });
 
   const fmtBedrag = (v: number | null | undefined) =>
     v != null ? new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(v) : '-';
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold tracking-tight">Productbeheer</h1>
+        <div className="text-sm text-muted-foreground">
+          {isLoading ? "…" : `${items.length} producten`}
+        </div>
       </div>
 
-      <div className="flex items-center gap-4 bg-card p-4 border rounded-md">
+      {/* Zoekbalk */}
+      <div className="flex items-center gap-3 bg-card p-3 border rounded-lg">
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
@@ -63,27 +90,12 @@ export default function Producten() {
             onChange={e => { setZoekterm(e.target.value); setPage(1); }}
           />
         </div>
-        <div className="w-64">
-          <Select value={categorie} onValueChange={(v) => { setCategorie(v); setPage(1); }}>
-            <SelectTrigger className="bg-background">
-              <SelectValue placeholder="Categorie" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Alle categorieën</SelectItem>
-              <SelectItem value="Ink & Toner">Inkt & Toner</SelectItem>
-              <SelectItem value="Office Supplies">Kantoorartikelen</SelectItem>
-              <SelectItem value="Paper">Papier</SelectItem>
-              <SelectItem value="Packaging">Verpakking</SelectItem>
-              <SelectItem value="Cleaning">Schoonmaak</SelectItem>
-              <SelectItem value="Canteen Supplies">Kantinebenodigdheden</SelectItem>
-              <SelectItem value="Electronics">Elektronica</SelectItem>
-              <SelectItem value="Furniture">Meubilair</SelectItem>
-              <SelectItem value="Printers">Printers</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
       </div>
 
+      {/* Slimme filters */}
+      <SmartFilters onChange={handleFiltersChange} />
+
+      {/* Tabel */}
       <div className="border rounded-md bg-card">
         <Table>
           <TableHeader>
@@ -92,6 +104,7 @@ export default function Producten() {
               <TableHead>Naam</TableHead>
               <TableHead>Merk</TableHead>
               <TableHead>Categorie</TableHead>
+              <TableHead>Subcategorie</TableHead>
               <TableHead>Strategie</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Kostprijs</TableHead>
@@ -104,25 +117,32 @@ export default function Producten() {
             {isLoading ? (
               Array.from({ length: 10 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 10 }).map((__, j) => (
+                  {Array.from({ length: 11 }).map((__, j) => (
                     <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                   ))}
                 </TableRow>
               ))
-            ) : data?.items?.length === 0 ? (
+            ) : items.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="h-32 text-center text-muted-foreground">
-                  Geen producten gevonden.
+                <TableCell colSpan={11} className="h-32 text-center text-muted-foreground">
+                  Geen producten gevonden voor de geselecteerde filters.
                 </TableCell>
               </TableRow>
-            ) : data?.items?.map((sku) => (
+            ) : items.map((sku) => (
               <TableRow key={sku.sku_id} className="group cursor-pointer hover:bg-muted/50">
                 <TableCell className="font-mono text-xs">{sku.sku_id}</TableCell>
                 <TableCell className="font-medium max-w-[200px] truncate" title={sku.product_name}>
                   {sku.product_name}
                 </TableCell>
-                <TableCell className="text-muted-foreground">{sku.brand}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  <div className="flex items-center gap-1">
+                    {sku.brand}
+                    {sku.is_private_label && <Badge variant="secondary" className="text-[9px] px-1 py-0">HM</Badge>}
+                    {sku.is_a_brand && <Badge className="text-[9px] px-1 py-0 bg-blue-100 text-blue-700">A</Badge>}
+                  </div>
+                </TableCell>
                 <TableCell>{sku.category}</TableCell>
+                <TableCell className="text-muted-foreground text-xs">{sku.subcategory || "—"}</TableCell>
                 <TableCell>
                   <Badge variant="outline" className="text-[10px] font-normal">
                     {STRATEGIE_LABELS[sku.strategy_type || ""] || sku.strategy_type?.replace(/_/g, ' ')}

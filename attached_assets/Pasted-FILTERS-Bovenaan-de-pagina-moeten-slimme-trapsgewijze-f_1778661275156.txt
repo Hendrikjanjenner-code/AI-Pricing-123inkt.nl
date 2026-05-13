@@ -1,0 +1,177 @@
+FILTERS
+
+Bovenaan de pagina moeten slimme trapsgewijze filters staan:
+
+1. Categorie
+2. Subcategorie
+3. Sub-subcategorie
+4. Merk
+5. Huismerk / A-merk
+6. BCG intern
+7. BCG extern
+8. Actie nodig ja/nee
+
+BELANGRIJK — DYNAMISCHE FILTERLOGICA
+
+De filters mogen NIET volledig vooraf vastgezet zijn.
+
+De gebruiker moet altijd:
+- eerst een categorie kiezen
+- daarna automatisch alleen relevante subcategorieën zien
+- daarna automatisch alleen relevante sub-subcategorieën zien
+
+Maar:
+
+De gebruiker moet OOK handmatig nieuwe subcategorieën en sub-subcategorieën kunnen toevoegen die niet vooraf gedefinieerd zijn.
+
+Dus:
+
+❌ Niet werken met alleen vaste dropdownwaarden.
+✅ Werken met dynamische waarden uit de database/data.
+
+Gedrag:
+
+1. Wanneer GEEN categorie gekozen is:
+- toon alle subcategorieën
+- toon alle sub-subcategorieën
+
+2. Wanneer categorie gekozen is:
+- toon alleen subcategorieën die gekoppeld zijn aan die categorie
+- maar laat ook handmatige/nieuwe subcategorieën zichtbaar indien gekoppeld aan die categorie
+
+3. Wanneer subcategorie gekozen is:
+- toon alleen sub-subcategorieën die gekoppeld zijn aan die subcategorie
+- inclusief dynamisch aangemaakte sub-subcategorieën
+
+4. Nieuwe categorieën, subcategorieën en sub-subcategorieën moeten automatisch zichtbaar worden zonder code-aanpassing.
+
+5. Filters moeten dus volledig database-driven zijn.
+
+---
+
+VOORBEELD
+
+Categorie:
+“Kantoorartikelen”
+
+Dan toont subcategorie filter automatisch bijvoorbeeld:
+- Schrijfwaren
+- Archivering
+- Papier
+- Bureau-accessoires
+- Alle nieuwe subcategorieën gekoppeld aan Kantoorartikelen
+
+Kiest gebruiker:
+“Schrijfwaren”
+
+Dan toont sub-subcategorie filter automatisch:
+- Potloden
+- Pennen
+- Markers
+- Vulpotloden
+- Alle nieuwe sub-subcategorieën gekoppeld aan Schrijfwaren
+
+---
+
+DATABASESTRUCTUUR
+
+Maak dynamische hiërarchische categorie-structuur.
+
+Tabel:
+dim_category_hierarchy
+
+Velden:
+- category_id
+- category_name
+- parent_category_id
+- category_level
+- active
+- created_at
+
+Category levels:
+1 = categorie
+2 = subcategorie
+3 = sub-subcategorie
+
+Voorbeelden:
+
+Printers & Inkt
+→ Toners
+→ HP Toners
+
+Kantoorartikelen
+→ Schrijfwaren
+→ Potloden
+
+Kantoorartikelen
+→ Archivering
+→ Ordners
+
+---
+
+BACKEND LOGICA
+
+Maak functies:
+
+- get_categories()
+- get_subcategories(parent_category_id)
+- get_sub_subcategories(parent_subcategory_id)
+- search_category_tree()
+- create_dynamic_category()
+- update_category_hierarchy()
+
+Belangrijk:
+Nieuwe categorieën moeten automatisch zichtbaar worden in filters zonder frontend deployment.
+
+---
+
+FRONTEND GEDRAG
+
+De filters moeten:
+
+- realtime updaten
+- cascading zijn
+- database-driven zijn
+- searchable zijn
+- multi-select ondersteunen
+- nieuwe categorieën automatisch tonen
+
+Gebruik moderne dropdowns/autocomplete componenten.
+
+De gebruiker moet:
+- snel kunnen zoeken
+- grote categorieboom kunnen gebruiken
+- zonder performanceproblemen kunnen filteren
+
+---
+
+UI VOORBEELD
+
+Categorie:
+[ Kantoorartikelen ▼ ]
+
+Subcategorie:
+[ Schrijfwaren ▼ ]
+
+Sub-subcategorie:
+[ Potloden ▼ ]
+
+Wanneer categorie verandert:
+→ subcategorieën automatisch refreshen
+→ sub-subcategorie resetten
+
+Wanneer subcategorie verandert:
+→ sub-subcategorieën automatisch refreshen
+
+---
+
+BELANGRIJKSTE DOEL
+
+De gebruiker moet extreem snel kunnen navigeren door:
+- categorieën
+- subcategorieën
+- sub-subcategorieën
+
+zonder beperkt te zijn tot vooraf hardcoded waarden.
+
+Het systeem moet schaalbaar zijn voor duizenden categorieën en toekomstige uitbreidingen.

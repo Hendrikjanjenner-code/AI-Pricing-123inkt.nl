@@ -940,3 +940,15 @@ class FactManagementReport(Base):
     export_filename = Column(String(500))
 
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class DimCategoryHierarchy(Base):
+    """Hiërarchische categoriestructuur: niveau 1=categorie, 2=subcategorie, 3=sub-subcategorie."""
+    __tablename__ = "dim_category_hierarchy"
+
+    category_id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    category_name = Column(String(255), nullable=False)
+    parent_category_id = Column(Integer, nullable=True, index=True)
+    category_level = Column(Integer, nullable=False)    # 1=categorie / 2=subcategorie / 3=sub-subcategorie
+    active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
