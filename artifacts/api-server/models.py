@@ -525,3 +525,70 @@ class PriceExecutionLine(Base):
     reason_code = Column(String(100))
     rollback_price = Column(Numeric(10, 4))
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─── BCG Intelligence Engine ──────────────────────────────────────────────────
+
+class FactBcgClassificationDaily(Base):
+    """Dagelijkse BCG-classificatie per SKU of categorie (intern, extern, hybrid)."""
+    __tablename__ = "fact_bcg_classification_daily"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False, index=True)
+    entity_type = Column(String(20), nullable=False)   # SKU or CATEGORY
+    entity_id = Column(String(200), nullable=False, index=True)
+    entity_name = Column(String(500))
+
+    # BCG classificaties
+    internal_bcg_class = Column(String(50))   # INTERNAL_STAR / INTERNAL_CASH_COW / ...
+    external_bcg_class = Column(String(50))   # EXTERNAL_STAR / ...
+    hybrid_bcg_class = Column(String(80))     # PRICING_POWER_STAR / DEFENSIVE_CASH_COW / ...
+
+    # Scores 0.00–1.00
+    ibss_score = Column(Float)                # Internal Business Strength Score
+    gps_score = Column(Float)                 # Growth Potential Score
+    css_external_score = Column(Float)        # Competitive Strength Score (extern)
+    mos_score = Column(Float)                 # Market Opportunity Score
+    pricing_power_score = Column(Float)       # Pricing Power Score
+    plsv_score = Column(Float)                # Private Label Strategic Value Score
+
+    # Pricingstrategie aanbeveling
+    pricing_strategy = Column(String(100))    # PROTECT_MARGIN / DEFEND_MARKET_POSITION / ...
+    strategic_priority = Column(String(20))   # hoog / gemiddeld / laag
+    confidence_score = Column(Float, default=0.8)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FactBcgHistory(Base):
+    """Wijzigingshistorie van BCG-classificaties."""
+    __tablename__ = "fact_bcg_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    entity_id = Column(String(200), nullable=False, index=True)
+    entity_type = Column(String(20), nullable=False)
+    classification_type = Column(String(20))  # internal / external / hybrid
+    old_classification = Column(String(80))
+    new_classification = Column(String(80))
+    changed_at = Column(DateTime, default=datetime.utcnow)
+    reason = Column(String(500))
+
+
+class FactPrivateLabelIntelligence(Base):
+    """Huismerk-intelligence per SKU: ISV, PLSV en strategische prioriteit."""
+    __tablename__ = "fact_private_label_intelligence"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    run_date = Column(Date, nullable=False)
+
+    internal_substitution_score = Column(Float)    # kans dat klant overstapt naar huismerk
+    internal_switch_probability = Column(Float)    # sub-component van ISV
+    internal_margin_gap = Column(Float)            # margverschil per eenheid (€)
+    private_label_value_score = Column(Float)      # PLSV 0–1
+    private_label_class = Column(String(80))       # PRIVATE_LABEL_STAR / GROWTH / DEFENSIVE / LOW_PRIORITY
+    strategic_priority = Column(String(20))        # hoog / gemiddeld / laag
+    a_brand_sku = Column(String(100))              # gekoppeld A-merk SKU (indien huismerk)
+    paired_sku_name = Column(String(500))
+
+    created_at = Column(DateTime, default=datetime.utcnow)

@@ -34,6 +34,15 @@ import ConcurrentieMonitoring from "@/pages/concurrentie-monitoring";
 import Uitvoering from "@/pages/uitvoering";
 import AuditLogPage from "@/pages/audit-log";
 
+// BCG Intelligence Engine
+import BcgDashboard from "@/pages/bcg-dashboard";
+import BcgSkuMatrix from "@/pages/bcg-sku";
+import BcgCategorie from "@/pages/bcg-categorie";
+import BcgHybrid from "@/pages/bcg-hybrid";
+import BcgHuismerk from "@/pages/bcg-huismerk";
+import BcgPricingPower from "@/pages/bcg-pricing-power";
+import BcgSkuDetail from "@/pages/bcg-sku-detail";
+
 const queryClient = new QueryClient();
 
 function Router() {
@@ -112,6 +121,29 @@ function Router() {
       </Route>
       <Route path="/audit-log">
         <ProtectedRoute><AuditLogPage /></ProtectedRoute>
+      </Route>
+
+      {/* BCG Intelligence Engine */}
+      <Route path="/bcg/dashboard">
+        <ProtectedRoute><BcgDashboard /></ProtectedRoute>
+      </Route>
+      <Route path="/bcg/sku-matrix">
+        <ProtectedRoute><BcgSkuMatrix /></ProtectedRoute>
+      </Route>
+      <Route path="/bcg/sku/:sku_id">
+        <ProtectedRoute><BcgSkuDetail /></ProtectedRoute>
+      </Route>
+      <Route path="/bcg/categorie">
+        <ProtectedRoute><BcgCategorie /></ProtectedRoute>
+      </Route>
+      <Route path="/bcg/hybrid">
+        <ProtectedRoute><BcgHybrid /></ProtectedRoute>
+      </Route>
+      <Route path="/bcg/huismerk">
+        <ProtectedRoute><BcgHuismerk /></ProtectedRoute>
+      </Route>
+      <Route path="/bcg/pricing-power">
+        <ProtectedRoute><BcgPricingPower /></ProtectedRoute>
       </Route>
 
       {/* Overige pagina's */}

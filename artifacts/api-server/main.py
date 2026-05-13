@@ -14,7 +14,8 @@ from routes import (
     dashboard, uploads, data_quality, substitutions,
     model_health, exports, users, skus, competition, ab_tests,
     concurrentie, elasticiteit, huismerk,
-    scraping, matching, monitoring, execution, audit_log
+    scraping, matching, monitoring, execution, audit_log,
+    bcg,
 )
 
 
@@ -73,3 +74,4 @@ app.include_router(matching.router)
 app.include_router(monitoring.router)
 app.include_router(execution.router)
 app.include_router(audit_log.router)
+app.include_router(bcg.router)

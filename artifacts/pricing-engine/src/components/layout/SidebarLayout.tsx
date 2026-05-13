@@ -22,6 +22,9 @@ import {
   Bell,
   Zap,
   ClipboardList,
+  LayoutGrid,
+  Tag,
+  Sigma,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -56,6 +59,17 @@ const navGroepen = [
     items: [
       { href: "/uitvoering", label: "Uitvoering Prijswijzigingen", icon: Zap },
       { href: "/audit-log", label: "Audit Log", icon: ClipboardList },
+    ],
+  },
+  {
+    label: "BCG Intelligence",
+    items: [
+      { href: "/bcg/dashboard", label: "BCG Dashboard", icon: LayoutGrid },
+      { href: "/bcg/sku-matrix", label: "SKU BCG Matrix", icon: Target },
+      { href: "/bcg/categorie", label: "Categorie BCG", icon: Layers },
+      { href: "/bcg/hybrid", label: "Hybrid Pricing Matrix", icon: Sigma },
+      { href: "/bcg/huismerk", label: "Huismerk Intelligence", icon: Tag },
+      { href: "/bcg/pricing-power", label: "Pricing Power", icon: Zap },
     ],
   },
   {

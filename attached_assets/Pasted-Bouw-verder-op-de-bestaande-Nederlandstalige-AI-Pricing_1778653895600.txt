@@ -1,0 +1,592 @@
+Bouw verder op de bestaande Nederlandstalige AI Pricing Decision Engine.
+
+Voeg een volledig geïntegreerde BCG Intelligence Engine toe.
+
+Belangrijk:
+Gebruik NIET de klassieke statische BCG-matrix.
+Bouw een dynamische, pricing-aware BCG engine voor:
+- SKU niveau
+- categorie niveau
+- interne BCG
+- externe BCG
+- hybride pricing BCG
+
+Doel:
+De BCG Engine moet pricingstrategie, portfolio-optimalisatie en concurrentiestrategie ondersteunen.
+
+De app moet niet alleen laten zien:
+- welke producten groeien
+
+Maar vooral:
+- waar pricing power zit
+- waar marge beschermd moet worden
+- waar concurrentiedruk gevaarlijk is
+- waar huismerkpotentie zit
+- waar prijsverhogingen mogelijk zijn
+- waar experimenten nodig zijn
+
+---
+
+KERNCONCEPTEN
+
+Maak drie BCG-types:
+
+1. INTERNAL_BCG
+2. EXTERNAL_BCG
+3. HYBRID_PRICING_BCG
+
+Deze moeten werken op:
+- SKU niveau
+- categorie niveau
+
+---
+
+1. INTERNAL BCG
+
+Vraag:
+“Hoe belangrijk is dit product of deze categorie voor onze business?”
+
+Gebruik NIET klassiek marktaandeel.
+Gebruik pricing/business metrics.
+
+X-as:
+Internal Business Strength
+
+Y-as:
+Growth Potential
+
+---
+
+Internal Business Strength Score (IBSS)
+
+Bereken op basis van:
+- omzetbijdrage
+- margebijdrage
+- repeat purchase
+- basket impact
+- huismerkwaarde
+- strategische waarde
+- customer retention impact
+- profitability stability
+
+Schaal:
+0.00–1.00
+
+---
+
+Growth Potential Score (GPS)
+
+Bereken op basis van:
+- omzetgroei
+- volumegroei
+- category growth
+- repeat growth
+- trend velocity
+- demand momentum
+
+Schaal:
+0.00–1.00
+
+---
+
+Internal BCG classificaties:
+
+STAR
+- hoge IBSS
+- hoge GPS
+
+CASH_COW
+- hoge IBSS
+- lage GPS
+
+QUESTION_MARK
+- lage IBSS
+- hoge GPS
+
+DOG
+- lage IBSS
+- lage GPS
+
+---
+
+2. EXTERNAL BCG
+
+Vraag:
+“Hoe sterk staat dit product in de markt?”
+
+X-as:
+Competitive Strength
+
+Y-as:
+Market Opportunity
+
+---
+
+Competitive Strength Score (CSS_EXTERNAL)
+
+Gebaseerd op:
+- prijspositie
+- PCIS
+- CIS
+- elasticiteit
+- marktdekking
+- voorraadbetrouwbaarheid
+- prijsstabiliteit
+- substitutiepositie
+
+---
+
+Market Opportunity Score (MOS)
+
+Gebaseerd op:
+- marktgroei
+- category momentum
+- concurrentiedynamiek
+- zoekvolume trends
+- pricing opportunity
+- substitutiepotentieel
+- demand growth
+
+---
+
+External BCG classificaties:
+
+EXTERNAL_STAR
+EXTERNAL_CASH_COW
+EXTERNAL_QUESTION_MARK
+EXTERNAL_DOG
+
+---
+
+3. HYBRID PRICING BCG
+
+Combineer:
+- interne waarde
+- externe concurrentiedruk
+- pricing power
+- elasticiteit
+- huismerkpotentie
+
+Doel:
+Pricingstrategie automatisch sturen.
+
+---
+
+Nieuwe hybride classificaties:
+
+PRICING_POWER_STAR
+- hoge marge
+- lage externe druk
+- hoge pricing power
+
+DEFENSIVE_CASH_COW
+- hoge omzet/marge
+- hoge concurrentiedruk
+- beschermen
+
+PRIVATE_LABEL_STAR
+- hoge huismerkmarge
+- hoge substitutiepotentie
+
+EXPERIMENTAL_QUESTION_MARK
+- hoge groeipotentie
+- lage betrouwbaarheid data
+- pricing experimenten nodig
+
+LOW_PRIORITY_DOG
+- lage waarde
+- lage groei
+- minimale pricing aandacht
+
+---
+
+PRIVATE LABEL INTELLIGENCE
+
+Voor 123inkt is huismerk cruciaal.
+
+Voeg speciale logica toe:
+
+Internal Substitution Value (ISV)
+
+ISV =
+internal_switch_probability
+× internal_margin_gap
+
+Gebruik:
+- A-merk vs huismerk
+- portfolio marge
+- traffic-to-margin strategie
+
+Maak nieuwe score:
+
+Private Label Strategic Value Score (PLSV)
+
+Gebaseerd op:
+- huismerkmarge
+- substitutiepotentie
+- repeat purchase
+- basket impact
+- category dominance
+
+Classificatie:
+- PRIVATE_LABEL_STAR
+- PRIVATE_LABEL_GROWTH
+- PRIVATE_LABEL_DEFENSIVE
+- PRIVATE_LABEL_LOW_PRIORITY
+
+---
+
+BCG SCORE BEREKENINGEN
+
+Bereken per SKU en categorie:
+
+internal_business_strength_score
+growth_potential_score
+competitive_strength_score
+market_opportunity_score
+pricing_power_score
+private_label_value_score
+
+Schaal:
+0.00–1.00
+
+---
+
+CLASSIFICATIELOGICA
+
+Gebruik thresholds:
+
+High >= 0.60
+Low < 0.60
+
+Voorbeeld:
+
+IF IBSS >= 0.60
+AND GPS >= 0.60
+THEN INTERNAL_STAR
+
+IF IBSS >= 0.60
+AND GPS < 0.60
+THEN INTERNAL_CASH_COW
+
+IF IBSS < 0.60
+AND GPS >= 0.60
+THEN INTERNAL_QUESTION_MARK
+
+IF IBSS < 0.60
+AND GPS < 0.60
+THEN INTERNAL_DOG
+
+Zelfde principe voor External en Hybrid.
+
+---
+
+INTEGRATIE MET PRICING ENGINE
+
+BCG moet pricing beïnvloeden.
+
+Pricingregels:
+
+IF INTERNAL_STAR
+→ prijspositie beschermen
+→ geen agressieve discounts
+
+IF INTERNAL_CASH_COW
+→ marge maximaliseren
+→ prijsverhoging testen
+
+IF EXTERNAL_STAR
+→ concurrentie actief monitoren
+
+IF PRIVATE_LABEL_STAR
+→ traffic-to-margin strategie
+→ huismerk promoten
+
+IF EXPERIMENTAL_QUESTION_MARK
+→ elasticity experiments uitvoeren
+
+IF LOW_PRIORITY_DOG
+→ minimale pricing aandacht
+→ eventueel clearance pricing
+
+---
+
+INTEGRATIE MET ELASTICITEIT
+
+Gebruik:
+- own elasticity
+- cross elasticity
+- competitive elasticity
+- internal substitution elasticity
+
+Voorbeeld:
+
+Hoge elasticiteit + hoge concurrentiedruk
+→ defensieve pricing
+
+Lage elasticiteit + lage concurrentiedruk
+→ pricing power verhogen
+
+---
+
+INTEGRATIE MET PCIS / CIS / CSRS / CSS
+
+BCG moet rekening houden met:
+- PCIS
+- CIS
+- CSRS
+- CSS
+
+Voorbeeld:
+
+Lage concurrentprijs
+maar lage CSRS
+→ External pressure verminderen
+
+Hoge CIS
+→ External competitive strength verhogen
+
+---
+
+DATABASE UITBREIDINGEN
+
+Maak tabellen:
+
+fact_bcg_classification_daily
+- date
+- entity_type (SKU/CATEGORY)
+- entity_id
+- internal_bcg_class
+- external_bcg_class
+- hybrid_bcg_class
+- ibss_score
+- gps_score
+- css_external_score
+- mos_score
+- pricing_power_score
+- plsv_score
+- confidence_score
+- created_at
+
+fact_bcg_history
+- entity_id
+- old_classification
+- new_classification
+- changed_at
+- reason
+
+fact_private_label_intelligence
+- sku_id
+- internal_substitution_score
+- internal_switch_probability
+- internal_margin_gap
+- private_label_value_score
+- strategic_priority
+- created_at
+
+---
+
+BACKEND MODULES
+
+Maak:
+- bcg_engine.py
+- internal_bcg.py
+- external_bcg.py
+- hybrid_bcg.py
+- private_label_intelligence.py
+- pricing_power_engine.py
+- growth_scoring.py
+
+Belangrijke functies:
+
+- calculate_internal_business_strength()
+- calculate_growth_potential()
+- calculate_competitive_strength()
+- calculate_market_opportunity()
+- calculate_pricing_power_score()
+- calculate_private_label_value()
+- classify_internal_bcg()
+- classify_external_bcg()
+- classify_hybrid_bcg()
+- generate_bcg_recommendations()
+
+---
+
+FRONTEND PAGINA’S
+
+Voeg toe:
+
+1. BCG Intelligence Dashboard
+2. SKU BCG Analyse
+3. Categorie BCG Analyse
+4. Hybrid Pricing Matrix
+5. Huismerk Intelligence
+6. Pricing Power Dashboard
+
+---
+
+BCG INTELLIGENCE DASHBOARD
+
+Toon:
+- aantal Stars
+- aantal Cash Cows
+- aantal Question Marks
+- aantal Dogs
+- top pricing power SKU’s
+- top private label stars
+- categorieën met hoge externe druk
+- pricing opportunity alerts
+
+---
+
+VISUALISATIES
+
+1. Internal BCG Matrix
+X-as:
+- Internal Business Strength
+
+Y-as:
+- Growth Potential
+
+2. External BCG Matrix
+X-as:
+- Competitive Strength
+
+Y-as:
+- Market Opportunity
+
+3. Hybrid Pricing Matrix
+X-as:
+- Pricing Power
+
+Y-as:
+- Competitive Pressure
+
+Bubble size:
+- omzet of marge
+
+Kleur:
+- BCG classificatie
+
+---
+
+SKU BCG DETAIL
+
+Per SKU tonen:
+- internal BCG
+- external BCG
+- hybrid BCG
+- pricing power score
+- elasticity
+- PCIS
+- CIS
+- CSS
+- CSRS
+- huismerkimpact
+- belangrijkste concurrenten
+- aanbevolen pricingstrategie
+
+---
+
+CATEGORIE BCG DETAIL
+
+Per categorie tonen:
+- gemiddelde PCIS
+- gemiddelde elasticiteit
+- pricing power
+- concurrentiedruk
+- category growth
+- top concurrenten
+- huismerkpotentie
+
+---
+
+PRICING STRATEGY OUTPUT
+
+Per SKU:
+
+- pricing strategy
+- recommended action
+- strategic priority
+- margin opportunity
+- competition pressure
+- elasticity risk
+- house brand opportunity
+
+Voorbeelden:
+- PROTECT_MARGIN
+- DEFEND_MARKET_POSITION
+- PRIVATE_LABEL_PUSH
+- EXPERIMENT_PRICE_INCREASE
+- COMPETITIVE_PRICE_MATCH
+- LOW_PRIORITY_AUTOMATION
+
+---
+
+ALERTS
+
+Voeg alerts toe:
+
+- SKU_MOVED_TO_STAR
+- SKU_MOVED_TO_DOG
+- CATEGORY_GROWTH_ACCELERATING
+- PRIVATE_LABEL_OPPORTUNITY
+- PRICING_POWER_INCREASED
+- COMPETITIVE_PRESSURE_RISING
+- ELASTICITY_RISK_HIGH
+- CASH_COW_MARGIN_AT_RISK
+
+---
+
+DEMO DATA
+
+Voeg demo toe:
+
+- huismerk toner = PRIVATE_LABEL_STAR
+- A-merk toner = DEFENSIVE_CASH_COW
+- potloden = EXTERNAL_STAR
+- ordners = INTERNAL_CASH_COW
+- papier = HIGH_COMPETITIVE_PRESSURE
+- meubels = LOW_PRIORITY_DOG
+
+Laat in de UI zien:
+- waarom classificaties zijn gekozen
+- welke pricingstrategie erbij hoort
+- hoe concurrentiedruk de BCG beïnvloedt
+
+---
+
+UI TAAL
+
+Alles volledig Nederlandstalig.
+
+Gebruik labels:
+- Ster
+- Cash Cow
+- Vraagteken
+- Dog
+- Pricing Power
+- Huismerkpotentie
+- Concurrentiedruk
+- Groeipotentie
+- Strategische prioriteit
+- Marge-impact
+
+---
+
+BELANGRIJKSTE DOEL
+
+De app moet niet alleen rapporteren,
+maar pricingstrategieën sturen.
+
+BCG moet:
+- pricing prioriteit bepalen
+- portfolio management ondersteunen
+- huismerkstrategie versterken
+- concurrentiedruk contextualiseren
+- pricing power zichtbaar maken
+- automatische pricingstrategieën voeden
+
+De app moet functioneren als een:
+“Pricing Intelligence & Portfolio Strategy Platform”
+voor een multi-category e-commerce omgeving zoals 123inkt.
