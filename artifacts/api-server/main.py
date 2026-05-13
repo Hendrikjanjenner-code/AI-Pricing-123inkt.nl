@@ -17,6 +17,7 @@ from routes import (
     scraping, matching, monitoring, execution, audit_log,
     bcg,
     traffic, search_demand,
+    cost, procurement, economic, reporting, bcg_transitions,
 )
 
 
@@ -79,3 +80,8 @@ app.include_router(bcg.router)
 app.include_router(traffic.router)
 app.include_router(traffic.conversie_router)
 app.include_router(search_demand.router)
+app.include_router(cost.router)
+app.include_router(procurement.router)
+app.include_router(economic.router)
+app.include_router(reporting.router)
+app.include_router(bcg_transitions.router)

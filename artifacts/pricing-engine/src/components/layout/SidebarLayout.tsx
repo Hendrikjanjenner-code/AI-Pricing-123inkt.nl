@@ -28,6 +28,13 @@ import {
   TrendingUp,
   SearchIcon,
   BarChart2,
+  DollarSign,
+  Megaphone,
+  Cpu,
+  ShoppingCart,
+  Globe2,
+  FileText,
+  GitBranch,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -73,6 +80,7 @@ const navGroepen = [
       { href: "/bcg/hybrid", label: "Hybrid Pricing Matrix", icon: Sigma },
       { href: "/bcg/huismerk", label: "Huismerk Intelligence", icon: Tag },
       { href: "/bcg/pricing-power", label: "Pricing Power", icon: Zap },
+      { href: "/bcg/transities", label: "BCG Transities", icon: GitBranch },
     ],
   },
   {
@@ -83,6 +91,22 @@ const navGroepen = [
       { href: "/traffic/search-demand",label: "Search Demand",        icon: SearchIcon },
       { href: "/traffic/opportunity",  label: "Traffic Opportunity",  icon: Target },
       { href: "/traffic/search-gap",   label: "Search Gap Analyse",   icon: BarChart2 },
+    ],
+  },
+  {
+    label: "Kosten Intelligence",
+    items: [
+      { href: "/kosten/dashboard", label: "Kosten Dashboard", icon: DollarSign },
+      { href: "/kosten/marketing", label: "Marketing Efficiency", icon: Megaphone },
+      { href: "/kosten/operationeel", label: "Operationele Complexiteit", icon: Cpu },
+    ],
+  },
+  {
+    label: "Forecasting & Procurement",
+    items: [
+      { href: "/procurement", label: "Procurement Forecast", icon: ShoppingCart },
+      { href: "/economie", label: "Economic Intelligence", icon: Globe2 },
+      { href: "/rapportages", label: "Management Rapportages", icon: FileText },
     ],
   },
   {

@@ -673,3 +673,270 @@ class FactTrafficIntelligenceDaily(Base):
     explanation_nl = Column(Text)                  # Nederlandse uitleg
 
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COST INTELLIGENCE ENGINE
+# ─────────────────────────────────────────────────────────────────────────────
+
+class FactCostDaily(Base):
+    """Dagelijkse volledige kostenstructuur per SKU."""
+    __tablename__ = "fact_cost_daily"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False, index=True)
+    sku_id = Column(String(50), nullable=False, index=True)
+    category = Column(String(200))
+    sku_name = Column(String(500))
+
+    # Directe kosten (€ per eenheid)
+    purchase_cost = Column(Numeric(10, 4))       # inkoopkosten
+    transport_cost = Column(Numeric(10, 4))      # transportkosten
+    dropshipping_cost = Column(Numeric(10, 4))   # dropshipping kosten
+    fulfilment_cost = Column(Numeric(10, 4))     # fulfilmentkosten
+    packaging_cost = Column(Numeric(10, 4))      # verpakkingskosten
+
+    # Indirecte kosten (€ per eenheid)
+    labour_cost = Column(Numeric(10, 4))         # personeelskosten (ABC)
+    marketplace_fee = Column(Numeric(10, 4))     # marketplace fees (%)
+    return_cost = Column(Numeric(10, 4))         # retourkosten
+    overhead_cost = Column(Numeric(10, 4))       # operationele overhead
+
+    # Totalen
+    total_direct_cost = Column(Numeric(10, 4))
+    total_indirect_cost = Column(Numeric(10, 4))
+    total_cost = Column(Numeric(10, 4))
+
+    # Verkoopprijs en marges
+    selling_price = Column(Numeric(10, 4))
+    gross_margin = Column(Numeric(10, 4))        # verkoopprijs - directe kosten
+    net_margin = Column(Numeric(10, 4))          # verkoopprijs - totale kosten
+    net_margin_pct = Column(Float)               # netto marge %
+
+    # Signaal
+    cost_signal = Column(String(100))            # MARGIN_CRITICAL / COST_RISING / HEALTHY
+    cost_signal_nl = Column(Text)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FactMarketingCostDaily(Base):
+    """Dagelijkse marketing kosten en efficiëntie per SKU."""
+    __tablename__ = "fact_marketing_cost_daily"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False, index=True)
+    sku_id = Column(String(50), nullable=False, index=True)
+    category = Column(String(200))
+    sku_name = Column(String(500))
+
+    # SEO kosten
+    seo_cost = Column(Numeric(10, 4))
+    seo_impressions = Column(Integer, default=0)
+    seo_clicks = Column(Integer, default=0)
+    seo_conversions = Column(Integer, default=0)
+    seo_revenue = Column(Numeric(12, 2))
+
+    # SEA kosten
+    sea_cost = Column(Numeric(10, 4))
+    sea_impressions = Column(Integer, default=0)
+    sea_clicks = Column(Integer, default=0)
+    sea_conversions = Column(Integer, default=0)
+    sea_revenue = Column(Numeric(12, 2))
+
+    # Efficiëntiemetrics
+    cac = Column(Numeric(10, 4))                        # Customer Acquisition Cost
+    roas = Column(Float)                                 # Return on Ad Spend
+    seo_efficiency = Column(Float)                       # 0.0–1.0
+    sea_efficiency = Column(Float)                       # 0.0–1.0
+    marketing_dependency_score = Column(Float)           # 0.0–1.0
+
+    # Netto marges
+    total_marketing_cost = Column(Numeric(10, 4))
+    margin_after_marketing = Column(Numeric(10, 4))
+    contribution_margin_pct = Column(Float)
+
+    # Signaal
+    marketing_signal = Column(String(100))               # HIGH_CAC / LOW_ROAS / EFFICIENT
+    marketing_signal_nl = Column(Text)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FactOperationalComplexityDaily(Base):
+    """Dagelijkse operationele complexiteitsscore per SKU (Activity-Based Costing)."""
+    __tablename__ = "fact_operational_complexity_daily"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False, index=True)
+    sku_id = Column(String(50), nullable=False, index=True)
+    category = Column(String(200))
+    sku_name = Column(String(500))
+
+    # ABC factoren (0.0–1.0)
+    pick_time_score = Column(Float)             # picktijd
+    packaging_time_score = Column(Float)        # verpakkingstijd
+    return_pressure = Column(Float)             # retourdruk
+    customer_service_load = Column(Float)       # klantenservicebelasting
+    handling_complexity = Column(Float)         # handling complexiteit
+    dropship_management = Column(Float)         # dropship management
+    supplier_management = Column(Float)         # supplier management
+    error_sensitivity = Column(Float)           # foutgevoeligheid
+
+    # OCS (gewogen gemiddelde)
+    operational_complexity_score = Column(Float)    # OCS 0.0–1.0
+    ocs_label = Column(String(20))                  # LAAG / GEMIDDELD / HOOG / KRITIEK
+
+    # Kosten
+    labour_cost_per_unit = Column(Numeric(10, 4))
+    total_operational_cost = Column(Numeric(10, 4))
+
+    # Aanbeveling
+    recommended_action = Column(String(300))
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FORECASTING & PROCUREMENT ENGINE
+# ─────────────────────────────────────────────────────────────────────────────
+
+class FactProcurementForecastDaily(Base):
+    """Dagelijkse procurement forecast en opportunity scores per SKU."""
+    __tablename__ = "fact_procurement_forecast_daily"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False, index=True)
+    sku_id = Column(String(50), nullable=False, index=True)
+    category = Column(String(200))
+    sku_name = Column(String(500))
+
+    # Huidige positie
+    current_purchase_price = Column(Numeric(10, 4))
+    current_stock_days = Column(Integer)         # voorraad in dagen
+    lead_time_days = Column(Integer)             # levertijd
+
+    # Forecast (30/90 dagen)
+    forecast_purchase_price_30d = Column(Numeric(10, 4))
+    forecast_purchase_price_90d = Column(Numeric(10, 4))
+    price_change_pct_30d = Column(Float)
+    price_change_pct_90d = Column(Float)
+    demand_forecast_30d = Column(Integer)        # verwachte eenheden
+    demand_forecast_90d = Column(Integer)
+
+    # Scores (0.0–1.0)
+    procurement_opportunity_score = Column(Float)   # POS: nu inkopen?
+    future_margin_risk_score = Column(Float)         # FMR: toekomstige margedruk
+    seasonality_factor = Column(Float)               # seizoensinvloed
+
+    # Signaal
+    signal_code = Column(String(100))            # BUY_NOW / MARGIN_RISK / STABLE
+    signal_label_nl = Column(String(500))
+    recommended_order_qty = Column(Integer)
+    recommended_action_nl = Column(Text)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ECONOMIC INTELLIGENCE ENGINE
+# ─────────────────────────────────────────────────────────────────────────────
+
+class FactEconomicSignalDaily(Base):
+    """Dagelijkse economische signalen met impact op pricing en procurement."""
+    __tablename__ = "fact_economic_signal_daily"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False, index=True)
+    signal_type = Column(String(50), nullable=False)    # RAW_MATERIAL / TRANSPORT / CURRENCY / etc.
+    signal_name = Column(String(200), nullable=False)
+    region = Column(String(100))                         # NL / EU / GLOBAL
+
+    # Ernst
+    severity = Column(String(20))                        # LAAG / GEMIDDELD / HOOG / KRITIEK
+    severity_score = Column(Float)                       # 0.0–1.0
+
+    # Waarden
+    current_value = Column(Float)
+    baseline_value = Column(Float)
+    change_pct = Column(Float)                           # % verandering t.o.v. baseline
+    unit = Column(String(50))                            # €/ton, $/container, EUR/USD, etc.
+
+    # Impact
+    affected_categories_json = Column(Text)              # JSON array van categorie IDs
+    pricing_impact_pct = Column(Float)                   # verwachte prijsimpact %
+    margin_impact_pct = Column(Float)                    # verwachte margeimpact %
+    procurement_urgency = Column(String(50))             # DIRECT / BINNEN_MAAND / MONITOREN
+
+    # Signaal code
+    signal_code = Column(String(100))
+    description_nl = Column(Text)
+    recommended_action_nl = Column(Text)
+    valid_until = Column(Date)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BCG TRANSITION ENGINE
+# ─────────────────────────────────────────────────────────────────────────────
+
+class FactBcgTransition(Base):
+    """BCG classificatiewijzigingen per SKU of categorie."""
+    __tablename__ = "fact_bcg_transition"
+
+    id = Column(Integer, primary_key=True, index=True)
+    date = Column(Date, nullable=False, index=True)
+    entity_type = Column(String(20), nullable=False)     # SKU / CATEGORY
+    entity_id = Column(String(200), nullable=False, index=True)
+    entity_name = Column(String(500))
+    category = Column(String(200))
+
+    # Transitie
+    from_classification = Column(String(50))             # STAR / CASH_COW / QUESTION_MARK / DOG
+    to_classification = Column(String(50))
+    from_growth_score = Column(Float)
+    to_growth_score = Column(Float)
+    from_market_score = Column(Float)
+    to_market_score = Column(Float)
+
+    # Oorzaak
+    trigger_code = Column(String(100))  # SKU_MOVED_TO_STAR / SKU_MOVED_TO_DOG / etc.
+    trigger_reason_nl = Column(Text)
+    business_impact_nl = Column(String(500))
+    revenue_impact_eur = Column(Numeric(12, 2))
+
+    # Aanbeveling
+    recommended_action_nl = Column(Text)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXECUTIVE REPORTING ENGINE
+# ─────────────────────────────────────────────────────────────────────────────
+
+class FactManagementReport(Base):
+    """Automatisch gegenereerde managementrapportages (dagelijks/wekelijks/maandelijks)."""
+    __tablename__ = "fact_management_report"
+
+    id = Column(Integer, primary_key=True, index=True)
+    report_date = Column(Date, nullable=False, index=True)
+    report_type = Column(String(20), nullable=False)     # DAGELIJKS / WEKELIJKS / MAANDELIJKS
+    period_start = Column(Date)
+    period_end = Column(Date)
+
+    # Inhoud
+    title_nl = Column(String(500))
+    summary_nl = Column(Text)
+    kpis_json = Column(Text)                             # JSON: {key: {value, delta, label}}
+    alerts_json = Column(Text)                           # JSON: [{code, severity, message}]
+    insights_json = Column(Text)                         # JSON: [{section, text}]
+    recommendations_json = Column(Text)                  # JSON: [{priority, action}]
+
+    # Metadata
+    generated_at = Column(DateTime, default=datetime.utcnow)
+    is_exported = Column(Boolean, default=False)
+    export_filename = Column(String(500))
+
+    created_at = Column(DateTime, default=datetime.utcnow)

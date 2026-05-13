@@ -1,0 +1,275 @@
+Bouw verder op de bestaande Nederlandstalige AI Pricing Decision Engine.
+
+Voeg de volgende nieuwe engines volledig geïntegreerd toe:
+
+1. Cost Intelligence Engine
+2. Forecasting & Procurement Engine
+3. Economic Intelligence Engine
+4. Executive Reporting Engine
+5. BCG Transition Intelligence
+
+Doel:
+De app moet niet alleen pricing optimaliseren, maar ook:
+- operationele winst bewaken
+- toekomstige margedruk voorspellen
+- economische risico’s signaleren
+- inkoop adviseren
+- management inzicht geven
+- BCG-transities monitoren
+
+---
+
+COST INTELLIGENCE ENGINE
+
+Voeg ondersteuning toe voor:
+
+- inkoopkosten
+- transportkosten
+- dropshipping kosten
+- fulfilmentkosten
+- verpakkingskosten
+- personeelskosten
+- SEO kosten
+- SEA kosten
+- marketplace fees
+- retourkosten
+- operationele overhead
+
+Maak kosten inzichtelijk op:
+- SKU niveau
+- categorie niveau
+
+---
+
+PERSONEELSKOSTEN VERDIEPEN
+
+Implementeer Activity-Based Costing (ABC).
+
+Meet operationele belasting per SKU/categorie.
+
+Voeg Operational Complexity Score (OCS) toe.
+
+Factoren:
+- picktijd
+- verpakkingstijd
+- retourdruk
+- klantenservicebelasting
+- handling complexiteit
+- dropship management
+- supplier management
+- foutgevoeligheid
+
+Bereken:
+operational_complexity_score
+
+Gebruik:
+- pricing
+- promoties
+- BCG
+- procurement
+- assortimentbeslissingen
+
+---
+
+MARKETINGKOSTEN
+
+Voeg SEO/SEA kosten toe.
+
+Bereken:
+- CAC per SKU
+- CAC per categorie
+- margin after marketing
+- marketing dependency score
+- SEO efficiency
+- SEA efficiency
+- ROAS
+- contribution margin after marketing
+
+Belangrijk:
+Een SKU met hoge omzet maar slechte netto marge moet zichtbaar worden.
+
+---
+
+FORECASTING & PROCUREMENT ENGINE
+
+Doel:
+Voorspellen van:
+- toekomstige margedruk
+- toekomstige vraag
+- inkoopkansen
+- prijsstijgingen
+- supply chain risico’s
+
+Voeg Procurement Opportunity Score toe.
+
+Vraag:
+“Moeten we nu extra inkopen tegen huidige prijs?”
+
+Gebaseerd op:
+- historische inkoopprijs
+- forecast inkoopprijs
+- search demand trends
+- sales trends
+- seasonality
+- lead times
+- voorraadpositie
+- economische signalen
+
+Voeg Future Margin Risk Score toe.
+
+Vraag:
+“Hoe groot is kans op toekomstige margedruk?”
+
+---
+
+ECONOMIC INTELLIGENCE ENGINE
+
+Voeg ondersteuning toe voor economische factoren:
+
+- grondstofprijzen
+- containerprijzen
+- valuta
+- inflatie
+- oorlogen
+- geopolitieke risico’s
+- pandemieën/virussen
+- supply chain disruptions
+
+Nieuwe signalen:
+- RAW_MATERIAL_RISK_HIGH
+- TRANSPORT_COST_RISK
+- CURRENCY_RISK
+- GEOPOLITICAL_RISK
+- PANDEMIC_RISK
+- SUPPLY_CHAIN_RISK
+
+Economic factors moeten:
+- pricing beïnvloeden
+- procurement beïnvloeden
+- forecast beïnvloeden
+- BCG beïnvloeden
+
+---
+
+EXECUTIVE REPORTING ENGINE
+
+Maak automatische managementrapportages:
+
+- dagelijks
+- wekelijks
+- maandelijks
+
+Rapportages moeten:
+- automatisch gegenereerd worden
+- exporteerbaar zijn
+- mail/API-ready zijn
+
+Dagelijks:
+- prijswijzigingen
+- concurrentie alerts
+- conversiedalingen
+- promotie alerts
+- voorraadrisico’s
+
+Wekelijks:
+- categorie performance
+- pricing impact
+- promotion ROI
+- traffic trends
+- BCG wijzigingen
+
+Maandelijks:
+- margeontwikkeling
+- pricing power trends
+- procurement risico’s
+- economische risico’s
+- BCG transities
+- management samenvatting
+
+---
+
+BCG TRANSITION INTELLIGENCE
+
+Track veranderingen in BCG classificaties.
+
+Per SKU/categorie opslaan:
+- oude classificatie
+- nieuwe classificatie
+- datum wijziging
+- oorzaak wijziging
+- business impact
+
+Nieuwe alerts:
+- SKU_MOVED_TO_STAR
+- SKU_MOVED_TO_DOG
+- CATEGORY_MOVED_TO_CASH_COW
+- PRIVATE_LABEL_BECAME_STAR
+- PRICING_POWER_DECLINING
+- DEMAND_SHIFT_DETECTED
+
+Toon in UI:
+- wanneer verschuiving plaatsvond
+- waarom
+- welk effect
+- aanbevolen actie
+
+---
+
+DATABASE UITBREIDINGEN
+
+Maak tabellen:
+
+fact_cost_daily
+fact_marketing_cost_daily
+fact_procurement_forecast_daily
+fact_economic_signal_daily
+fact_bcg_transition
+fact_management_report
+fact_operational_complexity_daily
+
+---
+
+BACKEND MODULES
+
+Maak modules:
+- cost_engine.py
+- operational_complexity.py
+- marketing_efficiency.py
+- procurement_forecasting.py
+- economic_intelligence.py
+- reporting_engine.py
+- bcg_transition_engine.py
+
+---
+
+FRONTEND PAGINA’S
+
+Voeg toe:
+- Kosten Intelligence
+- Marketing Efficiency
+- Procurement Forecast
+- Economic Intelligence
+- Management Rapportages
+- BCG Transities
+- Operational Complexity Dashboard
+
+---
+
+BELANGRIJKSTE DOEL
+
+De app moet functioneren als:
+
+“AI Commercial Operating System”
+
+Dat:
+- pricing
+- promoties
+- traffic
+- concurrentie
+- kosten
+- forecasting
+- procurement
+- economie
+- management reporting
+
+…integreert in één intelligent platform.

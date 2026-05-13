@@ -49,6 +49,13 @@ import TrafficSkuDetail from "@/pages/traffic-sku-detail";
 import TrafficCategorie from "@/pages/traffic-categorie";
 import TrafficOpportunity from "@/pages/traffic-opportunity";
 import SearchGap from "@/pages/search-gap";
+import KostenDashboard from "@/pages/kosten-dashboard";
+import MarketingEfficiency from "@/pages/marketing-efficiency";
+import OperationeleComplexiteit from "@/pages/operationele-complexiteit";
+import ProcurementForecast from "@/pages/procurement-forecast";
+import EconomieDashboard from "@/pages/economie-dashboard";
+import ManagementRapportages from "@/pages/management-rapportages";
+import BcgTransities from "@/pages/bcg-transities";
 
 const queryClient = new QueryClient();
 
@@ -177,6 +184,37 @@ function Router() {
       </Route>
       <Route path="/traffic/search-gap">
         <ProtectedRoute><SearchGap /></ProtectedRoute>
+      </Route>
+
+      {/* Cost Intelligence Engine */}
+      <Route path="/kosten/dashboard">
+        <ProtectedRoute><KostenDashboard /></ProtectedRoute>
+      </Route>
+      <Route path="/kosten/marketing">
+        <ProtectedRoute><MarketingEfficiency /></ProtectedRoute>
+      </Route>
+      <Route path="/kosten/operationeel">
+        <ProtectedRoute><OperationeleComplexiteit /></ProtectedRoute>
+      </Route>
+
+      {/* Forecasting & Procurement Engine */}
+      <Route path="/procurement">
+        <ProtectedRoute><ProcurementForecast /></ProtectedRoute>
+      </Route>
+
+      {/* Economic Intelligence Engine */}
+      <Route path="/economie">
+        <ProtectedRoute><EconomieDashboard /></ProtectedRoute>
+      </Route>
+
+      {/* Executive Reporting Engine */}
+      <Route path="/rapportages">
+        <ProtectedRoute><ManagementRapportages /></ProtectedRoute>
+      </Route>
+
+      {/* BCG Transition Intelligence */}
+      <Route path="/bcg/transities">
+        <ProtectedRoute><BcgTransities /></ProtectedRoute>
       </Route>
 
       {/* Overige pagina's */}
