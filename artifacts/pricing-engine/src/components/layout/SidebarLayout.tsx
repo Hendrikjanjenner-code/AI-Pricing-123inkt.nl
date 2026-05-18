@@ -39,6 +39,7 @@ import {
   Calculator,
   Scale,
   Shield,
+  Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -103,6 +104,16 @@ const navGroepen = [
       { href: "/kosten/dashboard", label: "Kosten Dashboard", icon: DollarSign },
       { href: "/kosten/marketing", label: "Marketing Efficiency", icon: Megaphone },
       { href: "/kosten/operationeel", label: "Operationele Complexiteit", icon: Cpu },
+    ],
+  },
+  {
+    label: "Traffic & Basket Intelligence",
+    items: [
+      { href: "/traffic-driver",     label: "Traffic Driver Score",     icon: TrendingUp },
+      { href: "/entry-products",     label: "Entry Products Analyse",   icon: Users },
+      { href: "/basket-intelligence",label: "Basket Intelligence",      icon: ShoppingCart },
+      { href: "/cross-sell",         label: "Cross-sell Intelligence",  icon: ArrowRightLeft },
+      { href: "/sku-ecosystem",      label: "SKU Ecosysteemwaarde",     icon: Layers },
     ],
   },
   {

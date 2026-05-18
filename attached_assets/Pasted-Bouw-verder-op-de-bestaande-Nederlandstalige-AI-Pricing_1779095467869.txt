@@ -1,0 +1,476 @@
+Bouw verder op de bestaande Nederlandstalige AI Pricing Decision Engine.
+
+Voeg een volledig geïntegreerd Help & Explainability System toe.
+
+Doel:
+Het platform moet extreem duidelijk, uitlegbaar en gebruiksvriendelijk zijn.
+
+Gebruikers moeten:
+- begrijpen wat iedere score betekent
+- begrijpen hoe een berekening werkt
+- begrijpen waarom een advies wordt gegeven
+- begrijpen hoe KPI’s samenhangen
+- minimale vragen hoeven stellen aan pricing/data teams
+
+De applicatie moet functioneren als:
+- pricing tool
+- kennisplatform
+- explainable AI platform
+
+Elke tegel, KPI, score, kolom, tabelveld, grafiek en metric moet voorzien worden van een:
+
+- i-knop (informatie button)
+- tooltip
+- uitgebreide uitlegpagina
+- formule-uitleg indien relevant
+- businessbetekenis
+- interpretatie
+- impact op pricingstrategie
+
+---
+
+ALGEMENE UX PRINCIPES
+
+1. Iedere KPI moet uitlegbaar zijn
+2. Iedere afkorting moet uitgelegd worden
+3. Iedere score moet interpreteerbaar zijn
+4. Iedere aanbeveling moet onderbouwd zijn
+5. Iedere AI-beslissing moet verklaarbaar zijn
+6. Geen “black box AI”
+7. Gebruiker moet zelfstandig kunnen begrijpen:
+   - wat er gebeurt
+   - waarom het gebeurt
+   - welke actie verstandig is
+
+---
+
+INFO BUTTONS
+
+Voeg bij ieder relevant element een:
+
+- i-icoon
+- hover tooltip
+- klikbare uitlegmodal
+
+Toevoegen aan:
+- KPI cards
+- Pricing Grid kolommen
+- Grafieken
+- Dashboards
+- BCG scores
+- Elasticiteit
+- Traffic scores
+- Promotion scores
+- Competition scores
+- Procurement scores
+- Forecasting metrics
+- Alerts
+- Recommendation panels
+
+Gebruik:
+- duidelijke Nederlandse taal
+- zakelijke uitleg
+- voorbeelden
+- formule-uitleg
+- interpretatie-uitleg
+
+---
+
+VOORBEELD TOOLTIP
+
+Voor:
+“PCIS”
+
+Tooltip:
+
+“PCIS staat voor Product Competition Intensity Score.
+
+Deze score meet hoeveel concurrentiedruk een SKU of categorie ervaart.
+
+De score wordt berekend op basis van:
+- aantal relevante concurrenten
+- prijsverschillen
+- voorraadbetrouwbaarheid
+- prijsvolatiliteit
+- concurrentie-intensiteit
+
+Interpretatie:
+0.00–0.30 = lage concurrentiedruk
+0.30–0.60 = gemiddelde concurrentiedruk
+0.60–1.00 = hoge concurrentiedruk
+
+Hoge PCIS betekent dat prijswijzigingen waarschijnlijk meer impact hebben op afzet en conversie.”
+
+---
+
+VOORBEELD FORMULE-UITLEG
+
+Voor:
+“CSRS”
+
+Tooltip:
+
+“CSRS staat voor Competitor Stock Reliability Score.
+
+Deze score meet hoe betrouwbaar de voorraadpositie van een concurrent is.
+
+Formule:
+CSRS =
+0.40 × availability_rate
++ 0.25 × delivery_speed_score
++ 0.20 × stock_stability_score
++ 0.15 × listing_consistency_score
+
+Interpretatie:
+- Hoge score = concurrent is structureel leverbaar
+- Lage score = concurrent mogelijk niet relevant voor pricing
+
+Bij lage CSRS kan een lage concurrentieprijs worden genegeerd.”
+
+---
+
+VOORBEELD BUSINESS-UITLEG
+
+Voor:
+“Break-even extra afzet”
+
+Tooltip:
+
+“Deze metric toont hoeveel extra verkochte eenheden nodig zijn om een prijsverlaging of promotie terug te verdienen.
+
+Voorbeeld:
+Een prijsverlaging verlaagt de marge per stuk.
+Om dezelfde totale marge te behouden moet extra volume worden verkocht.
+
+Hoge break-even afzet betekent:
+- promotie risicovol
+- veel extra volume nodig
+
+Lage break-even afzet betekent:
+- promotie relatief veilig.”
+
+---
+
+VOORBEELD STRATEGISCHE UITLEG
+
+Voor:
+“Traffic Driver Score”
+
+Tooltip:
+
+“Traffic Driver Score meet in welke mate een SKU bezoekers aantrekt naar 123inkt.nl.
+
+Een SKU met hoge Traffic Driver Score:
+- trekt veel bezoekers via SEO/SEA
+- genereert veel zoekverkeer
+- kan belangrijk zijn voor nieuwe klanten
+
+Deze SKU’s hoeven niet altijd de hoogste directe marge te hebben.
+Hun strategische waarde zit vaak in:
+- traffic acquisitie
+- cross-sell
+- winkelmandvulling.”
+
+---
+
+INFO LAYERS
+
+Voeg drie niveaus van uitleg toe:
+
+1. KORTE TOOLTIP
+- korte zakelijke uitleg
+
+2. UITGEBREIDE MODAL
+- diepere uitleg
+- formule
+- interpretatie
+- voorbeelden
+
+3. DOCUMENTATIEPAGINA
+- volledige businesslogica
+- gebruiksscenario’s
+- strategische betekenis
+- voorbeelden
+- best practices
+
+---
+
+EXPLAINABLE AI ENGINE
+
+Maak backendmodule:
+
+backend/app/services/explainability_engine.py
+
+Doel:
+Automatisch uitleg genereren voor:
+- scores
+- aanbevelingen
+- alerts
+- pricingacties
+- promotieadviezen
+- BCG-classificaties
+- forecastinguitkomsten
+
+Functies:
+- generate_score_explanation()
+- generate_formula_explanation()
+- generate_business_impact_explanation()
+- generate_recommendation_explanation()
+- generate_alert_explanation()
+- generate_bcg_explanation()
+- generate_pricing_decision_explanation()
+
+---
+
+DUIDELIJKE UITLEG PER SCORE
+
+Voeg uitleg toe voor minimaal:
+
+Competition:
+- PCIS
+- CIS
+- CSRS
+- CSS
+
+Pricing:
+- Elasticiteit
+- Price Pass-through Feasibility
+- Margin Protection Score
+- Break-even Difficulty
+
+Traffic:
+- Traffic Driver Score
+- Conversion Health Score
+- Search Gap Score
+- Demand Signal Score
+
+Promotion:
+- Promotion ROI
+- Promotion Dependency
+- Promotion Opportunity
+- Promotion Risk
+
+BCG:
+- Internal BCG
+- External BCG
+- Hybrid BCG
+- Pricing Power
+- Private Label Value
+
+Forecasting:
+- Procurement Opportunity
+- Future Margin Risk
+- Economic Risk
+
+Basket:
+- Basket Builder Score
+- Margin Amplification
+- Ecosystem Value
+
+---
+
+UI COMPONENTEN
+
+Maak herbruikbare componenten:
+
+frontend/src/components/InfoTooltip.jsx
+frontend/src/components/ExplanationModal.jsx
+frontend/src/components/MetricHelpCard.jsx
+frontend/src/components/FormulaViewer.jsx
+
+Functionaliteit:
+- hover tooltip
+- klikbare uitleg
+- formuleweergave
+- voorbeelden
+- interpretatie
+- business impact
+
+---
+
+INFO BUTTON DESIGN
+
+Gebruik:
+- subtiel i-icoon
+- hover effect
+- consistente styling
+- moderne zakelijke uitstraling
+
+Bij hover:
+- korte uitleg tonen
+
+Bij klik:
+- uitgebreide uitleg openen
+
+---
+
+EXTRA UX VERBETERINGEN
+
+Voeg toe:
+
+1. “Waarom?” knop
+Bij aanbevelingen:
+- waarom dit advies?
+- welke factoren?
+- welke scores?
+- welke risico’s?
+
+2. “Hoe berekend?” knop
+Bij metrics:
+- formule
+- gebruikte databronnen
+- interpretatie
+
+3. “Wat betekent dit?” knop
+Bij complexe KPI’s:
+- businessbetekenis
+- praktische uitleg
+- impact op pricing
+
+---
+
+RECOMMENDATION EXPLAINABILITY
+
+Bij ieder pricingadvies tonen:
+
+- waarom advies is gegeven
+- welke factoren zwaar meewegen
+- concurrentie-impact
+- elasticiteit-impact
+- traffic-impact
+- BCG-impact
+- marge-impact
+- confidence score
+
+Voorbeeld:
+
+“Prijsverhoging van 4% wordt geadviseerd omdat:
+- elasticiteit laag is
+- concurrentiedruk beperkt is
+- Traffic Driver Score hoog blijft
+- marge significant verbetert
+- break-even risico laag is.”
+
+---
+
+BCG EXPLAINABILITY
+
+Bij iedere BCG-classificatie tonen:
+
+- waarom SKU in dit kwadrant zit
+- welke scores dit bepalen
+- welke veranderingen hebben plaatsgevonden
+- aanbevolen strategie
+
+Voorbeeld:
+
+“SKU is geclassificeerd als Internal Star omdat:
+- margebijdrage hoog is
+- omzetgroei sterk is
+- repeat aankopen hoog zijn
+- Traffic Driver Score stijgt.”
+
+---
+
+PRICING GRID INTEGRATIE
+
+Voeg i-knoppen toe aan:
+- kolomnamen
+- KPI’s
+- delta’s
+- alerts
+- aanbevelingen
+
+Voorbeeld:
+Hover op “Δ Marge”
+→ uitleg over margeverandering
+
+Hover op “Actie nodig”
+→ uitleg waarom SKU aandacht vereist
+
+---
+
+DASHBOARD EXPLAINABILITY
+
+Iedere dashboardtegel moet bevatten:
+- KPI naam
+- uitleg
+- interpretatie
+- trenduitleg
+- business impact
+
+Voorbeeld:
+“Traffic Opportunity”
+→ uitleg wanneer hoge score goed of slecht is
+
+---
+
+DOCUMENTATIECENTRUM
+
+Maak pagina:
+“Modeldocumentatie”
+
+Hierin:
+- alle KPI’s
+- alle afkortingen
+- alle formules
+- alle businessregels
+- alle classificaties
+- alle alerts
+- alle recommendation types
+
+Doorzoekbaar:
+- zoekfunctie
+- categorieën
+- filters
+
+---
+
+GEBRUIKERSERVARING
+
+Het platform moet aanvoelen als:
+- intelligent
+- transparant
+- professioneel
+- begrijpelijk
+- uitlegbaar
+- schaalbaar
+
+Een nieuwe gebruiker moet:
+- zelfstandig kunnen begrijpen hoe het model werkt
+- pricingbeslissingen kunnen volgen
+- uitleg krijgen zonder externe documentatie
+
+---
+
+UI TAAL
+
+Alles volledig Nederlands.
+
+Gebruik duidelijke zakelijke taal.
+Geen technische AI-jargon zonder uitleg.
+
+Voorbeelden:
+- “Concurrentiedruk”
+- “Doorberekenbaarheid”
+- “Break-even afzet”
+- “Winkelmandimpact”
+- “Zoekvraag”
+- “Pricing power”
+- “Huismerkpotentie”
+
+---
+
+BELANGRIJKSTE DOEL
+
+De app moet:
+- Explainable AI ondersteunen
+- Transparante pricingbeslissingen tonen
+- Gebruikers opleiden tijdens gebruik
+- Vragen minimaliseren
+- Vertrouwen creëren in AI-aanbevelingen
+
+Het platform moet functioneren als:
+“Explainable Commercial Intelligence Platform”
+waarbij gebruikers niet alleen inzichten krijgen,
+maar ook begrijpen waarom die inzichten bestaan.

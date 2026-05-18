@@ -57,6 +57,13 @@ import EconomieDashboard from "@/pages/economie-dashboard";
 import ManagementRapportages from "@/pages/management-rapportages";
 import BcgTransities from "@/pages/bcg-transities";
 
+// Traffic Driver & Basket Intelligence Engine
+import TrafficDriverDashboard from "@/pages/traffic-driver-dashboard";
+import BasketIntelligenceDashboard from "@/pages/basket-intelligence";
+import SkuEcosysteem from "@/pages/sku-ecosystem";
+import CrossSellIntelligence from "@/pages/cross-sell-intelligence";
+import EntryProductsAnalyse from "@/pages/entry-products";
+
 // Cost Change & Break-even Intelligence Engine
 import KostprijswijzigingDashboard from "@/pages/kostprijswijziging";
 import BreakEvenAnalyse from "@/pages/break-even-analyse";
@@ -266,6 +273,23 @@ function Router() {
       </Route>
       <Route path="/ab-tests">
         <ProtectedRoute><AbTestMonitor /></ProtectedRoute>
+      </Route>
+
+      {/* Traffic Driver & Basket Intelligence */}
+      <Route path="/traffic-driver">
+        <ProtectedRoute><TrafficDriverDashboard /></ProtectedRoute>
+      </Route>
+      <Route path="/basket-intelligence">
+        <ProtectedRoute><BasketIntelligenceDashboard /></ProtectedRoute>
+      </Route>
+      <Route path="/sku-ecosystem">
+        <ProtectedRoute><SkuEcosysteem /></ProtectedRoute>
+      </Route>
+      <Route path="/cross-sell">
+        <ProtectedRoute><CrossSellIntelligence /></ProtectedRoute>
+      </Route>
+      <Route path="/entry-products">
+        <ProtectedRoute><EntryProductsAnalyse /></ProtectedRoute>
       </Route>
 
       {/* Cost Change & Break-even Intelligence */}

@@ -954,6 +954,106 @@ class DimCategoryHierarchy(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+# ── Traffic Driver & Basket Intelligence Engine ───────────────────────────────
+
+class FactSkuEcosystemDaily(Base):
+    """Dagelijkse ecosysteemwaarde per SKU: gecombineerde commerciële bijdrage."""
+    __tablename__ = "fact_sku_ecosystem_daily"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    date = Column(Date, nullable=False, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    sku_name = Column(String(500))
+    category = Column(String(255))
+
+    # Component scores (0–1)
+    traffic_driver_score = Column(Float, default=0.0)       # TDS
+    basket_builder_score = Column(Float, default=0.0)       # BBS
+    margin_amplification_score = Column(Float, default=0.0) # MAS
+    entry_product_score = Column(Float, default=0.0)        # EPS
+    repeat_contribution_score = Column(Float, default=0.0)  # RCS
+    private_label_contribution = Column(Float, default=0.0) # PLCS
+    margin_contribution_score = Column(Float, default=0.0)  # directe marge
+
+    # Totale SEVS
+    ecosystem_value_score = Column(Float, default=0.0)      # SEVS 0–1
+    sevs_label = Column(String(50))                          # KRITIEK / HOOG / MEDIUM / LAAG
+
+    # SKU rollen (komma-gescheiden)
+    primary_sku_role = Column(String(100))      # TRAFFIC_DRIVER / BASKET_BUILDER / ...
+    secondary_sku_role = Column(String(200))    # kommalijst
+
+    # Pricing-implicaties
+    pricing_sensitivity = Column(String(50))    # HOOG / MEDIUM / LAAG
+    protection_advice = Column(String(100))     # BESCHERMEN / OPTIMALISEREN / NEUTRALE / ...
+    strategic_note_nl = Column(Text)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FactBasketIntelligenceDaily(Base):
+    """Dagelijkse winkelmand-analyse per SKU."""
+    __tablename__ = "fact_basket_intelligence_daily"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    date = Column(Date, nullable=False, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    sku_name = Column(String(500))
+    category = Column(String(255))
+
+    # Basket-statistieken
+    attach_rate = Column(Float)                  # % bestellingen met bijproduct
+    avg_basket_value = Column(Numeric(10, 4))    # gem. mandbedrag incl. dit SKU
+    avg_items_per_basket = Column(Float)         # gem. items per bestelling
+    basket_co_occurrence_score = Column(Float)   # 0–1: hoe vaak samen met andere topSKUs
+    cross_sell_frequency = Column(Float)         # gem. cross-sell producten per bestelling
+    incremental_margin = Column(Numeric(10, 4))  # extra marge door basket-uitbreiding
+    basket_uplift_eur = Column(Numeric(10, 4))   # gem. extra EUR per bestelling door dit SKU
+
+    # Score
+    basket_builder_score = Column(Float)         # BBS 0–1
+    bbs_label = Column(String(50))               # KRITIEK / STERK / MATIG / ZWAK
+
+    # Top co-occurerende SKU's (JSON string)
+    top_co_skus = Column(Text)                   # kommalijst van sku_ids
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FactTrafficDriverScoreDaily(Base):
+    """Dagelijkse Traffic Driver Score per SKU."""
+    __tablename__ = "fact_traffic_driver_score_daily"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    date = Column(Date, nullable=False, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    sku_name = Column(String(500))
+    category = Column(String(255))
+
+    # Traffic-bronnen
+    seo_traffic = Column(Integer, default=0)
+    sea_traffic = Column(Integer, default=0)
+    direct_traffic = Column(Integer, default=0)
+    total_traffic = Column(Integer, default=0)
+    organic_visibility = Column(Float)           # 0–1
+    search_volume = Column(Integer, default=0)   # extern maandelijks zoekvolume
+    landing_page_sessions = Column(Integer, default=0)
+    new_customer_entries = Column(Integer, default=0)
+    ctr = Column(Float)                          # klikratio
+
+    # Entry product metrics
+    first_product_in_session_pct = Column(Float) # % sessies waar dit SKU eerste is
+    new_customer_first_order_pct = Column(Float) # % orders van nieuwe klanten
+
+    # Scores
+    traffic_driver_score = Column(Float)         # TDS 0–1
+    entry_product_score = Column(Float)          # EPS 0–1
+    tds_label = Column(String(50))               # KRITIEK / STERK / MATIG / LAAG
+    toelichting_nl = Column(Text)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 # ── Cost Change & Break-even Intelligence Engine ─────────────────────────────
 
 class FactCostChangeDaily(Base):

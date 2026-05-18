@@ -1,0 +1,393 @@
+Bouw verder op de bestaande Nederlandstalige AI Pricing Decision Engine.
+
+Voeg een volledig geïntegreerde Traffic Driver & Basket Intelligence Engine toe.
+
+Doel:
+De app moet niet alleen kijken naar directe SKU-marge,
+maar ook begrijpen welke SKU’s:
+
+- traffic naar 123inkt.nl genereren
+- nieuwe klanten aantrekken
+- winkelmandjes vullen
+- cross-sell stimuleren
+- repeat orders ondersteunen
+- portfolio-waarde creëren
+
+De engine moet SKU’s strategisch classificeren op basis van hun commerciële ecosysteemwaarde.
+
+---
+
+NIEUWE CONCEPTEN
+
+Voeg nieuwe SKU-rollen toe:
+
+- TRAFFIC_DRIVER
+- BASKET_BUILDER
+- MARGIN_DRIVER
+- RETENTION_DRIVER
+- PORTFOLIO_DRIVER
+- PRIVATE_LABEL_DRIVER
+
+Een SKU kan meerdere rollen hebben.
+
+---
+
+TRAFFIC DRIVER INTELLIGENCE
+
+Voeg Traffic Driver Score (TDS) toe.
+
+Vraag:
+“Hoe belangrijk is deze SKU voor traffic-acquisitie?”
+
+Gebaseerd op:
+- extern zoekvolume
+- SEO traffic
+- SEA traffic
+- landing page visits
+- CTR
+- new customer entry
+- organic visibility
+- branded search
+- generic search
+- search trend
+- traffic growth
+
+Schaal:
+0.00–1.00
+
+Classificatie:
+- 0.80–1.00 = Critical Traffic Driver
+- 0.60–0.80 = Strong Traffic Driver
+- 0.40–0.60 = Moderate Traffic Driver
+- <0.40 = Low Traffic Driver
+
+---
+
+ENTRY PRODUCT SCORE
+
+Voeg Entry Product Score (EPS) toe.
+
+Vraag:
+“Hoe vaak is dit product het startpunt van een bestelling?”
+
+Gebaseerd op:
+- first product in session
+- landing page conversions
+- new customer first orders
+- traffic acquisition contribution
+
+---
+
+BASKET BUILDER INTELLIGENCE
+
+Voeg Basket Builder Score (BBS) toe.
+
+Vraag:
+“Hoe sterk draagt deze SKU bij aan winkelmandvulling?”
+
+Gebaseerd op:
+- attach-rate
+- basket co-occurrence
+- average basket uplift
+- cross-sell frequency
+- average items added after this SKU
+- incremental revenue after attachment
+
+Schaal:
+0.00–1.00
+
+Classificatie:
+- Critical Basket Builder
+- Strong Basket Builder
+- Moderate Basket Builder
+- Weak Basket Builder
+
+---
+
+MARGIN AMPLIFICATION SCORE
+
+Voeg Margin Amplification Score (MAS) toe.
+
+Vraag:
+“Hoeveel extra marge genereert deze SKU indirect?”
+
+Gebaseerd op:
+- cross-sell margin
+- upsell margin
+- basket expansion
+- repeat purchase impact
+- private label substitution impact
+
+---
+
+SKU ECOSYSTEM VALUE
+
+Voeg nieuwe score toe:
+
+SKU Ecosystem Value Score (SEVS)
+
+Doel:
+Meet totale commerciële waarde van een SKU.
+
+Niet alleen:
+- directe marge
+
+Maar ook:
+- traffic
+- conversie
+- basket impact
+- repeat
+- cross-sell
+- private label impact
+- portfolio impact
+
+SEVS gebaseerd op:
+- Traffic Driver Score
+- Basket Builder Score
+- Margin Amplification Score
+- Repeat Contribution
+- Private Label Contribution
+- Margin Contribution
+- Search Demand
+- Entry Product Score
+
+---
+
+DATABASE UITBREIDINGEN
+
+Maak tabellen:
+
+fact_sku_ecosystem_daily
+- date
+- sku_id
+- traffic_driver_score
+- basket_builder_score
+- margin_amplification_score
+- entry_product_score
+- repeat_contribution_score
+- private_label_contribution_score
+- ecosystem_value_score
+- primary_sku_role
+- secondary_sku_role
+- created_at
+
+fact_basket_analysis_daily
+- date
+- sku_id
+- attach_rate
+- avg_basket_value
+- avg_items_per_basket
+- basket_co_occurrence_score
+- cross_sell_frequency
+- incremental_margin
+- created_at
+
+fact_traffic_driver_daily
+- date
+- sku_id
+- seo_traffic
+- sea_traffic
+- organic_visibility
+- search_volume
+- landing_page_sessions
+- new_customer_entries
+- traffic_driver_score
+- created_at
+
+---
+
+BACKEND MODULES
+
+Maak modules:
+
+backend/app/services/traffic_driver_engine.py
+backend/app/services/basket_intelligence.py
+backend/app/services/sku_ecosystem_engine.py
+backend/app/services/cross_sell_engine.py
+
+Belangrijke functies:
+- calculate_traffic_driver_score()
+- calculate_entry_product_score()
+- calculate_basket_builder_score()
+- calculate_margin_amplification_score()
+- calculate_sku_ecosystem_value()
+- classify_sku_role()
+- detect_cross_sell_patterns()
+- calculate_attach_rate()
+- calculate_incremental_margin()
+- generate_ecosystem_explanation_nl()
+
+---
+
+PRICING INTEGRATIE
+
+Pricing mag NIET alleen op directe marge sturen.
+
+Regels:
+
+IF traffic_driver_score hoog
+THEN vermijd agressieve prijsverhogingen
+
+IF basket_builder_score hoog
+THEN promoties/bundels kunnen interessant zijn
+
+IF ecosystem_value_score hoog
+AND direct_margin laag
+THEN SKU strategisch beschermen
+
+IF entry_product_score hoog
+THEN pricing voorzichtig aanpassen
+
+---
+
+PROMOTION INTEGRATIE
+
+IF basket_builder_score hoog
+THEN bundelpromoties adviseren
+
+IF traffic_driver_score hoog
+THEN SEO/SEA push adviseren
+
+IF margin_amplification_score hoog
+THEN cross-sell campagnes adviseren
+
+---
+
+BCG INTEGRATIE
+
+Internal Star + Traffic Driver
+→ beschermen
+
+Cash Cow + Basket Builder
+→ basket optimalisatie
+
+Private Label Driver
+→ substitutie pushen
+
+Dog + lage ecosystem value
+→ saneren mogelijk
+
+---
+
+FRONTEND PAGINA’S
+
+Voeg toe:
+
+1. Traffic Driver Dashboard
+2. Basket Intelligence Dashboard
+3. SKU Ecosystem Dashboard
+4. Cross-sell Intelligence
+5. Entry Products Analyse
+
+---
+
+TRAFFIC DRIVER DASHBOARD
+
+Toon:
+- top traffic drivers
+- top entry products
+- highest search demand
+- traffic growth
+- SEO vs SEA contribution
+- new customer drivers
+
+---
+
+BASKET INTELLIGENCE DASHBOARD
+
+Toon:
+- top basket builders
+- highest attach-rates
+- avg basket uplift
+- strongest cross-sell relationships
+- incremental margin contribution
+
+---
+
+SKU ECOSYSTEM DETAIL
+
+Per SKU tonen:
+- directe marge
+- traffic impact
+- basket impact
+- repeat impact
+- cross-sell impact
+- ecosystem value
+- pricing sensitivity
+- promotion impact
+- BCG status
+- strategic recommendation
+
+---
+
+DEMO DATA
+
+Voeg demo toe:
+
+1. HP toner
+- hoge traffic driver score
+- hoge entry product score
+- middelmatige marge
+
+2. Huismerk toner
+- hoge margin amplification
+- hoge private label contribution
+
+3. Ordners
+- lage traffic
+- hoge basket builder score
+
+4. Papier
+- sterke basket co-occurrence
+
+5. USB kabel
+- lage directe marge
+- hoge basket uplift
+
+Laat duidelijk zien:
+- waarom SKU strategisch belangrijk is
+- waarom directe marge niet alles zegt
+- hoe pricing rekening houdt met ecosystem value
+
+---
+
+UI TAAL
+
+Alles volledig Nederlands.
+
+Gebruik labels:
+- Traffic Driver
+- Winkelmandvuller
+- Ecosysteemwaarde
+- Entry Product
+- Cross-sell impact
+- Basket uplift
+- Attach-rate
+- Nieuwe klant bijdrage
+- Strategische SKU rol
+- Portfolio impact
+
+---
+
+BELANGRIJKSTE DOEL
+
+De app moet intelligent begrijpen:
+
+- welke SKU’s traffic genereren
+- welke SKU’s winkelwagens vergroten
+- welke SKU’s nieuwe klanten aantrekken
+- welke SKU’s indirect veel marge creëren
+- welke SKU’s strategisch beschermd moeten worden
+
+Het systeem moet pricingbeslissingen nemen op basis van:
+- totale commerciële ecosysteemwaarde
+- niet alleen directe SKU-marge
+
+De Traffic Driver & Basket Intelligence Engine moet volledig geïntegreerd zijn met:
+- Pricing Engine
+- Promotion Engine
+- Traffic & Demand Intelligence
+- Elasticity Engine
+- BCG Intelligence Engine
+- Private Label Intelligence
+- Forecasting Engine
