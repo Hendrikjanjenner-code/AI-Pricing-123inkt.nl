@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from "recharts";
 import { ArrowUpRight, ArrowDownRight, AlertTriangle, CheckCircle2, ShieldAlert } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { InfoTooltip } from "@/components/InfoTooltip";
 
 const STRATEGIE_LABELS: Record<string, string> = {
   SUBSTITUTION_PORTFOLIO: "Substitutieportfolio",
@@ -42,7 +43,17 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Verwachte margeverbetering</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1">
+                Verwachte margeverbetering
+                <InfoTooltip inline={{
+                  naam: "Verwachte Margeverbetering",
+                  korteUitleg: "Totale extra marge als alle openstaande adviezen worden goedgekeurd en uitgevoerd.",
+                  uitgebreideUitleg: "Dit bedrag is de som van de verwachte margeverbeteringen van alle openstaande prijsadviezen. Het is een theoretisch maximum — in de praktijk worden niet alle adviezen goedgekeurd en reageert de markt soms anders dan verwacht.",
+                  interpretatie: "Hoog bedrag = veel optimalisatieruimte aanwezig.\nLaag bedrag = pricing is al grotendeels geoptimaliseerd.",
+                  businessImpact: "Gebruik dit als dagelijks prioriteringssignaal: hoe hoger het bedrag, hoe meer urgentie om adviezen te reviewen.",
+                  formule: "Som van (aanbevolen_prijs – huidige_prijs) × verwacht_volume per openstaand advies",
+                }} />
+              </CardTitle>
               <ArrowUpRight className="h-4 w-4 text-emerald-500" />
             </CardHeader>
             <CardContent>
@@ -52,7 +63,16 @@ export default function Dashboard() {
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Openstaande adviezen</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1">
+                Openstaande adviezen
+                <InfoTooltip inline={{
+                  naam: "Openstaande Adviezen",
+                  korteUitleg: "Aantal prijsadviezen dat nog wacht op goedkeuring of afwijzing door een pricing analist.",
+                  uitgebreideUitleg: "Openstaande adviezen zijn prijsaanbevelingen die door het AI-model zijn gegenereerd maar nog niet zijn verwerkt. Ze staan klaar voor review, goedkeuring (→ uitvoeren in PriceShape) of afwijzing.",
+                  interpretatie: "Hoog getal = veel werkload voor pricing team.\nLaag getal = team heeft backlog verwerkt of weinig adviezen beschikbaar.",
+                  businessImpact: "Adviezen ouder dan 2 dagen kunnen verouderd zijn doordat de markt is veranderd. Prioriteer verse adviezen met hoge margewaarde.",
+                }} />
+              </CardTitle>
               <CheckCircle2 className="h-4 w-4 text-primary" />
             </CardHeader>
             <CardContent>
@@ -62,7 +82,10 @@ export default function Dashboard() {
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Gem. betrouwbaarheid</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1">
+                Gem. betrouwbaarheid
+                <InfoTooltip definitieId="confidence_score" />
+              </CardTitle>
               <ActivityIcon className="h-4 w-4 text-primary" />
             </CardHeader>
             <CardContent>
@@ -72,7 +95,16 @@ export default function Dashboard() {
           </Card>
           <Card className="border-destructive/50">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium text-destructive">Veiligheidswaarschuwingen</CardTitle>
+              <CardTitle className="text-sm font-medium text-destructive flex items-center gap-1">
+                Veiligheidswaarschuwingen
+                <InfoTooltip inline={{
+                  naam: "Veiligheidswaarschuwingen",
+                  korteUitleg: "Adviezen die door veiligheidsregels zijn gemarkeerd voor verplichte handmatige controle.",
+                  uitgebreideUitleg: "Veiligheidswaarschuwingen treden op wanneer een pricingadvies een of meer veiligheidsregels schendt:\n• Prijs onder kostprijsvloer (kostprijs × 1.01)\n• Prijswijziging groter dan 5% per dag\n• Modelbetrouwbaarheid onder 40%\n• Product uit voorraad",
+                  interpretatie: "0 waarschuwingen = geen actie vereist.\n1+ waarschuwingen = direct review door pricing analist.",
+                  businessImpact: "Negeer waarschuwingen nooit — ze voorkomen prijsfouten en verlieslatende transacties.",
+                }} />
+              </CardTitle>
               <ShieldAlert className="h-4 w-4 text-destructive" />
             </CardHeader>
             <CardContent>

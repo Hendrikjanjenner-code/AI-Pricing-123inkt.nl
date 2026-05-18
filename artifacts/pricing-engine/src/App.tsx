@@ -64,6 +64,9 @@ import SkuEcosysteem from "@/pages/sku-ecosystem";
 import CrossSellIntelligence from "@/pages/cross-sell-intelligence";
 import EntryProductsAnalyse from "@/pages/entry-products";
 
+// Help & Explainability System
+import ModelDocumentatie from "@/pages/modeldocumentatie";
+
 // Cost Change & Break-even Intelligence Engine
 import KostprijswijzigingDashboard from "@/pages/kostprijswijziging";
 import BreakEvenAnalyse from "@/pages/break-even-analyse";
@@ -307,6 +310,10 @@ function Router() {
       </Route>
       <Route path="/margebescherming">
         <ProtectedRoute><Margebescherming /></ProtectedRoute>
+      </Route>
+
+      <Route path="/modeldocumentatie">
+        <ProtectedRoute><ModelDocumentatie /></ProtectedRoute>
       </Route>
 
       <Route component={NotFound} />

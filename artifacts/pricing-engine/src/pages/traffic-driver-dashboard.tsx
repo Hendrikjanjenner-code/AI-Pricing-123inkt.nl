@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ScatterChart, Scatter, ZAxis } from "recharts";
 import { TrendingUp, Users, Search, Megaphone, Star } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { InfoTooltip } from "@/components/InfoTooltip";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const getToken = () => localStorage.getItem("auth_token") || "";
@@ -40,8 +41,13 @@ export default function TrafficDriverDashboard() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold tracking-tight">Traffic Driver Dashboard</h1>
-      <p className="text-sm text-muted-foreground">Welke SKU's genereren traffic naar 123inkt.nl en trekken nieuwe klanten aan?</p>
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+          Traffic Driver Dashboard
+          <InfoTooltip definitieId="tds" />
+        </h1>
+        <p className="text-sm text-muted-foreground mt-1">Welke SKU's genereren traffic naar 123inkt.nl en trekken nieuwe klanten aan?</p>
+      </div>
 
       {/* KPI's */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
@@ -65,7 +71,10 @@ export default function TrafficDriverDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* TDS bar */}
         <div className="bg-card border rounded-lg p-4">
-          <h3 className="text-sm font-semibold mb-3">Traffic Driver Score (TDS) per SKU</h3>
+          <h3 className="text-sm font-semibold mb-3 flex items-center gap-1.5">
+            Traffic Driver Score (TDS) per SKU
+            <InfoTooltip definitieId="tds" />
+          </h3>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={tdsBar}>
               <XAxis dataKey="name" tick={{ fontSize: 9 }} angle={-30} textAnchor="end" height={40} />

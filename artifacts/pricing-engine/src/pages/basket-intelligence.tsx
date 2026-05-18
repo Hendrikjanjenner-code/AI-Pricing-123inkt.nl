@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ScatterChart, Scatter, ZAxis, CartesianGrid } from "recharts";
 import { ShoppingCart, TrendingUp, Package, Euro } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { InfoTooltip } from "@/components/InfoTooltip";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const getToken = () => localStorage.getItem("auth_token") || "";
@@ -40,8 +41,13 @@ export default function BasketIntelligenceDashboard() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold tracking-tight">Basket Intelligence Dashboard</h1>
-      <p className="text-sm text-muted-foreground">Welke SKU's vullen winkelwagens en genereren cross-sell omzet?</p>
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+          Basket Intelligence Dashboard
+          <InfoTooltip definitieId="bbs" />
+        </h1>
+        <p className="text-sm text-muted-foreground mt-1">Welke SKU's vullen winkelwagens en genereren cross-sell omzet?</p>
+      </div>
 
       {/* KPI's */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

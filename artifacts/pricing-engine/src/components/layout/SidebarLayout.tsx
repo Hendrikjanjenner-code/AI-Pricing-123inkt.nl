@@ -40,6 +40,7 @@ import {
   Scale,
   Shield,
   Users,
+  BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -155,6 +156,12 @@ const navGroepen = [
       { href: "/gegevensintegratie", label: "Gegevensintegratie", icon: Upload },
       { href: "/export", label: "Export naar PriceShape", icon: Download },
       { href: "/instellingen", label: "Instellingen", icon: Settings },
+    ],
+  },
+  {
+    label: "Kennisplatform",
+    items: [
+      { href: "/modeldocumentatie", label: "Modeldocumentatie", icon: BookOpen },
     ],
   },
 ];

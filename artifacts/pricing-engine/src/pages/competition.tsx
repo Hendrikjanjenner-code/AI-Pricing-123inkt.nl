@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from "recharts";
 import { TrendingDown, TrendingUp, Target, AlertTriangle } from "lucide-react";
 import { useState } from "react";
+import { InfoTooltip } from "@/components/InfoTooltip";
 
 const KLASSE_KLEUREN: Record<string, string> = {
   Critical: "bg-red-500/15 text-red-700 border-red-300",
@@ -73,7 +74,10 @@ export default function ConcurrentieIntelligence() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Concurrentie-intelligentie</h1>
+        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+          Concurrentie-intelligentie
+          <InfoTooltip definitieId="pcis" />
+        </h1>
         <p className="text-muted-foreground mt-1">PCIS-scores, concurrentenrelevantie en prijspositionering per SKU.</p>
       </div>
 
@@ -85,7 +89,10 @@ export default function ConcurrentieIntelligence() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card>
             <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Gem. PCIS-score</CardTitle>
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-1">
+                Gem. PCIS-score
+                <InfoTooltip definitieId="pcis" />
+              </CardTitle>
               <Target className="h-4 w-4 text-primary" />
             </CardHeader>
             <CardContent>
