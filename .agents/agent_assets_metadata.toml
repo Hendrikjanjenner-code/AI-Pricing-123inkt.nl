@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "GXjibsbIsA3nW4Umym3b9"
+uri = "file://AI_Pricing_Engine_Platform_Overzicht.docx"
+type = "word_document"
+title = "AI Pricing Engine — Volledig Platform Overzicht & Kansen"
