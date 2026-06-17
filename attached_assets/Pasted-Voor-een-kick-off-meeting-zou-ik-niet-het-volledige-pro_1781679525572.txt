@@ -1,0 +1,250 @@
+Voor een kick-off meeting zou ik niet het volledige projectplan presenteren. Dat is 50+ pagina's. Ik zou teruggaan naar 10-12 slides die antwoord geven op drie vragen:
+
+Waarom doen we dit?
+Wat gaat het opleveren?
+Wat hebben we van het team nodig?
+
+Uit het projectplan blijkt namelijk dat het platform veel meer wordt dan een pricingtool. Het wordt een Commercial Intelligence Platform voor pricing, concurrentie, traffic, promoties, forecasting, huismerkstrategie en managementrapportages.
+
+Slide 1 – Introductie
+AI Pricing & Commercial Intelligence Platform
+
+Doel:
+
+Slimmere pricingbeslissingen
+Meer grip op concurrentie
+Meer inzicht in huismerkpotentie
+Hogere portfoliomarge
+Minder handmatig werk
+Meer onderbouwde besluitvorming
+
+Belangrijk uitgangspunt:
+
+AI ondersteunt de pricing specialist, AI vervangt de pricing specialist niet.
+
+Slide 2 – Waarom dit project?
+
+Vandaag werken we met:
+
+PriceShape
+Excel-analyses
+Handmatige concurrentiebeoordelingen
+Losse rapportages
+Veel kennis in hoofden van medewerkers
+
+Uitdagingen:
+
+Niet iedere concurrent is relevant
+Huismerkpotentie wordt niet altijd zichtbaar
+Prijsgaps zijn lastig te beheren
+Veel analyses kosten tijd
+Externe factoren zijn moeilijk te voorspellen
+Slide 3 – Wat AI wel en niet kan
+AI kan wel
+miljoenen datapunten analyseren
+patronen herkennen
+prijselasticiteit berekenen
+concurrentie analyseren
+promoties evalueren
+traffic drivers herkennen
+forecasting ondersteunen
+AI kan niet
+een oorlog voorspellen
+COVID voorspellen
+leveranciersbeslissingen voorspellen
+politieke besluiten voorspellen
+
+Voorbeeld:
+
+COVID veroorzaakte enorme vraag naar printers en thuiswerkproducten.
+
+Geen enkel AI-model had dat vooraf exact kunnen voorspellen.
+
+AI blijft daarom een adviesinstrument.
+
+Menselijke besluitvorming blijft noodzakelijk.
+
+Slide 4 – De visie voor 123inkt
+
+De kernvraag:
+
+Hoe gebruiken we A-merken om maximaal winstgevende huismerkverkoop te realiseren?
+
+Belangrijk inzicht:
+
+A-merken zorgen vaak voor:
+
+zoekverkeer
+vertrouwen
+conversie
+
+Huismerken zorgen vaak voor:
+
+hogere marge
+betere winstgevendheid
+meer commerciële ruimte
+
+Het model moet beide combineren.
+
+Slide 5 – Huismerk vs OEM Intelligence
+
+Nieuw onderdeel:
+
+PrijsGap Intelligence
+
+Per SKU bepalen:
+
+huidige OEM prijs
+huidige huismerk prijs
+optimale prijsgap
+maximale prijsgap
+break-even punt
+substitutiepotentie
+
+Vraag:
+
+Wanneer wordt een OEM-klant bereid om over te stappen naar huismerk?
+
+Dit is exact het soort analyse waar AI zeer sterk in is.
+
+Slide 6 – Concurrentie Intelligence
+
+Niet iedere concurrent telt even zwaar.
+
+Voorbeeld:
+
+123inkt verkoopt een toner voor €250.
+
+Concurrent verlaagt naar €199.
+
+Belangrijke vraag:
+
+Is dit een tijdelijke actie?
+Heeft concurrent voorraad?
+Is concurrent winstgevend?
+Is dit een stuntprijs?
+
+AI bepaalt:
+
+concurrentierelevantie
+prijsimpact
+betrouwbaarheid
+
+In plaats van blind de laagste prijs te volgen.
+
+Slide 7 – Traffic & Demand Intelligence
+
+Nieuwe inzichten:
+
+Per SKU:
+
+Traffic Driver Score
+Basket Builder Score
+Entry Product Score
+
+Vragen:
+
+Welke producten trekken bezoekers?
+Welke producten vullen winkelmandjes?
+Welke producten zorgen voor herhaalaankopen?
+Welke producten hebben veel zoekvolume?
+
+Hierdoor ontstaat inzicht in:
+
+Traffic
+Conversie
+Vraag
+Marktpotentie
+
+Slide 8 – BCG Intelligence
+
+Interne BCG
+
+Stars
+Cash Cows
+Question Marks
+Dogs
+
+Externe BCG
+
+marktvraag
+concurrentiedruk
+groeipotentie
+
+Nieuwe mogelijkheid:
+
+Automatisch signaleren wanneer:
+
+een SKU verschuift
+een categorie verschuift
+een markt verandert
+Slide 9 – Forecasting & Procurement
+
+AI ondersteunt:
+
+inkoopbeslissingen
+voorraadbeslissingen
+kostenontwikkelingen
+
+Factoren:
+
+grondstoffen
+transport
+leveranciers
+inflatie
+economische ontwikkelingen
+
+AI geeft signalen.
+
+Mens bepaalt de uiteindelijke actie.
+
+Slide 10 – Belangrijkste open vragen
+
+Uit het document "Vragen Projectplan AI" zijn dit de belangrijkste discussiepunten voor de kick-off:
+
+Scope
+Alleen Nederland?
+Partnershops?
+België?
+Concurrentie
+Wat definieert een concurrent?
+Hoe bepalen we relevantie?
+Huismerk
+Wanneer sturen we actief op substitutie?
+Wanneer beschermen we OEM?
+Forecasting
+Welke data missen we nog?
+Traffic
+Welke producten zijn trafficdrivers?
+Governance
+Welke beslissingen mogen automatisch?
+Welke vereisen menselijke goedkeuring?
+Slide 11 – Brainstormsessie
+Pricing Team
+Welke analyses kosten vandaag de meeste tijd?
+Welke pricingbeslissingen zijn lastig?
+CATMAN
+Welke categorieën hebben de grootste kansen?
+Marketing
+Welke producten trekken verkeer?
+Welke producten converteren slecht?
+Inkoop
+Welke leveranciers zijn risicovol?
+Management
+Welke inzichten missen we vandaag?
+
+Slide 12 – Gewenste eindresultaat
+
+Een platform dat dagelijks antwoord geeft op:
+
+Wat moeten we vandaag aanpassen?
+Waarom moeten we dit aanpassen?
+Wat is het verwachte effect?
+Hoe beïnvloedt dit marge?
+Hoe beïnvloedt dit traffic?
+Hoe beïnvloedt dit huismerk?
+Hoe beïnvloedt dit concurrentiepositie?
+
+En vooral:
+
+Niet meer reageren op de markt, maar de markt proactief begrijpen en benutten.
