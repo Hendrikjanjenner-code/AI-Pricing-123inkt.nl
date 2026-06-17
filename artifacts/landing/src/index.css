@@ -1,0 +1,77 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-primary: var(--blue);
+  --color-primary-foreground: #ffffff;
+  --color-accent: var(--purple);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-fg);
+  --color-border: var(--border-color);
+  --color-surface: var(--surface);
+  --color-card: var(--card-bg);
+
+  --font-sans: var(--app-font-sans);
+
+  --text-xs: 0.75rem;
+  --text-xs--line-height: calc(1 / 0.75);
+  --text-sm: 0.875rem;
+  --text-sm--line-height: calc(1.25 / 0.875);
+  --text-base: 1rem;
+  --text-base--line-height: calc(1.5 / 1);
+  --text-lg: 1.125rem;
+  --text-lg--line-height: calc(1.75 / 1.125);
+  --text-xl: 1.25rem;
+  --text-xl--line-height: calc(1.75 / 1.25);
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: calc(2 / 1.5);
+  --text-3xl: 1.875rem;
+  --text-3xl--line-height: calc(2.25 / 1.875);
+  --text-4xl: 2.25rem;
+  --text-4xl--line-height: calc(2.5 / 2.25);
+  --text-5xl: 3rem;
+  --text-5xl--line-height: 1;
+  --text-6xl: 3.75rem;
+  --text-6xl--line-height: 1;
+  --text-7xl: 4.5rem;
+  --text-7xl--line-height: 1;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+}
+
+:root {
+  --bg: #0C0F1A;
+  --surface: #141828;
+  --card-bg: #1A1F33;
+  --blue: #4F7FFF;
+  --purple: #7C6BF0;
+  --fg: #F0F4FF;
+  --muted: #2A3050;
+  --muted-fg: #8892B0;
+  --border-color: rgba(79, 127, 255, 0.15);
+  --app-font-sans: 'Inter', system-ui, sans-serif;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--app-font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+}

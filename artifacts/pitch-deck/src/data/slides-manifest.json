@@ -1,0 +1,66 @@
+[
+  {
+    "id": "a1b2c3d4-0001-4000-8000-000000000001",
+    "position": 1,
+    "filepath": "src/pages/slides/Slide1Title.tsx",
+    "title": "AI Pricing Decision Engine",
+    "description": "Titelpagina — AI Pricing Decision Engine voor 123inkt",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0002-4000-8000-000000000002",
+    "position": 2,
+    "filepath": "src/pages/slides/Slide2Probleem.tsx",
+    "title": "Het Probleem",
+    "description": "Handmatig prijsbeheer schaalt niet — tijdsinvestering, inconsistentie, gemiste kansen",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0003-4000-8000-000000000003",
+    "position": 3,
+    "filepath": "src/pages/slides/Slide3Oplossing.tsx",
+    "title": "De Oplossing",
+    "description": "AI-cockpit voor elke prijsbeslissing — workflow van data-ingest tot PriceShape",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0004-4000-8000-000000000004",
+    "position": 4,
+    "filepath": "src/pages/slides/Slide4Modules.tsx",
+    "title": "Tien Modules",
+    "description": "Overzicht van alle 10 geintegreerde platform-modules",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0005-4000-8000-000000000005",
+    "position": 5,
+    "filepath": "src/pages/slides/Slide5Resultaten.tsx",
+    "title": "Resultaten",
+    "description": "Gemeten impact: +4,2% brutomarge, -70% handmatig werk, 87% goedkeuring",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0006-4000-8000-000000000006",
+    "position": 6,
+    "filepath": "src/pages/slides/Slide6Explainability.tsx",
+    "title": "Explainability",
+    "description": "Elk advies volledig uitlegbaar — factor-breakdown, confidence score, audittrail",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0007-4000-8000-000000000007",
+    "position": 7,
+    "filepath": "src/pages/slides/Slide7Vervolgstappen.tsx",
+    "title": "Vervolgstappen",
+    "description": "Roadmap: Fase 1 actief, Fase 2 Q3 2026, Fase 3 Q1 2027",
+    "speakerNotes": ""
+  },
+  {
+    "id": "a1b2c3d4-0008-4000-8000-000000000008",
+    "position": 8,
+    "filepath": "src/pages/slides/Slide8Investering.tsx",
+    "title": "Investering en Impact",
+    "description": "EUR 2,1M geschatte jaarlijkse margewinst, terugverdientijd onder 6 maanden",
+    "speakerNotes": ""
+  }
+]
