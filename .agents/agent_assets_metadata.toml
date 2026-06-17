@@ -6,3 +6,21 @@ id = "GXjibsbIsA3nW4Umym3b9"
 uri = "file://AI_Pricing_Engine_Platform_Overzicht.docx"
 type = "word_document"
 title = "AI Pricing Engine — Volledig Platform Overzicht & Kansen"
+
+[[outputs]]
+id = "t0zBHlbJ6TspZ1LEZwC9-"
+uri = "file://.local/outputs/Pricing-Engine.pptx"
+type = "slides"
+title = "Pricing Engine.pptx"
+
+[[outputs]]
+id = "E7rlzp8qHglYTQXoDHXis"
+uri = "file://.local/outputs/AI-Pricing-Commercial-Intelligence-Platform-Kickoff.pdf"
+type = "pdf"
+title = "AI Pricing & Commercial Intelligence — Kick-off Deck (PDF)"
+
+[[outputs]]
+id = "38zxNs7kpRZUO1349bztQ"
+uri = "file://.local/outputs/AI-Pricing-Decision-Engine-Management-Deck.pdf"
+type = "pdf"
+title = "AI Pricing Decision Engine — Management Deck (PDF)"
