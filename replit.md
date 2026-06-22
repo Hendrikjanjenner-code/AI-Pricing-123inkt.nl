@@ -140,10 +140,34 @@ pnpm run typecheck
 14. `/competition/:sku_id` — PCIS sub-score bars + radar chart + competitor price table
 15. `/ab-tests` — AI vs CONTROL uplift, margin/revenue/conversion KPIs, statistical confidence
 
+## Database Initialisation (new / empty DB)
+
+Run the single bundled command to populate all demo data tables in the correct order:
+
+```bash
+python artifacts/api-server/backfill_all.py
+```
+
+This runs all 8 backfill scripts sequentially, each idempotent (already-filled tables are skipped):
+
+| # | Script | Data |
+|---|--------|------|
+| 1 | `backfill_new_tables` | Competition scores, A/B tests, CIS, elasticiteit, ISV |
+| 2 | `backfill_category_hierarchy` | Categorieënhiërarchie |
+| 3 | `backfill_bcg` | BCG-classificaties |
+| 4 | `backfill_traffic` | Traffic & zoekvolume |
+| 5 | `backfill_modules` | Concurrenten, scrape-config, uitvoerbatches |
+| 6 | `backfill_intelligence` | Kosten, marketing, OCS, inkoop, economie, BCG-transities |
+| 7 | `backfill_break_even` | Kostprijswijziging & break-even analyse |
+| 8 | `backfill_ecosystem` | Traffic driver & mandjeintelligentie |
+
+The individual scripts can still be run standalone if you only need to refresh one table group.
+
 ## Gotchas
 
 - Seed guard (`if users.count() > 0: return`) means new tables won't seed on existing DBs.
-  Run `python artifacts/api-server/backfill_new_tables.py` after adding new seeded tables.
+  Run `python artifacts/api-server/backfill_all.py` to initialise all demo data at once.
+  Add new backfill scripts to the `STEPS` list in `backfill_all.py` to keep it complete.
 - New pages (competition, ab-tests) use direct `fetch()` with Bearer token, not generated hooks.
 
 ## Environment Variables
