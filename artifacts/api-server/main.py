@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 
 from database import engine, Base
 from seed import seed_database
+from migrate import run_migrations
 from routes import (
     auth, products, categories, recommendations,
     dashboard, uploads, data_quality, substitutions,
@@ -24,8 +25,11 @@ from routes import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create tables and seed on startup
+    # 1. Create any brand-new tables
     Base.metadata.create_all(bind=engine)
+    # 2. Add missing columns to existing tables (idempotent)
+    run_migrations(engine, Base.metadata)
+    # 3. Seed demo data if the DB is empty
     seed_database()
     yield
 
