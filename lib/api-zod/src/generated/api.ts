@@ -379,7 +379,7 @@ export const ListRecommendationsResponse = zod.object({
         ])
         .nullish(),
       approved_by: zod.string().nullish(),
-      pushed_to_priceshape: zod.boolean(),
+      exported: zod.boolean(),
       model_version: zod.string().nullish(),
     }),
   ),
@@ -433,7 +433,7 @@ export const GetRecommendationResponse = zod.object({
       ])
       .nullish(),
     approved_by: zod.string().nullish(),
-    pushed_to_priceshape: zod.boolean(),
+    exported: zod.boolean(),
     model_version: zod.string().nullish(),
   }),
   product: zod.object({
@@ -536,7 +536,7 @@ export const ApproveRecommendationResponse = zod.object({
     ])
     .nullish(),
   approved_by: zod.string().nullish(),
-  pushed_to_priceshape: zod.boolean(),
+  exported: zod.boolean(),
   model_version: zod.string().nullish(),
 });
 
@@ -585,7 +585,7 @@ export const RejectRecommendationResponse = zod.object({
     ])
     .nullish(),
   approved_by: zod.string().nullish(),
-  pushed_to_priceshape: zod.boolean(),
+  exported: zod.boolean(),
   model_version: zod.string().nullish(),
 });
 
@@ -635,7 +635,7 @@ export const OverrideRecommendationResponse = zod.object({
     ])
     .nullish(),
   approved_by: zod.string().nullish(),
-  pushed_to_priceshape: zod.boolean(),
+  exported: zod.boolean(),
   model_version: zod.string().nullish(),
 });
 
@@ -775,7 +775,7 @@ export const UploadPricesResponse = zod.object({
 });
 
 /**
- * @summary Upload competitor prices CSV from PriceShape
+ * @summary Upload competitor prices CSV
  */
 export const UploadCompetitorPricesBody = zod.object({
   filename: zod.string().optional(),
@@ -945,14 +945,14 @@ export const GetSkuHistoryResponse = zod.object({
         ])
         .nullish(),
       approved_by: zod.string().nullish(),
-      pushed_to_priceshape: zod.boolean(),
+      exported: zod.boolean(),
       model_version: zod.string().nullish(),
     }),
   ),
 });
 
 /**
- * @summary Export approved recommendations as CSV for PriceShape
+ * @summary Export approved recommendations as CSV (prijsexport)
  */
 export const ExportRecommendationsQueryParams = zod.object({
   date: zod.coerce.string().nullish(),

@@ -41,7 +41,7 @@ export interface Recommendation {
   approval_status?: RecommendationApprovalStatus;
   /** @nullable */
   approved_by?: string | null;
-  pushed_to_priceshape: boolean;
+  exported: boolean;
   /** @nullable */
   model_version?: string | null;
 }

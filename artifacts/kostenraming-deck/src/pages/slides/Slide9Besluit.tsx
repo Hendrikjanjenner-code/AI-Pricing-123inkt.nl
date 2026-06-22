@@ -26,7 +26,7 @@ export default function Slide9Besluit() {
       <div className="absolute" style={{ top: "12vh", left: "6vw", right: "6vw" }}>
         <div style={{ width: "3.5vw", height: "0.35vh", background: "#4F7FFF", marginBottom: "1.8vh" }} />
         <h2 style={{ fontSize: "3.2vw", fontWeight: 700, color: "#F0F4FF", lineHeight: 1.2, textWrap: "balance", maxWidth: "72vw" }}>
-          Gevraagd besluit: goedkeuring voor pilotbudget van €106.100 voor 12 weken
+          Gevraagd besluit: goedkeuring voor pilotbudget van €94.000 voor 12 weken
         </h2>
       </div>
 
@@ -41,21 +41,21 @@ export default function Slide9Besluit() {
           <div style={{ display: "flex", alignItems: "flex-start", gap: "1.2vw", marginBottom: "2vh" }}>
             <div style={{ width: "0.5vw", height: "0.5vw", borderRadius: "50%", background: "#4F7FFF", marginTop: "1.2vh", flexShrink: 0 }} />
             <div style={{ fontSize: "1.9vw", color: "#F0F4FF", lineHeight: 1.5 }}>
-              Eenmalige pilotkosten: <strong style={{ color: "#4F7FFF" }}>€87.500</strong> — setup, integratie en data-ontsluiting
+              Eenmalige pilotkosten: <strong style={{ color: "#4F7FFF" }}>€80.500</strong> — setup, scraping-configuratie en data-ontsluiting
             </div>
           </div>
 
           <div style={{ display: "flex", alignItems: "flex-start", gap: "1.2vw", marginBottom: "2vh" }}>
             <div style={{ width: "0.5vw", height: "0.5vw", borderRadius: "50%", background: "#4F7FFF", marginTop: "1.2vh", flexShrink: 0 }} />
             <div style={{ fontSize: "1.9vw", color: "#F0F4FF", lineHeight: 1.5 }}>
-              Drie maanden doorlopende kosten: <strong style={{ color: "#4F7FFF" }}>€18.600</strong> (3 × €6.200)
+              Drie maanden doorlopende kosten: <strong style={{ color: "#4F7FFF" }}>€13.500</strong> (3 × €4.500)
             </div>
           </div>
 
           <div style={{ display: "flex", alignItems: "flex-start", gap: "1.2vw", marginBottom: "2vh" }}>
             <div style={{ width: "0.5vw", height: "0.5vw", borderRadius: "50%", background: "#4F7FFF", marginTop: "1.2vh", flexShrink: 0 }} />
             <div style={{ fontSize: "1.9vw", color: "#F0F4FF", lineHeight: 1.5 }}>
-              Totaal pilotbudget: <strong style={{ color: "#4F7FFF" }}>€106.100</strong> bruto over 12 weken
+              Totaal pilotbudget: <strong style={{ color: "#4F7FFF" }}>€94.000</strong> bruto over 12 weken
             </div>
           </div>
 
@@ -87,7 +87,7 @@ export default function Slide9Besluit() {
               </div>
               <div>
                 <div style={{ fontSize: "1.7vw", color: "#F0F4FF", fontWeight: 700, lineHeight: 1.2 }}>Week 1: contractering</div>
-                <div style={{ fontSize: "1.4vw", color: "#8892B0", marginTop: "0.3vh" }}>PriceShape SLA ondertekening, AWS-account activering</div>
+                <div style={{ fontSize: "1.4vw", color: "#8892B0", marginTop: "0.3vh" }}>AWS-account activering, scraping-infrastructuur opleveren</div>
               </div>
             </div>
 

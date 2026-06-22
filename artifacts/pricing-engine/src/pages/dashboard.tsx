@@ -68,7 +68,7 @@ export default function Dashboard() {
                 <InfoTooltip inline={{
                   naam: "Openstaande Adviezen",
                   korteUitleg: "Aantal prijsadviezen dat nog wacht op goedkeuring of afwijzing door een pricing analist.",
-                  uitgebreideUitleg: "Openstaande adviezen zijn prijsaanbevelingen die door het AI-model zijn gegenereerd maar nog niet zijn verwerkt. Ze staan klaar voor review, goedkeuring (→ uitvoeren in PriceShape) of afwijzing.",
+                  uitgebreideUitleg: "Openstaande adviezen zijn prijsaanbevelingen die door het AI-model zijn gegenereerd maar nog niet zijn verwerkt. Ze staan klaar voor review, goedkeuring (→ uitvoeren via de interne prijsmodule) of afwijzing.",
                   interpretatie: "Hoog getal = veel werkload voor pricing team.\nLaag getal = team heeft backlog verwerkt of weinig adviezen beschikbaar.",
                   businessImpact: "Adviezen ouder dan 2 dagen kunnen verouderd zijn doordat de markt is veranderd. Prioriteer verse adviezen met hoge margewaarde.",
                 }} />

@@ -2451,7 +2451,7 @@ export const useUploadPrices = <
 };
 
 /**
- * @summary Upload competitor prices CSV from PriceShape
+ * @summary Upload competitor prices CSV
  */
 export const getUploadCompetitorPricesUrl = () => {
   return `/api/uploads/competitor-prices`;
@@ -2518,7 +2518,7 @@ export type UploadCompetitorPricesMutationBody = BodyType<FileUploadRequest>;
 export type UploadCompetitorPricesMutationError = ErrorType<unknown>;
 
 /**
- * @summary Upload competitor prices CSV from PriceShape
+ * @summary Upload competitor prices CSV
  */
 export const useUploadCompetitorPrices = <
   TError = ErrorType<unknown>,
@@ -3063,7 +3063,7 @@ export function useGetSkuHistory<
 }
 
 /**
- * @summary Export approved recommendations as CSV for PriceShape
+ * @summary Export approved recommendations as CSV (prijsexport)
  */
 export const getExportRecommendationsUrl = (
   params?: ExportRecommendationsParams,
@@ -3136,7 +3136,7 @@ export type ExportRecommendationsQueryResult = NonNullable<
 export type ExportRecommendationsQueryError = ErrorType<unknown>;
 
 /**
- * @summary Export approved recommendations as CSV for PriceShape
+ * @summary Export approved recommendations as CSV (prijsexport)
  */
 
 export function useExportRecommendations<

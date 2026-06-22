@@ -154,7 +154,7 @@ const navGroepen = [
     items: [
       { href: "/datakwaliteit", label: "Datakwaliteit", icon: Database },
       { href: "/gegevensintegratie", label: "Gegevensintegratie", icon: Upload },
-      { href: "/export", label: "Export naar PriceShape", icon: Download },
+      { href: "/export", label: "Prijsexport", icon: Download },
       { href: "/instellingen", label: "Instellingen", icon: Settings },
     ],
   },

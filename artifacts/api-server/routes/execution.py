@@ -1,6 +1,6 @@
 """
 Price Execution routes — /api/execution/...
-Uitvoering van goedgekeurde prijswijzigingen zonder PriceShape.
+Uitvoering van goedgekeurde prijswijzigingen via de interne prijsmodule.
 """
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from sqlalchemy.orm import Session

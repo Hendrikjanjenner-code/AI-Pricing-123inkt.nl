@@ -154,7 +154,7 @@ class FactPricingRecommendationDaily(Base):
     approval_status = Column(String(50), default="pending")
     approved_by = Column(String(100))
     approved_at = Column(DateTime)
-    pushed_to_priceshape = Column(Boolean, default=False)
+    exported = Column(Boolean, default=False)
     model_version = Column(String(50))
     override_price = Column(Numeric(10, 4))
     override_reason = Column(Text)

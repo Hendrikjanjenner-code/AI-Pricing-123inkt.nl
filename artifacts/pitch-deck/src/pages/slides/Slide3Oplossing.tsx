@@ -30,7 +30,7 @@ export default function Slide3Oplossing() {
             Een AI-cockpit voor elke prijsbeslissing
           </h2>
           <p style={{ fontSize: "1.2vw", color: "#8892B0", lineHeight: 1.7, marginBottom: "4vh" }}>
-            Het platform genereert dagelijks aanbevelingen per SKU op basis van 8 geoptimaliseerde strategieen. Analisten keuren goed, verwerpen of overschrijven — het systeem leert en publiceert automatisch naar PriceShape.
+            Het platform genereert dagelijks aanbevelingen per SKU op basis van 8 geoptimaliseerde strategieen. Analisten keuren goed, verwerpen of overschrijven — het systeem leert en publiceert automatisch via de ingebouwde prijsmodule.
           </p>
 
           <div style={{ display: "flex", flexDirection: "column", gap: "2vh" }}>
@@ -57,8 +57,8 @@ export default function Slide3Oplossing() {
                 <div style={{ width: "0.4vw", height: "0.4vw", borderRadius: "50%", background: "#4F7FFF" }} />
               </div>
               <div>
-                <div style={{ fontSize: "1.1vw", fontWeight: 600, color: "#F0F4FF", marginBottom: "0.3vh" }}>Directe PriceShape-integratie</div>
-                <div style={{ fontSize: "0.95vw", color: "#8892B0", lineHeight: 1.5 }}>Goedgekeurde prijzen worden automatisch als CSV geexporteerd en in PriceShape geladen.</div>
+                <div style={{ fontSize: "1.1vw", fontWeight: 600, color: "#F0F4FF", marginBottom: "0.3vh" }}>Ingebouwde concurrent-scraping</div>
+                <div style={{ fontSize: "0.95vw", color: "#8892B0", lineHeight: 1.5 }}>Concurrent-prijzen worden dagelijks automatisch gescraped en direct verwerkt in de prijsmotor.</div>
               </div>
             </div>
           </div>
@@ -119,8 +119,8 @@ export default function Slide3Oplossing() {
                 <span style={{ color: "white", fontSize: "1vw", fontWeight: 700 }}>4</span>
               </div>
               <div>
-                <div style={{ fontSize: "1vw", fontWeight: 600, color: "#F0F4FF" }}>Publicatie PriceShape</div>
-                <div style={{ fontSize: "0.85vw", color: "#8892B0" }}>CSV-export, live prijzen zichtbaar binnen minuten</div>
+                <div style={{ fontSize: "1vw", fontWeight: 600, color: "#F0F4FF" }}>Directe prijspublicatie</div>
+                <div style={{ fontSize: "0.85vw", color: "#8892B0" }}>Interne prijsmodule publiceert goedgekeurde prijzen direct naar de webshop</div>
               </div>
             </div>
           </div>

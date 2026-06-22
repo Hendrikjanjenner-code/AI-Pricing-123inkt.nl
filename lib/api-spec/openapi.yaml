@@ -616,7 +616,7 @@ paths:
     post:
       operationId: uploadCompetitorPrices
       tags: [uploads]
-      summary: Upload competitor prices CSV from PriceShape
+      summary: Upload competitor prices CSV
       requestBody:
         required: true
         content:
@@ -745,7 +745,7 @@ paths:
     get:
       operationId: exportRecommendations
       tags: [exports]
-      summary: Export approved recommendations as CSV for PriceShape
+      summary: Export approved recommendations as CSV (prijsexport)
       parameters:
         - name: date
           in: query
@@ -1076,11 +1076,11 @@ components:
           enum: ["pending", "approved", "rejected", "overridden", null]
         approved_by:
           type: ["string", "null"]
-        pushed_to_priceshape:
+        exported:
           type: boolean
         model_version:
           type: ["string", "null"]
-      required: [id, date, sku_id, product_name, pushed_to_priceshape]
+      required: [id, date, sku_id, product_name, exported]
 
     RecommendationListResponse:
       type: object

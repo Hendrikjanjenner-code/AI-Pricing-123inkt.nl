@@ -18,7 +18,7 @@ export default function Slide5DoorlopendeKosten() {
       <div className="absolute" style={{ top: "12vh", left: "6vw", right: "6vw" }}>
         <div style={{ width: "3.5vw", height: "0.35vh", background: "#4F7FFF", marginBottom: "1.8vh" }} />
         <h2 style={{ fontSize: "3.2vw", fontWeight: 700, color: "#F0F4FF", lineHeight: 1.2, textWrap: "balance", maxWidth: "78vw" }}>
-          Doorlopende kosten van €6.200/maand zijn stabiel na pilotafronding
+          Doorlopende kosten van €4.500/maand zijn stabiel na pilotafronding
         </h2>
       </div>
 
@@ -36,17 +36,10 @@ export default function Slide5DoorlopendeKosten() {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "3fr 4fr 1.8fr 1.8fr", padding: "1.5vh 2vw", background: "#0F1422", borderBottom: "1px solid rgba(79,127,255,0.1)" }}>
-            <span style={{ fontSize: "1.7vw", color: "#F0F4FF" }}>PriceShape licentie</span>
-            <span style={{ fontSize: "1.6vw", color: "#8892B0" }}>SaaS-abonnement tot 1.000 SKU's</span>
-            <span style={{ fontSize: "1.7vw", color: "#F0F4FF", textAlign: "right", fontWeight: 700 }}>€2.000</span>
-            <span style={{ fontSize: "1.7vw", color: "#8892B0", textAlign: "right" }}>€24.000</span>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "3fr 4fr 1.8fr 1.8fr", padding: "1.5vh 2vw", background: "#0C0F1A", borderBottom: "1px solid rgba(79,127,255,0.1)" }}>
             <span style={{ fontSize: "1.7vw", color: "#F0F4FF" }}>Cloud infra (AWS)</span>
-            <span style={{ fontSize: "1.6vw", color: "#8892B0" }}>ECS compute, RDS, S3 opslag</span>
-            <span style={{ fontSize: "1.7vw", color: "#F0F4FF", textAlign: "right", fontWeight: 700 }}>€1.800</span>
-            <span style={{ fontSize: "1.7vw", color: "#8892B0", textAlign: "right" }}>€21.600</span>
+            <span style={{ fontSize: "1.6vw", color: "#8892B0" }}>ECS compute, RDS, S3 opslag + scraping-proxies</span>
+            <span style={{ fontSize: "1.7vw", color: "#F0F4FF", textAlign: "right", fontWeight: 700 }}>€2.100</span>
+            <span style={{ fontSize: "1.7vw", color: "#8892B0", textAlign: "right" }}>€25.200</span>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "3fr 4fr 1.8fr 1.8fr", padding: "1.5vh 2vw", background: "#0F1422", borderBottom: "1px solid rgba(79,127,255,0.1)" }}>
@@ -66,12 +59,12 @@ export default function Slide5DoorlopendeKosten() {
           <div style={{ display: "grid", gridTemplateColumns: "3fr 4fr 1.8fr 1.8fr", padding: "1.8vh 2vw", background: "#141828", borderRadius: "0 0 0.4vw 0.4vw" }}>
             <span style={{ fontSize: "1.9vw", color: "#F0F4FF", fontWeight: 700 }}>Totaal doorlopend</span>
             <span style={{ fontSize: "1.6vw", color: "#8892B0" }}>Na pilotafronding</span>
-            <span style={{ fontSize: "2vw", color: "#4F7FFF", textAlign: "right", fontWeight: 700 }}>€6.200</span>
-            <span style={{ fontSize: "2vw", color: "#4F7FFF", textAlign: "right", fontWeight: 700 }}>€74.400</span>
+            <span style={{ fontSize: "2vw", color: "#4F7FFF", textAlign: "right", fontWeight: 700 }}>€4.500</span>
+            <span style={{ fontSize: "2vw", color: "#4F7FFF", textAlign: "right", fontWeight: 700 }}>€54.000</span>
           </div>
 
           <div style={{ fontSize: "1.2vw", color: "#8892B0", marginTop: "1.5vh", opacity: 0.7 }}>
-            Bron: AWS prijsmodel juni 2026, PriceShape tariefblad Q2 2026
+            Bron: AWS prijsmodel juni 2026, interne tariefkaart FTE
           </div>
         </div>
 
@@ -80,7 +73,7 @@ export default function Slide5DoorlopendeKosten() {
           <div style={{ background: "#141828", border: "1px solid rgba(79,127,255,0.15)", borderRadius: "0.5vw", padding: "3vh 2vw" }}>
             <div style={{ fontSize: "1vw", fontWeight: 700, color: "#4F7FFF", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "1.5vh" }}>Schaalbaarheid</div>
             <div style={{ fontSize: "1.7vw", color: "#F0F4FF", lineHeight: 1.55, marginBottom: "1.5vh" }}>
-              Bij uitrol naar 26.000+ SKU's stijgen de PriceShape-kosten naar het enterprise-tarief (indicatief €8.500/mnd).
+              Bij uitrol naar 26.000+ SKU's schalen de scraping-infrastructuurkosten mee: extra proxycapaciteit indicatief +€800/mnd.
             </div>
             <div style={{ fontSize: "1.7vw", color: "#8892B0", lineHeight: 1.55 }}>
               AWS-kosten schalen lineair mee; verwacht circa €6.000/mnd bij volledige uitrol.

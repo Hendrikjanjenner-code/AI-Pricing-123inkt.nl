@@ -43,7 +43,7 @@ export default function Slide7Vervolgstappen() {
               </div>
               <div style={{ display: "flex", gap: "0.8vw", alignItems: "flex-start" }}>
                 <div style={{ width: "0.4vw", height: "0.4vw", borderRadius: "50%", background: "#4F7FFF", marginTop: "0.6vh", flexShrink: 0 }} />
-                <span style={{ fontSize: "0.95vw", color: "#8892B0", lineHeight: 1.5 }}>PriceShape-koppeling actief</span>
+                <span style={{ fontSize: "0.95vw", color: "#8892B0", lineHeight: 1.5 }}>Scraping-module live & gevalideerd</span>
               </div>
               <div style={{ display: "flex", gap: "0.8vw", alignItems: "flex-start" }}>
                 <div style={{ width: "0.4vw", height: "0.4vw", borderRadius: "50%", background: "#4F7FFF", marginTop: "0.6vh", flexShrink: 0 }} />

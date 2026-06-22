@@ -1,4 +1,4 @@
-"""Export endpoint — approved recommendations as CSV for PriceShape."""
+"""Export endpoint — approved recommendations as CSV (prijsexport)."""
 import csv
 import io
 from datetime import date, datetime
@@ -25,7 +25,7 @@ def export_recommendations(
     """
     q = db.query(models.FactPricingRecommendationDaily).filter(
         models.FactPricingRecommendationDaily.approval_status == "approved",
-        models.FactPricingRecommendationDaily.pushed_to_priceshape == False,
+        models.FactPricingRecommendationDaily.exported == False,
     )
     if date_filter:
         try:
@@ -36,7 +36,7 @@ def export_recommendations(
 
     count = q.count()
     export_date = date_filter or datetime.utcnow().date().isoformat()
-    filename = f"priceshape_export_{export_date}.csv"
+    filename = f"prijsexport_{export_date}.csv"
 
     return {
         "exported_count": count,
@@ -89,13 +89,12 @@ def download_recommendations_csv(
             r.approved_by or "",
             r.date.isoformat() if r.date else "",
         ])
-        # Mark as pushed
-        r.pushed_to_priceshape = True
+        r.exported = True
 
     db.commit()
     output.seek(0)
     export_date = date_filter or datetime.utcnow().date().isoformat()
-    filename = f"priceshape_export_{export_date}.csv"
+    filename = f"prijsexport_{export_date}.csv"
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",

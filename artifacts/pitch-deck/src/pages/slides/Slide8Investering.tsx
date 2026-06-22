@@ -105,7 +105,7 @@ export default function Slide8Investering() {
                 <div style={{ width: "1.4vw", height: "1.4vw", borderRadius: "50%", background: "rgba(79,127,255,0.2)", border: "1px solid #4F7FFF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                   <svg width="55%" height="55%" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#4F7FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 </div>
-                <span style={{ fontSize: "0.95vw", color: "#F0F4FF", fontWeight: 500 }}>PriceShape-export getested en werkend</span>
+                <span style={{ fontSize: "0.95vw", color: "#F0F4FF", fontWeight: 500 }}>Interne prijspublicatie gevalideerd</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "1vw" }}>
                 <div style={{ width: "1.4vw", height: "1.4vw", borderRadius: "50%", background: "rgba(79,127,255,0.2)", border: "1px solid #4F7FFF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>

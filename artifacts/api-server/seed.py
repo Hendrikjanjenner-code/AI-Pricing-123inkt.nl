@@ -261,7 +261,7 @@ def seed_database():
                 safety_status=safety,
                 approval_status=approval,
                 approved_by=approved_by,
-                pushed_to_priceshape=False,
+                exported=False,
                 model_version="v1.0.0",
             ))
 
@@ -417,7 +417,7 @@ def seed_database():
         for upload_type, filename in [
             ("products", "product_master_2024_q4.csv"),
             ("sales", "sales_history_90days.csv"),
-            ("competitor_prices", "priceshape_export_2024_12_01.csv"),
+            ("competitor_prices", "concurrent_prijzen_2024_12_01.csv"),
             ("inventory", "stock_levels_current.csv"),
         ]:
             db.add(models.ImportJob(

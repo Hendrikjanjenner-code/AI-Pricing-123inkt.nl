@@ -18,7 +18,7 @@ export default function Slide4EenmaligeKosten() {
       <div className="absolute" style={{ top: "12vh", left: "6vw", right: "6vw" }}>
         <div style={{ width: "3.5vw", height: "0.35vh", background: "#4F7FFF", marginBottom: "1.8vh" }} />
         <h2 style={{ fontSize: "3.2vw", fontWeight: 700, color: "#F0F4FF", lineHeight: 1.2, textWrap: "balance", maxWidth: "78vw" }}>
-          Eenmalige kosten van €87.500 dekken integratie, data-ontsluiting en modelsetup
+          Eenmalige kosten van €80.500 dekken scraping-configuratie, data-ontsluiting en modelsetup
         </h2>
       </div>
 
@@ -55,9 +55,9 @@ export default function Slide4EenmaligeKosten() {
 
         {/* Row 3 */}
         <div style={{ display: "grid", gridTemplateColumns: "3fr 4fr 1.5fr", padding: "1.5vh 2vw", background: "#0F1422", borderBottom: "1px solid rgba(79,127,255,0.1)" }}>
-          <span style={{ fontSize: "1.7vw", color: "#F0F4FF" }}>Integratie PriceShape API</span>
-          <span style={{ fontSize: "1.6vw", color: "#8892B0" }}>Koppeling export-feed + webhook validatie</span>
-          <span style={{ fontSize: "1.7vw", color: "#F0F4FF", textAlign: "right", fontWeight: 700 }}>€12.000</span>
+          <span style={{ fontSize: "1.7vw", color: "#F0F4FF" }}>Scraping-configuratie & validatie</span>
+          <span style={{ fontSize: "1.6vw", color: "#8892B0" }}>CSS-selectors instellen, proxy-config & data-validatie</span>
+          <span style={{ fontSize: "1.7vw", color: "#F0F4FF", textAlign: "right", fontWeight: 700 }}>€5.000</span>
         </div>
 
         {/* Row 4 */}
@@ -78,7 +78,7 @@ export default function Slide4EenmaligeKosten() {
         <div style={{ display: "grid", gridTemplateColumns: "3fr 4fr 1.5fr", padding: "1.8vh 2vw", background: "#141828", borderRadius: "0 0 0.4vw 0.4vw" }}>
           <span style={{ fontSize: "1.9vw", color: "#F0F4FF", fontWeight: 700 }}>Totaal eenmalig</span>
           <span style={{ fontSize: "1.6vw", color: "#8892B0" }}>Inclusief contingentie 0%</span>
-          <span style={{ fontSize: "2vw", color: "#4F7FFF", textAlign: "right", fontWeight: 700 }}>€87.500</span>
+          <span style={{ fontSize: "2vw", color: "#4F7FFF", textAlign: "right", fontWeight: 700 }}>€80.500</span>
         </div>
 
         <div style={{ fontSize: "1.2vw", color: "#8892B0", marginTop: "1.5vh", opacity: 0.7 }}>

@@ -146,7 +146,7 @@ export default function LandingPage() {
               { num: "01", title: "Data-ingest", desc: "Verkoop, voorraad, concurrentprijzen en historische data worden dagelijks geladen via CSV-upload of directe koppeling.", color: "#4F7FFF" },
               { num: "02", title: "AI-prijsmotor", desc: "8 geoptimaliseerde strategieën berekenen de ideale prijs per SKU, met veiligheidsregels en een confidence score.", color: "#7C6BF0" },
               { num: "03", title: "Analist-review", desc: "Pricing analisten zien alle aanbevelingen in één cockpit — inclusief uitleg, factoren en audittrail — en keuren goed of verwerpen.", color: "#4F7FFF" },
-              { num: "04", title: "Publicatie", desc: "Goedgekeurde prijzen worden automatisch geëxporteerd naar PriceShape en zijn binnen minuten live in de webshop.", color: "#7C6BF0" },
+              { num: "04", title: "Publicatie", desc: "Goedgekeurde prijzen worden rechtstreeks gepubliceerd via de interne prijsmodule en zijn binnen minuten live in de webshop.", color: "#7C6BF0" },
             ].map((step) => (
               <div key={step.num} style={{ background: "rgba(20,24,40,0.9)", border: "1px solid rgba(79,127,255,0.15)", borderRadius: "16px", padding: "32px 28px" }}>
                 <div style={{ fontSize: "2.5rem", fontWeight: 900, color: step.color, opacity: 0.4, lineHeight: 1, marginBottom: "16px" }}>{step.num}</div>

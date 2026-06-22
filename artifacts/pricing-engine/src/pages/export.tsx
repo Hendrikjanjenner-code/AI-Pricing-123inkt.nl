@@ -8,7 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { Download, ExternalLink, CheckCircle } from "lucide-react";
 
-export default function ExportPrijsShape() {
+export default function Prijsexport() {
   const [datum, setDatum] = useState(format(new Date(), "yyyy-MM-dd"));
   const { toast } = useToast();
   const exportMut = useExportRecommendations();
@@ -27,7 +27,7 @@ export default function ExportPrijsShape() {
   return (
     <div className="space-y-6 max-w-3xl">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Export naar PriceShape</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Prijsexport</h1>
         <p className="text-muted-foreground mt-1">Genereer de definitieve prijspayload voor downstream systemen.</p>
       </div>
 
@@ -61,7 +61,7 @@ export default function ExportPrijsShape() {
                   </a>
                 </Button>
                 <Button variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-100">
-                  <ExternalLink className="w-4 h-4 mr-2" /> Doorsturen naar PriceShape API
+                  <ExternalLink className="w-4 h-4 mr-2" /> Doorsturen naar interne prijsmodule
                 </Button>
               </div>
             </div>

@@ -32,7 +32,7 @@ def _rec_out(r: models.FactPricingRecommendationDaily, product: Optional[models.
         "safety_status": r.safety_status,
         "approval_status": r.approval_status,
         "approved_by": r.approved_by,
-        "pushed_to_priceshape": r.pushed_to_priceshape,
+        "exported": r.exported,
         "model_version": r.model_version,
     }
 

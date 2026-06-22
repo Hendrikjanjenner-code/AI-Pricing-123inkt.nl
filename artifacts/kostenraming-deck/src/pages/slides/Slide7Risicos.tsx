@@ -53,8 +53,8 @@ export default function Slide7Risicos() {
         {/* Row 2 */}
         <div style={{ display: "grid", gridTemplateColumns: "3fr 1.2fr 1.2fr 4fr", padding: "2.5vh 2vw", background: "#0C0F1A", borderBottom: "1px solid rgba(79,127,255,0.12)", alignItems: "start" }}>
           <div>
-            <div style={{ fontSize: "1.8vw", color: "#F0F4FF", fontWeight: 700, lineHeight: 1.3 }}>PriceShape API-wijzigingen</div>
-            <div style={{ fontSize: "1.5vw", color: "#8892B0", lineHeight: 1.4, marginTop: "0.5vh" }}>Breaking changes in externe API onderbreken de export-feed</div>
+            <div style={{ fontSize: "1.8vw", color: "#F0F4FF", fontWeight: 700, lineHeight: 1.3 }}>Concurrent-site structuurwijzigingen</div>
+            <div style={{ fontSize: "1.5vw", color: "#8892B0", lineHeight: 1.4, marginTop: "0.5vh" }}>CSS-selectors verouderen wanneer concurrenten hun webshop-layout wijzigen</div>
           </div>
           <div style={{ display: "flex", alignItems: "center" }}>
             <span style={{ display: "inline-block", background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.35)", borderRadius: "0.3vw", padding: "0.4vh 0.8vw", fontSize: "1.5vw", color: "#22C55E", fontWeight: 700 }}>Laag</span>
@@ -63,7 +63,7 @@ export default function Slide7Risicos() {
             <span style={{ display: "inline-block", background: "rgba(245,158,11,0.15)", border: "1px solid rgba(245,158,11,0.4)", borderRadius: "0.3vw", padding: "0.4vh 0.8vw", fontSize: "1.5vw", color: "#F59E0B", fontWeight: 700 }}>Middel</span>
           </div>
           <div style={{ fontSize: "1.6vw", color: "#8892B0", lineHeight: 1.5 }}>
-            Contract bevat 30-dagen-notificatie SLA bij API-wijzigingen; integratie via versioneerde webhook.
+            Scraping-monitoring detecteert selectorfouten automatisch; herstel via configuratie-update zonder codewijziging.
           </div>
         </div>
 
