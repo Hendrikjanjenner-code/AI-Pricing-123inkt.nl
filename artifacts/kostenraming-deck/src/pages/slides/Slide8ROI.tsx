@@ -33,26 +33,26 @@ export default function Slide8ROI() {
           <div style={{ marginBottom: "1.5vh" }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5vh" }}>
               <span style={{ fontSize: "1.7vw", color: "#8892B0" }}>Eenmalige pilotkosten</span>
-              <span style={{ fontSize: "1.7vw", color: "#F0F4FF", fontWeight: 700 }}>€87.500</span>
+              <span style={{ fontSize: "1.7vw", color: "#F0F4FF", fontWeight: 700 }}>€850</span>
             </div>
             <div style={{ height: "0.6vh", background: "#141828", borderRadius: "0.3vh", overflow: "hidden" }}>
-              <div style={{ width: "28%", height: "100%", background: "#4F7FFF" }} />
+              <div style={{ width: "2%", height: "100%", background: "#4F7FFF" }} />
             </div>
           </div>
 
           <div style={{ marginBottom: "3vh" }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5vh" }}>
               <span style={{ fontSize: "1.7vw", color: "#8892B0" }}>Doorlopende kosten (12 mnd)</span>
-              <span style={{ fontSize: "1.7vw", color: "#F0F4FF", fontWeight: 700 }}>€74.400</span>
+              <span style={{ fontSize: "1.7vw", color: "#F0F4FF", fontWeight: 700 }}>€54.000</span>
             </div>
             <div style={{ height: "0.6vh", background: "#141828", borderRadius: "0.3vh", overflow: "hidden" }}>
-              <div style={{ width: "24%", height: "100%", background: "#7C6BF0" }} />
+              <div style={{ width: "98%", height: "100%", background: "#7C6BF0" }} />
             </div>
           </div>
 
           <div style={{ display: "flex", justifyContent: "space-between", padding: "1.5vh 0", borderTop: "1px solid rgba(79,127,255,0.3)", marginBottom: "3.5vh" }}>
             <span style={{ fontSize: "1.9vw", color: "#F0F4FF", fontWeight: 700 }}>Totaal jaar 1</span>
-            <span style={{ fontSize: "2vw", color: "#4F7FFF", fontWeight: 700 }}>€161.900</span>
+            <span style={{ fontSize: "2vw", color: "#4F7FFF", fontWeight: 700 }}>€54.850</span>
           </div>
 
           <div style={{ fontSize: "1.2vw", fontWeight: 700, color: "#8892B0", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "2vh" }}>Verwachte jaarlijkse baten (uitrol)</div>
@@ -88,14 +88,14 @@ export default function Slide8ROI() {
 
           <div style={{ background: "rgba(34,197,94,0.08)", border: "1px solid rgba(34,197,94,0.25)", borderRadius: "0.5vw", padding: "3vh 2.5vw" }}>
             <div style={{ fontSize: "1vw", fontWeight: 700, color: "#22C55E", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "1.5vh" }}>Terugverdientijd</div>
-            <div style={{ fontSize: "5vw", fontWeight: 700, color: "#22C55E", lineHeight: 1 }}>0,9</div>
-            <div style={{ fontSize: "1.5vw", color: "#8892B0", marginTop: "0.5vh" }}>maanden na volledige uitrol</div>
+            <div style={{ fontSize: "5vw", fontWeight: 700, color: "#22C55E", lineHeight: 1 }}>&lt; 1</div>
+            <div style={{ fontSize: "1.5vw", color: "#8892B0", marginTop: "0.5vh" }}>maand na volledige uitrol</div>
           </div>
 
           <div style={{ background: "#141828", border: "1px solid rgba(79,127,255,0.2)", borderRadius: "0.5vw", padding: "2.5vh 2.5vw" }}>
             <div style={{ fontSize: "1vw", fontWeight: 700, color: "#4F7FFF", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "1vh" }}>ROI jaar 1 (post-uitrol)</div>
-            <div style={{ fontSize: "3.8vw", fontWeight: 700, color: "#4F7FFF", lineHeight: 1 }}>16,8×</div>
-            <div style={{ fontSize: "1.4vw", color: "#8892B0", marginTop: "0.5vh" }}>op totale jaarkosten €161.900</div>
+            <div style={{ fontSize: "3.8vw", fontWeight: 700, color: "#4F7FFF", lineHeight: 1 }}>49×</div>
+            <div style={{ fontSize: "1.4vw", color: "#8892B0", marginTop: "0.5vh" }}>op totale jaarkosten €54.850</div>
           </div>
 
           <div style={{ background: "#141828", border: "1px solid rgba(79,127,255,0.15)", borderRadius: "0.5vw", padding: "2vh 2vw" }}>

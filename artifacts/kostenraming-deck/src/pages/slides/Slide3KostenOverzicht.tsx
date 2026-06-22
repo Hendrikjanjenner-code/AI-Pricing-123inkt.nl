@@ -18,7 +18,7 @@ export default function Slide3KostenOverzicht() {
       <div className="absolute" style={{ top: "12vh", left: "6vw", right: "6vw" }}>
         <div style={{ width: "3.5vw", height: "0.35vh", background: "#4F7FFF", marginBottom: "1.8vh" }} />
         <h2 style={{ fontSize: "3.2vw", fontWeight: 700, color: "#F0F4FF", lineHeight: 1.2, textWrap: "balance", maxWidth: "78vw" }}>
-          De totale pilotinvestering bedraagt €80.500 eenmalig en €4.500 per maand
+          De totale pilotinvestering bedraagt €850 eenmalig en €4.500 per maand
         </h2>
       </div>
 
@@ -29,8 +29,8 @@ export default function Slide3KostenOverzicht() {
         <div style={{ width: "28vw" }}>
           <div style={{ background: "#141828", border: "1px solid rgba(79,127,255,0.2)", borderRadius: "0.5vw", padding: "3vh 2.5vw", marginBottom: "2.5vh" }}>
             <div style={{ fontSize: "1vw", fontWeight: 700, color: "#4F7FFF", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "1.5vh" }}>Eenmalige kosten (pilot)</div>
-            <div style={{ fontSize: "3.8vw", fontWeight: 700, color: "#F0F4FF", lineHeight: 1 }}>€80.500</div>
-            <div style={{ fontSize: "1.5vw", color: "#8892B0", marginTop: "1vh" }}>Setup, integratie & data-ontsluiting</div>
+            <div style={{ fontSize: "3.8vw", fontWeight: 700, color: "#F0F4FF", lineHeight: 1 }}>€850</div>
+            <div style={{ fontSize: "1.5vw", color: "#8892B0", marginTop: "1vh" }}>Data-onboarding, kalibratie & training</div>
           </div>
           <div style={{ background: "#141828", border: "1px solid rgba(124,107,240,0.2)", borderRadius: "0.5vw", padding: "3vh 2.5vw", marginBottom: "2.5vh" }}>
             <div style={{ fontSize: "1vw", fontWeight: 700, color: "#7C6BF0", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "1.5vh" }}>Doorlopende kosten</div>
@@ -39,7 +39,7 @@ export default function Slide3KostenOverzicht() {
           </div>
           <div style={{ background: "rgba(79,127,255,0.08)", border: "1px solid rgba(79,127,255,0.25)", borderRadius: "0.5vw", padding: "2.5vh 2.5vw" }}>
             <div style={{ fontSize: "1vw", fontWeight: 700, color: "#4F7FFF", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "1vh" }}>Totaal 12-weekse pilot</div>
-            <div style={{ fontSize: "3.2vw", fontWeight: 700, color: "#4F7FFF", lineHeight: 1 }}>€94.000</div>
+            <div style={{ fontSize: "3.2vw", fontWeight: 700, color: "#4F7FFF", lineHeight: 1 }}>€14.350</div>
             <div style={{ fontSize: "1.5vw", color: "#8892B0", marginTop: "0.8vh" }}>Eenmalig + 3× maandkosten</div>
           </div>
         </div>
@@ -48,63 +48,37 @@ export default function Slide3KostenOverzicht() {
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: "1.2vw", fontWeight: 700, color: "#8892B0", marginBottom: "2.5vh", letterSpacing: "0.05em", textTransform: "uppercase" }}>Uitsplitsing eenmalige kosten</div>
 
-          {/* Bar: Data-ontsluiting */}
+          {/* Bar: Model-kalibratie — 47.1% */}
           <div style={{ marginBottom: "2.2vh" }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.6vh" }}>
-              <span style={{ fontSize: "1.7vw", color: "#F0F4FF" }}>Data-ontsluiting & ETL</span>
-              <span style={{ fontSize: "1.7vw", color: "#4F7FFF", fontWeight: 700 }}>€40.000</span>
+              <span style={{ fontSize: "1.7vw", color: "#F0F4FF" }}>Model-kalibratie & acceptatietest</span>
+              <span style={{ fontSize: "1.7vw", color: "#4F7FFF", fontWeight: 700 }}>€400</span>
             </div>
             <div style={{ height: "0.8vh", background: "#141828", borderRadius: "0.4vh", overflow: "hidden" }}>
-              <div style={{ width: "49.7%", height: "100%", background: "#4F7FFF", borderRadius: "0.4vh" }} />
+              <div style={{ width: "47.1%", height: "100%", background: "#4F7FFF", borderRadius: "0.4vh" }} />
             </div>
           </div>
 
-          {/* Bar: Projectmanagement */}
+          {/* Bar: Data-onboarding — 29.4% */}
           <div style={{ marginBottom: "2.2vh" }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.6vh" }}>
-              <span style={{ fontSize: "1.7vw", color: "#F0F4FF" }}>Projectmanagement & QA</span>
-              <span style={{ fontSize: "1.7vw", color: "#4F7FFF", fontWeight: 700 }}>€15.000</span>
+              <span style={{ fontSize: "1.7vw", color: "#F0F4FF" }}>Data-onboarding via CSV-uploadportal</span>
+              <span style={{ fontSize: "1.7vw", color: "#4F7FFF", fontWeight: 700 }}>€250</span>
             </div>
             <div style={{ height: "0.8vh", background: "#141828", borderRadius: "0.4vh", overflow: "hidden" }}>
-              <div style={{ width: "18.6%", height: "100%", background: "#4F7FFF", borderRadius: "0.4vh" }} />
+              <div style={{ width: "29.4%", height: "100%", background: "#4F7FFF", borderRadius: "0.4vh" }} />
             </div>
           </div>
 
-          {/* Bar: Scraping-configuratie */}
+          {/* Bar: Gebruikerstraining — 23.5% */}
           <div style={{ marginBottom: "2.2vh" }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.6vh" }}>
-              <span style={{ fontSize: "1.7vw", color: "#F0F4FF" }}>Scraping-configuratie & validatie</span>
-              <span style={{ fontSize: "1.7vw", color: "#7C6BF0", fontWeight: 700 }}>€5.000</span>
+              <span style={{ fontSize: "1.7vw", color: "#F0F4FF" }}>Gebruikerstraining & documentatie</span>
+              <span style={{ fontSize: "1.7vw", color: "#7C6BF0", fontWeight: 700 }}>€200</span>
             </div>
             <div style={{ height: "0.8vh", background: "#141828", borderRadius: "0.4vh", overflow: "hidden" }}>
-              <div style={{ width: "6.2%", height: "100%", background: "#7C6BF0", borderRadius: "0.4vh" }} />
+              <div style={{ width: "23.5%", height: "100%", background: "#7C6BF0", borderRadius: "0.4vh" }} />
             </div>
-          </div>
-
-          {/* Bar: ML fijnafstelling */}
-          <div style={{ marginBottom: "2.2vh" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.6vh" }}>
-              <span style={{ fontSize: "1.7vw", color: "#F0F4FF" }}>ML-model fijnafstelling</span>
-              <span style={{ fontSize: "1.7vw", color: "#7C6BF0", fontWeight: 700 }}>€12.500</span>
-            </div>
-            <div style={{ height: "0.8vh", background: "#141828", borderRadius: "0.4vh", overflow: "hidden" }}>
-              <div style={{ width: "15.5%", height: "100%", background: "#7C6BF0", borderRadius: "0.4vh" }} />
-            </div>
-          </div>
-
-          {/* Bar: Cloud infra */}
-          <div style={{ marginBottom: "2.2vh" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.6vh" }}>
-              <span style={{ fontSize: "1.7vw", color: "#F0F4FF" }}>Cloud infra setup (AWS)</span>
-              <span style={{ fontSize: "1.7vw", color: "#4F7FFF", fontWeight: 700 }}>€8.000</span>
-            </div>
-            <div style={{ height: "0.8vh", background: "#141828", borderRadius: "0.4vh", overflow: "hidden" }}>
-              <div style={{ width: "9.9%", height: "100%", background: "#4F7FFF", borderRadius: "0.4vh" }} />
-            </div>
-          </div>
-
-          <div style={{ fontSize: "1.2vw", color: "#8892B0", marginTop: "2vh", opacity: 0.7 }}>
-            Bron: marktprijzen Q2 2026 — AWS, interne FTE-tarief €1.250/dag
           </div>
         </div>
       </div>
