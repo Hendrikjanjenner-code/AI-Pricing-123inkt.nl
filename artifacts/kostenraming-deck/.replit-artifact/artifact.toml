@@ -1,0 +1,31 @@
+kind = "slides"
+previewPath = "/kostenraming-deck/"
+title = "AI Pricing Pilot — Kostenraming Directie"
+version = "1.0.0"
+id = "artifacts/kostenraming-deck"
+router = "path"
+
+[[integratedSkills]]
+name = "slides"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/kostenraming-deck/" ]
+localPort = 19144
+
+[services.development]
+run = "pnpm --filter @workspace/kostenraming-deck run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/kostenraming-deck", "run", "build" ]
+publicDir = "artifacts/kostenraming-deck/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19144"
+BASE_PATH = "/kostenraming-deck/"
