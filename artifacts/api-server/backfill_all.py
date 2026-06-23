@@ -34,6 +34,7 @@ STEPS = [
     ("backfill_intelligence",       "Kosten, marketing, OCS, inkoop, economie, BCG-transities"),
     ("backfill_break_even",         "Kostprijswijziging & break-even analyse"),
     ("backfill_ecosystem",          "Traffic driver & mandjeintelligentie"),
+    ("backfill_paper_copy",         "Paper_Copy pilot SKU's, concurrentieprijzen & KPI-data"),
 ]
 
 
