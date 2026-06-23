@@ -1,8 +1,9 @@
 """CSV upload endpoints for all data types."""
 import io
 import csv
+import zipfile
 from datetime import datetime
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
 from sqlalchemy.orm import Session
 from database import get_db
 import models
@@ -809,6 +810,259 @@ async def upload_promotions(
         db.commit()
         return processed, failed, warnings
     return await _process_upload(file, "promotions", db, current_user, _proc)
+
+
+def _detect_csv_type(kolommen: set[str]) -> str | None:
+    """Auto-detect upload type from CSV column names."""
+    kols = {k.lower().strip() for k in kolommen}
+
+    def has_any(*keys):
+        return any(k in kols for k in keys)
+
+    if has_any("competitor_name", "concurrent_naam", "concurrentnaam", "competitor_price_inc_vat", "prijs_concurrent"):
+        return "competitor-prices"
+    if has_any("promotion_type", "promotie_type", "promo_type"):
+        return "promotions"
+    if has_any("product_name", "productnaam", "naam") and has_any("cost_price", "cost_price_exc_vat", "inkoopprijs"):
+        return "products"
+    if has_any("units_sold", "quantity_sold", "aantallen") and has_any("revenue", "revenue_inc_vat"):
+        return "sales"
+    if has_any("price_inc_vat", "price_incl_vat", "verkoopprijs_incl_btw") or (
+        has_any("price") and has_any("date", "datum") and not has_any("sessions")
+    ):
+        return "prices"
+    return None
+
+
+def _detect_type_by_filename(name: str) -> str | None:
+    n = name.lower()
+    if any(x in n for x in ("product", "catalog", "catalogus", "master")):
+        return "products"
+    if any(x in n for x in ("sales", "verkoop", "omzet")):
+        return "sales"
+    if any(x in n for x in ("competitor", "concurrent", "competition")):
+        return "competitor-prices"
+    if any(x in n for x in ("promo",)):
+        return "promotions"
+    if any(x in n for x in ("price", "prijs")) and "competitor" not in n:
+        return "prices"
+    return None
+
+
+@router.post("/bulk")
+async def upload_bulk(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
+):
+    """
+    Combineer-upload: accepteert een ZIP met meerdere CSV-bestanden.
+    Elk CSV-bestand wordt automatisch herkend op basis van kolomnamen of bestandsnaam.
+    Ondersteunde types: products, sales, prices, competitor-prices, promotions.
+    """
+    content = await file.read()
+
+    if not zipfile.is_zipfile(io.BytesIO(content)):
+        raise HTTPException(status_code=400, detail="Bestand is geen geldig ZIP-archief (.zip verwacht)")
+
+    zf = zipfile.ZipFile(io.BytesIO(content))
+    csv_names = [n for n in zf.namelist() if n.lower().endswith(".csv") and not n.startswith("__MACOSX")]
+
+    if not csv_names:
+        raise HTTPException(status_code=400, detail="ZIP bevat geen CSV-bestanden")
+
+    PROCESSORS = {
+        "products": _process_products,
+    }
+
+    results = []
+    totaal_verwerkt = 0
+    totaal_mislukt = 0
+
+    for csv_name in csv_names:
+        raw = zf.read(csv_name)
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = raw.decode("latin-1")
+
+        reader = csv.DictReader(io.StringIO(text))
+        if not reader.fieldnames:
+            results.append({"bestand": csv_name, "type": "onbekend", "status": "overgeslagen", "reden": "Leeg CSV"})
+            continue
+
+        rows = list(reader)
+        kolommen = set(reader.fieldnames)
+
+        upload_type = _detect_type_by_filename(csv_name) or _detect_csv_type(kolommen)
+        if not upload_type:
+            results.append({"bestand": csv_name, "type": "onbekend", "status": "overgeslagen",
+                            "reden": "Type niet herkend op basis van kolomnamen of bestandsnaam"})
+            continue
+
+        job = models.ImportJob(
+            upload_type=upload_type,
+            filename=f"{file.filename}::{csv_name}",
+            status="processing",
+            uploaded_by=current_user.username,
+            created_at=datetime.utcnow(),
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+
+        try:
+            from datetime import date as _date
+
+            if upload_type == "products":
+                proc, fail, warns = _process_products(rows, db)
+
+            elif upload_type == "sales":
+                proc, fail, warns = 0, 0, []
+                for i, row in enumerate(rows, start=1):
+                    try:
+                        if not _enforce_row_validation(row, i, warns):
+                            fail += 1; continue
+                        sku_id = _normalize_sku(row)
+                        if not sku_id:
+                            fail += 1; continue
+                        rev_raw = _r(row, "revenue_inc_vat", "revenue_incl_vat", "revenue_incl_btw", "revenue")
+                        date_raw = _r(row, "date", "datum")
+                        entry = models.FactSalesDaily(
+                            date=_date.fromisoformat(date_raw.strip()),
+                            sku_id=sku_id,
+                            units_sold=_safe_int(_r(row, "units_sold", "quantity_sold", "aantallen")) or 0,
+                            revenue=_safe_float(rev_raw),
+                            cost=_safe_float(_r(row, "cost", "cost_exc_vat")),
+                            margin=_safe_float(_r(row, "margin", "marge")),
+                            margin_pct=_safe_float(_r(row, "margin_pct", "marge_pct")),
+                        )
+                        db.add(entry); proc += 1
+                    except Exception as e:
+                        warns.append(str(e)); fail += 1
+                db.commit()
+
+            elif upload_type == "prices":
+                proc, fail, warns = 0, 0, []
+                for i, row in enumerate(rows, start=1):
+                    try:
+                        if not _enforce_row_validation(row, i, warns):
+                            fail += 1; continue
+                        sku_id = _normalize_sku(row)
+                        if not sku_id:
+                            fail += 1; continue
+                        price_raw = _r(row, "price_inc_vat", "price_incl_vat", "verkoopprijs_incl_btw", "price")
+                        cost_raw = _r(row, "cost_price_exc_vat", "inkoopprijs", "cost_price")
+                        date_raw = _r(row, "date", "datum")
+                        entry = models.FactPriceDaily(
+                            date=_date.fromisoformat(date_raw.strip()),
+                            sku_id=sku_id,
+                            price=_safe_float(price_raw),
+                            cost_price=_safe_float(cost_raw),
+                        )
+                        db.add(entry); proc += 1
+                    except Exception as e:
+                        warns.append(str(e)); fail += 1
+                db.commit()
+
+            elif upload_type == "competitor-prices":
+                proc, fail, warns = 0, 0, []
+                for i, row in enumerate(rows, start=1):
+                    try:
+                        if not _enforce_row_validation(row, i, warns):
+                            fail += 1; continue
+                        sku_id = _normalize_sku(row)
+                        if not sku_id:
+                            fail += 1; continue
+                        price_raw = _r(row, "competitor_price_inc_vat", "prijs_concurrent", "price")
+                        date_raw = _r(row, "date", "datum")
+                        entry = models.FactCompetitorPriceDaily(
+                            date=_date.fromisoformat(date_raw.strip()),
+                            sku_id=sku_id,
+                            competitor_name=_r(row, "competitor_name", "concurrent_naam") or "Unknown",
+                            price=_safe_float(price_raw),
+                            url=_r(row, "url", "product_url"),
+                        )
+                        db.add(entry); proc += 1
+                    except Exception as e:
+                        warns.append(str(e)); fail += 1
+                db.commit()
+
+            elif upload_type == "promotions":
+                proc, fail, warns = 0, 0, []
+                from datetime import datetime as _dt
+                for i, row in enumerate(rows, start=1):
+                    try:
+                        if not _enforce_row_validation(row, i, warns):
+                            fail += 1; continue
+                        sku_id = _normalize_sku(row)
+                        start_raw = _r(row, "start_date", "startdatum") or ""
+                        if not sku_id or not start_raw:
+                            fail += 1; continue
+                        start_date = _dt.strptime(start_raw.strip(), "%Y-%m-%d").date()
+                        end_date = None
+                        end_raw = _r(row, "end_date", "einddatum") or ""
+                        if end_raw.strip():
+                            try:
+                                end_date = _dt.strptime(end_raw.strip(), "%Y-%m-%d").date()
+                            except ValueError:
+                                pass
+                        disc_raw = _r(row, "discount_value", "korting_waarde")
+                        discount_val = None
+                        if disc_raw:
+                            try:
+                                discount_val = float(disc_raw.strip())
+                                if discount_val <= 0:
+                                    discount_val = None
+                            except ValueError:
+                                pass
+                        entry = models.Promotion(
+                            sku_id=sku_id,
+                            promotion_type=_r(row, "promotion_type", "promotie_type") or None,
+                            discount_value=discount_val,
+                            start_date=start_date,
+                            end_date=end_date,
+                            channel=_r(row, "channel", "kanaal") or None,
+                            description=_r(row, "description", "omschrijving") or None,
+                        )
+                        db.add(entry); proc += 1
+                    except Exception as e:
+                        warns.append(str(e)); fail += 1
+                db.commit()
+
+            else:
+                proc, fail, warns = 0, 0, []
+
+            job.rows_processed = proc
+            job.rows_failed = fail
+            job.status = "completed"
+            job.completed_at = datetime.utcnow()
+            db.commit()
+
+            totaal_verwerkt += proc
+            totaal_mislukt += fail
+            results.append({
+                "bestand": csv_name,
+                "type": upload_type,
+                "status": "voltooid",
+                "rows_processed": proc,
+                "rows_failed": fail,
+                "warnings": warns[:10],
+            })
+
+        except Exception as e:
+            job.status = "failed"
+            job.error_message = str(e)
+            job.completed_at = datetime.utcnow()
+            db.commit()
+            results.append({"bestand": csv_name, "type": upload_type, "status": "mislukt", "reden": str(e)})
+
+    return {
+        "bestanden": len(csv_names),
+        "totaal_verwerkt": totaal_verwerkt,
+        "totaal_mislukt": totaal_mislukt,
+        "resultaten": results,
+    }
 
 
 @router.post("/price-rules")

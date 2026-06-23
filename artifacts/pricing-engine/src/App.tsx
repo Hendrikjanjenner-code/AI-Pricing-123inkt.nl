@@ -73,8 +73,6 @@ import DrsIntegratie from "@/pages/drs-integratie";
 import Ga4Integratie from "@/pages/ga4-integratie";
 import KostenoverzichtPilot from "@/pages/kostenoverzicht-pilot";
 import PrijsstrategieHerkenning from "@/pages/prijsstrategie-herkenning";
-import PriceShapeMigratie from "@/pages/priceshape-migratie";
-
 // Cost Change & Break-even Intelligence Engine
 import KostprijswijzigingDashboard from "@/pages/kostprijswijziging";
 import BreakEvenAnalyse from "@/pages/break-even-analyse";
@@ -325,9 +323,6 @@ function Router() {
       </Route>
 
       {/* Pilot Paper_Copy */}
-      <Route path="/priceshape-migratie">
-        <ProtectedRoute><PriceShapeMigratie /></ProtectedRoute>
-      </Route>
       <Route path="/pilot-paper-copy">
         <ProtectedRoute><PilotPaperCopy /></ProtectedRoute>
       </Route>

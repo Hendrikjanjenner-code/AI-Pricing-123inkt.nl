@@ -173,7 +173,6 @@ const navGroepen = [
       { href: "/ga4-integratie", label: "GA4 Integratie", icon: TrendingUp },
       { href: "/prijsstrategie-herkenning", label: "Prijsstrategie-herkenning", icon: Target },
       { href: "/kostenoverzicht-pilot", label: "Kostenoverzicht Pilot", icon: Calculator },
-      { href: "/priceshape-migratie", label: "PriceShape Migratie", icon: ArrowRightLeft },
     ],
   },
 ];
