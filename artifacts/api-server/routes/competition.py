@@ -5,6 +5,7 @@ Exposes PCIS scores, competition classes, reference prices and
 competitor exclusion data per SKU.
 """
 from typing import Optional
+from datetime import date, timedelta
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from database import get_db
@@ -255,6 +256,56 @@ def get_sub_scores_by_class(
             "avg_strategic_importance": round(sum(r.strategic_importance_score or 0 for r in rows) / n, 3),
         })
     return result
+
+
+# ── Strategy Recognition ─────────────────────────────────────────────────────
+
+@router.get("/strategies")
+def get_competitor_strategies(
+    lookback_days: int = Query(30, ge=7, le=180),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """
+    Classificeer alle concurrenten naar één van 7 strategietypen
+    op basis van prijshistorie van de afgelopen lookback_days dagen.
+    """
+    from engine.competitor_strategy_engine import analyseer_alle_concurrenten
+
+    since = date.today() - timedelta(days=lookback_days)
+    rijen = (
+        db.query(models.FactCompetitorPriceDaily)
+        .filter(models.FactCompetitorPriceDaily.date >= since)
+        .order_by(
+            models.FactCompetitorPriceDaily.competitor_name,
+            models.FactCompetitorPriceDaily.date,
+        )
+        .all()
+    )
+
+    # Groepeer per concurrent: {naam: [(datum, prijs)]}
+    prijsdata: dict[str, list[tuple[date, float]]] = {}
+    for r in rijen:
+        naam = r.competitor_name or "Onbekend"
+        if r.price is None:
+            continue
+        prijsdata.setdefault(naam, []).append((r.date, float(r.price)))
+
+    if not prijsdata:
+        return {
+            "strategieen": [],
+            "periode": f"Geen data de afgelopen {lookback_days} dagen",
+            "lookback_days": lookback_days,
+        }
+
+    resultaten = analyseer_alle_concurrenten(prijsdata)
+
+    return {
+        "strategieen": resultaten,
+        "periode": f"{since.isoformat()} – {date.today().isoformat()}",
+        "lookback_days": lookback_days,
+        "totaal_concurrenten": len(resultaten),
+    }
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

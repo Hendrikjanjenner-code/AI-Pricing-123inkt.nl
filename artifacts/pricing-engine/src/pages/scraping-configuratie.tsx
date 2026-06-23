@@ -10,7 +10,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Globe, Play, Plus, RefreshCw, CheckCircle2, XCircle, Clock, AlertTriangle } from "lucide-react";
+import { Globe, Play, Plus, RefreshCw, CheckCircle2, XCircle, Clock, AlertTriangle, CalendarClock, Pencil, Trash2 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { getAuthToken } from "@/lib/auth";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -47,11 +48,16 @@ export default function ScrapingConfiguratie() {
   const { toast } = useToast();
   const [configs, setConfigs] = useState<any>(null);
   const [resultaten, setResultaten] = useState<any>(null);
+  const [rooster, setRooster] = useState<any>(null);
   const [laden, setLaden] = useState(true);
   const [testResultaat, setTestResultaat] = useState<any>(null);
   const [testenBezig, setTestenBezig] = useState(false);
   const [runBezig, setRunBezig] = useState<number | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [nieuwSlotDialogOpen, setNieuwSlotDialogOpen] = useState(false);
+  const [nieuwSlotTijd, setNieuwSlotTijd] = useState("09:00");
+  const [nieuwSlotLabel, setNieuwSlotLabel] = useState("");
+  const [slotBezig, setSlotBezig] = useState<number | null>(null);
 
   // Nieuw concurrent formulier
   const [nieuwNaam, setNieuwNaam] = useState("");
@@ -59,6 +65,23 @@ export default function ScrapingConfiguratie() {
   const [nieuwType, setNieuwType] = useState("online");
   const [nieuwPriceSelector, setNieuwPriceSelector] = useState("");
   const [nieuwTitleSelector, setNieuwTitleSelector] = useState("");
+  const [nieuwStockSelector, setNieuwStockSelector] = useState("");
+  const [nieuwDeliverySelector, setNieuwDeliverySelector] = useState("");
+  const [nieuwEanSelector, setNieuwEanSelector] = useState("");
+  const [nieuwUrlPattern, setNieuwUrlPattern] = useState("");
+
+  // Bewerk concurrent formulier
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editConcurrent, setEditConcurrent] = useState<any>(null);
+  const [editNaam, setEditNaam] = useState("");
+  const [editUrl, setEditUrl] = useState("");
+  const [editType, setEditType] = useState("online");
+  const [editPriceSelector, setEditPriceSelector] = useState("");
+  const [editTitleSelector, setEditTitleSelector] = useState("");
+  const [editStockSelector, setEditStockSelector] = useState("");
+  const [editDeliverySelector, setEditDeliverySelector] = useState("");
+  const [editEanSelector, setEditEanSelector] = useState("");
+  const [editUrlPattern, setEditUrlPattern] = useState("");
 
   // Test scrape formulier
   const [testUrl, setTestUrl] = useState("");
@@ -70,12 +93,14 @@ export default function ScrapingConfiguratie() {
   async function laadData() {
     setLaden(true);
     try {
-      const [c, r] = await Promise.all([
+      const [c, r, s] = await Promise.all([
         apiFetch("/api/scraping/configs"),
         apiFetch("/api/scraping/results?limit=30"),
+        apiFetch("/api/scraping/schedule"),
       ]);
       setConfigs(c);
       setResultaten(r);
+      setRooster(s);
     } catch { toast({ title: "Fout", description: "Kon gegevens niet laden", variant: "destructive" }); }
     setLaden(false);
   }
@@ -86,14 +111,61 @@ export default function ScrapingConfiguratie() {
         method: "POST",
         body: JSON.stringify({
           competitor_name: nieuwNaam, base_url: nieuwUrl, competitor_type: nieuwType,
+          url_pattern: nieuwUrlPattern,
           price_selector: nieuwPriceSelector, title_selector: nieuwTitleSelector,
+          stock_selector: nieuwStockSelector, delivery_selector: nieuwDeliverySelector,
+          ean_selector: nieuwEanSelector,
         }),
       });
       toast({ title: "Concurrent toegevoegd" });
       setDialogOpen(false);
-      setNieuwNaam(""); setNieuwUrl(""); setNieuwPriceSelector(""); setNieuwTitleSelector("");
+      setNieuwNaam(""); setNieuwUrl(""); setNieuwUrlPattern(""); setNieuwPriceSelector(""); setNieuwTitleSelector("");
+      setNieuwStockSelector(""); setNieuwDeliverySelector(""); setNieuwEanSelector("");
       laadData();
     } catch { toast({ title: "Fout", description: "Concurrent toevoegen mislukt", variant: "destructive" }); }
+  }
+
+  function openEditDialog(c: any) {
+    const cfg = c.configs?.[0] ?? {};
+    setEditConcurrent(c);
+    setEditNaam(c.competitor_name);
+    setEditUrl(c.base_url || "");
+    setEditType(c.competitor_type || "online");
+    setEditUrlPattern(cfg.url_pattern || "");
+    setEditPriceSelector(cfg.price_selector || "");
+    setEditTitleSelector(cfg.title_selector || "");
+    setEditStockSelector(cfg.stock_selector || "");
+    setEditDeliverySelector(cfg.delivery_selector || "");
+    setEditEanSelector(cfg.ean_selector || "");
+    setEditDialogOpen(true);
+  }
+
+  async function wijzigConcurrent() {
+    if (!editConcurrent) return;
+    try {
+      await apiFetch(`/api/scraping/configs/${editConcurrent.competitor_id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          competitor_name: editNaam, base_url: editUrl, competitor_type: editType,
+          url_pattern: editUrlPattern,
+          price_selector: editPriceSelector, title_selector: editTitleSelector,
+          stock_selector: editStockSelector, delivery_selector: editDeliverySelector,
+          ean_selector: editEanSelector,
+        }),
+      });
+      toast({ title: "Concurrent bijgewerkt" });
+      setEditDialogOpen(false);
+      laadData();
+    } catch { toast({ title: "Fout", description: "Bijwerken mislukt", variant: "destructive" }); }
+  }
+
+  async function verwijderConcurrent(competitor_id: number, naam: string) {
+    if (!confirm(`"${naam}" deactiveren? Dit schakelt scraping uit.`)) return;
+    try {
+      await apiFetch(`/api/scraping/configs/${competitor_id}`, { method: "DELETE" });
+      toast({ title: `"${naam}" gedeactiveerd` });
+      laadData();
+    } catch { toast({ title: "Fout", description: "Deactiveren mislukt", variant: "destructive" }); }
   }
 
   async function testScrape() {
@@ -108,6 +180,38 @@ export default function ScrapingConfiguratie() {
       setTestResultaat(r);
     } catch { toast({ title: "Test mislukt", variant: "destructive" }); }
     setTestenBezig(false);
+  }
+
+  async function toggleSlot(id: number, active: boolean) {
+    setSlotBezig(id);
+    try {
+      await apiFetch(`/api/scraping/schedule/${id}`, { method: "PUT", body: JSON.stringify({ active }) });
+      const s = await apiFetch("/api/scraping/schedule");
+      setRooster(s);
+    } catch { toast({ title: "Fout", description: "Tijdslot bijwerken mislukt", variant: "destructive" }); }
+    setSlotBezig(null);
+  }
+
+  async function voegSlotToe() {
+    if (!nieuwSlotTijd.match(/^\d{2}:\d{2}$/)) {
+      toast({ title: "Ongeldig tijdformaat", description: "Gebruik HH:MM (bijv. 10:00)", variant: "destructive" });
+      return;
+    }
+    try {
+      await apiFetch("/api/scraping/schedule", {
+        method: "POST",
+        body: JSON.stringify({ time_slot: nieuwSlotTijd, label: nieuwSlotLabel, active: true }),
+      });
+      toast({ title: "Tijdslot toegevoegd" });
+      setNieuwSlotDialogOpen(false);
+      setNieuwSlotTijd("09:00");
+      setNieuwSlotLabel("");
+      const s = await apiFetch("/api/scraping/schedule");
+      setRooster(s);
+    } catch (e: any) {
+      const msg = e.message?.includes("409") ? "Tijdslot bestaat al" : "Toevoegen mislukt";
+      toast({ title: "Fout", description: msg, variant: "destructive" });
+    }
   }
 
   async function runScrape(competitor_id: number) {
@@ -140,9 +244,10 @@ export default function ScrapingConfiguratie() {
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader><DialogTitle>Nieuwe concurrent toevoegen</DialogTitle></DialogHeader>
-                <div className="space-y-4 py-2">
+                <div className="space-y-3 py-2">
                   <div><Label>Naam *</Label><Input value={nieuwNaam} onChange={e => setNieuwNaam(e.target.value)} placeholder="bv. Bol.com" /></div>
-                  <div><Label>Basis-URL</Label><Input value={nieuwUrl} onChange={e => setNieuwUrl(e.target.value)} placeholder="https://www.bol.com" /></div>
+                  <div><Label>Basis-URL (homepage)</Label><Input value={nieuwUrl} onChange={e => setNieuwUrl(e.target.value)} placeholder="https://www.bol.com" /></div>
+                  <div><Label>Product-URL patroon</Label><Input value={nieuwUrlPattern} onChange={e => setNieuwUrlPattern(e.target.value)} placeholder="https://www.bol.com/nl/p/{sku}/" /></div>
                   <div>
                     <Label>Type</Label>
                     <Select value={nieuwType} onValueChange={setNieuwType}>
@@ -154,9 +259,47 @@ export default function ScrapingConfiguratie() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div><Label>Titel-selector (CSS)</Label><Input value={nieuwTitleSelector} onChange={e => setNieuwTitleSelector(e.target.value)} placeholder=".product-title h1" /></div>
-                  <div><Label>Prijs-selector (CSS)</Label><Input value={nieuwPriceSelector} onChange={e => setNieuwPriceSelector(e.target.value)} placeholder=".price-block__price" /></div>
-                  <Button onClick={voegConcurrentToe} disabled={!nieuwNaam} className="w-full">Toevoegen</Button>
+                  <p className="text-xs text-muted-foreground font-medium pt-1">CSS-selectors (optioneel)</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><Label>Titel</Label><Input value={nieuwTitleSelector} onChange={e => setNieuwTitleSelector(e.target.value)} placeholder=".product-title h1" /></div>
+                    <div><Label>Prijs</Label><Input value={nieuwPriceSelector} onChange={e => setNieuwPriceSelector(e.target.value)} placeholder=".price-block__price" /></div>
+                    <div><Label>Voorraadstatus</Label><Input value={nieuwStockSelector} onChange={e => setNieuwStockSelector(e.target.value)} placeholder=".stock-status" /></div>
+                    <div><Label>Levertijd</Label><Input value={nieuwDeliverySelector} onChange={e => setNieuwDeliverySelector(e.target.value)} placeholder=".delivery-info" /></div>
+                    <div><Label>EAN</Label><Input value={nieuwEanSelector} onChange={e => setNieuwEanSelector(e.target.value)} placeholder="[data-ean]" /></div>
+                  </div>
+                  <Button onClick={voegConcurrentToe} disabled={!nieuwNaam} className="w-full mt-1">Toevoegen</Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            {/* Bewerk concurrent dialog */}
+            <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+              <DialogContent>
+                <DialogHeader><DialogTitle>Concurrent bewerken</DialogTitle></DialogHeader>
+                <div className="space-y-3 py-2">
+                  <div><Label>Naam *</Label><Input value={editNaam} onChange={e => setEditNaam(e.target.value)} /></div>
+                  <div><Label>Basis-URL (homepage)</Label><Input value={editUrl} onChange={e => setEditUrl(e.target.value)} /></div>
+                  <div><Label>Product-URL patroon</Label><Input value={editUrlPattern} onChange={e => setEditUrlPattern(e.target.value)} placeholder="https://www.example.nl/p/{sku}/" /></div>
+                  <div>
+                    <Label>Type</Label>
+                    <Select value={editType} onValueChange={setEditType}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="online">Online retailer</SelectItem>
+                        <SelectItem value="marketplace">Marketplace</SelectItem>
+                        <SelectItem value="local">Lokale concurrent</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p className="text-xs text-muted-foreground font-medium pt-1">CSS-selectors</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><Label>Titel</Label><Input value={editTitleSelector} onChange={e => setEditTitleSelector(e.target.value)} placeholder=".product-title h1" /></div>
+                    <div><Label>Prijs</Label><Input value={editPriceSelector} onChange={e => setEditPriceSelector(e.target.value)} placeholder=".price-block__price" /></div>
+                    <div><Label>Voorraadstatus</Label><Input value={editStockSelector} onChange={e => setEditStockSelector(e.target.value)} placeholder=".stock-status" /></div>
+                    <div><Label>Levertijd</Label><Input value={editDeliverySelector} onChange={e => setEditDeliverySelector(e.target.value)} placeholder=".delivery-info" /></div>
+                    <div><Label>EAN</Label><Input value={editEanSelector} onChange={e => setEditEanSelector(e.target.value)} placeholder="[data-ean]" /></div>
+                  </div>
+                  <Button onClick={wijzigConcurrent} disabled={!editNaam} className="w-full mt-1">Opslaan</Button>
                 </div>
               </DialogContent>
             </Dialog>
@@ -166,6 +309,7 @@ export default function ScrapingConfiguratie() {
         <Tabs defaultValue="concurrenten">
           <TabsList>
             <TabsTrigger value="concurrenten">Concurrenten</TabsTrigger>
+            <TabsTrigger value="rooster">Rooster</TabsTrigger>
             <TabsTrigger value="test">Test scrape</TabsTrigger>
             <TabsTrigger value="resultaten">Scrape-resultaten</TabsTrigger>
           </TabsList>
@@ -195,9 +339,9 @@ export default function ScrapingConfiguratie() {
                             </div>
                           </div>
                         </div>
-                        <div className="text-right shrink-0">
+                        <div className="text-right shrink-0 space-y-2">
                           {c.laatste_scrape && (
-                            <div className="text-xs text-muted-foreground mb-2">
+                            <div className="text-xs text-muted-foreground">
                               <Clock className="w-3 h-3 inline mr-1" />
                               {new Date(c.laatste_scrape).toLocaleDateString("nl-NL")}
                               {c.laatste_status && (
@@ -205,11 +349,20 @@ export default function ScrapingConfiguratie() {
                               )}
                             </div>
                           )}
-                          <Button size="sm" variant="outline" disabled={runBezig === c.competitor_id || !c.scraping_enabled}
-                            onClick={() => runScrape(c.competitor_id)}>
-                            <Play className="w-3 h-3 mr-1" />
-                            {runBezig === c.competitor_id ? "Bezig..." : "Run scrape"}
-                          </Button>
+                          <div className="flex gap-1 justify-end">
+                            <Button size="sm" variant="outline" disabled={runBezig === c.competitor_id || !c.scraping_enabled}
+                              onClick={() => runScrape(c.competitor_id)}>
+                              <Play className="w-3 h-3 mr-1" />
+                              {runBezig === c.competitor_id ? "Bezig..." : "Run scrape"}
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => openEditDialog(c)}>
+                              <Pencil className="w-3 h-3" />
+                            </Button>
+                            <Button size="sm" variant="outline" className="text-red-600 hover:text-red-700"
+                              onClick={() => verwijderConcurrent(c.competitor_id, c.competitor_name)}>
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          </div>
                         </div>
                       </div>
                     </CardContent>
@@ -224,6 +377,88 @@ export default function ScrapingConfiguratie() {
                 )}
               </div>
             )}
+          </TabsContent>
+
+          <TabsContent value="rooster" className="mt-4">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium text-sm">Dagelijks scraperooster</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Scrapes worden op deze tijden uitgevoerd. Standaard 3× per dag.
+                    {rooster && <span className="ml-1 font-medium text-foreground">{rooster.frequentie_per_dag} actief</span>}
+                  </p>
+                </div>
+                <Dialog open={nieuwSlotDialogOpen} onOpenChange={setNieuwSlotDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button size="sm" variant="outline"><Plus className="w-4 h-4 mr-2" />Tijdslot toevoegen</Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader><DialogTitle>Nieuw tijdslot toevoegen</DialogTitle></DialogHeader>
+                    <div className="space-y-4 py-2">
+                      <div>
+                        <Label>Tijdstip (HH:MM) *</Label>
+                        <Input
+                          value={nieuwSlotTijd}
+                          onChange={e => setNieuwSlotTijd(e.target.value)}
+                          placeholder="10:00"
+                          maxLength={5}
+                        />
+                      </div>
+                      <div>
+                        <Label>Omschrijving (optioneel)</Label>
+                        <Input
+                          value={nieuwSlotLabel}
+                          onChange={e => setNieuwSlotLabel(e.target.value)}
+                          placeholder="bv. Extra run marktopening"
+                        />
+                      </div>
+                      <Button onClick={voegSlotToe} className="w-full" disabled={!nieuwSlotTijd}>
+                        <CalendarClock className="w-4 h-4 mr-2" />Toevoegen
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
+
+              {laden ? (
+                <div className="space-y-2">{[1,2,3].map(i => <Skeleton key={i} className="h-16 w-full" />)}</div>
+              ) : (
+                <div className="space-y-2">
+                  {rooster?.tijdsloten?.map((slot: any) => (
+                    <Card key={slot.id} className={slot.active ? "" : "opacity-50"}>
+                      <CardContent className="py-3 px-4">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <Clock className="w-4 h-4 text-muted-foreground" />
+                            <div>
+                              <span className="font-mono font-semibold text-sm">{slot.time_slot}</span>
+                              {slot.label && (
+                                <span className="text-xs text-muted-foreground ml-2">{slot.label}</span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground">{slot.active ? "Actief" : "Inactief"}</span>
+                            <Switch
+                              checked={slot.active}
+                              disabled={slotBezig === slot.id}
+                              onCheckedChange={v => toggleSlot(slot.id, v)}
+                            />
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                  {!rooster?.tijdsloten?.length && (
+                    <Card><CardContent className="py-8 text-center text-muted-foreground text-sm">
+                      <CalendarClock className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                      Geen tijdsloten geconfigureerd
+                    </CardContent></Card>
+                  )}
+                </div>
+              )}
+            </div>
           </TabsContent>
 
           <TabsContent value="test" className="mt-4">

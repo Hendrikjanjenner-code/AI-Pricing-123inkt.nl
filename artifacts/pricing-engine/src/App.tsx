@@ -67,6 +67,14 @@ import EntryProductsAnalyse from "@/pages/entry-products";
 // Help & Explainability System
 import ModelDocumentatie from "@/pages/modeldocumentatie";
 
+// Pilot Paper_Copy
+import PilotPaperCopy from "@/pages/pilot-paper-copy";
+import DrsIntegratie from "@/pages/drs-integratie";
+import Ga4Integratie from "@/pages/ga4-integratie";
+import KostenoverzichtPilot from "@/pages/kostenoverzicht-pilot";
+import PrijsstrategieHerkenning from "@/pages/prijsstrategie-herkenning";
+import PriceShapeMigratie from "@/pages/priceshape-migratie";
+
 // Cost Change & Break-even Intelligence Engine
 import KostprijswijzigingDashboard from "@/pages/kostprijswijziging";
 import BreakEvenAnalyse from "@/pages/break-even-analyse";
@@ -314,6 +322,26 @@ function Router() {
 
       <Route path="/modeldocumentatie">
         <ProtectedRoute><ModelDocumentatie /></ProtectedRoute>
+      </Route>
+
+      {/* Pilot Paper_Copy */}
+      <Route path="/priceshape-migratie">
+        <ProtectedRoute><PriceShapeMigratie /></ProtectedRoute>
+      </Route>
+      <Route path="/pilot-paper-copy">
+        <ProtectedRoute><PilotPaperCopy /></ProtectedRoute>
+      </Route>
+      <Route path="/drs-integratie">
+        <ProtectedRoute><DrsIntegratie /></ProtectedRoute>
+      </Route>
+      <Route path="/ga4-integratie">
+        <ProtectedRoute><Ga4Integratie /></ProtectedRoute>
+      </Route>
+      <Route path="/kostenoverzicht-pilot">
+        <ProtectedRoute><KostenoverzichtPilot /></ProtectedRoute>
+      </Route>
+      <Route path="/prijsstrategie-herkenning">
+        <ProtectedRoute><PrijsstrategieHerkenning /></ProtectedRoute>
       </Route>
 
       <Route component={NotFound} />

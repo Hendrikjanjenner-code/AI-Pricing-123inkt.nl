@@ -164,6 +164,18 @@ const navGroepen = [
       { href: "/modeldocumentatie", label: "Modeldocumentatie", icon: BookOpen },
     ],
   },
+  {
+    label: "Pilot Paper_Copy",
+    items: [
+      { href: "/pilot-paper-copy", label: "Pilot Dashboard", icon: FlaskConical },
+      { href: "/scraping", label: "Scraping Configuratie", icon: Globe },
+      { href: "/drs-integratie", label: "DRS Integratie", icon: Database },
+      { href: "/ga4-integratie", label: "GA4 Integratie", icon: TrendingUp },
+      { href: "/prijsstrategie-herkenning", label: "Prijsstrategie-herkenning", icon: Target },
+      { href: "/kostenoverzicht-pilot", label: "Kostenoverzicht Pilot", icon: Calculator },
+      { href: "/priceshape-migratie", label: "PriceShape Migratie", icon: ArrowRightLeft },
+    ],
+  },
 ];
 
 const alleItems = navGroepen.flatMap(g => g.items);

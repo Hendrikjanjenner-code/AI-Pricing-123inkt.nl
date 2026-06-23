@@ -78,10 +78,39 @@ PRODUCTS = [
 ]
 
 
-def seed_database():
+def seed_users_only():
+    """
+    Create the 4 demo user accounts if no users exist yet.
+    Always called on startup so login works on a fresh empty DB.
+    """
     db = SessionLocal()
     try:
         if db.query(models.User).count() > 0:
+            return
+        users = [
+            models.User(username="admin", email="admin@pricing.local", full_name="System Admin",
+                        hashed_password=auth_utils.hash_password("admin123"), role="admin", is_active=True),
+            models.User(username="pricing_manager", email="manager@pricing.local", full_name="Sarah van den Berg",
+                        hashed_password=auth_utils.hash_password("manager123"), role="pricing_manager", is_active=True),
+            models.User(username="analyst", email="analyst@pricing.local", full_name="Jan de Vries",
+                        hashed_password=auth_utils.hash_password("analyst123"), role="analyst", is_active=True),
+            models.User(username="viewer", email="viewer@pricing.local", full_name="Lisa Smit",
+                        hashed_password=auth_utils.hash_password("viewer123"), role="viewer", is_active=True),
+        ]
+        db.add_all(users)
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+def seed_database():
+    db = SessionLocal()
+    try:
+        # Guard on business data, not users — seed_users_only() runs before this
+        # so User.count() > 0 would always short-circuit when SEED_DEMO_DATA=true.
+        if db.query(models.DimProduct).count() > 0:
             return  # Already seeded
 
         # ── Users ──────────────────────────────────────────────────────────

@@ -53,6 +53,10 @@ class DimProduct(Base):
     current_price = Column(Numeric(10, 4))
     stock_quantity = Column(Integer, default=0)
     data_quality_score = Column(Float, default=1.0)
+    # Paper_Copy pilot fields (nullable — filled only for paper products)
+    paper_size = Column(String(20))        # A4 / A3 / A5 / etc.
+    paper_weight_gsm = Column(Integer)     # gram per vierkante meter
+    sheets_per_pack = Column(Integer)      # vel per pak
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -384,6 +388,18 @@ class DimCompetitor(Base):
     scraping_enabled = Column(Boolean, default=True)
     active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ScrapeSchedule(Base):
+    """Dagelijkse scrape-tijdsloten (standaard 3× per dag: 08:00, 13:00, 18:00)."""
+    __tablename__ = "scrape_schedule"
+
+    id = Column(Integer, primary_key=True, index=True)
+    time_slot = Column(String(5), nullable=False, unique=True)  # HH:MM
+    label = Column(String(100))
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class CompetitorScrapeConfig(Base):
@@ -1164,6 +1180,21 @@ class FactPricePassThroughDaily(Base):
     reason_code = Column(String(100))
     toelichting_nl = Column(Text)
 
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Promotion(Base):
+    """Promoties per SKU — geïmporteerd via CSV (pilotformaat)."""
+    __tablename__ = "promotions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    promotion_type = Column(String(100))           # percentage_off / fixed_amount / buy_x_get_y
+    discount_value = Column(Float)                 # % of € afhankelijk van type
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date)
+    channel = Column(String(100))                  # online / instore / both
+    description = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

@@ -20,6 +20,7 @@ from routes import (
     traffic, search_demand,
     cost, procurement, economic, reporting, bcg_transitions,
     category_hierarchy, break_even, ecosystem, explainability,
+    admin, pilot,
 )
 
 
@@ -29,8 +30,12 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     # 2. Add missing columns to existing tables (idempotent)
     run_migrations(engine, Base.metadata)
-    # 3. Seed demo data if the DB is empty
-    seed_database()
+    # 3. Always ensure the 4 demo user accounts exist (needed for login)
+    from seed import seed_users_only
+    seed_users_only()
+    # 4. Only seed demo product/price/sales data when explicitly requested
+    if os.environ.get("SEED_DEMO_DATA", "false").lower() in ("1", "true", "yes"):
+        seed_database()
     yield
 
 
@@ -94,3 +99,5 @@ app.include_router(category_hierarchy.router)
 app.include_router(break_even.router)
 app.include_router(ecosystem.router)
 app.include_router(explainability.router)
+app.include_router(admin.router)
+app.include_router(pilot.router)

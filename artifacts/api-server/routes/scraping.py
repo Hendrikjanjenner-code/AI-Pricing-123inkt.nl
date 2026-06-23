@@ -8,7 +8,7 @@ from sqlalchemy import desc
 from database import get_db
 from auth import get_current_user
 from models import (
-    DimCompetitor, CompetitorScrapeConfig, FactScrapeResult, User
+    DimCompetitor, CompetitorScrapeConfig, FactScrapeResult, ScrapeSchedule, User
 )
 from datetime import datetime
 
@@ -57,6 +57,8 @@ def get_scraping_configs(
                     "title_selector": cfg.title_selector,
                     "price_selector": cfg.price_selector,
                     "stock_selector": cfg.stock_selector,
+                    "delivery_selector": cfg.delivery_selector,
+                    "ean_selector": cfg.ean_selector,
                     "active": cfg.active,
                 }
                 for cfg in configs
@@ -97,7 +99,7 @@ def create_competitor_config(
         db.refresh(concurrent)
 
     # Voeg eventueel selector-config toe
-    if payload.get("price_selector") or payload.get("title_selector"):
+    if any(payload.get(f) for f in ("price_selector", "title_selector", "url_pattern")):
         cfg = CompetitorScrapeConfig(
             competitor_id=concurrent.competitor_id,
             page_type=payload.get("page_type", "product"),
@@ -117,6 +119,66 @@ def create_competitor_config(
         db.commit()
 
     return {"status": "aangemaakt", "competitor_id": concurrent.competitor_id, "naam": naam}
+
+
+@router.put("/configs/{competitor_id}")
+def update_competitor_config(
+    competitor_id: int,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Pas een bestaande concurrent-configuratie aan (selectors, scraping_enabled, naam, url)."""
+    if current_user.role not in ("admin", "pricing_manager"):
+        raise HTTPException(status_code=403, detail="Onvoldoende rechten")
+    concurrent = db.query(DimCompetitor).filter(DimCompetitor.competitor_id == competitor_id).first()
+    if not concurrent:
+        raise HTTPException(status_code=404, detail="Concurrent niet gevonden")
+
+    if "competitor_name" in payload and payload["competitor_name"].strip():
+        concurrent.competitor_name = payload["competitor_name"].strip()
+    if "base_url" in payload:
+        concurrent.base_url = payload["base_url"]
+    if "scraping_enabled" in payload:
+        concurrent.scraping_enabled = bool(payload["scraping_enabled"])
+    if "competitor_type" in payload:
+        concurrent.competitor_type = payload["competitor_type"]
+
+    # Update or create the selector config for this competitor
+    has_selectors = any(
+        k in payload for k in ("price_selector", "title_selector", "stock_selector", "delivery_selector", "ean_selector", "url_pattern")
+    )
+    if has_selectors:
+        cfg = db.query(CompetitorScrapeConfig).filter(
+            CompetitorScrapeConfig.competitor_id == competitor_id
+        ).first()
+        if not cfg:
+            cfg = CompetitorScrapeConfig(competitor_id=competitor_id, page_type="product", scrape_method="requests", requests_per_minute=10, active=True)
+            db.add(cfg)
+        for field in ("price_selector", "title_selector", "stock_selector", "delivery_selector", "ean_selector", "url_pattern"):
+            if field in payload:
+                setattr(cfg, field, payload[field])
+
+    db.commit()
+    return {"status": "bijgewerkt", "competitor_id": competitor_id, "naam": concurrent.competitor_name}
+
+
+@router.delete("/configs/{competitor_id}")
+def delete_competitor_config(
+    competitor_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Deactiveer een concurrent (soft-delete)."""
+    if current_user.role not in ("admin", "pricing_manager"):
+        raise HTTPException(status_code=403, detail="Onvoldoende rechten")
+    concurrent = db.query(DimCompetitor).filter(DimCompetitor.competitor_id == competitor_id).first()
+    if not concurrent:
+        raise HTTPException(status_code=404, detail="Concurrent niet gevonden")
+    concurrent.active = False
+    concurrent.scraping_enabled = False
+    db.commit()
+    return {"status": "gedeactiveerd", "competitor_id": competitor_id}
 
 
 @router.post("/test")
@@ -206,6 +268,98 @@ def run_scrape(
         "configs_verwerkt": len(resultaten),
         "statussen": resultaten,
     }
+
+
+DEFAULT_SCHEDULE = [
+    {"time_slot": "08:00", "label": "Ochtendrun — voor werkdag"},
+    {"time_slot": "13:00", "label": "Middagscan — midden op de dag"},
+    {"time_slot": "18:00", "label": "Avondrun — na sluitingstijd"},
+]
+
+
+@router.get("/schedule")
+def get_scrape_schedule(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Haal het dagelijkse scraperooster op.
+    Standaard: 3× per dag op 08:00, 13:00 en 18:00.
+    """
+    tijdsloten = db.query(ScrapeSchedule).order_by(ScrapeSchedule.time_slot).all()
+    if not tijdsloten:
+        # Seed defaults if table is empty
+        for s in DEFAULT_SCHEDULE:
+            db.add(ScrapeSchedule(**s, active=True))
+        db.commit()
+        tijdsloten = db.query(ScrapeSchedule).order_by(ScrapeSchedule.time_slot).all()
+    return {
+        "tijdsloten": [
+            {
+                "id": t.id,
+                "time_slot": t.time_slot,
+                "label": t.label,
+                "active": t.active,
+                "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+            }
+            for t in tijdsloten
+        ],
+        "frequentie_per_dag": sum(1 for t in tijdsloten if t.active),
+        "omschrijving": "Configureerbare scrape-tijdsloten. Standaard 3× per dag.",
+    }
+
+
+@router.put("/schedule/{tijdslot_id}")
+def update_scrape_schedule(
+    tijdslot_id: int,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Activeer/deactiveer een tijdslot of pas het tijdstip aan."""
+    if current_user.role not in ("admin", "pricing_manager"):
+        raise HTTPException(status_code=403, detail="Onvoldoende rechten")
+    tijdslot = db.query(ScrapeSchedule).filter(ScrapeSchedule.id == tijdslot_id).first()
+    if not tijdslot:
+        raise HTTPException(status_code=404, detail="Tijdslot niet gevonden")
+    if "active" in payload:
+        tijdslot.active = bool(payload["active"])
+    if "time_slot" in payload:
+        nieuw = payload["time_slot"].strip()
+        if len(nieuw) == 5 and nieuw[2] == ":" and nieuw[:2].isdigit() and nieuw[3:].isdigit():
+            tijdslot.time_slot = nieuw
+        else:
+            raise HTTPException(status_code=400, detail="Ongeldig tijdformaat — verwacht HH:MM")
+    if "label" in payload:
+        tijdslot.label = payload["label"]
+    db.commit()
+    return {"status": "bijgewerkt", "tijdslot": tijdslot.time_slot, "active": tijdslot.active}
+
+
+@router.post("/schedule")
+def add_scrape_schedule(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Voeg een nieuw tijdslot toe aan het scraperooster."""
+    if current_user.role not in ("admin", "pricing_manager"):
+        raise HTTPException(status_code=403, detail="Onvoldoende rechten")
+    time_slot = (payload.get("time_slot") or "").strip()
+    if not (len(time_slot) == 5 and time_slot[2] == ":" and time_slot[:2].isdigit() and time_slot[3:].isdigit()):
+        raise HTTPException(status_code=400, detail="Ongeldig tijdformaat — verwacht HH:MM")
+    bestaand = db.query(ScrapeSchedule).filter(ScrapeSchedule.time_slot == time_slot).first()
+    if bestaand:
+        raise HTTPException(status_code=409, detail=f"Tijdslot {time_slot} bestaat al")
+    nieuw = ScrapeSchedule(
+        time_slot=time_slot,
+        label=payload.get("label", ""),
+        active=payload.get("active", True),
+    )
+    db.add(nieuw)
+    db.commit()
+    db.refresh(nieuw)
+    return {"status": "aangemaakt", "id": nieuw.id, "time_slot": nieuw.time_slot}
 
 
 @router.get("/results")
