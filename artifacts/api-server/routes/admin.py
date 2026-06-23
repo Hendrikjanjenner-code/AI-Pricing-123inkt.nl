@@ -6,13 +6,19 @@ DELETE /api/admin/clear-data?include_users=true — Volledige DB-wipe incl. user
   Na een volledige wipe worden de demo-gebruikers automatisch hersteld bij herstart
   (seed_users_only() draait altijd bij opstarten als er nog geen gebruikers zijn).
 GET    /api/admin/clear-data/preview      — Toon rijen per tabel zonder te wissen.
+GET    /api/admin/sync/status             — Verbindingsstatus DRS + GA4.
+POST   /api/admin/sync                    — Start handmatige sync van DRS én GA4.
 """
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+
 from database import get_db
 import models
 import auth as auth_utils
+from connectors import drs_connector, ga4_connector
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -94,13 +100,131 @@ def preview_clear_data(
         except Exception:
             telling.append({"tabel": tabel, "rijen": None, "fout": "tabel onbereikbaar"})
 
-    # Voeg beschermde tabellen toe ter info
-    for tabel in BESCHERMDE_TABELLEN:
-        try:
-            result = db.execute(text(f'SELECT COUNT(*) FROM "{tabel}"')).scalar()
-            telling.append({"tabel": tabel, "rijen": result, "beschermd": True})
-        except Exception:
-            pass
-
     telling.sort(key=lambda x: (x.get("beschermd", False), x.get("tabel", "")))
     return {"tabellen": telling}
+
+
+# ---------------------------------------------------------------------------
+# Sync endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/sync/status")
+def sync_status(
+    current_user: models.User = Depends(auth_utils.require_role("admin")),
+):
+    """
+    Controleer de verbindingsstatus van DRS en GA4 zonder data op te halen.
+
+    Geen authenticatie richting de externe APIs; valideert alleen of de
+    omgevingsvariabelen aanwezig en de endpoints bereikbaar zijn.
+    """
+    drs_status = drs_connector.check_connection()
+    ga4_status = ga4_connector.check_connection()
+
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "drs": drs_status,
+        "ga4": ga4_status,
+    }
+
+
+@router.post("/sync")
+def trigger_sync(
+    current_user: models.User = Depends(auth_utils.require_role("admin")),
+):
+    """
+    Start een handmatige datasync van DRS én GA4.
+
+    DRS:  haalt productcatalogus, verkoopdata (laatste 30 dagen),
+          voorraadstanden en prijshistorie (laatste 90 dagen) op.
+    GA4:  haalt traffic + conversiedata (laatste 30 dagen) op.
+
+    De opgehaalde data wordt momenteel teruggestuurd als JSON-samenvatting.
+    Schrijf de records naar de DB wanneer de datapijplijn live gaat.
+    """
+    from datetime import date, timedelta
+
+    today = date.today().isoformat()
+    date_30d = (date.today() - timedelta(days=30)).isoformat()
+
+    result: dict = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "drs": {"status": "skipped", "message": "", "counts": {}},
+        "ga4": {"status": "skipped", "message": "", "counts": {}},
+    }
+
+    # --- DRS sync ---
+    try:
+        drs_connector._get_credentials()  # gooit ConnectorError als niet geconfigureerd
+    except drs_connector.ConnectorError as exc:
+        result["drs"] = {"status": "not_configured", "message": str(exc), "counts": {}}
+    else:
+        drs_counts: dict = {}
+        drs_errors: list[str] = []
+
+        try:
+            products = drs_connector.fetch_product_catalog()
+            drs_counts["products"] = len(products)
+        except drs_connector.ConnectorError as exc:
+            drs_errors.append(f"products: {exc}")
+
+        try:
+            sales = drs_connector.fetch_sales_history(date_from=date_30d, date_to=today)
+            drs_counts["sales_records"] = len(sales)
+        except drs_connector.ConnectorError as exc:
+            drs_errors.append(f"sales: {exc}")
+
+        try:
+            stock = drs_connector.fetch_stock_levels()
+            drs_counts["stock_records"] = len(stock)
+        except drs_connector.ConnectorError as exc:
+            drs_errors.append(f"stock: {exc}")
+
+        try:
+            sku_ids = [p["sku_code"] for p in products] if "products" in drs_counts else []
+            if sku_ids:
+                prices = drs_connector.fetch_price_history(sku_ids=sku_ids[:50], lookback_days=90)
+                drs_counts["price_records"] = len(prices)
+        except drs_connector.ConnectorError as exc:
+            drs_errors.append(f"prices: {exc}")
+
+        result["drs"] = {
+            "status": "error" if drs_errors else "ok",
+            "message": "; ".join(drs_errors) if drs_errors else "DRS sync voltooid.",
+            "counts": drs_counts,
+        }
+
+    # --- GA4 sync ---
+    try:
+        ga4_connector._get_credentials()
+    except ga4_connector.ConnectorError as exc:
+        result["ga4"] = {"status": "not_configured", "message": str(exc), "counts": {}}
+    else:
+        ga4_counts: dict = {}
+        ga4_errors: list[str] = []
+
+        try:
+            traffic = ga4_connector.fetch_traffic_data(date_from=date_30d, date_to=today)
+            ga4_counts["traffic_records"] = len(traffic)
+        except ga4_connector.ConnectorError as exc:
+            ga4_errors.append(f"traffic: {exc}")
+
+        try:
+            conversions = ga4_connector.fetch_conversion_data(date_from=date_30d, date_to=today)
+            ga4_counts["conversion_records"] = len(conversions)
+        except ga4_connector.ConnectorError as exc:
+            ga4_errors.append(f"conversions: {exc}")
+
+        try:
+            channels = ga4_connector.fetch_channel_breakdown(date_from=date_30d, date_to=today)
+            ga4_counts["channel_records"] = len(channels)
+        except ga4_connector.ConnectorError as exc:
+            ga4_errors.append(f"channels: {exc}")
+
+        result["ga4"] = {
+            "status": "error" if ga4_errors else "ok",
+            "message": "; ".join(ga4_errors) if ga4_errors else "GA4 sync voltooid.",
+            "counts": ga4_counts,
+        }
+
+    return result

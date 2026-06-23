@@ -7,6 +7,10 @@ setAuthTokenGetter(() => localStorage.getItem("auth_token"));
 
 export const getAuthToken = (): string => localStorage.getItem("auth_token") || "";
 
+export const getAuthHeaders = (): Record<string, string> => ({
+  Authorization: `Bearer ${getAuthToken()}`,
+});
+
 export const setAuthToken = (token: string | null) => {
   if (token) {
     localStorage.setItem("auth_token", token);

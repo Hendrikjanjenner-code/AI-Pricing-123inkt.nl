@@ -1,119 +1,284 @@
 """
-DRS Connector stub — Dynamisch Retail Systeem integratie.
+DRS Connector — Dynamisch Retail Systeem integratie.
 
-Alle functies gooien NotImplementedError met een beschrijvende melding.
-Vervang de stubs door echte implementaties zodra de DRS API beschikbaar is.
+Leest verbindingsconfig uit omgevingsvariabelen:
+  DRS_API_URL     (vereist)  bijv. https://api.drs.example.com/v1
+  DRS_API_KEY     (vereist)  geheime API-sleutel
+  DRS_TENANT_ID   (optioneel) tenant-/klant-ID voor multi-tenant omgevingen
 
-Vereiste DRS-velden:
-- product_id       (string)       Interne product-ID in DRS
-- sku_code         (string)       EAN / artikelnummer
-- description      (string)       Productomschrijving
-- category_code    (string)       Categoriecode
-- cost_price       (decimal)      Inkoopprijs excl. BTW
-- selling_price    (decimal)      Huidige verkoopprijs incl. BTW
-- stock_qty        (integer)      Actuele voorraad
-- sales_qty_7d     (integer)      Verkopen afgelopen 7 dagen
-- sales_qty_30d    (integer)      Verkopen afgelopen 30 dagen
-- last_sale_date   (date)         Datum laatste verkoop
-- supplier_id      (string)       Leverancier-ID
+Functies retourneren altijd een dict of lijst; bij ontbrekende config of
+een netwerk-/API-fout wordt een ConnectorError opgegooid met een beschrijvende melding.
 """
+from __future__ import annotations
+
+import os
+import json
+import logging
+from datetime import date, datetime
+from typing import Any
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+_TIMEOUT = 30  # seconden
 
 
-def validate_drs_payload(payload: dict) -> dict:
+class ConnectorError(Exception):
+    """Fout bij verbinding met of data-ophalen uit DRS."""
+
+
+def _get_credentials() -> dict:
+    """Lees DRS-credentials uit omgevingsvariabelen."""
+    base_url = os.environ.get("DRS_API_URL", "").rstrip("/")
+    api_key = os.environ.get("DRS_API_KEY", "")
+    tenant_id = os.environ.get("DRS_TENANT_ID", "")
+
+    if not base_url or not api_key:
+        raise ConnectorError(
+            "DRS niet geconfigureerd. Stel DRS_API_URL en DRS_API_KEY in als omgevingsvariabelen."
+        )
+    return {"base_url": base_url, "api_key": api_key, "tenant_id": tenant_id}
+
+
+def _make_client(creds: dict) -> httpx.Client:
+    headers = {
+        "Authorization": f"Bearer {creds['api_key']}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    if creds.get("tenant_id"):
+        headers["X-Tenant-ID"] = creds["tenant_id"]
+    return httpx.Client(base_url=creds["base_url"], headers=headers, timeout=_TIMEOUT)
+
+
+def check_connection() -> dict:
     """
-    Valideer een DRS-datapakket op vereiste velden en datatypes.
+    Test de DRS-verbinding zonder data op te halen.
 
     Returns:
-        dict met keys 'valid' (bool), 'errors' (list[str])
-
-    Raises:
-        NotImplementedError: altijd, DRS API nog niet geïmplementeerd.
+        {
+          'configured': bool,   — env vars aanwezig
+          'reachable':  bool,   — API reageert op health-check
+          'status':     str,    — 'ok' | 'not_configured' | 'unreachable' | 'auth_error'
+          'message':    str,    — leesbare uitleg
+        }
     """
-    raise NotImplementedError(
-        "DRS API is nog niet gekoppeld. "
-        "Gebruik op dit moment de CSV-importmodule (POST /api/uploads/products) "
-        "om productdata te importeren."
-    )
+    try:
+        creds = _get_credentials()
+    except ConnectorError as exc:
+        return {
+            "configured": False,
+            "reachable": False,
+            "status": "not_configured",
+            "message": str(exc),
+        }
+
+    try:
+        with _make_client(creds) as client:
+            resp = client.get("/health")
+            if resp.status_code == 401:
+                return {
+                    "configured": True,
+                    "reachable": True,
+                    "status": "auth_error",
+                    "message": "DRS bereikbaar maar API-sleutel geweigerd (HTTP 401).",
+                }
+            resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        return {
+            "configured": True,
+            "reachable": True,
+            "status": "error",
+            "message": f"DRS API fout: HTTP {exc.response.status_code}",
+        }
+    except httpx.RequestError as exc:
+        return {
+            "configured": True,
+            "reachable": False,
+            "status": "unreachable",
+            "message": f"DRS niet bereikbaar: {exc}",
+        }
+
+    return {
+        "configured": True,
+        "reachable": True,
+        "status": "ok",
+        "message": "DRS verbinding succesvol.",
+    }
 
 
-def import_products_from_drs(credentials: dict, filters: dict | None = None) -> list[dict]:
+def fetch_product_catalog(
+    filters: dict | None = None,
+    page_size: int = 500,
+) -> list[dict]:
     """
-    Haal productcatalogus op uit DRS via de REST API.
+    Haal de volledige productcatalogus op uit DRS.
+
+    Query-parameters (optioneel via filters-dict):
+      category    — filter op categoriecode
+      updated_after — ISO-datumstring, bijv. '2026-01-01'
+
+    Returns:
+        Lijst van product-dicts met de DRS-velden:
+        product_id, sku_code, description, category_code,
+        cost_price, selling_price, stock_qty, sales_qty_7d,
+        sales_qty_30d, last_sale_date, supplier_id
+    """
+    creds = _get_credentials()
+    params: dict[str, Any] = {"page_size": page_size}
+    if filters:
+        if "category" in filters:
+            params["category"] = filters["category"]
+        if "updated_after" in filters:
+            params["updated_after"] = filters["updated_after"]
+
+    products: list[dict] = []
+    page = 1
+
+    try:
+        with _make_client(creds) as client:
+            while True:
+                params["page"] = page
+                resp = client.get("/products", params=params)
+                resp.raise_for_status()
+                data = resp.json()
+
+                batch = data.get("items", data) if isinstance(data, dict) else data
+                if not batch:
+                    break
+                products.extend(batch)
+
+                # Paginering stoppen als er geen volgende pagina is
+                if isinstance(data, dict) and not data.get("has_next", False):
+                    break
+                if len(batch) < page_size:
+                    break
+                page += 1
+
+    except httpx.HTTPStatusError as exc:
+        raise ConnectorError(
+            f"DRS productcatalogus ophalen mislukt: HTTP {exc.response.status_code} — {exc.response.text[:200]}"
+        ) from exc
+    except httpx.RequestError as exc:
+        raise ConnectorError(f"DRS verbindingsfout bij ophalen productcatalogus: {exc}") from exc
+
+    logger.info("DRS: %d producten opgehaald", len(products))
+    return products
+
+
+def fetch_sales_history(
+    date_from: str,
+    date_to: str,
+    sku_ids: list[str] | None = None,
+) -> list[dict]:
+    """
+    Haal dagelijkse verkoopdata op uit DRS voor een datumbereik.
 
     Args:
-        credentials: {'api_key': str, 'base_url': str, 'tenant_id': str}
-        filters:     optioneel {'category': str, 'updated_after': date}
+        date_from:  'YYYY-MM-DD' — beginddatum (inclusief)
+        date_to:    'YYYY-MM-DD' — einddatum (inclusief)
+        sku_ids:    optionele lijst van SKU-ID's; bij None worden alle SKU's opgehaald
 
     Returns:
-        list van product-dicts conform DRS-schema
-
-    Raises:
-        NotImplementedError: altijd, DRS API nog niet geïmplementeerd.
+        Lijst van verkooprijen: {sku_id, date, qty_sold, revenue, avg_price}
     """
-    raise NotImplementedError(
-        "import_products_from_drs is nog niet geïmplementeerd. "
-        "Wacht tot DRS API-toegang verleend is (zie technische checklist)."
-    )
+    creds = _get_credentials()
+    params: dict[str, Any] = {"date_from": date_from, "date_to": date_to}
+    if sku_ids:
+        params["sku_ids"] = ",".join(sku_ids)
+
+    try:
+        with _make_client(creds) as client:
+            resp = client.get("/sales/daily", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPStatusError as exc:
+        raise ConnectorError(
+            f"DRS verkoopdata ophalen mislukt: HTTP {exc.response.status_code} — {exc.response.text[:200]}"
+        ) from exc
+    except httpx.RequestError as exc:
+        raise ConnectorError(f"DRS verbindingsfout bij ophalen verkoopdata: {exc}") from exc
+
+    rows = data.get("items", data) if isinstance(data, dict) else data
+    logger.info("DRS: %d verkooprecords opgehaald (%s → %s)", len(rows), date_from, date_to)
+    return rows
 
 
-def import_sales_from_drs(credentials: dict, date_from: str, date_to: str) -> list[dict]:
+def fetch_stock_levels(sku_ids: list[str] | None = None) -> list[dict]:
     """
-    Haal dagelijkse verkoopdata op uit DRS.
+    Haal actuele voorraadstanden op uit DRS (snapshot van vandaag).
 
     Args:
-        credentials: {'api_key': str, 'base_url': str, 'tenant_id': str}
-        date_from:   'YYYY-MM-DD'
-        date_to:     'YYYY-MM-DD'
+        sku_ids: optionele filter op SKU-ID's
 
     Returns:
-        list van verkooprijen
-
-    Raises:
-        NotImplementedError: altijd, DRS API nog niet geïmplementeerd.
+        Lijst van voorraad-dicts: {sku_id, stock_qty, warehouse, as_of_date}
     """
-    raise NotImplementedError(
-        "import_sales_from_drs is nog niet geïmplementeerd. "
-        "Importeer verkoophistorie via CSV (POST /api/uploads/sales)."
-    )
+    creds = _get_credentials()
+    params: dict[str, Any] = {}
+    if sku_ids:
+        params["sku_ids"] = ",".join(sku_ids)
+
+    try:
+        with _make_client(creds) as client:
+            resp = client.get("/inventory/current", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPStatusError as exc:
+        raise ConnectorError(
+            f"DRS voorraad ophalen mislukt: HTTP {exc.response.status_code} — {exc.response.text[:200]}"
+        ) from exc
+    except httpx.RequestError as exc:
+        raise ConnectorError(f"DRS verbindingsfout bij ophalen voorraad: {exc}") from exc
+
+    rows = data.get("items", data) if isinstance(data, dict) else data
+    logger.info("DRS: %d voorraadrecords opgehaald", len(rows))
+    return rows
 
 
-def import_stock_from_drs(credentials: dict) -> list[dict]:
-    """
-    Haal actuele voorraadstanden op uit DRS.
-
-    Args:
-        credentials: {'api_key': str, 'base_url': str, 'tenant_id': str}
-
-    Returns:
-        list van voorraad-dicts: {'sku_id': str, 'stock_qty': int, 'date': str}
-
-    Raises:
-        NotImplementedError: altijd, DRS API nog niet geïmplementeerd.
-    """
-    raise NotImplementedError(
-        "import_stock_from_drs is nog niet geïmplementeerd. "
-        "Importeer voorraaddata via CSV (POST /api/uploads/inventory)."
-    )
-
-
-def import_price_history_from_drs(
-    credentials: dict, sku_ids: list[str], lookback_days: int = 90
+def fetch_price_history(
+    sku_ids: list[str],
+    lookback_days: int = 90,
 ) -> list[dict]:
     """
     Haal prijshistorie op uit DRS voor een set SKU's.
 
     Args:
-        credentials:   {'api_key': str, 'base_url': str, 'tenant_id': str}
-        sku_ids:       lijst van SKU-ID's
-        lookback_days: aantal historische dagen (standaard 90)
+        sku_ids:       Lijst van SKU-ID's (verplicht)
+        lookback_days: Aantal historische dagen (standaard 90)
 
     Returns:
-        list van prijsrijen: {'sku_id': str, 'date': str, 'price': float}
-
-    Raises:
-        NotImplementedError: altijd, DRS API nog niet geïmplementeerd.
+        Lijst van prijsrijen: {sku_id, date, selling_price, cost_price, margin_pct}
     """
-    raise NotImplementedError(
-        "import_price_history_from_drs is nog niet geïmplementeerd. "
-        "Importeer prijshistorie via CSV (POST /api/uploads/prices)."
+    if not sku_ids:
+        raise ConnectorError("fetch_price_history vereist minimaal één SKU-ID.")
+
+    creds = _get_credentials()
+    date_from = (
+        datetime.utcnow().date() - __import__("datetime").timedelta(days=lookback_days)
+    ).isoformat()
+
+    params: dict[str, Any] = {
+        "sku_ids": ",".join(sku_ids),
+        "date_from": date_from,
+    }
+
+    try:
+        with _make_client(creds) as client:
+            resp = client.get("/prices/history", params=params)
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPStatusError as exc:
+        raise ConnectorError(
+            f"DRS prijshistorie ophalen mislukt: HTTP {exc.response.status_code} — {exc.response.text[:200]}"
+        ) from exc
+    except httpx.RequestError as exc:
+        raise ConnectorError(f"DRS verbindingsfout bij ophalen prijshistorie: {exc}") from exc
+
+    rows = data.get("items", data) if isinstance(data, dict) else data
+    logger.info(
+        "DRS: %d prijsrecords opgehaald voor %d SKU's (lookback %dd)",
+        len(rows), len(sku_ids), lookback_days,
     )
+    return rows
