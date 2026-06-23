@@ -1,0 +1,560 @@
+Bouw verder op de bestaande AI Pricing Tool.
+
+BELANGRIJK:
+Verwijder alle PriceShape-afhankelijkheden volledig.
+
+Alles wat verwijst naar:
+- PriceShape import
+- PriceShape API
+- PriceShape export
+- PriceShape connector
+- PriceShape execution
+- PriceShape data pipeline
+
+moet worden verwijderd of vervangen door eigen functionaliteit.
+
+De tool moet voortaan werken met:
+1. eigen CSV-import
+2. handmatige invoer
+3. eigen scraping-engine
+4. later optioneel DRS/API-koppeling
+5. later optioneel Google Analytics/GA4-koppeling
+
+---
+
+DOEL VAN DE TEST
+
+Ik wil de tool testen met echte data uit DRS, voor de categorie:
+
+Paper_Copy
+
+Dit betreft kopieerpapier van diverse merken, types, formaten en verpakkingen.
+
+De test moet kunnen draaien zonder demo-data.
+
+---
+
+VERWIJDER DEMO DATA
+
+Verwijder alle bestaande demo-data uit:
+- database
+- seed scripts
+- frontend mock data
+- backend mock endpoints
+- dashboards
+- grafieken
+- pricing grid
+- BCG modules
+- competition modules
+- traffic modules
+- promotion modules
+
+Voeg een duidelijke knop toe:
+
+“Alle data verwijderen”
+
+Alleen zichtbaar voor Admin.
+
+---
+
+CSV IMPORT MODULE
+
+Maak een volledige CSV-importmodule.
+
+Pagina:
+“Data Import”
+
+Importtypes:
+1. Productdata
+2. Historische verkoopdata
+3. Historische prijsdata
+4. Concurrentieprijzen
+5. Voorraaddata
+6. Trafficdata
+7. Promotiedata
+8. Inkoopkosten
+
+De gebruiker moet CSV kunnen uploaden, valideren en importeren.
+
+Toon na upload:
+- aantal regels
+- aantal fouten
+- ontbrekende verplichte velden
+- dubbele SKU’s
+- ongeldige EAN’s
+- ongeldige prijzen
+- import preview
+- import log
+
+---
+
+CSV FORMAT 1 — PRODUCTMASTER
+
+Bestandsnaam:
+product_master_paper_copy.csv
+
+Velden:
+
+sku_id
+product_name
+category
+subcategory
+sub_subcategory
+brand
+is_private_label
+ean
+oem_code
+mpn
+supplier_name
+paper_size
+paper_weight_gsm
+color
+sheets_per_pack
+packs_per_box
+unit_quantity
+current_sales_price_inc_vat
+current_sales_price_ex_vat
+cost_price
+transport_cost
+fulfillment_cost
+marketing_cost
+stock_quantity
+supplier_lead_time_days
+active
+
+Categorie default:
+Paper_Copy
+
+Voorbeeld:
+
+sku_id,product_name,category,subcategory,sub_subcategory,brand,is_private_label,ean,oem_code,mpn,supplier_name,paper_size,paper_weight_gsm,color,sheets_per_pack,packs_per_box,unit_quantity,current_sales_price_inc_vat,current_sales_price_ex_vat,cost_price,transport_cost,fulfillment_cost,marketing_cost,stock_quantity,supplier_lead_time_days,active
+PAP-001,123inkt Kopieerpapier A4 80 grams,Paper_Copy,Kopieerpapier,A4 80 grams,123inkt,true,8710000000012,,PAP-A4-80,123inkt,A4,80,Wit,500,5,2500,24.95,20.62,14.50,0.80,0.50,0.20,1200,7,true
+
+---
+
+CSV FORMAT 2 — HISTORISCHE SALES
+
+Bestandsnaam:
+sales_history_paper_copy.csv
+
+Velden:
+
+date
+sku_id
+shop_code
+units_sold
+orders
+revenue_inc_vat
+revenue_ex_vat
+gross_margin
+net_margin
+average_sales_price
+returns_units
+promotion_active
+
+Voorbeeld:
+
+date,sku_id,shop_code,units_sold,orders,revenue_inc_vat,revenue_ex_vat,gross_margin,net_margin,average_sales_price,returns_units,promotion_active
+2026-05-01,PAP-001,NL,42,35,1047.90,866.03,256.20,238.50,24.95,1,false
+
+---
+
+CSV FORMAT 3 — HISTORISCHE EIGEN PRIJZEN
+
+Bestandsnaam:
+own_price_history_paper_copy.csv
+
+Velden:
+
+date
+sku_id
+shop_code
+sales_price_inc_vat
+sales_price_ex_vat
+cost_price
+margin_per_unit
+price_change_reason
+changed_by
+
+Voorbeeld:
+
+date,sku_id,shop_code,sales_price_inc_vat,sales_price_ex_vat,cost_price,margin_per_unit,price_change_reason,changed_by
+2026-05-01,PAP-001,NL,24.95,20.62,14.50,6.12,Initial import,manual
+
+---
+
+CSV FORMAT 4 — CONCURRENTIEPRIJZEN
+
+Bestandsnaam:
+competitor_prices_paper_copy.csv
+
+Velden:
+
+date
+competitor_name
+competitor_url
+competitor_sku
+own_sku_id
+product_title
+ean
+oem_code
+mpn
+brand
+price_inc_vat
+price_ex_vat
+shipping_cost
+total_price_inc_vat
+stock_status
+delivery_days
+match_confidence
+scrape_source
+
+Voorbeeld:
+
+date,competitor_name,competitor_url,competitor_sku,own_sku_id,product_title,ean,oem_code,mpn,brand,price_inc_vat,price_ex_vat,shipping_cost,total_price_inc_vat,stock_status,delivery_days,match_confidence,scrape_source
+2026-05-01,Concurrent A,https://example.com/product,paper123,PAP-001,Kopieerpapier A4 80g 5 pakken,8710000000012,,PAP-A4-80,Generic,23.95,19.79,3.95,27.90,IN_STOCK,1,0.92,scrape
+
+---
+
+CSV FORMAT 5 — TRAFFIC DATA
+
+Bestandsnaam:
+traffic_paper_copy.csv
+
+Velden:
+
+date
+sku_id
+shop_code
+sessions
+pageviews
+unique_visitors
+add_to_cart
+orders
+conversion_rate
+bounce_rate
+organic_sessions
+paid_sessions
+internal_search_count
+
+Voorbeeld:
+
+date,sku_id,shop_code,sessions,pageviews,unique_visitors,add_to_cart,orders,conversion_rate,bounce_rate,organic_sessions,paid_sessions,internal_search_count
+2026-05-01,PAP-001,NL,420,610,390,52,35,0.083,0.42,300,80,25
+
+---
+
+CSV FORMAT 6 — PROMOTIES
+
+Bestandsnaam:
+promotions_paper_copy.csv
+
+Velden:
+
+promotion_id
+sku_id
+shop_code
+start_date
+end_date
+promotion_type
+discount_pct
+bundle_quantity
+promotion_price_inc_vat
+expected_goal
+active
+
+Voorbeeld:
+
+promotion_id,sku_id,shop_code,start_date,end_date,promotion_type,discount_pct,bundle_quantity,promotion_price_inc_vat,expected_goal,active
+PROMO-001,PAP-001,NL,2026-05-01,2026-05-14,PRICE_DISCOUNT,10,,22.45,Volume uplift,true
+
+---
+
+SCRAPING ENGINE
+
+Maak scraping de primaire bron voor concurrentieprijzen.
+
+Pagina:
+“Scraping Configuratie”
+
+Functionaliteit:
+- concurrent toevoegen
+- basis URL invoeren
+- product URL invoeren
+- categorie URL invoeren
+- CSS selectors beheren
+- test scrape uitvoeren
+- scraping frequentie instellen
+- scrape log bekijken
+- fouten bekijken
+
+Scrapingfrequentie voor test:
+3x per dag
+
+Momenten:
+08:00
+13:00
+18:00
+
+Gebruik:
+- respecteer robots.txt
+- rate limiting
+- random delay
+- retry logic
+- geen captcha-omzeiling
+- geen anti-bot bypass
+- publieke productinformatie alleen
+
+Te scrapen velden:
+competitor_name
+competitor_url
+competitor_sku
+product_title
+ean
+oem_code
+mpn
+brand
+price_inc_vat
+shipping_cost
+total_price_inc_vat
+stock_status
+delivery_days
+scraped_at
+scrape_status
+error_message
+
+---
+
+VERWIJDER PRICESHAPE CODE
+
+Zoek en verwijder alle bestanden, functies en endpoints met:
+
+priceshape
+price_shape
+PriceShape
+priceshape_connector
+priceshape_api
+priceshape_export
+priceshape_import
+
+Vervang door:
+
+scraping_engine
+csv_import_engine
+manual_import_engine
+competitor_price_history
+
+Maak een overzichtspagina:
+“Verwijderde PriceShape afhankelijkheden”
+
+Toon:
+- welke bestanden zijn aangepast
+- welke endpoints zijn verwijderd
+- welke databasevelden zijn aangepast
+- welke imports zijn verwijderd
+- welke vervangende functionaliteit is toegevoegd
+
+---
+
+DRS KOPPELING
+
+Voor nu wil ik DRS-data handmatig importeren via CSV.
+
+Maak wel een voorbereidende API-structuur:
+
+backend/app/connectors/drs_connector.py
+
+Met functies:
+- validate_drs_payload()
+- import_products_from_drs()
+- import_sales_from_drs()
+- import_stock_from_drs()
+- import_price_history_from_drs()
+
+Maar:
+- geen echte API-call nodig
+- connector standaard inactive
+- CSV-import is voor nu leidend
+
+Maak in de UI een pagina:
+“DRS Integratie”
+
+Toon:
+- status: Niet gekoppeld
+- huidige methode: CSV import
+- toekomstige optie: API koppeling
+- benodigde datavelden
+- technische checklist
+
+---
+
+GOOGLE ANALYTICS / GA4 KOPPELING
+
+Maak GA4 optioneel.
+
+Voor nu:
+- geen verplichte koppeling
+- trafficdata kan via CSV worden geïmporteerd
+
+Maak voorbereidende connector:
+
+backend/app/connectors/ga4_connector.py
+
+Functies:
+- validate_ga4_credentials()
+- fetch_sku_traffic()
+- fetch_category_traffic()
+- fetch_conversion_data()
+
+UI pagina:
+“Google Analytics Integratie”
+
+Toon:
+- status: Niet gekoppeld
+- huidige methode: CSV import
+- toekomstige optie: GA4 API
+- benodigde velden:
+  - sessions
+  - pageviews
+  - add_to_cart
+  - orders
+  - conversion_rate
+  - channel
+  - device
+  - landing_page
+
+---
+
+TEST DASHBOARD
+
+Maak pagina:
+“Pilot Test Paper_Copy”
+
+Toon:
+- aantal geïmporteerde SKU’s
+- aantal concurrentieprijzen
+- aantal scrapes vandaag
+- laatste scrape status
+- gemiddelde prijsindex
+- gemiddelde marge
+- huismerk aandeel
+- OEM vs huismerk prijsgap
+- SKU’s met prijsrisico
+- SKU’s met huismerkkans
+- concurrenten met meeste prijswijzigingen
+- categorieadvies
+
+---
+
+PRICING STRATEGY RECOGNITION
+
+De tool moet prijsstrategieën herkennen op basis van historische prijzen.
+
+Per concurrent:
+- aantal prijswijzigingen per dag/week
+- gemiddelde prijsdaling
+- gemiddelde prijsstijging
+- prijsvolatiliteit
+- promotiepatronen
+- categorieën met meeste prijsbeweging
+
+Classificeer concurrentstrategieën:
+
+- EVERYDAY_LOW_PRICE
+- PROMOTION_DRIVEN
+- MARKET_SHARE_ATTACK
+- MARGIN_PROTECTION
+- INVENTORY_CLEARANCE
+- PRICE_FOLLOWER
+- PRICE_LEADER
+
+Toon per concurrent:
+- strategie
+- confidence score
+- categorie
+- reden
+- aanbevolen reactie
+
+---
+
+KOSTENOVERZICHT
+
+Maak een pagina:
+“Kostenoverzicht Test”
+
+De tool moet een indicatief kostenoverzicht tonen voor de pilot.
+
+Scenario:
+- categorie: Paper_Copy
+- 250–500 SKU’s
+- 5–10 concurrenten
+- 3 scrapes per dag
+- 3 maanden testperiode
+- AI analyses dagelijks of wekelijks
+
+Toon:
+1. Eenmalige kosten
+2. Maandelijkse kosten
+3. Mogelijke externe kosten
+4. Kostenbesparingen t.o.v. externe tooling
+
+Kostenposten:
+- Replit hosting
+- database opslag
+- scraping compute
+- AI API gebruik
+- eventueel proxykosten
+- ontwikkeluren intern
+- externe API’s optioneel
+
+Maak kostenvelden instelbaar:
+- aantal SKU’s
+- aantal concurrenten
+- scrapes per dag
+- AI analyses per dag
+- gemiddelde AI kosten per analyse
+- opslagkosten per maand
+- hostingkosten per maand
+
+Output:
+- geschatte kosten per maand
+- geschatte kosten per 3 maanden
+- geschatte kosten per jaar
+
+---
+
+BELANGRIJKSTE BUSINESSREGELS
+
+1. PriceShape is niet meer nodig.
+2. CSV-import is leidend voor eerste test.
+3. Scraping is leidend voor concurrentieprijzen.
+4. DRS-koppeling komt later, maar structuur moet klaarstaan.
+5. GA4-koppeling komt later, maar structuur moet klaarstaan.
+6. Geen demo-data meer.
+7. Alles moet werken met echte CSV-import.
+8. Categorie Paper_Copy moet als pilotcategorie ingericht worden.
+9. AI is adviserend, niet automatisch beslissend.
+10. Prijswijzigingen moeten altijd uitlegbaar zijn.
+11. Huismerk-first strategie blijft uitgangspunt.
+12. A-merk/OEM wordt gebruikt als trafficdriver; huismerk als marge-driver.
+
+---
+
+ACCEPTATIECRITERIA
+
+Na uitvoering moet ik kunnen:
+
+- alle demo-data verwijderen
+- productdata importeren via CSV
+- salesdata importeren via CSV
+- historische prijsdata importeren via CSV
+- concurrentieprijzen importeren via CSV
+- scraping configureren
+- 3x per dag scraping draaien
+- Paper_Copy pilotdashboard bekijken
+- OEM vs huismerk prijsgap analyseren
+- concurrentstrategieën herkennen
+- kostenoverzicht voor de pilot bekijken
+- zien welke stappen nog nodig zijn voor DRS
+- zien welke stappen nog nodig zijn voor GA4
+- tool testen zonder PriceShape
