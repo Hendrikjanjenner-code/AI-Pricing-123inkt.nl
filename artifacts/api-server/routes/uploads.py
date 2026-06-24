@@ -33,7 +33,7 @@ async def _process_upload(
 
     try:
         content = await file.read()
-        text = content.decode("utf-8-sig")
+        text = content.decode("utf-8-sig").replace('\r\n', '\n').replace('\r', '\n')
         reader = csv.DictReader(io.StringIO(text))
         rows = list(reader)
         processed, failed, warnings = processor(rows, db)
@@ -325,6 +325,7 @@ async def validate_csv(
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError:
         text = content.decode("latin-1")
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
 
     reader = csv.DictReader(io.StringIO(text))
     if reader.fieldnames is None:
@@ -885,6 +886,7 @@ async def upload_bulk(
             text = raw.decode("utf-8-sig")
         except UnicodeDecodeError:
             text = raw.decode("latin-1")
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
 
         reader = csv.DictReader(io.StringIO(text))
         if not reader.fieldnames:
