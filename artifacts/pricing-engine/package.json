@@ -74,7 +74,5 @@
     "wouter": "^3.3.5",
     "zod": "catalog:"
   },
-  "dependencies": {
-    "jszip": "^3.10.1"
-  }
+  "dependencies": {}
 }
