@@ -1,4 +1,4 @@
-"""CSV upload endpoints for all data types."""
+"""CSV and XLSX upload endpoints for all data types."""
 import io
 import csv
 import zipfile
@@ -8,6 +8,50 @@ from sqlalchemy.orm import Session
 from database import get_db
 import models
 import auth as auth_utils
+
+
+def _file_to_rows(content: bytes, filename: str, warnings: list | None = None) -> list[dict]:
+    """
+    Parse uploaded file bytes into a list of row dicts.
+    Supports .csv (UTF-8/latin-1) and .xlsx (first sheet only).
+    Values are always returned as strings to match csv.DictReader behaviour.
+    If an XLSX contains multiple sheets, an informative warning is appended to
+    the optional `warnings` list — the first sheet is always used.
+    """
+    fname = (filename or "").lower()
+    if fname.endswith(".xlsx"):
+        try:
+            import openpyxl
+        except ImportError:
+            raise HTTPException(status_code=500, detail="openpyxl is niet geïnstalleerd; XLSX niet ondersteund")
+        wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+        if len(wb.worksheets) > 1 and warnings is not None:
+            sheet_names = ", ".join(ws.title for ws in wb.worksheets)
+            warnings.append(
+                f"Alleen het eerste werkblad wordt ingelezen (werkbladen gevonden: {sheet_names})"
+            )
+        ws = wb.worksheets[0]
+        rows_iter = ws.iter_rows(values_only=True)
+        headers = [str(c).strip() if c is not None else "" for c in next(rows_iter, [])]
+        if not headers:
+            wb.close()
+            return []
+        rows = []
+        for row in rows_iter:
+            row_dict = {}
+            for h, v in zip(headers, row):
+                row_dict[h] = "" if v is None else str(v).strip()
+            rows.append(row_dict)
+        wb.close()
+        return rows
+    else:
+        try:
+            text = content.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = content.decode("latin-1")
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        reader = csv.DictReader(io.StringIO(text))
+        return list(reader)
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 
@@ -33,10 +77,10 @@ async def _process_upload(
 
     try:
         content = await file.read()
-        text = content.decode("utf-8-sig").replace('\r\n', '\n').replace('\r', '\n')
-        reader = csv.DictReader(io.StringIO(text))
-        rows = list(reader)
+        file_warnings: list = []
+        rows = _file_to_rows(content, file.filename or "", file_warnings)
         processed, failed, warnings = processor(rows, db)
+        warnings = file_warnings + warnings
         job.rows_processed = processed
         job.rows_failed = failed
         job.status = "completed"
@@ -321,19 +365,19 @@ async def validate_csv(
     EAN_KOLOMMEN = {"ean", "ean_code", "ean13", "ean8", "barcode"}
 
     content = await file.read()
+    fname = file.filename or ""
+    waarschuwingen: list[str] = []
     try:
-        text = content.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        text = content.decode("latin-1")
-    text = text.replace('\r\n', '\n').replace('\r', '\n')
+        alle_rijen = _file_to_rows(content, fname, waarschuwingen)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Bestand kon niet worden ingelezen: {str(e)}")
 
-    reader = csv.DictReader(io.StringIO(text))
-    if reader.fieldnames is None:
+    if not alle_rijen:
         return {"rows_total": 0, "rows_valid": 0, "rows_failed": 0,
                 "missing_fields": [], "duplicate_skus": [], "errors": [],
                 "errors_by_type": {}, "preview": [], "warnings": [], "kan_importeren": False}
 
-    kolommen = {k.lower().strip() for k in reader.fieldnames}
+    kolommen = {k.lower().strip() for k in alle_rijen[0].keys()}
     vereist_groepen = VERPLICHTE_KOLOMMEN.get(upload_type, [])
 
     # A requirement is satisfied if ANY alias in its group appears in the column set
@@ -343,14 +387,13 @@ async def validate_csv(
             ontbrekend.append(groep[0])  # Report the canonical field name
 
     fouten: list[dict] = []
-    waarschuwingen: list[str] = []
     sku_gezien: dict[str, list[int]] = {}
     preview: list[dict] = []
     geldig = 0
     mislukt = 0
     totaal = 0
 
-    for i, row in enumerate(reader, start=1):
+    for i, row in enumerate(alle_rijen, start=1):
         totaal += 1
         rij_geldig = True
         row_norm = {k.lower().strip(): v for k, v in row.items()}
@@ -867,10 +910,14 @@ async def upload_bulk(
         raise HTTPException(status_code=400, detail="Bestand is geen geldig ZIP-archief (.zip verwacht)")
 
     zf = zipfile.ZipFile(io.BytesIO(content))
-    csv_names = [n for n in zf.namelist() if n.lower().endswith(".csv") and not n.startswith("__MACOSX")]
+    csv_names = [
+        n for n in zf.namelist()
+        if (n.lower().endswith(".csv") or n.lower().endswith(".xlsx"))
+        and not n.startswith("__MACOSX")
+    ]
 
     if not csv_names:
-        raise HTTPException(status_code=400, detail="ZIP bevat geen CSV-bestanden")
+        raise HTTPException(status_code=400, detail="ZIP bevat geen CSV- of XLSX-bestanden")
 
     PROCESSORS = {
         "products": _process_products,
@@ -882,19 +929,18 @@ async def upload_bulk(
 
     for csv_name in csv_names:
         raw = zf.read(csv_name)
+        file_warns: list = []
         try:
-            text = raw.decode("utf-8-sig")
-        except UnicodeDecodeError:
-            text = raw.decode("latin-1")
-        text = text.replace('\r\n', '\n').replace('\r', '\n')
-
-        reader = csv.DictReader(io.StringIO(text))
-        if not reader.fieldnames:
-            results.append({"bestand": csv_name, "type": "onbekend", "status": "overgeslagen", "reden": "Leeg CSV"})
+            rows = _file_to_rows(raw, csv_name, file_warns)
+        except Exception as e:
+            results.append({"bestand": csv_name, "type": "onbekend", "status": "overgeslagen", "reden": str(e)})
             continue
 
-        rows = list(reader)
-        kolommen = set(reader.fieldnames)
+        if not rows:
+            results.append({"bestand": csv_name, "type": "onbekend", "status": "overgeslagen", "reden": "Leeg bestand"})
+            continue
+
+        kolommen = set(rows[0].keys())
 
         upload_type = _detect_type_by_filename(csv_name) or _detect_csv_type(kolommen)
         if not upload_type:
@@ -1043,13 +1089,14 @@ async def upload_bulk(
 
             totaal_verwerkt += proc
             totaal_mislukt += fail
+            all_warns = file_warns + warns
             results.append({
                 "bestand": csv_name,
                 "type": upload_type,
                 "status": "voltooid",
                 "rows_processed": proc,
                 "rows_failed": fail,
-                "warnings": warns[:10],
+                "warnings": all_warns[:10],
             })
 
         except Exception as e:

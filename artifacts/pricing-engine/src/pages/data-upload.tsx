@@ -124,11 +124,11 @@ function SalesUploadCard() {
           <div>
             <CardTitle className="text-base flex items-center gap-2">
               <FileSpreadsheet className="h-5 w-5 text-primary" />
-              Verkoopdata CSV
+              Verkoopdata
             </CardTitle>
             <CardDescription className="mt-1 text-sm">
               Dagelijkse verkoophistorie per SKU: aantallen, omzet, kosten en marge.
-              Upload één CSV-bestand rechtstreeks vanuit je ERP of exporttool.
+              Upload één CSV of XLSX-bestand rechtstreeks vanuit je ERP of exporttool.
             </CardDescription>
           </div>
           <Button variant="ghost" size="sm" className="h-7 text-xs shrink-0" onClick={downloadTemplate}>
@@ -254,7 +254,7 @@ function SalesUploadCard() {
         <div className="relative flex-1">
           <Input
             type="file"
-            accept=".csv"
+            accept=".csv,.xlsx"
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
             onChange={handleBestand}
             disabled={validating || uploading}
@@ -262,7 +262,7 @@ function SalesUploadCard() {
           <Button variant="outline" className="w-full text-sm" size="sm" disabled={validating || uploading}>
             {validating
               ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Valideren…</>
-              : <><Upload className="mr-2 h-4 w-4" />{bestand ? bestand.name : "CSV kiezen"}</>
+              : <><Upload className="mr-2 h-4 w-4" />{bestand ? bestand.name : "CSV of XLSX kiezen"}</>
             }
           </Button>
         </div>
@@ -357,7 +357,7 @@ function TrafficUploadCard() {
               Traffic & GA4
             </CardTitle>
             <CardDescription className="mt-1 text-sm">
-              Sessies, pageviews en conversies per SKU/dag. Exporteer dit rechtstreeks uit Google Analytics 4
+              Sessies, pageviews en conversies per SKU/dag. Exporteer als CSV of XLSX uit Google Analytics 4
               of upload handmatig totdat de GA4-koppeling actief is.
             </CardDescription>
           </div>
@@ -446,7 +446,7 @@ function TrafficUploadCard() {
         <div className="relative flex-1">
           <Input
             type="file"
-            accept=".csv"
+            accept=".csv,.xlsx"
             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
             onChange={handleBestand}
             disabled={validating || uploading}
@@ -454,7 +454,7 @@ function TrafficUploadCard() {
           <Button variant="outline" className="w-full text-sm" size="sm" disabled={validating || uploading}>
             {validating
               ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Valideren…</>
-              : <><Upload className="mr-2 h-4 w-4" />{bestand ? bestand.name : "CSV kiezen"}</>
+              : <><Upload className="mr-2 h-4 w-4" />{bestand ? bestand.name : "CSV of XLSX kiezen"}</>
             }
           </Button>
         </div>
@@ -477,7 +477,7 @@ export default function Gegevensintegratie() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Gegevensintegratie</h1>
         <p className="text-muted-foreground mt-1">
-          Upload verkoopdata en GA4-traffic als CSV. Elk bestand wordt gevalideerd vóór import.
+          Upload verkoopdata en GA4-traffic als CSV of XLSX. Elk bestand wordt gevalideerd vóór import.
         </p>
       </div>
 
