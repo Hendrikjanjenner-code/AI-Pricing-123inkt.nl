@@ -1,0 +1,102 @@
+# Replit Prompt – Integratie DRS Datareport als primaire databron
+
+Bouw verder op de bestaande AI Pricing Engine.
+
+## DOEL
+
+Gebruik vanaf nu het dagelijkse DRS Datareport als primaire databron voor de gehele AI Pricing Engine.
+
+Verwijder alle interne demo-productstructuren en maak het DRS Datareport de enige Product Master.
+
+Gebruik beide tabbladen:
+
+* Sales
+* Hierarchy
+
+### Sales
+
+Gebruik de volgende velden rechtstreeks:
+
+* productcode → unieke SKU
+* Titel → productnaam
+* Merk → merk
+* Soort → OEM / Compatible / Huismerk
+* OEM
+* Afzet_YTD
+* Omzet_YTD
+* Marge_YTD
+* Afzet_YTD_1_jaar
+* Omzet_YTD_1_jaar
+* Marge_YTD_1_jaar
+* Afzet_YTD_2_jaar
+* Omzet_YTD_2_jaar
+* Marge_YTD_2_jaar
+* Inkoopprijs ex BTW
+* Verkoopprijs incl BTW
+* Verkoopprijs excl BTW
+* Gemiddeld aantal stuks per order
+* Aanmaakdatum
+* Eerste verkoop
+* Active / Inactive
+
+### Hierarchy
+
+Gebruik dit tabblad als de centrale categorieboom van de gehele applicatie.
+
+Alle modules moeten deze hiërarchie gebruiken.
+
+Gebruik de volledige path voor:
+
+* Pricing
+* Competition Intelligence
+* BCG Intelligence
+* Promotion Intelligence
+* Traffic Intelligence
+* Reporting
+* Forecasting
+
+Verwijder eventuele losse categorie-indelingen uit de applicatie.
+
+## Data Import
+
+Maak een importwizard die:
+
+* het DRS-bestand valideert;
+* beide tabbladen automatisch koppelt;
+* SKU's synchroniseert;
+* categorieën synchroniseert;
+* hiërarchie synchroniseert;
+* wijzigingen logt.
+
+## Datakwaliteit
+
+Controleer automatisch:
+
+* dubbele SKU's
+* ontbrekende productcodes
+* ontbrekende hiërarchie
+* ontbrekende merken
+* ontbrekende prijzen
+* negatieve marges
+* inactieve artikelen
+
+Maak een dashboard "Datakwaliteit" waarin alle fouten zichtbaar zijn.
+
+## Ontbrekende datasets
+
+Maak placeholders voor toekomstige koppelingen:
+
+* voorraad
+* historische prijswijzigingen
+* promoties
+* concurrentieprijzen
+* traffic
+* leveranciersdata
+* logistieke kosten
+* marketingkosten
+
+Deze datasets worden later gekoppeld, maar de database moet hier nu al op voorbereid zijn.
+
+## Resultaat
+
+Na import moet de volledige AI Pricing Engine automatisch werken op basis van het DRS Datareport zonder aanvullende handmatige productinvoer.
