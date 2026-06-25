@@ -57,6 +57,23 @@ class DimProduct(Base):
     paper_size = Column(String(20))        # A4 / A3 / A5 / etc.
     paper_weight_gsm = Column(Integer)     # gram per vierkante meter
     sheets_per_pack = Column(Integer)      # vel per pak
+    # DRS Datareport fields
+    product_type = Column(String(50))      # OEM / Compatible / Huismerk
+    oem_code = Column(String(100))         # OEM artikelnummer
+    afzet_ytd = Column(Float)             # eenheden YTD huidig jaar
+    omzet_ytd = Column(Numeric(14, 4))    # omzet YTD huidig jaar
+    marge_ytd = Column(Numeric(14, 4))    # marge YTD huidig jaar
+    afzet_ytd_1j = Column(Float)          # eenheden YTD vorig jaar
+    omzet_ytd_1j = Column(Numeric(14, 4))
+    marge_ytd_1j = Column(Numeric(14, 4))
+    afzet_ytd_2j = Column(Float)          # eenheden YTD 2 jaar geleden
+    omzet_ytd_2j = Column(Numeric(14, 4))
+    marge_ytd_2j = Column(Numeric(14, 4))
+    avg_units_per_order = Column(Float)    # gemiddeld aantal per order
+    aanmaakdatum = Column(Date)            # datum aangemaakt in DRS
+    eerste_verkoop = Column(Date)          # datum eerste verkoop
+    is_active = Column(Boolean, default=True)  # actief in DRS
+    import_source = Column(String(50))     # "DRS" / "CSV" / "seed"
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -959,14 +976,62 @@ class FactManagementReport(Base):
 
 
 class DimCategoryHierarchy(Base):
-    """Hiërarchische categoriestructuur: niveau 1=categorie, 2=subcategorie, 3=sub-subcategorie."""
+    """Hiërarchische categoriestructuur afkomstig uit DRS Datareport Hierarchy-tabblad."""
     __tablename__ = "dim_category_hierarchy"
 
     category_id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     category_name = Column(String(255), nullable=False)
     parent_category_id = Column(Integer, nullable=True, index=True)
     category_level = Column(Integer, nullable=False)    # 1=categorie / 2=subcategorie / 3=sub-subcategorie
+    path = Column(String(1000))                         # volledig pad bv. "Inkt & Toner > Cartridges"
+    module = Column(String(500))                        # actieve modules kommagescheiden: Pricing,Competition,BCG
     active = Column(Boolean, default=True, nullable=False)
+    import_source = Column(String(50), default="DRS")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FactPromotionsDaily(Base):
+    """Placeholder: dagelijkse promotiedata per SKU (koppeling volgt)."""
+    __tablename__ = "fact_promotions_daily"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    date = Column(Date, nullable=False, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    promotion_type = Column(String(100))
+    discount_pct = Column(Float)
+    discount_eur = Column(Numeric(10, 4))
+    channel = Column(String(100))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FactSupplierData(Base):
+    """Placeholder: leveranciersdata per SKU (koppeling volgt)."""
+    __tablename__ = "fact_supplier_data"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    supplier_id = Column(String(100))
+    supplier_name = Column(String(255))
+    lead_time_days = Column(Integer)
+    moq = Column(Integer)                              # minimum order quantity
+    purchase_price = Column(Numeric(10, 4))
+    valid_from = Column(Date)
+    valid_to = Column(Date)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class FactLogisticsCost(Base):
+    """Placeholder: logistieke kosten per SKU (koppeling volgt)."""
+    __tablename__ = "fact_logistics_cost"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    date = Column(Date, nullable=False, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    pick_cost = Column(Numeric(10, 4))
+    pack_cost = Column(Numeric(10, 4))
+    ship_cost = Column(Numeric(10, 4))
+    return_cost = Column(Numeric(10, 4))
+    total_logistics_cost = Column(Numeric(10, 4))
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

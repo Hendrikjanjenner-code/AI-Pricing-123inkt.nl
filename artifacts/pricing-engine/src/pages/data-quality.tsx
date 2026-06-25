@@ -2,15 +2,24 @@ import { useGetDataQuality } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, CheckCircle2, ShieldAlert, FileWarning } from "lucide-react";
+import { AlertCircle, CheckCircle2, ShieldAlert, FileWarning, Database } from "lucide-react";
 
 export default function Datakwaliteit() {
   const { data, isLoading } = useGetDataQuality();
+  const raw = data as any;
 
   if (isLoading) return <div className="p-8"><Skeleton className="h-[500px] w-full" /></div>;
   if (!data) return <div>Geen datakwaliteitsrapport beschikbaar.</div>;
 
-  const kleurScore = data.overall_score >= 90 ? 'text-emerald-500' : data.overall_score >= 70 ? 'text-amber-500' : 'text-destructive';
+  const score = typeof data.overall_score === "number" ? data.overall_score : Math.round(Number(data.overall_score) * 100);
+  const kleurScore = score >= 80 ? "text-emerald-500" : score >= 60 ? "text-amber-500" : "text-destructive";
+  const drsIssues: any[] = raw?.drs_issues ?? [];
+  const drsSummary: Record<string, number> = raw?.drs_summary ?? {};
+  const hierCount: number = raw?.hierarchy_node_count ?? 0;
+
+  const errCount = (raw?.issues ?? []).filter((i: any) => i.severity === "error").length;
+  const warnCount = (raw?.issues ?? []).filter((i: any) => i.severity === "warning").length;
+  const infoCount = (raw?.issues ?? []).filter((i: any) => i.severity === "info").length;
 
   return (
     <div className="space-y-6">
@@ -26,12 +35,12 @@ export default function Datakwaliteit() {
           </CardHeader>
           <CardContent>
             <div className="flex flex-col items-center justify-center py-6">
-              <div className={`text-6xl font-bold ${kleurScore}`}>{data.overall_score}</div>
+              <div className={`text-6xl font-bold ${kleurScore}`}>{score}</div>
               <div className="text-sm text-muted-foreground mt-2">/ 100 Score</div>
             </div>
             <div className="mt-4 flex justify-between text-sm">
               <span className="text-muted-foreground">Totaal SKU's</span>
-              <span className="font-medium">{data.total_skus.toLocaleString('nl-NL')}</span>
+              <span className="font-medium">{data.total_skus.toLocaleString("nl-NL")}</span>
             </div>
           </CardContent>
         </Card>
@@ -48,9 +57,7 @@ export default function Datakwaliteit() {
                   <span className="flex items-center text-sm font-medium">
                     <ShieldAlert className="w-4 h-4 text-destructive mr-2" /> Kritieke fouten
                   </span>
-                  <Badge variant="destructive">
-                    {Object.entries(data.summary).reduce((acc, [k, v]) => k.includes('error') ? acc + v : acc, 0)}
-                  </Badge>
+                  <Badge variant="destructive">{errCount}</Badge>
                 </div>
                 <div className="text-xs text-muted-foreground pl-6">Ontbrekende kostprijzen, ontbrekende strategie</div>
               </div>
@@ -59,9 +66,7 @@ export default function Datakwaliteit() {
                   <span className="flex items-center text-sm font-medium">
                     <AlertCircle className="w-4 h-4 text-amber-500 mr-2" /> Waarschuwingen
                   </span>
-                  <Badge variant="outline" className="text-amber-600 border-amber-200 bg-amber-50">
-                    {Object.entries(data.summary).reduce((acc, [k, v]) => k.includes('warning') ? acc + v : acc, 0)}
-                  </Badge>
+                  <Badge variant="outline" className="text-amber-600 border-amber-200 bg-amber-50">{warnCount}</Badge>
                 </div>
                 <div className="text-xs text-muted-foreground pl-6">Verouderde concurrentenprijzen, lage voorraad</div>
               </div>
@@ -70,9 +75,7 @@ export default function Datakwaliteit() {
                   <span className="flex items-center text-sm font-medium">
                     <FileWarning className="w-4 h-4 text-blue-500 mr-2" /> Informatie
                   </span>
-                  <Badge variant="secondary">
-                    {Object.entries(data.summary).reduce((acc, [k, v]) => k.includes('info') ? acc + v : acc, 0)}
-                  </Badge>
+                  <Badge variant="secondary">{infoCount}</Badge>
                 </div>
                 <div className="text-xs text-muted-foreground pl-6">Ontbrekende optionele kenmerken</div>
               </div>
@@ -81,6 +84,51 @@ export default function Datakwaliteit() {
         </Card>
       </div>
 
+      {/* DRS-specifieke kwaliteitssectie */}
+      <Card className={drsIssues.length === 0 && hierCount === 0 ? "border-dashed opacity-70" : ""}>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Database className="w-5 h-5 text-primary" />
+            DRS Datareport kwaliteit
+          </CardTitle>
+          <CardDescription>
+            Kwaliteitschecks specifiek voor data afkomstig uit het DRS Datareport.
+            {hierCount > 0 && (
+              <span className="ml-2 text-emerald-600 font-medium">{hierCount} hiërarchiepunten geladen.</span>
+            )}
+            {hierCount === 0 && (
+              <span className="ml-2 text-amber-600">Nog geen DRS-hiërarchie geïmporteerd — gebruik Gegevensintegratie → DRS Datareport.</span>
+            )}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-0">
+          {drsIssues.length === 0 ? (
+            <div className="p-8 text-center text-muted-foreground flex flex-col items-center">
+              <CheckCircle2 className="w-8 h-8 text-emerald-500 mb-2" />
+              {hierCount > 0 ? "Geen DRS-kwaliteitsproblemen gevonden!" : "Geen DRS-data beschikbaar. Importeer eerst een DRS Datareport."}
+            </div>
+          ) : (
+            <div className="divide-y">
+              {drsIssues.map((issue, i) => (
+                <div key={i} className="grid grid-cols-12 items-center p-3 text-sm">
+                  <div className="col-span-2">
+                    {issue.severity === "error" && <Badge variant="destructive" className="rounded-sm">Fout</Badge>}
+                    {issue.severity === "warning" && <Badge variant="outline" className="text-amber-600 border-amber-200 bg-amber-50 rounded-sm">Waarschuwing</Badge>}
+                    {issue.severity === "info" && <Badge variant="secondary" className="rounded-sm">Info</Badge>}
+                  </div>
+                  <div className="col-span-3 font-mono text-xs">{issue.issue_type}</div>
+                  <div className="col-span-5">{issue.message}</div>
+                  <div className="col-span-2 text-right font-medium">
+                    {issue.affected_count?.toLocaleString("nl-NL") || "-"}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Alle issues */}
       <Card>
         <CardHeader>
           <CardTitle>Gedetailleerd issuelogboek</CardTitle>
@@ -93,21 +141,21 @@ export default function Datakwaliteit() {
             <div className="col-span-2 text-right">Betroffen SKU's</div>
           </div>
           <div className="divide-y max-h-[500px] overflow-y-auto">
-            {data.issues.length === 0 ? (
+            {(raw?.issues ?? []).length === 0 ? (
               <div className="p-8 text-center text-muted-foreground flex flex-col items-center">
                 <CheckCircle2 className="w-8 h-8 text-emerald-500 mb-2" />
                 Geen datakwaliteitsproblemen gevonden!
               </div>
-            ) : data.issues.map((issue, i) => (
+            ) : (raw?.issues ?? []).map((issue: any, i: number) => (
               <div key={i} className="grid grid-cols-12 items-center p-3 text-sm">
                 <div className="col-span-2">
-                  {issue.severity === 'error' && <Badge variant="destructive" className="rounded-sm">Fout</Badge>}
-                  {issue.severity === 'warning' && <Badge variant="outline" className="text-amber-600 border-amber-200 bg-amber-50 rounded-sm">Waarschuwing</Badge>}
-                  {issue.severity === 'info' && <Badge variant="secondary" className="rounded-sm">Info</Badge>}
+                  {issue.severity === "error" && <Badge variant="destructive" className="rounded-sm">Fout</Badge>}
+                  {issue.severity === "warning" && <Badge variant="outline" className="text-amber-600 border-amber-200 bg-amber-50 rounded-sm">Waarschuwing</Badge>}
+                  {issue.severity === "info" && <Badge variant="secondary" className="rounded-sm">Info</Badge>}
                 </div>
                 <div className="col-span-3 font-mono text-xs">{issue.issue_type}</div>
                 <div className="col-span-5">{issue.message}</div>
-                <div className="col-span-2 text-right font-medium">{issue.affected_count?.toLocaleString('nl-NL') || '-'}</div>
+                <div className="col-span-2 text-right font-medium">{issue.affected_count?.toLocaleString("nl-NL") || "-"}</div>
               </div>
             ))}
           </div>

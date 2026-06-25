@@ -11,6 +11,76 @@ import auth as auth_utils
 router = APIRouter(prefix="/api", tags=["categories"])
 
 
+@router.get("/categories/hierarchy")
+def get_category_hierarchy(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """
+    Retourneert de volledige DRS-hiërarchieboom als een geneste structuur.
+    Niveau 1 = hoofdcategorie, niveau 2+ = subcategorieën.
+    Bevat ook een platte lijst (flat) voor gebruik in dropdowns.
+    """
+    nodes = db.query(models.DimCategoryHierarchy).filter(
+        models.DimCategoryHierarchy.active == True
+    ).order_by(
+        models.DimCategoryHierarchy.category_level,
+        models.DimCategoryHierarchy.category_name,
+    ).all()
+
+    # Build flat list
+    flat = [
+        {
+            "id": n.category_id,
+            "name": n.category_name,
+            "parent_id": n.parent_category_id,
+            "level": n.category_level,
+            "path": n.path,
+            "module": n.module,
+        }
+        for n in nodes
+    ]
+
+    # Build nested tree
+    id_map = {n.category_id: {
+        "id": n.category_id,
+        "name": n.category_name,
+        "parent_id": n.parent_category_id,
+        "level": n.category_level,
+        "path": n.path,
+        "module": n.module,
+        "children": [],
+    } for n in nodes}
+
+    roots = []
+    for node in id_map.values():
+        pid = node["parent_id"]
+        if pid and pid in id_map:
+            id_map[pid]["children"].append(node)
+        else:
+            roots.append(node)
+
+    # If hierarchy is empty, fall back to dim_product categories
+    if not flat:
+        rows = (
+            db.query(
+                models.DimProduct.category,
+                func.count(models.DimProduct.sku_id).label("sku_count"),
+            )
+            .filter(models.DimProduct.category.isnot(None))
+            .group_by(models.DimProduct.category)
+            .all()
+        )
+        flat = [
+            {"id": i + 1, "name": r.category, "parent_id": None, "level": 1,
+             "path": r.category, "module": None}
+            for i, r in enumerate(rows)
+        ]
+        roots = flat
+
+    return {"tree": roots, "flat": flat}
+
+
 @router.get("/categories")
 def list_categories(
     db: Session = Depends(get_db),

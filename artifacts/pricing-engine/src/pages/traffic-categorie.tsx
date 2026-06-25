@@ -12,11 +12,6 @@ import { getAuthToken } from "@/lib/auth";
 
 const API = import.meta.env.BASE_URL.replace(/\/$/, "");
 
-const CATEGORIES = [
-  "Ink & Toner", "Office Supplies", "Paper", "Packaging",
-  "Cleaning", "Furniture", "Electronics", "Canvas & Art", "Printers",
-];
-
 const SIGNAAL_KLEUR: Record<string, string> = {
   CONVERSION_DROP_DETECTED:       "#ef4444",
   TRAFFIC_DROP_DETECTED:          "#f97316",
@@ -30,12 +25,35 @@ const SIGNAAL_KLEUR: Record<string, string> = {
 
 export default function TrafficCategorie() {
   const params = useParams<{ category?: string }>();
-  const [selectedCat, setSelectedCat] = useState(params.category || CATEGORIES[0]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [selectedCat, setSelectedCat] = useState(params.category || "");
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
-  useEffect(() => { laden(selectedCat); }, [selectedCat]);
+  // Load categories from API on mount
+  useEffect(() => {
+    async function loadCategories() {
+      try {
+        const r = await fetch(`${API}/api/categories/hierarchy`, {
+          headers: { Authorization: `Bearer ${getAuthToken()}` },
+        });
+        if (!r.ok) return;
+        const json = await r.json();
+        const flat: Array<{ id: number; name: string; level: number }> = json.flat ?? [];
+        const names = flat.map(n => n.name).filter(Boolean);
+        if (names.length > 0) {
+          setCategories(names);
+          if (!selectedCat) setSelectedCat(names[0]);
+        }
+      } catch {
+        // fallback silently
+      }
+    }
+    loadCategories();
+  }, []);
+
+  useEffect(() => { if (selectedCat) laden(selectedCat); }, [selectedCat]);
 
   async function laden(cat: string) {
     setLoading(true);
@@ -71,7 +89,7 @@ export default function TrafficCategorie() {
         <Select value={selectedCat} onValueChange={setSelectedCat}>
           <SelectTrigger className="w-52"><SelectValue /></SelectTrigger>
           <SelectContent>
-            {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+            {categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>

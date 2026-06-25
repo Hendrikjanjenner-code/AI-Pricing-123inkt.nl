@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api", tags=["data-quality"])
 def get_data_quality(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
-):
+):  # noqa: C901
     total_skus = db.query(models.DimProduct).count()
     issues = []
     summary = {}
@@ -86,14 +86,105 @@ def get_data_quality(
                         "message": "SKUs where min_price > max_price", "affected_count": invalid_range})
         summary["INVALID_PRICE_RANGE"] = invalid_range
 
+    # ── DRS-specifieke kwaliteitschecks ──────────────────────────────────────
+    drs_issues = []
+    drs_summary: dict[str, int] = {}
+
+    # DRS: Duplicate SKUs (multiple rows with same sku_id)
+    # Not possible in dim_product (PK), but check import_jobs for recent DRS imports
+    # with duplicate warnings — instead check for missing productcode (brand) fields
+    missing_brand = db.query(models.DimProduct).filter(
+        models.DimProduct.brand.is_(None)
+    ).count()
+    if missing_brand:
+        drs_issues.append({
+            "sku_id": None,
+            "issue_type": "DRS_MISSING_BRAND",
+            "severity": "warning",
+            "message": "SKU's zonder merknaam (vereist voor DRS-kwaliteit)",
+            "affected_count": missing_brand,
+        })
+        drs_summary["DRS_MISSING_BRAND"] = missing_brand
+
+    missing_price = db.query(models.DimProduct).filter(
+        models.DimProduct.current_price.is_(None)
+    ).count()
+    if missing_price:
+        drs_issues.append({
+            "sku_id": None,
+            "issue_type": "DRS_MISSING_PRICE",
+            "severity": "error",
+            "message": "SKU's zonder verkoopprijs",
+            "affected_count": missing_price,
+        })
+        drs_summary["DRS_MISSING_PRICE"] = missing_price
+
+    # DRS: Missing hierarchy (products without a category matching dim_category_hierarchy)
+    hier_count = db.query(models.DimCategoryHierarchy).filter(
+        models.DimCategoryHierarchy.active == True
+    ).count()
+    if hier_count > 0:
+        # Count products whose category has no match in the hierarchy
+        hier_names = {
+            row.category_name
+            for row in db.query(models.DimCategoryHierarchy.category_name).all()
+        }
+        missing_hier = db.query(models.DimProduct).filter(
+            models.DimProduct.category.notin_(hier_names)
+        ).count() if hier_names else 0
+        if missing_hier:
+            drs_issues.append({
+                "sku_id": None,
+                "issue_type": "DRS_MISSING_HIERARCHY",
+                "severity": "warning",
+                "message": "SKU's waarvan de categorie niet in de DRS-hiërarchieboom staat",
+                "affected_count": missing_hier,
+            })
+            drs_summary["DRS_MISSING_HIERARCHY"] = missing_hier
+
+    # DRS: Inactive articles (is_active = False)
+    inactief = db.query(models.DimProduct).filter(
+        models.DimProduct.is_active == False
+    ).count()
+    if inactief:
+        drs_issues.append({
+            "sku_id": None,
+            "issue_type": "DRS_INACTIEVE_ARTIKELEN",
+            "severity": "info",
+            "message": "Inactieve artikelen in de productcatalogus (uit DRS-import)",
+            "affected_count": inactief,
+        })
+        drs_summary["DRS_INACTIEVE_ARTIKELEN"] = inactief
+
+    # DRS: Negative margin from YTD data
+    neg_marge_ytd = db.query(models.DimProduct).filter(
+        models.DimProduct.marge_ytd.isnot(None),
+        models.DimProduct.marge_ytd < 0,
+    ).count()
+    if neg_marge_ytd:
+        drs_issues.append({
+            "sku_id": None,
+            "issue_type": "DRS_NEGATIEVE_MARGE_YTD",
+            "severity": "error",
+            "message": "SKU's met negatieve YTD-marge (DRS Datareport)",
+            "affected_count": neg_marge_ytd,
+        })
+        drs_summary["DRS_NEGATIEVE_MARGE_YTD"] = neg_marge_ytd
+
+    issues.extend(drs_issues)
+    summary.update(drs_summary)
+
     # Compute overall score (100% = no issues, penalize by error severity)
     error_count = sum(1 for i in issues if i["severity"] == "error")
     warning_count = sum(1 for i in issues if i["severity"] == "warning")
     score = max(0.0, 1.0 - (error_count * 0.15) - (warning_count * 0.05))
 
     return {
-        "overall_score": round(score, 2),
+        "overall_score": round(score * 100, 1),
         "total_skus": total_skus,
         "issues": issues,
         "summary": summary,
+        "drs_summary": drs_summary,
+        "drs_issues": drs_issues,
+        "hierarchy_node_count": hier_count if hier_count else 0,
     }
