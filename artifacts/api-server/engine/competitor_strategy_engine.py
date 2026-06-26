@@ -30,6 +30,23 @@ STRATEGIE_LABELS: dict[str, str] = {
     "PRICE_LEADER":        "Prijsleider",
 }
 
+# Gewicht waarmee een concurrent meetelt in de COMPETITOR_INDEX-strategie.
+# Concurrenten in opruiming (INVENTORY_CLEARANCE) verlaten de markt en mogen de
+# referentieprijs niet naar beneden trekken → laag gewicht. Prijsleiders zetten
+# de toon en krijgen extra gewicht. Overige strategieën tellen neutraal mee (1.0).
+STRATEGIE_GEWICHT: dict[str, float] = {
+    "PRICE_LEADER":        1.5,
+    "INVENTORY_CLEARANCE": 0.3,
+}
+
+
+def strategie_gewicht(strategy_type: Optional[str]) -> float:
+    """Weegfactor voor een concurrentstrategie in de prijsindex (default 1.0)."""
+    if not strategy_type:
+        return 1.0
+    return STRATEGIE_GEWICHT.get(strategy_type, 1.0)
+
+
 AANBEVOLEN_REACTIE: dict[str, str] = {
     "EVERYDAY_LOW_PRICE":  "Handhaaf eigen PCIS-gewogen referentieprijs; follow niet blind.",
     "PROMOTION_DRIVEN":    "Monitor promotiecycli; vermijd structurele prijsverlaging.",

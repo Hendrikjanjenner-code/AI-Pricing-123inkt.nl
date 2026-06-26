@@ -25,6 +25,8 @@ import numpy as np
 import pandas as pd
 from typing import Optional
 
+from engine.competitor_strategy_engine import strategie_gewicht
+
 
 def _current_price(context: dict) -> Optional[float]:
     p = context["product"]
@@ -148,10 +150,50 @@ def competitor_index(context: dict) -> Optional[dict]:
             **(_estimate_margin_uplift(cost, current, current, avg_units) if cost else {}),
         }
 
-    recent_comp = competitors.sort_values("date").tail(7)
-    comp_prices = recent_comp["price"].dropna()
-    min_comp = float(comp_prices.min())
-    avg_comp = float(comp_prices.mean())
+    recent_comp = competitors.sort_values("date").dropna(subset=["price"]).tail(7)
+    comp_prices = recent_comp["price"]
+
+    # Latest known price per competitor within the recent window.
+    if "competitor_name" in recent_comp.columns:
+        per_competitor = recent_comp.groupby("competitor_name", as_index=False).last()
+    else:
+        per_competitor = recent_comp
+
+    # Strategy-weighted competitor index: down-weight competitors that are in
+    # INVENTORY_CLEARANCE (leaving the market) and up-weight PRICE_LEADERs.
+    strategy_map = context.get("competitor_strategies", {}) or {}
+    weighted_sum = 0.0
+    weight_total = 0.0
+    signal_competitors: list[dict] = []
+    for _, row in per_competitor.iterrows():
+        price = float(row["price"])
+        name = row.get("competitor_name") if hasattr(row, "get") else None
+        strat = strategy_map.get(name) if name else None
+        strategy_type = strat["strategy_type"] if strat else None
+        weight = strategie_gewicht(strategy_type)
+        weighted_sum += price * weight
+        weight_total += weight
+        if strat:
+            signal_competitors.append({
+                "name": name,
+                "price": round(price, 4),
+                "strategy_type": strategy_type,
+                "label_nl": strat.get("label_nl"),
+                "weight": weight,
+            })
+
+    if weight_total > 0:
+        avg_comp = weighted_sum / weight_total
+    else:
+        avg_comp = float(comp_prices.mean())
+
+    competitor_strategy_signal = None
+    if signal_competitors:
+        competitor_strategy_signal = {
+            "applied": any(c["weight"] != 1.0 for c in signal_competitors),
+            "method": "weighted_competitor_index",
+            "competitors": signal_competitors,
+        }
 
     # Target price index: 1.0 = match average, 0.98 = 2% below average
     target_index = 0.98
@@ -177,6 +219,7 @@ def competitor_index(context: dict) -> Optional[dict]:
         "change_pct": change_pct,
         "confidence": round(confidence, 2),
         "reason_code": reason,
+        "competitor_strategy_signal": competitor_strategy_signal,
         **financials,
     }
 

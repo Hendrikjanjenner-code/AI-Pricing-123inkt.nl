@@ -1117,6 +1117,9 @@ components:
         input_factors:
           type: object
           additionalProperties: true
+        competitor_strategy_signal:
+          type: ["object", "null"]
+          additionalProperties: true
         safety_rules_applied:
           type: array
           items:

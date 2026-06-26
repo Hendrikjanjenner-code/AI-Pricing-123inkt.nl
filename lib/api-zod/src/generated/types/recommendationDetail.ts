@@ -9,6 +9,7 @@ import type { AuditEntry } from "./auditEntry";
 import type { CompetitorPrice } from "./competitorPrice";
 import type { Product } from "./product";
 import type { Recommendation } from "./recommendation";
+import type { RecommendationDetailCompetitorStrategySignal } from "./recommendationDetailCompetitorStrategySignal";
 import type { RecommendationDetailInputFactors } from "./recommendationDetailInputFactors";
 
 export interface RecommendationDetail {
@@ -16,6 +17,8 @@ export interface RecommendationDetail {
   product: Product;
   competitor_prices: CompetitorPrice[];
   input_factors?: RecommendationDetailInputFactors;
+  /** @nullable */
+  competitor_strategy_signal?: RecommendationDetailCompetitorStrategySignal;
   safety_rules_applied: string[];
   audit_trail: AuditEntry[];
 }

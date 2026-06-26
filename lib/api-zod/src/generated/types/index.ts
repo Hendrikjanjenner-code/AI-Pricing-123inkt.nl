@@ -47,6 +47,7 @@ export * from "./productStrategyType";
 export * from "./recommendation";
 export * from "./recommendationApprovalStatus";
 export * from "./recommendationDetail";
+export * from "./recommendationDetailCompetitorStrategySignal";
 export * from "./recommendationDetailInputFactors";
 export * from "./recommendationListResponse";
 export * from "./recommendationSafetyStatus";

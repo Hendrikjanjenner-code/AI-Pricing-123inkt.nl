@@ -483,6 +483,7 @@ export const GetRecommendationResponse = zod.object({
     }),
   ),
   input_factors: zod.record(zod.string(), zod.unknown()).optional(),
+  competitor_strategy_signal: zod.record(zod.string(), zod.unknown()).nullish(),
   safety_rules_applied: zod.array(zod.string()),
   audit_trail: zod.array(
     zod.object({

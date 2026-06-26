@@ -61,6 +61,19 @@ export default function PrijsadviesDetail() {
 
   const { recommendation: rec, product, competitor_prices, audit_trail, safety_rules_applied } = data;
 
+  type StrategieSignaalConcurrent = {
+    name?: string;
+    price?: number;
+    strategy_type?: string;
+    label_nl?: string;
+    weight?: number;
+  };
+  const strategieSignaal = data.competitor_strategy_signal as
+    | { applied?: boolean; method?: string; competitors?: StrategieSignaalConcurrent[] }
+    | null
+    | undefined;
+  const signaalConcurrenten = strategieSignaal?.competitors ?? [];
+
   const handleGoedkeuren = async () => {
     try {
       await goedkeurenMut.mutateAsync({ id });
@@ -209,6 +222,43 @@ export default function PrijsadviesDetail() {
                 <div className="text-sm text-muted-foreground bg-muted/50 p-2 rounded-md">
                   {REDEN_LABELS[rec.reason_code] || rec.reason_code}
                 </div>
+              </div>
+            )}
+            {signaalConcurrenten.length > 0 && (
+              <div>
+                <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                  Concurrentstrategie-signalen
+                </div>
+                <div className="space-y-2">
+                  {signaalConcurrenten.map((c, i) => {
+                    const gewicht = c.weight ?? 1;
+                    const opgewaardeerd = gewicht > 1;
+                    const afgewaardeerd = gewicht < 1;
+                    return (
+                      <div key={i} className="flex items-center justify-between gap-2 text-sm bg-muted/50 p-2 rounded-md">
+                        <div className="min-w-0">
+                          <div className="font-medium truncate">{c.name}</div>
+                          <div className="text-xs text-muted-foreground">{c.label_nl || c.strategy_type}</div>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className={
+                            opgewaardeerd
+                              ? "border-emerald-500/30 text-emerald-600"
+                              : afgewaardeerd
+                              ? "border-amber-500/30 text-amber-600"
+                              : "text-muted-foreground"
+                          }
+                        >
+                          {opgewaardeerd ? "↑" : afgewaardeerd ? "↓" : "="} ×{gewicht.toFixed(2)}
+                        </Badge>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Concurrenten in opruiming wegen lichter mee, prijsleiders zwaarder bij het bepalen van de referentieprijs.
+                </p>
               </div>
             )}
             {safety_rules_applied && safety_rules_applied.length > 0 && (

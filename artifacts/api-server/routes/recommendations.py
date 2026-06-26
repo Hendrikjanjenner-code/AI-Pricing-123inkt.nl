@@ -221,6 +221,7 @@ def get_recommendation(
         "product": _product_brief(product),
         "competitor_prices": competitor_prices,
         "input_factors": input_factors,
+        "competitor_strategy_signal": r.competitor_strategy_signal,
         "safety_rules_applied": safety_rules,
         "audit_trail": audit_trail,
     }

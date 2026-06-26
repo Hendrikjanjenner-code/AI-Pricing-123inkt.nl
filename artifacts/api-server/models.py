@@ -172,6 +172,7 @@ class FactPricingRecommendationDaily(Base):
     confidence_score = Column(Float)
     reason_code = Column(String(100))
     strategy_type = Column(String(100))
+    competitor_strategy_signal = Column(JSON)
     safety_status = Column(String(50), default="ok")
     approval_status = Column(String(50), default="pending")
     approved_by = Column(String(100))

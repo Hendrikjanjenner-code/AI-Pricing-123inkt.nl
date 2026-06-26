@@ -265,6 +265,13 @@ export interface RecommendationListResponse {
 
 export type RecommendationDetailInputFactors = { [key: string]: unknown };
 
+/**
+ * @nullable
+ */
+export type RecommendationDetailCompetitorStrategySignal = {
+  [key: string]: unknown;
+} | null;
+
 export interface CompetitorPrice {
   competitor_name: string;
   price: number;
@@ -288,6 +295,8 @@ export interface RecommendationDetail {
   product: Product;
   competitor_prices: CompetitorPrice[];
   input_factors?: RecommendationDetailInputFactors;
+  /** @nullable */
+  competitor_strategy_signal?: RecommendationDetailCompetitorStrategySignal;
   safety_rules_applied: string[];
   audit_trail: AuditEntry[];
 }

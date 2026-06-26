@@ -9,13 +9,18 @@ For each SKU:
 """
 import numpy as np
 import pandas as pd
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from sqlalchemy.orm import Session
 import models
 from engine import strategies
 from engine.safety_rules import apply_safety_rules
+from engine.competitor_strategy_engine import analyseer_alle_concurrenten
 
 MODEL_VERSION = "v1.0.0"
+
+# Aantal dagen prijshistorie dat wordt gebruikt om concurrentstrategieën te
+# classificeren voordat de COMPETITOR_INDEX-strategie wordt gedraaid.
+STRATEGY_LOOKBACK_DAYS = 30
 
 
 def run_pricing_engine(db: Session) -> tuple[int, int]:
@@ -35,6 +40,7 @@ def run_pricing_engine(db: Session) -> tuple[int, int]:
     inventory_df = _load_inventory(db)
     basket_df = _load_basket_affinity(db)
     substitution_map = _load_substitutions(db)
+    competitor_strategies = _load_competitor_strategies(db)
 
     processed, skipped = 0, 0
 
@@ -66,6 +72,7 @@ def run_pricing_engine(db: Session) -> tuple[int, int]:
                 "basket": sku_basket,
                 "substitutions": subs,
                 "all_products": {p.sku_id: p for p in products},
+                "competitor_strategies": competitor_strategies,
             }
 
             # Route to strategy
@@ -93,6 +100,7 @@ def run_pricing_engine(db: Session) -> tuple[int, int]:
                 confidence_score=result["confidence"],
                 reason_code=result["reason_code"],
                 strategy_type=strategy,
+                competitor_strategy_signal=result.get("competitor_strategy_signal"),
                 safety_status=result.get("safety_status", "ok"),
                 approval_status="pending",
                 model_version=MODEL_VERSION,
@@ -191,3 +199,31 @@ def _load_substitutions(db: Session) -> dict:
         result.setdefault(r.a_brand_sku, []).append(r.private_label_sku)
         result.setdefault(r.private_label_sku, []).append(r.a_brand_sku)
     return result
+
+
+def _load_competitor_strategies(db: Session) -> dict[str, dict]:
+    """
+    Classificeer elke concurrent op basis van zijn prijshistorie van de
+    afgelopen STRATEGY_LOOKBACK_DAYS dagen en geef een lookup terug van
+    {concurrent_naam: classificatie-dict}. Deze signalen worden door de
+    COMPETITOR_INDEX-strategie gebruikt om concurrenten te wegen.
+    """
+    since = date.today() - timedelta(days=STRATEGY_LOOKBACK_DAYS)
+    rows = (
+        db.query(models.FactCompetitorPriceDaily)
+        .filter(models.FactCompetitorPriceDaily.date >= since)
+        .all()
+    )
+
+    prijsdata: dict[str, list[tuple[date, float]]] = {}
+    for r in rows:
+        if r.price is None:
+            continue
+        naam = r.competitor_name or "Onbekend"
+        prijsdata.setdefault(naam, []).append((r.date, float(r.price)))
+
+    if not prijsdata:
+        return {}
+
+    resultaten = analyseer_alle_concurrenten(prijsdata)
+    return {res["concurrent"]: res for res in resultaten}
