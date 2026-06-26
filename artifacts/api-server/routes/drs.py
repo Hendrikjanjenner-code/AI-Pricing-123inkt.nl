@@ -10,18 +10,32 @@ import auth as auth_utils
 
 router = APIRouter(prefix="/api/uploads", tags=["drs"])
 
-# ── Column definitions ──────────────────────────────────────────────────────
+# ── Column definitions (real DATAREPORT structure) ───────────────────────────
+# Headers are stored lowercase after parsing.
 
-SALES_REQUIRED = ["productcode", "productnaam", "verkoopprijs", "inkoopprijs"]
-SALES_OPTIONAL = [
-    "merk", "categorie", "subcategorie", "productgroep", "producttype", "oem_code",
-    "afzet_ytd", "omzet_ytd", "marge_ytd",
-    "afzet_ytd_1j", "omzet_ytd_1j", "marge_ytd_1j",
-    "afzet_ytd_2j", "omzet_ytd_2j", "marge_ytd_2j",
-    "gem_eenheden_per_order", "aanmaakdatum", "eerste_verkoop", "actief",
+# Verplichte kolommen in het Sales-tabblad
+SALES_REQUIRED = [
+    "productcode",
+    "titel",
+    "inkoopprijs ex btw",
+    "verkoopprijs excl btw",
 ]
-HIERARCHY_REQUIRED = ["node_id", "node_naam", "niveau"]
-HIERARCHY_OPTIONAL = ["parent_id", "pad", "module", "actief"]
+
+# Optionele kolommen in het Sales-tabblad (voor informatie, niet validatie-blokkerend)
+SALES_OPTIONAL = [
+    "merk", "soort", "oem",
+    "afzet_ytd", "omzet_ytd", "marge_ytd",
+    "afzet_ytd_1_jaar", "omzet_ytd_1_jaar", "marge_ytd_1_jaar",
+    "afzet_ytd_2_jaar", "omzet_ytd_2_jaar", "marge_ytd_2_jaar",
+    "verkoopprijs incl btw",
+    "gemiddeld aantal stuks per order ytd",
+    "gemiddeld aantal stuks per order ytd -1",
+    "gemiddeld aantal stuks per order ytd -2",
+    "aanmaakdatum", "eerste verkoop", "active/inactive", "producthierarchy",
+]
+
+# Verplichte kolommen in het Hierarchy-tabblad
+HIERARCHY_REQUIRED = ["productcode", "name", "path"]
 
 
 def _load_drs_xlsx(content: bytes) -> tuple[list[dict], list[dict], list[str]]:
@@ -102,10 +116,37 @@ def _safe_date(val: str | None) -> Optional[_date]:
     return None
 
 
-def _safe_bool(val: str | None, default: bool = True) -> bool:
+def _is_inactive(val: str | None) -> bool:
+    """Returns True when the Active/Inactive value signals inactief."""
     if val is None or str(val).strip() == "":
-        return default
-    return str(val).strip().lower() not in ("0", "false", "nee", "n", "no", "inactive", "inactief")
+        return False
+    return str(val).strip().lower() in ("inactive", "inactief", "0", "false", "nee", "n", "no")
+
+
+def _build_hierarchy_from_paths(paths: list[str]) -> dict[str, dict]:
+    """
+    Given a list of pipe-separated path strings like 'Paper + | Paper_copy | A4 | 80 grams',
+    return a dict keyed by full-path-prefix with node metadata:
+      { "Paper +" : { "name": "Paper +", "level": 1, "parent_path": None, "path": "Paper +" },
+        "Paper + | Paper_copy": { "name": "Paper_copy", "level": 2, "parent_path": "Paper +", ... }, ... }
+    """
+    nodes: dict[str, dict] = {}
+    for raw_path in paths:
+        if not raw_path.strip():
+            continue
+        segments = [s.strip() for s in raw_path.split(" | ")]
+        for i, seg in enumerate(segments):
+            prefix = " | ".join(segments[: i + 1])
+            if prefix in nodes:
+                continue
+            parent_prefix = " | ".join(segments[:i]) if i > 0 else None
+            nodes[prefix] = {
+                "name": seg,
+                "level": i + 1,
+                "parent_path": parent_prefix,
+                "path": prefix,
+            }
+    return nodes
 
 
 # ── Validate endpoint ───────────────────────────────────────────────────────
@@ -129,10 +170,29 @@ async def validate_drs(
     fouten: list[dict] = []
     sku_gezien: dict[str, list[int]] = {}
 
-    # ── Sales tab validation ──────────────────────────────────────────────
+    # ── Sales tab: check aanwezige kolommen ──────────────────────────────
     sales_kolommen = set(sales_rows[0].keys()) if sales_rows else set()
     ontbrekende_sales_kols = [k for k in SALES_REQUIRED if k not in sales_kolommen]
 
+    # ── Hierarchy tab: check aanwezige kolommen ───────────────────────────
+    hier_kolommen = set(hier_rows[0].keys()) if hier_rows else set()
+    ontbrekende_hier_kols = [k for k in HIERARCHY_REQUIRED if k not in hier_kolommen]
+
+    # Bouw een mapping productcode → path vanuit de Hierarchy-tab
+    hier_path_by_sku: dict[str, str] = {}
+    unieke_paden: set[str] = set()
+    for row in hier_rows:
+        pc = row.get("productcode", "").strip()
+        pad = row.get("path", "").strip()
+        if pc:
+            hier_path_by_sku[pc] = pad
+        if pad:
+            unieke_paden.add(pad)
+
+    actief_count = 0
+    inactief_count = 0
+    merken: set[str] = set()
+    skus_zonder_hierarchy: list[str] = []
     geldig_sales = 0
     ongeldig_sales = 0
 
@@ -149,36 +209,41 @@ async def validate_drs(
         if pc:
             sku_gezien.setdefault(pc, []).append(i)
 
-        vp = row.get("verkoopprijs", "").strip()
-        ip = row.get("inkoopprijs", "").strip()
-        vp_f = _safe_float(vp)
-        ip_f = _safe_float(ip)
+        vp_raw = row.get("verkoopprijs excl btw", "").strip()
+        ip_raw = row.get("inkoopprijs ex btw", "").strip()
+        vp_f = _safe_float(vp_raw)
+        ip_f = _safe_float(ip_raw)
 
-        if vp and vp_f is None:
-            fouten.append({"tab": "Sales", "rij": i, "veld": "verkoopprijs", "type": "ongeldige_prijs",
-                           "bericht": f"Niet-numerieke verkoopprijs: '{vp}'"})
+        if vp_raw and vp_f is None:
+            fouten.append({"tab": "Sales", "rij": i, "veld": "verkoopprijs excl btw",
+                           "type": "ongeldige_prijs",
+                           "bericht": f"Niet-numerieke verkoopprijs: '{vp_raw}'"})
             rij_ok = False
-        if ip and ip_f is None:
-            fouten.append({"tab": "Sales", "rij": i, "veld": "inkoopprijs", "type": "ongeldige_prijs",
-                           "bericht": f"Niet-numerieke inkoopprijs: '{ip}'"})
+        if ip_raw and ip_f is None:
+            fouten.append({"tab": "Sales", "rij": i, "veld": "inkoopprijs ex btw",
+                           "type": "ongeldige_prijs",
+                           "bericht": f"Niet-numerieke inkoopprijs: '{ip_raw}'"})
             rij_ok = False
         if vp_f is not None and ip_f is not None and vp_f < ip_f:
             fouten.append({"tab": "Sales", "rij": i, "veld": "marge", "type": "negatieve_marge",
-                           "bericht": f"Verkoopprijs ({vp_f}) < inkoopprijs ({ip_f}): negatieve marge"})
-            rij_ok = False
+                           "bericht": f"Verkoopprijs excl BTW ({vp_f}) < inkoopprijs ({ip_f}): negatieve marge"})
 
-        actief_raw = row.get("actief", "1")
-        if actief_raw.strip().lower() in ("0", "false", "nee", "n", "no", "inactive", "inactief"):
-            fouten.append({"tab": "Sales", "rij": i, "veld": "actief", "type": "inactief_artikel",
-                           "bericht": f"Artikel {pc or i} is gemarkeerd als inactief"})
+        # Actief/inactief — waarschuwing, geen fout
+        actief_raw = row.get("active/inactive", "").strip()
+        if _is_inactive(actief_raw):
+            inactief_count += 1
+            warnings.append(f"Inactief artikel: '{pc or i}' (rij {i})")
+        else:
+            actief_count += 1
 
-        if not row.get("merk", "").strip():
-            fouten.append({"tab": "Sales", "rij": i, "veld": "merk", "type": "ontbrekend_merk",
-                           "bericht": f"Merk ontbreekt voor productcode '{pc or i}'"})
+        merk = row.get("merk", "").strip()
+        if merk:
+            merken.add(merk)
 
-        if not row.get("categorie", "").strip():
-            fouten.append({"tab": "Sales", "rij": i, "veld": "categorie", "type": "ontbrekende_hierarchie",
-                           "bericht": f"Categorie ontbreekt voor productcode '{pc or i}'"})
+        # Waarschuw als SKU geen overeenkomst heeft in de Hierarchy-tab
+        if pc and pc not in hier_path_by_sku:
+            skus_zonder_hierarchy.append(pc)
+            warnings.append(f"Productcode '{pc}' (rij {i}) heeft geen overeenkomstige rij in Hierarchy-tab")
 
         if rij_ok:
             geldig_sales += 1
@@ -189,9 +254,7 @@ async def validate_drs(
     for dup in dubbele_skus:
         warnings.append(f"Dubbele productcode '{dup}' op rijen: {sku_gezien[dup]}")
 
-    # ── Hierarchy tab validation ──────────────────────────────────────────
-    hier_kolommen = set(hier_rows[0].keys()) if hier_rows else set()
-    ontbrekende_hier_kols = [k for k in HIERARCHY_REQUIRED if k not in hier_kolommen]
+    # ── Hierarchy tab row validation ──────────────────────────────────────
     geldig_hier = 0
     ongeldig_hier = 0
 
@@ -221,6 +284,14 @@ async def validate_drs(
 
     return {
         "bestandsnaam": file.filename,
+        "samenvatting": {
+            "skus_totaal": len(sales_rows),
+            "skus_actief": actief_count,
+            "skus_inactief": inactief_count,
+            "unieke_merken": len(merken),
+            "unieke_hierarchiepaden": len(unieke_paden),
+            "skus_zonder_hierarchy_match": len(skus_zonder_hierarchy),
+        },
         "sales": {
             "rows_total": len(sales_rows),
             "rows_valid": geldig_sales,
@@ -232,11 +303,13 @@ async def validate_drs(
             "rows_valid": geldig_hier,
             "rows_failed": ongeldig_hier,
             "missing_columns": ontbrekende_hier_kols,
+            "unieke_paden": len(unieke_paden),
         },
         "duplicate_skus": dubbele_skus[:20],
+        "skus_zonder_hierarchy": skus_zonder_hierarchy[:20],
         "errors": fouten[:50],
         "errors_by_type": fouten_per_type,
-        "warnings": warnings,
+        "warnings": warnings[:50],
         "kan_importeren": kan_importeren,
     }
 
@@ -252,8 +325,8 @@ async def import_drs(
     """
     Importeer een DRS Datareport XLSX-bestand.
     - Upsert alle SKU's uit het Sales-tabblad in dim_product.
-    - Synchroniseer alle knooppunten uit het Hierarchy-tabblad in dim_category_hierarchy.
-    - Synchroniseer dim_category op basis van unieke bladknooppunten (niveau-2).
+    - Bouw de hiërarchieboom op vanuit de unieke path-waarden in het Hierarchy-tabblad.
+    - Synchroniseer dim_category op basis van level-1 knooppunten.
     - Logt elke aanmaak/update in audit_log.
     """
     if not (file.filename or "").lower().endswith(".xlsx"):
@@ -280,70 +353,69 @@ async def import_drs(
         warnings: list[str] = list(file_warnings)
         now = datetime.utcnow()
 
-        # ── Step 1: Sync Hierarchy ────────────────────────────────────────────
-        node_id_to_db_id: dict[str, int] = {}
+        # ── Step 1: Bouw mapping productcode → path vanuit Hierarchy-tab ─────
+        hier_path_by_sku: dict[str, str] = {}
+        for row in hier_rows:
+            pc = row.get("productcode", "").strip()
+            pad = row.get("path", "").strip()
+            if pc and pad:
+                hier_path_by_sku[pc] = pad
 
-        for i, row in enumerate(hier_rows, start=2):
-            node_id_raw = row.get("node_id", "").strip()
-            node_naam = row.get("node_naam", "").strip()
-            niveau_raw = row.get("niveau", "1").strip()
-            if not node_id_raw or not node_naam:
-                continue
-            try:
-                niveau = int(niveau_raw)
-            except ValueError:
-                niveau = 1
+        # ── Step 2: Verzamel alle unieke paden en bouw knooppunt-structuur ───
+        unieke_paden: set[str] = {r.get("path", "").strip() for r in hier_rows if r.get("path", "").strip()}
+        node_defs = _build_hierarchy_from_paths(list(unieke_paden))
 
-            pad = row.get("pad", "").strip() or node_naam
-            module = row.get("module", "").strip()
-            actief = _safe_bool(row.get("actief", "1"))
+        # Verwerk knooppunten level-voor-level zodat ouders eerder worden aangemaakt
+        max_level = max((n["level"] for n in node_defs.values()), default=0)
+        path_to_db_id: dict[str, int] = {}
 
-            # parent_id: resolve from node_id_to_db_id mapping
-            parent_raw = row.get("parent_id", "").strip()
-            parent_db_id: Optional[int] = node_id_to_db_id.get(parent_raw) if parent_raw else None
+        for level in range(1, max_level + 1):
+            level_nodes = {p: n for p, n in node_defs.items() if n["level"] == level}
+            for full_path, node in level_nodes.items():
+                node_naam = node["name"]
+                parent_path = node["parent_path"]
+                parent_db_id: Optional[int] = path_to_db_id.get(parent_path) if parent_path else None
 
-            # Try to find existing node by name + level
-            existing = (
-                db.query(models.DimCategoryHierarchy)
-                .filter(
-                    models.DimCategoryHierarchy.category_name == node_naam,
-                    models.DimCategoryHierarchy.category_level == niveau,
+                existing = (
+                    db.query(models.DimCategoryHierarchy)
+                    .filter(
+                        models.DimCategoryHierarchy.path == full_path,
+                    )
+                    .first()
                 )
-                .first()
-            )
 
-            if existing:
-                existing.path = pad
-                existing.module = module
-                existing.active = actief
-                existing.parent_category_id = parent_db_id
-                existing.import_source = "DRS"
-                db.flush()
-                node_id_to_db_id[node_id_raw] = existing.category_id
-                hier_updated += 1
-            else:
-                new_node = models.DimCategoryHierarchy(
-                    category_name=node_naam,
-                    parent_category_id=parent_db_id,
-                    category_level=niveau,
-                    path=pad,
-                    module=module,
-                    active=actief,
-                    import_source="DRS",
-                )
-                db.add(new_node)
-                db.flush()
-                node_id_to_db_id[node_id_raw] = new_node.category_id
-                _log_audit(db, "dim_category_hierarchy", str(new_node.category_id),
-                           "create", current_user.username, {"name": node_naam, "level": niveau})
-                hier_created += 1
+                if existing:
+                    existing.category_name = node_naam
+                    existing.category_level = level
+                    existing.parent_category_id = parent_db_id
+                    existing.active = True
+                    existing.import_source = "DRS"
+                    db.flush()
+                    path_to_db_id[full_path] = existing.category_id
+                    hier_updated += 1
+                else:
+                    new_node = models.DimCategoryHierarchy(
+                        category_name=node_naam,
+                        parent_category_id=parent_db_id,
+                        category_level=level,
+                        path=full_path,
+                        active=True,
+                        import_source="DRS",
+                    )
+                    db.add(new_node)
+                    db.flush()
+                    path_to_db_id[full_path] = new_node.category_id
+                    _log_audit(db, "dim_category_hierarchy", str(new_node.category_id),
+                               "create", current_user.username, {"name": node_naam, "level": level})
+                    hier_created += 1
 
         db.commit()
 
-        # ── Step 2: Sync dim_category from hierarchy level-1 nodes ───────────
+        # ── Step 3: Sync dim_category vanuit level-1 knooppunten ─────────────
         level1_nodes = (
             db.query(models.DimCategoryHierarchy)
-            .filter(models.DimCategoryHierarchy.category_level == 1)
+            .filter(models.DimCategoryHierarchy.category_level == 1,
+                    models.DimCategoryHierarchy.import_source == "DRS")
             .all()
         )
         existing_cats = {c.name: c for c in db.query(models.DimCategory).all()}
@@ -361,36 +433,47 @@ async def import_drs(
 
         db.commit()
 
-        # ── Step 3: Upsert SKUs from Sales ───────────────────────────────────
+        # ── Step 4: Upsert SKU's vanuit Sales-tabblad ─────────────────────────
         for i, row in enumerate(sales_rows, start=2):
             pc = row.get("productcode", "").strip()
             if not pc:
                 continue
 
-            naam = row.get("productnaam", "") or row.get("productomschrijving", "") or pc
+            naam = row.get("titel", "").strip() or pc
             merk = row.get("merk", "").strip() or None
-            categorie = row.get("categorie", "").strip() or None
-            subcategorie = row.get("subcategorie", "").strip() or None
-            product_group = row.get("productgroep", "").strip() or None
-            product_type = row.get("producttype", "").strip() or None
-            oem_code = row.get("oem_code", "").strip() or None
+            soort = row.get("soort", "").strip() or None       # Soort → product_type
+            oem_code = row.get("oem", "").strip() or None
 
-            vp_f = _safe_float(row.get("verkoopprijs"))
-            ip_f = _safe_float(row.get("inkoopprijs"))
-            actief = _safe_bool(row.get("actief", "1"))
+            vp_excl = _safe_float(row.get("verkoopprijs excl btw"))
+            vp_incl = _safe_float(row.get("verkoopprijs incl btw"))
+            ip_f = _safe_float(row.get("inkoopprijs ex btw"))
+
+            actief_raw = row.get("active/inactive", "").strip()
+            actief = not _is_inactive(actief_raw)
 
             afzet_ytd = _safe_float(row.get("afzet_ytd"))
             omzet_ytd = _safe_float(row.get("omzet_ytd"))
             marge_ytd = _safe_float(row.get("marge_ytd"))
-            afzet_ytd_1j = _safe_float(row.get("afzet_ytd_1j"))
-            omzet_ytd_1j = _safe_float(row.get("omzet_ytd_1j"))
-            marge_ytd_1j = _safe_float(row.get("marge_ytd_1j"))
-            afzet_ytd_2j = _safe_float(row.get("afzet_ytd_2j"))
-            omzet_ytd_2j = _safe_float(row.get("omzet_ytd_2j"))
-            marge_ytd_2j = _safe_float(row.get("marge_ytd_2j"))
-            avg_units = _safe_float(row.get("gem_eenheden_per_order"))
+            afzet_ytd_1j = _safe_float(row.get("afzet_ytd_1_jaar"))
+            omzet_ytd_1j = _safe_float(row.get("omzet_ytd_1_jaar"))
+            marge_ytd_1j = _safe_float(row.get("marge_ytd_1_jaar"))
+            afzet_ytd_2j = _safe_float(row.get("afzet_ytd_2_jaar"))
+            omzet_ytd_2j = _safe_float(row.get("omzet_ytd_2_jaar"))
+            marge_ytd_2j = _safe_float(row.get("marge_ytd_2_jaar"))
+
+            avg_units = _safe_float(row.get("gemiddeld aantal stuks per order ytd"))
             aanmaakdatum = _safe_date(row.get("aanmaakdatum"))
-            eerste_verkoop = _safe_date(row.get("eerste_verkoop"))
+            eerste_verkoop = _safe_date(row.get("eerste verkoop"))
+
+            # Hiërarchie: haal pad op via Hierarchy-tab mapping
+            pad = hier_path_by_sku.get(pc, "")
+            segments = [s.strip() for s in pad.split(" | ")] if pad else []
+            # category = level-2 segment (bijv. "Paper_copy"), of level-1 als er maar 1 niveau is
+            categorie = segments[1] if len(segments) >= 2 else (segments[0] if segments else None)
+            product_group = pad or None  # volledig pad als product_group
+
+            if not pad:
+                warnings.append(f"SKU '{pc}': geen Hierarchy-pad gevonden, category/product_group leeg gelaten")
 
             existing = db.query(models.DimProduct).filter(models.DimProduct.sku_id == pc).first()
 
@@ -402,11 +485,11 @@ async def import_drs(
                 existing.product_name = naam
                 existing.brand = merk
                 existing.category = categorie
-                existing.subcategory = subcategorie
                 existing.product_group = product_group
-                existing.product_type = product_type
+                existing.product_type = soort
                 existing.oem_code = oem_code
-                existing.current_price = vp_f
+                existing.current_price = vp_excl
+                existing.price_incl_vat = vp_incl
                 existing.cost_price = ip_f
                 existing.is_active = actief
                 existing.lifecycle_status = "active" if actief else "discontinued"
@@ -427,7 +510,7 @@ async def import_drs(
                 existing.import_source = "DRS"
                 existing.updated_at = now
                 _log_audit(db, "dim_product", pc, "update", current_user.username,
-                           old_vals, {"product_name": naam, "current_price": vp_f})
+                           old_vals, {"product_name": naam, "current_price": vp_excl})
                 sku_updated += 1
             else:
                 new_product = models.DimProduct(
@@ -435,11 +518,11 @@ async def import_drs(
                     product_name=naam,
                     brand=merk,
                     category=categorie,
-                    subcategory=subcategorie,
                     product_group=product_group,
-                    product_type=product_type,
+                    product_type=soort,
                     oem_code=oem_code,
-                    current_price=vp_f,
+                    current_price=vp_excl,
+                    price_incl_vat=vp_incl,
                     cost_price=ip_f,
                     is_active=actief,
                     lifecycle_status="active" if actief else "discontinued",

@@ -72,6 +72,7 @@ class DimProduct(Base):
     avg_units_per_order = Column(Float)    # gemiddeld aantal per order
     aanmaakdatum = Column(Date)            # datum aangemaakt in DRS
     eerste_verkoop = Column(Date)          # datum eerste verkoop
+    price_incl_vat = Column(Numeric(10, 4))    # Verkoopprijs incl BTW
     is_active = Column(Boolean, default=True)  # actief in DRS
     import_source = Column(String(50))     # "DRS" / "CSV" / "seed"
     created_at = Column(DateTime, default=datetime.utcnow)
