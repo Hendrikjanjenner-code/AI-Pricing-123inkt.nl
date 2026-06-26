@@ -15,7 +15,7 @@ run = "sh -c 'cd /home/runner/workspace/artifacts/api-server && uvicorn main:app
 [services.production]
 
 [services.production.build]
-args = ["echo", "no-build-step"]
+args = ["sh", "-c", "cd /home/runner/workspace && uv pip install -r pyproject.toml"]
 
 [services.production.run]
 args = ["sh", "-c", "cd /home/runner/workspace/artifacts/api-server && uvicorn main:app --host 0.0.0.0 --port 8080"]
