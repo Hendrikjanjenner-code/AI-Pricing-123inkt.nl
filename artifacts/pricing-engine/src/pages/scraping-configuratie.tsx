@@ -514,11 +514,41 @@ export default function ScrapingConfiguratie() {
 
           <TabsContent value="rooster" className="mt-4">
             <div className="space-y-4">
+              {!laden && rooster && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Card className="border-primary/20 bg-primary/5">
+                    <CardContent className="py-3 px-4 flex items-center gap-3">
+                      <CalendarClock className="w-5 h-5 text-primary shrink-0" />
+                      <div>
+                        <div className="text-xs text-muted-foreground">Volgende automatische run</div>
+                        <div className="text-sm font-semibold">
+                          {rooster.volgende_run
+                            ? new Date(rooster.volgende_run).toLocaleString("nl-NL", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+                            : <span className="text-muted-foreground font-normal">Geen actieve tijdsloten</span>}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="py-3 px-4 flex items-center gap-3">
+                      <Clock className="w-5 h-5 text-muted-foreground shrink-0" />
+                      <div>
+                        <div className="text-xs text-muted-foreground">Laatste automatische run</div>
+                        <div className="text-sm font-semibold">
+                          {rooster.laatste_automatische_run
+                            ? new Date(rooster.laatste_automatische_run).toLocaleString("nl-NL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+                            : <span className="text-muted-foreground font-normal">Nog niet gedraaid</span>}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-medium text-sm">Dagelijks scraperooster</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Scrapes worden op deze tijden uitgevoerd. Standaard 3× per dag.
+                    Scrapes worden automatisch op deze tijden uitgevoerd. Standaard 3× per dag.
                     {rooster && <span className="ml-1 font-medium text-foreground">{rooster.frequentie_per_dag} actief</span>}
                   </p>
                 </div>

@@ -166,13 +166,14 @@ def detect_scrape_changes(old_hash: Optional[str], new_content: str) -> bool:
     return old_hash != new_hash
 
 
-def save_scrape_result(db, competitor_id: int, product_url: str, result: dict):
+def save_scrape_result(db, competitor_id: int, product_url: str, result: dict, triggered_by: str = "manual"):
     """Sla scrape-resultaat op in de database."""
     from models import FactScrapeResult
     record = FactScrapeResult(
         competitor_id=competitor_id,
         product_url=product_url,
         scraped_at=datetime.utcnow(),
+        triggered_by=triggered_by,
         scrape_status=result.get("scrape_status", SCRAPE_FAILED_SELECTOR_MISSING),
         product_title=result.get("product_title"),
         brand=result.get("brand"),
@@ -194,6 +195,80 @@ def save_scrape_result(db, competitor_id: int, product_url: str, result: dict):
     db.commit()
     db.refresh(record)
     return record
+
+
+def run_scrape_for_competitor(db, competitor, triggered_by: str = "manual") -> dict:
+    """
+    Voer een volledige scrape-run uit voor één concurrent op basis van zijn
+    actieve selector-configs en sla alle resultaten op.
+
+    Gedeeld door de handmatige /run route en de achtergrond-scheduler, zodat
+    beide exact hetzelfde persisteren. Geeft een samenvatting terug met
+    statussen; gooit geen excepties (de scheduler mag nooit crashen).
+    """
+    from models import CompetitorScrapeConfig
+
+    configs = (
+        db.query(CompetitorScrapeConfig)
+        .filter(
+            CompetitorScrapeConfig.competitor_id == competitor.competitor_id,
+            CompetitorScrapeConfig.active == True,
+        )
+        .all()
+    )
+
+    if not configs:
+        return {
+            "status": "geen_config",
+            "concurrent": competitor.competitor_name,
+            "configs_verwerkt": 0,
+            "statussen": [],
+        }
+
+    resultaten: list[str] = []
+    for cfg in configs[:3]:  # Demo: max 3 configs per run
+        if not cfg.url_pattern:
+            continue
+        config_dict = {
+            "title_selector": cfg.title_selector,
+            "price_selector": cfg.price_selector,
+            "stock_selector": cfg.stock_selector,
+            "delivery_selector": cfg.delivery_selector,
+            "ean_selector": cfg.ean_selector,
+            "mpn_selector": cfg.mpn_selector,
+        }
+        try:
+            resultaat = scrape_competitor_product(
+                cfg.url_pattern, config_dict, cfg.requests_per_minute
+            )
+        except Exception as exc:  # noqa: BLE001 — nooit de scheduler laten crashen
+            logger.warning(
+                "Scrape voor '%s' (%s) gooide een fout: %s",
+                competitor.competitor_name, cfg.url_pattern, exc,
+            )
+            resultaat = {
+                "scrape_status": SCRAPE_FAILED_TIMEOUT,
+                "error_message": str(exc),
+            }
+        try:
+            save_scrape_result(
+                db, competitor.competitor_id, cfg.url_pattern, resultaat,
+                triggered_by=triggered_by,
+            )
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            logger.warning(
+                "Opslaan scrape-resultaat voor '%s' mislukt: %s",
+                competitor.competitor_name, exc,
+            )
+        resultaten.append(resultaat["scrape_status"])
+
+    return {
+        "status": "uitgevoerd",
+        "concurrent": competitor.competitor_name,
+        "configs_verwerkt": len(resultaten),
+        "statussen": resultaten,
+    }
 
 
 def scrape_competitor_product(

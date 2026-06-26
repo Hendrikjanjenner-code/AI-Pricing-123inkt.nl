@@ -259,36 +259,11 @@ def run_scrape(
     if not deps["ok"]:
         raise HTTPException(status_code=503, detail=deps["message"])
 
-    configs = db.query(CompetitorScrapeConfig).filter(
-        CompetitorScrapeConfig.competitor_id == competitor_id,
-        CompetitorScrapeConfig.active == True,
-    ).all()
-
-    if not configs:
+    from services.scraping_engine import run_scrape_for_competitor
+    samenvatting = run_scrape_for_competitor(db, concurrent, triggered_by="manual")
+    if samenvatting["status"] == "geen_config":
         return {"status": "geen_config", "bericht": "Geen actieve selector-configs voor deze concurrent"}
-
-    from services.scraping_engine import scrape_competitor_product, save_scrape_result
-    resultaten = []
-    for cfg in configs[:3]:  # Demo: max 3 configs per run
-        if cfg.url_pattern:
-            config_dict = {
-                "title_selector": cfg.title_selector,
-                "price_selector": cfg.price_selector,
-                "stock_selector": cfg.stock_selector,
-                "delivery_selector": cfg.delivery_selector,
-                "ean_selector": cfg.ean_selector,
-                "mpn_selector": cfg.mpn_selector,
-            }
-            resultaat = scrape_competitor_product(cfg.url_pattern, config_dict, cfg.requests_per_minute)
-            save_scrape_result(db, competitor_id, cfg.url_pattern, resultaat)
-            resultaten.append(resultaat["scrape_status"])
-
-    return {
-        "status": "uitgevoerd",
-        "concurrent": concurrent.competitor_name,
-        "configs_verwerkt": len(resultaten),
-        "statussen": resultaten,
-    }
+    return samenvatting
 
 
 DEFAULT_SCHEDULE = [
@@ -314,6 +289,11 @@ def get_scrape_schedule(
             db.add(ScrapeSchedule(**s, active=True))
         db.commit()
         tijdsloten = db.query(ScrapeSchedule).order_by(ScrapeSchedule.time_slot).all()
+
+    from services.scrape_scheduler import compute_next_run, get_last_automatic_run
+    volgende_run = compute_next_run(db)
+    laatste_automatische_run = get_last_automatic_run(db)
+
     return {
         "tijdsloten": [
             {
@@ -326,6 +306,8 @@ def get_scrape_schedule(
             for t in tijdsloten
         ],
         "frequentie_per_dag": sum(1 for t in tijdsloten if t.active),
+        "volgende_run": volgende_run,
+        "laatste_automatische_run": laatste_automatische_run,
         "omschrijving": "Configureerbare scrape-tijdsloten. Standaard 3× per dag.",
     }
 

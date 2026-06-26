@@ -44,7 +44,20 @@ async def lifespan(app: FastAPI):
     # 4. Only seed demo product/price/sales data when explicitly requested
     if os.environ.get("SEED_DEMO_DATA", "false").lower() in ("1", "true", "yes"):
         seed_database()
-    yield
+    # 5. Start de achtergrond-scheduler die scrapes automatisch volgens rooster draait
+    scheduler_task = None
+    if os.environ.get("DISABLE_SCRAPE_SCHEDULER", "false").lower() not in ("1", "true", "yes"):
+        from services.scrape_scheduler import start_scheduler
+        scheduler_task = start_scheduler()
+    try:
+        yield
+    finally:
+        if scheduler_task is not None:
+            scheduler_task.cancel()
+            try:
+                await scheduler_task
+            except Exception:
+                pass
 
 
 app = FastAPI(

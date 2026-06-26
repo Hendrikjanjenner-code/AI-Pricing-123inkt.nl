@@ -465,6 +465,7 @@ class FactScrapeResult(Base):
     seller_name = Column(String(255))
     raw_html_hash = Column(String(64))
     error_message = Column(Text)
+    triggered_by = Column(String(20), default="manual", index=True)  # manual | scheduled
 
 
 class FactCompetitorOfferDaily(Base):
