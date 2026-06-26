@@ -583,6 +583,7 @@ function TrafficUploadCard() {
   const [validating, setValidating] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [rapport, setRapport] = useState<ValidationReport | null>(null);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [bestand, setBestand] = useState<File | null>(null);
   const [toonVoorbeeld, setToonVoorbeeld] = useState(false);
 
@@ -601,6 +602,7 @@ function TrafficUploadCard() {
     if (!f) return;
     setBestand(f);
     setRapport(null);
+    setImportResult(null);
     if (e.target) e.target.value = "";
     setValidating(true);
     try {
@@ -634,7 +636,7 @@ function TrafficUploadCard() {
       });
       if (!res.ok) throw new Error(await res.text());
       const result = await res.json();
-      toast({ title: "Import geslaagd", description: `${result.rows_processed} rijen verwerkt.` });
+      setImportResult({ rows_processed: result.rows_processed ?? 0, rows_failed: result.rows_failed ?? 0, warnings: result.warnings ?? [] });
       queryClient.invalidateQueries({ queryKey: ["/api/uploads"] });
       setRapport(null);
       setBestand(null);
@@ -648,7 +650,7 @@ function TrafficUploadCard() {
   const kanImporteren = bestand && rapport && rapport.missing_fields.length === 0 && (rapport.kan_importeren ?? rapport.rows_valid > 0);
 
   return (
-    <Card className={rapport ? (rapport.rows_failed > 0 ? "border-amber-300" : "border-emerald-300") : ""}>
+    <Card className={importResult ? (importResult.rows_failed > 0 ? "border-amber-300" : "border-emerald-300") : rapport ? (rapport.rows_failed > 0 ? "border-amber-300" : "border-emerald-300") : ""}>
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-2">
           <div>
@@ -674,6 +676,27 @@ function TrafficUploadCard() {
             <Badge key={v} variant="outline" className="text-xs font-mono">{v}</Badge>
           ))}
         </div>
+        {importResult && (
+          <div className="rounded-md border p-3 space-y-2 bg-muted/30">
+            <div className="flex items-center gap-3 text-sm font-medium">
+              <span className="text-emerald-600 flex items-center gap-1"><CheckCircle2 className="w-4 h-4" />Import voltooid</span>
+            </div>
+            <div className="flex flex-wrap gap-4 text-sm">
+              <span className="text-emerald-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />{importResult.rows_processed} rijen verwerkt</span>
+              {importResult.rows_failed > 0 && (
+                <span className="text-amber-600 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{importResult.rows_failed} mislukt</span>
+              )}
+            </div>
+            {importResult.warnings.length > 0 && (
+              <div className="space-y-1">
+                {importResult.warnings.slice(0, 3).map((w, i) => (
+                  <div key={i} className="text-xs text-amber-600 flex items-start gap-1"><AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />{w}</div>
+                ))}
+                {importResult.warnings.length > 3 && <div className="text-xs text-muted-foreground">+{importResult.warnings.length - 3} meer waarschuwingen</div>}
+              </div>
+            )}
+          </div>
+        )}
         {rapport && (
           <div className="rounded-md border p-3 space-y-2 bg-muted/30">
             <div className="flex items-center gap-3 text-sm">
