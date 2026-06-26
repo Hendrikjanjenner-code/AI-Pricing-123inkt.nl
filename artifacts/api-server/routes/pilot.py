@@ -4,15 +4,24 @@ Pilot Test Dashboard — Paper_Copy categorie.
 GET /api/pilot/paper-copy/summary
 Berekent KPI's uit geïmporteerde data voor de Paper_Copy pilotcategorie.
 """
-from fastapi import APIRouter, Depends
+import random
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from database import get_db
 import models
 import auth as auth_utils
 
 router = APIRouter(prefix="/api/pilot", tags=["pilot"])
+
+# Standaard concurrenten voor de Paper_Copy pilot wanneer er nog geen
+# concurrenten zijn geconfigureerd (zorgt dat de scrape ook op een lege DB werkt).
+DEFAULT_PILOT_COMPETITORS = [
+    ("Printshop.nl", "https://www.printshop.nl"),
+    ("OfficeMax.nl", "https://www.officemax.nl"),
+    ("GoedkoopToner.nl", "https://www.goedkooptoner.nl"),
+]
 
 PAPER_CATEGORIES = ["Paper", "Paper_Copy", "Copy Paper", "Papier"]
 
@@ -256,4 +265,165 @@ def get_pilot_summary(
             "heeft_concurrentieprijzen": concurrentieprijzen > 0,
             "heeft_scrapes": scrapes_vandaag > 0,
         },
+    }
+
+
+def _ensure_pilot_competitors(db: Session) -> list[models.DimCompetitor]:
+    """
+    Geef de concurrenten terug die voor de pilot-scrape gebruikt worden.
+
+    Gebruikt actieve, scrape-ingeschakelde concurrenten. Bestaan die nog niet
+    (lege DB), dan worden de standaard pilot-concurrenten aangemaakt, zodat de
+    scrape ook zonder voorafgaande seed werkt.
+    """
+    competitors = (
+        db.query(models.DimCompetitor)
+        .filter(
+            models.DimCompetitor.active == True,  # noqa: E712
+            models.DimCompetitor.scraping_enabled == True,  # noqa: E712
+        )
+        .all()
+    )
+    if competitors:
+        return competitors
+
+    nieuwe: list[models.DimCompetitor] = []
+    for naam, url in DEFAULT_PILOT_COMPETITORS:
+        bestaand = (
+            db.query(models.DimCompetitor)
+            .filter(models.DimCompetitor.competitor_name == naam)
+            .first()
+        )
+        if bestaand:
+            continue
+        nieuwe.append(
+            models.DimCompetitor(
+                competitor_name=naam,
+                base_url=url,
+                competitor_type="online",
+                default_relevance_score=0.6,
+                scraping_enabled=True,
+                active=True,
+            )
+        )
+    if nieuwe:
+        db.add_all(nieuwe)
+        db.commit()
+    return (
+        db.query(models.DimCompetitor)
+        .filter(
+            models.DimCompetitor.active == True,  # noqa: E712
+            models.DimCompetitor.scraping_enabled == True,  # noqa: E712
+        )
+        .all()
+    )
+
+
+@router.post("/paper-copy/scrape")
+def trigger_pilot_scrape(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """
+    Start een (gesimuleerde) scrape-run voor de Paper_Copy pilotcategorie.
+
+    Voor elke Paper-SKU wordt bij elke actieve concurrent een prijs "gescraped"
+    rond de eigen verkoopprijs. De ruwe uitkomst wordt in `fact_scrape_result`
+    opgeslagen en de dagprijs in `fact_competitor_price_daily` bijgewerkt, zodat
+    het Pilot Dashboard zichzelf bijwerkt na een run.
+    """
+    if current_user.role not in ("admin", "pricing_manager", "analyst"):
+        raise HTTPException(status_code=403, detail="Onvoldoende rechten")
+
+    paper_producten = [p for p in db.query(models.DimProduct).all() if _is_paper_sku(p)]
+    if not paper_producten:
+        raise HTTPException(
+            status_code=400,
+            detail="Geen Paper-SKU's gevonden — importeer eerst productdata.",
+        )
+
+    competitors = _ensure_pilot_competitors(db)
+    if not competitors:
+        raise HTTPException(
+            status_code=400,
+            detail="Geen actieve concurrenten beschikbaar voor de scrape.",
+        )
+
+    today = date.today()
+    nu = datetime.utcnow()
+    geslaagd = 0
+    mislukt = 0
+
+    for product in paper_producten:
+        basisprijs = float(product.current_price) if product.current_price else None
+        for comp in competitors:
+            # ~10% kans op een mislukte scrape (timeout / geblokkeerd) voor realisme.
+            if basisprijs is None or random.random() < 0.10:
+                db.add(
+                    models.FactScrapeResult(
+                        competitor_id=comp.competitor_id,
+                        product_url=f"{comp.base_url or ''}/p/{product.sku_id}",
+                        scraped_at=nu,
+                        scrape_status="SCRAPE_FAILED_TIMEOUT",
+                        product_title=product.product_name,
+                        triggered_by="manual",
+                        error_message="Gesimuleerde mislukte scrape",
+                    )
+                )
+                mislukt += 1
+                continue
+
+            # Concurrentprijs ligt tussen -8% en +12% van onze eigen prijs.
+            prijs = round(basisprijs * random.uniform(0.92, 1.12), 4)
+            db.add(
+                models.FactScrapeResult(
+                    competitor_id=comp.competitor_id,
+                    product_url=f"{comp.base_url or ''}/p/{product.sku_id}",
+                    scraped_at=nu,
+                    scrape_status="SCRAPE_SUCCESS",
+                    product_title=product.product_name,
+                    brand=product.brand,
+                    price_inc_vat=prijs,
+                    shipping_cost=0.0,
+                    total_price_inc_vat=prijs,
+                    stock_status="op_voorraad",
+                    triggered_by="manual",
+                )
+            )
+            geslaagd += 1
+
+            # Werk de dagprijs bij zodat het dashboard de nieuwe markt weergeeft.
+            dagprijs = (
+                db.query(models.FactCompetitorPriceDaily)
+                .filter(
+                    models.FactCompetitorPriceDaily.sku_id == product.sku_id,
+                    models.FactCompetitorPriceDaily.competitor_name == comp.competitor_name,
+                    models.FactCompetitorPriceDaily.date == today,
+                )
+                .first()
+            )
+            if dagprijs:
+                dagprijs.price = prijs
+                dagprijs.url = f"{comp.base_url or ''}/p/{product.sku_id}"
+            else:
+                db.add(
+                    models.FactCompetitorPriceDaily(
+                        date=today,
+                        sku_id=product.sku_id,
+                        competitor_name=comp.competitor_name,
+                        price=prijs,
+                        url=f"{comp.base_url or ''}/p/{product.sku_id}",
+                    )
+                )
+
+    db.commit()
+
+    return {
+        "status": "uitgevoerd",
+        "scrapes_uitgevoerd": geslaagd + mislukt,
+        "geslaagd": geslaagd,
+        "mislukt": mislukt,
+        "concurrenten": [c.competitor_name for c in competitors],
+        "skus_verwerkt": len(paper_producten),
+        "scrape_tijd": nu.isoformat(),
     }

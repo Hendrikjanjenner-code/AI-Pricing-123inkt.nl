@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { AlertCircle, CheckCircle2, TrendingDown, TrendingUp, Package, Users, BarChart3, RefreshCw } from "lucide-react";
+import { AlertCircle, CheckCircle2, TrendingDown, TrendingUp, Package, Users, BarChart3, RefreshCw, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getAuthToken } from "@/lib/auth";
 
@@ -15,6 +15,25 @@ async function fetchSummary() {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error("Ophalen mislukt");
+  return res.json();
+}
+
+async function triggerScrape() {
+  const token = getAuthToken();
+  const res = await fetch(`${BASE}/api/pilot/paper-copy/scrape`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    let detail = "Scrape mislukt";
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = body.detail;
+    } catch {
+      // negeer parse-fout, gebruik standaardmelding
+    }
+    throw new Error(detail);
+  }
   return res.json();
 }
 
@@ -51,6 +70,8 @@ export default function PilotPaperCopy() {
   const [data, setData] = useState<any>(null);
   const [laden, setLaden] = useState(true);
   const [fout, setFout] = useState<string | null>(null);
+  const [scrapen, setScrapen] = useState(false);
+  const [scrapeMelding, setScrapeMelding] = useState<string | null>(null);
 
   const laad = async () => {
     setLaden(true);
@@ -65,6 +86,23 @@ export default function PilotPaperCopy() {
     }
   };
 
+  const scrapeNu = async () => {
+    setScrapen(true);
+    setFout(null);
+    setScrapeMelding(null);
+    try {
+      const r = await triggerScrape();
+      setScrapeMelding(
+        `Scrape voltooid — ${r.geslaagd} geslaagd, ${r.mislukt} mislukt over ${r.skus_verwerkt} SKU's.`,
+      );
+      await laad();
+    } catch (e: any) {
+      setFout(e.message);
+    } finally {
+      setScrapen(false);
+    }
+  };
+
   useEffect(() => { laad(); }, []);
 
   return (
@@ -76,11 +114,26 @@ export default function PilotPaperCopy() {
             KPI-overzicht voor de Paper_Copy pilotcategorie. Data op basis van geïmporteerde CSV's.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={laad} disabled={laden}>
-          <RefreshCw className={`w-4 h-4 mr-2 ${laden ? "animate-spin" : ""}`} />
-          Vernieuwen
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={scrapeNu} disabled={scrapen || laden}>
+            <Play className={`w-4 h-4 mr-2 ${scrapen ? "animate-pulse" : ""}`} />
+            {scrapen ? "Bezig met scrapen…" : "Scrape nu"}
+          </Button>
+          <Button variant="outline" size="sm" onClick={laad} disabled={laden || scrapen}>
+            <RefreshCw className={`w-4 h-4 mr-2 ${laden ? "animate-spin" : ""}`} />
+            Vernieuwen
+          </Button>
+        </div>
       </div>
+
+      {scrapeMelding && (
+        <Card className="border-emerald-200 bg-emerald-50/50">
+          <CardContent className="pt-6 flex items-center gap-2 text-emerald-700">
+            <CheckCircle2 className="w-4 h-4" />
+            <span className="text-sm">{scrapeMelding}</span>
+          </CardContent>
+        </Card>
+      )}
 
       {fout && (
         <Card className="border-red-200 bg-red-50/50">
