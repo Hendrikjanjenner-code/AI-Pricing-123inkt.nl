@@ -1,5 +1,6 @@
 alembic>=1.18.4
 beautifulsoup4>=4.15.0
+charset-normalizer>=3.4.0
 fastapi>=0.136.1
 google-analytics-data>=0.18.14
 httpx>=0.28.1

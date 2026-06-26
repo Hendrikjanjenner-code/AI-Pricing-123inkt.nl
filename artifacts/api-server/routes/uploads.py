@@ -10,10 +10,54 @@ import models
 import auth as auth_utils
 
 
+def _decode_csv_bytes(content: bytes) -> str:
+    """
+    Decode raw CSV bytes to text, robust to the encodings end users actually
+    produce: UTF-8 (with/without BOM), Windows-1252/CP1252 (Excel default on
+    Western-European Windows), classic Mac Roman, and Latin-1.
+
+    Strategy:
+      1. Prefer strict UTF-8 (handles BOM) — the modern default.
+      2. Otherwise use charset-normalizer to detect the legacy code page so
+         that special chars (€, smart quotes, accented letters) survive.
+      3. Fall back to CP1252, then Latin-1 (never raises — every byte maps).
+    """
+    try:
+        return content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        pass
+
+    try:
+        from charset_normalizer import from_bytes
+
+        # Constrain detection to the encodings end users actually produce.
+        # Without this, charset-normalizer mis-detects short Western-European
+        # text as Eastern-European code pages (e.g. cp775, mac_latin2), which
+        # garbles €, smart quotes and accented characters.
+        match = from_bytes(
+            content,
+            cp_isolation=["utf_8", "cp1252", "mac_roman", "latin_1"],
+        ).best()
+        if match is not None and match.encoding:
+            try:
+                return content.decode(match.encoding)
+            except (UnicodeDecodeError, LookupError):
+                pass
+    except ImportError:
+        pass
+
+    # Deterministic fallback: CP1252 (Excel/Windows default) before Latin-1, so
+    # bytes 0x80–0x9F map to € and smart quotes instead of control characters.
+    try:
+        return content.decode("cp1252")
+    except UnicodeDecodeError:
+        return content.decode("latin-1")
+
+
 def _file_to_rows(content: bytes, filename: str, warnings: list | None = None) -> list[dict]:
     """
     Parse uploaded file bytes into a list of row dicts.
-    Supports .csv (UTF-8/latin-1) and .xlsx (first sheet only).
+    Supports .csv (UTF-8/CP1252/Mac-Roman/Latin-1) and .xlsx (first sheet only).
     Values are always returned as strings to match csv.DictReader behaviour.
     If an XLSX contains multiple sheets, an informative warning is appended to
     the optional `warnings` list — the first sheet is always used.
@@ -45,10 +89,7 @@ def _file_to_rows(content: bytes, filename: str, warnings: list | None = None) -
         wb.close()
         return rows
     else:
-        try:
-            text = content.decode("utf-8-sig")
-        except UnicodeDecodeError:
-            text = content.decode("latin-1")
+        text = _decode_csv_bytes(content)
         text = text.replace('\r\n', '\n').replace('\r', '\n')
         reader = csv.DictReader(io.StringIO(text))
         return list(reader)
