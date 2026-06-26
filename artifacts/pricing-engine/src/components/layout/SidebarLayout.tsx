@@ -41,6 +41,7 @@ import {
   Shield,
   Users,
   BookOpen,
+  FolderTree,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -146,6 +147,7 @@ const navGroepen = [
     label: "Configuratie",
     items: [
       { href: "/categorieen", label: "Categorieregels", icon: Layers },
+      { href: "/categorieen/hierarchie", label: "Categorieënhiërarchie", icon: FolderTree },
       { href: "/modelgezondheid", label: "Modelgezondheid", icon: Activity },
     ],
   },

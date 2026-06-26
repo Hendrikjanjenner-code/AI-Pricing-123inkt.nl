@@ -14,6 +14,7 @@ import PrijsadviesDetail from "@/pages/recommendations/detail";
 import Producten from "@/pages/skus";
 import ProductDetail from "@/pages/skus/detail";
 import Categorieen from "@/pages/categories";
+import CategorieHierarchie from "@/pages/categories-hierarchy";
 import Gegevensintegratie from "@/pages/data-upload";
 import Datakwaliteit from "@/pages/data-quality";
 import Substitutiemonitor from "@/pages/substitutions";
@@ -243,6 +244,12 @@ function Router() {
       {/* Overige pagina's */}
       <Route path="/categorieen">
         <ProtectedRoute><Categorieen /></ProtectedRoute>
+      </Route>
+      <Route path="/categorieen/hierarchie">
+        <ProtectedRoute><CategorieHierarchie /></ProtectedRoute>
+      </Route>
+      <Route path="/categories/hierarchy">
+        <ProtectedRoute><CategorieHierarchie /></ProtectedRoute>
       </Route>
       <Route path="/categories">
         <ProtectedRoute><Categorieen /></ProtectedRoute>

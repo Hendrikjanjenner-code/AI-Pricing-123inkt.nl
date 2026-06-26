@@ -44,6 +44,7 @@ class UpdateProductRequest(BaseModel):
 @router.get("")
 def list_products(
     category: Optional[str] = Query(None),
+    subcategory: Optional[str] = Query(None),
     strategy_type: Optional[str] = Query(None),
     lifecycle_status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
@@ -55,6 +56,8 @@ def list_products(
     q = db.query(models.DimProduct)
     if category:
         q = q.filter(models.DimProduct.category == category)
+    if subcategory:
+        q = q.filter(models.DimProduct.subcategory == subcategory)
     if strategy_type:
         q = q.filter(models.DimProduct.strategy_type == strategy_type)
     if lifecycle_status:

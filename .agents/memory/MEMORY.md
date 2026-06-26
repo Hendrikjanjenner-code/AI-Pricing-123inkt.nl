@@ -3,3 +3,4 @@
 - [Traffic model fields](traffic-model-fields.md) — FactTrafficDaily uses entity_type/entity_id (not sku_id); entity_type="SKU" for per-SKU rows.
 - [Price index direction](price-index-direction.md) — price_index = own/competitor; <1.0 means we're cheaper (good), >1.0 means we're more expensive (bad).
 - [DRS daily import](drs-import.md) — no per-row queries/audit inserts (proxy timeout), truncate all strings to VARCHAR limits, rollback before failed-job commit.
+- [Local API runtime quirks](local-api-runtime.md) — DISABLE_SCRAPE_SCHEDULER=true to avoid startup hang; login is POST /api/auth/login returning `token` (not access_token).

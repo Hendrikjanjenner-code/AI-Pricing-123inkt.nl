@@ -28,6 +28,43 @@ def get_category_hierarchy(
         models.DimCategoryHierarchy.category_name,
     ).all()
 
+    # SKU-aantallen per categorie en per (categorie, subcategorie) uit dim_product
+    cat_count_rows = (
+        db.query(
+            models.DimProduct.category,
+            func.count(models.DimProduct.sku_id).label("c"),
+        )
+        .filter(models.DimProduct.category.isnot(None))
+        .group_by(models.DimProduct.category)
+        .all()
+    )
+    cat_counts = {r.category: r.c for r in cat_count_rows}
+
+    subcat_count_rows = (
+        db.query(
+            models.DimProduct.category,
+            models.DimProduct.subcategory,
+            func.count(models.DimProduct.sku_id).label("c"),
+        )
+        .filter(models.DimProduct.category.isnot(None))
+        .filter(models.DimProduct.subcategory.isnot(None))
+        .group_by(models.DimProduct.category, models.DimProduct.subcategory)
+        .all()
+    )
+    subcat_counts = {(r.category, r.subcategory): r.c for r in subcat_count_rows}
+
+    id_to_name = {n.category_id: n.category_name for n in nodes}
+
+    def sku_count_for(n) -> int:
+        # Niveau 1 = directe categorie-match; niveau 2 = (parent-categorie, subcategorie);
+        # niveau 3+ heeft geen directe productkoppeling.
+        if n.category_level == 1:
+            return cat_counts.get(n.category_name, 0)
+        if n.category_level == 2:
+            parent_name = id_to_name.get(n.parent_category_id)
+            return subcat_counts.get((parent_name, n.category_name), 0)
+        return 0
+
     # Build flat list
     flat = [
         {
@@ -37,6 +74,7 @@ def get_category_hierarchy(
             "level": n.category_level,
             "path": n.path,
             "module": n.module,
+            "sku_count": sku_count_for(n),
         }
         for n in nodes
     ]
@@ -49,6 +87,7 @@ def get_category_hierarchy(
         "level": n.category_level,
         "path": n.path,
         "module": n.module,
+        "sku_count": sku_count_for(n),
         "children": [],
     } for n in nodes}
 
@@ -73,7 +112,8 @@ def get_category_hierarchy(
         )
         flat = [
             {"id": i + 1, "name": r.category, "parent_id": None, "level": 1,
-             "path": r.category, "module": None}
+             "path": r.category, "module": None, "sku_count": r.sku_count,
+             "children": []}
             for i, r in enumerate(rows)
         ]
         roots = flat
