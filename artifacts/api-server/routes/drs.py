@@ -377,20 +377,18 @@ async def import_drs(
         max_level = max((n["level"] for n in node_defs.values()), default=0)
         path_to_db_id: dict[str, int] = {}
 
+        # Laad alle bestaande hiërarchie-knooppunten in één query (voorkomt N queries)
+        existing_nodes = {n.path: n for n in db.query(models.DimCategoryHierarchy).all()}
+
         for level in range(1, max_level + 1):
             level_nodes = {p: n for p, n in node_defs.items() if n["level"] == level}
             for full_path, node in level_nodes.items():
-                node_naam = node["name"]
+                node_naam = _trunc(node["name"], 255)
+                full_path = _trunc(full_path, 1000)
                 parent_path = node["parent_path"]
                 parent_db_id: Optional[int] = path_to_db_id.get(parent_path) if parent_path else None
 
-                existing = (
-                    db.query(models.DimCategoryHierarchy)
-                    .filter(
-                        models.DimCategoryHierarchy.path == full_path,
-                    )
-                    .first()
-                )
+                existing = existing_nodes.get(full_path)
 
                 if existing:
                     existing.category_name = node_naam
@@ -442,8 +440,11 @@ async def import_drs(
         db.commit()
 
         # ── Step 4: Upsert SKU's vanuit Sales-tabblad ─────────────────────────
+        # Laad alle bestaande producten in één query (voorkomt N queries → timeout)
+        existing_products = {p.sku_id: p for p in db.query(models.DimProduct).all()}
+
         for i, row in enumerate(sales_rows, start=2):
-            pc = row.get("productcode", "").strip()
+            pc = _trunc(row.get("productcode", "").strip(), 100)
             if not pc:
                 continue
 
@@ -483,13 +484,9 @@ async def import_drs(
             if not pad:
                 warnings.append(f"SKU '{pc}': geen Hierarchy-pad gevonden, category/product_group leeg gelaten")
 
-            existing = db.query(models.DimProduct).filter(models.DimProduct.sku_id == pc).first()
+            existing = existing_products.get(pc)
 
             if existing:
-                old_vals = {
-                    "product_name": existing.product_name,
-                    "current_price": float(existing.current_price) if existing.current_price else None,
-                }
                 existing.product_name = naam
                 existing.brand = merk
                 existing.category = categorie
@@ -517,8 +514,6 @@ async def import_drs(
                     existing.eerste_verkoop = eerste_verkoop
                 existing.import_source = "DRS"
                 existing.updated_at = now
-                _log_audit(db, "dim_product", pc, "update", current_user.username,
-                           old_vals, {"product_name": naam, "current_price": vp_excl})
                 sku_updated += 1
             else:
                 new_product = models.DimProduct(
@@ -549,10 +544,13 @@ async def import_drs(
                     import_source="DRS",
                 )
                 db.add(new_product)
-                _log_audit(db, "dim_product", pc, "create", current_user.username,
-                           None, {"product_name": naam, "import_source": "DRS"})
+                existing_products[pc] = new_product
                 sku_created += 1
 
+        # Eén samenvattende audit-entry i.p.v. duizenden losse inserts
+        _log_audit(db, "dim_product", "DRS_IMPORT", "import", current_user.username,
+                   None, {"skus_created": sku_created, "skus_updated": sku_updated,
+                          "filename": job.filename})
         db.commit()
 
         totaal = sku_created + sku_updated
