@@ -35,7 +35,9 @@ import logging
 from sqlalchemy import inspect, text
 from sqlalchemy.dialects import postgresql as pg_dialect
 
-logger = logging.getLogger(__name__)
+# Log through the uvicorn error logger so migration output is actually visible
+# in the startup logs (the root logger has no INFO handler under uvicorn).
+logger = logging.getLogger("uvicorn.error")
 
 
 def _pg_type(column) -> str:
@@ -89,6 +91,59 @@ def _warn_orphan_columns(table_name, live_cols, model_cols) -> int:
     return len(orphans)
 
 
+def _load_applied_keys(engine) -> set:
+    """
+    Return the set of change_keys already recorded in the schema_migrations
+    history table. Returns an empty set if the table does not yet exist.
+    """
+    inspector = inspect(engine)
+    if "schema_migrations" not in set(inspector.get_table_names()):
+        return set()
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT change_key FROM schema_migrations")
+            ).fetchall()
+        return {row[0] for row in rows}
+    except Exception as exc:
+        logger.warning(
+            "Migration: could not read schema_migrations history: %s", exc
+        )
+        return set()
+
+
+def _record_migration(conn, change_key, table_name, column_name, ddl) -> None:
+    """
+    Insert one audit-trail row into schema_migrations for a column that was just
+    added. Uses ON CONFLICT DO NOTHING so a re-run never duplicates a change.
+    Recording failures are logged but never abort the migration itself.
+    """
+    try:
+        conn.execute(
+            text(
+                "INSERT INTO schema_migrations "
+                "(change_key, change_type, table_name, column_name, ddl, applied_at) "
+                "VALUES (:change_key, :change_type, :table_name, :column_name, :ddl, NOW()) "
+                "ON CONFLICT (change_key) DO NOTHING"
+            ),
+            {
+                "change_key": change_key,
+                "change_type": "add_column",
+                "table_name": table_name,
+                "column_name": column_name,
+                "ddl": ddl,
+            },
+        )
+        conn.commit()
+    except Exception as exc:
+        conn.rollback()
+        logger.warning(
+            "Migration: could not record history for change '%s': %s",
+            change_key,
+            exc,
+        )
+
+
 def run_migrations(engine, metadata) -> None:
     """
     For every table registered in *metadata*, compare the live DB schema
@@ -107,6 +162,10 @@ def run_migrations(engine, metadata) -> None:
     columns_skipped = 0
     orphan_columns = 0
 
+    # Load the change_keys already recorded in the history table so we can
+    # distinguish "newly applied" from "already applied" on every startup.
+    applied_keys = _load_applied_keys(engine)
+
     with engine.connect() as conn:
         for table_name, table in metadata.tables.items():
             if table_name not in existing_tables:
@@ -123,7 +182,17 @@ def run_migrations(engine, metadata) -> None:
             )
 
             for column in table.columns:
+                change_key = f"{table_name}.{column.name}"
+
                 if column.name in live_cols:
+                    # The column is present in the live DB. If we previously
+                    # recorded adding it, report it as "already applied" so the
+                    # startup log shows the full per-change history.
+                    if change_key in applied_keys:
+                        logger.info(
+                            "Migration: change '%s' already applied.",
+                            change_key,
+                        )
                     continue
 
                 pg_type = _pg_type(column)
@@ -143,8 +212,14 @@ def run_migrations(engine, metadata) -> None:
                 try:
                     conn.execute(text(sql))
                     conn.commit()
+                    _record_migration(
+                        conn, change_key, table_name, column.name, sql
+                    )
+                    applied_keys.add(change_key)
                     logger.info(
-                        "Migration: added column '%s' to table '%s'",
+                        "Migration: newly applied change '%s' "
+                        "(added column '%s' to table '%s').",
+                        change_key,
                         column.name,
                         table_name,
                     )
@@ -162,10 +237,16 @@ def run_migrations(engine, metadata) -> None:
     if columns_added or columns_skipped or orphan_columns:
         logger.info(
             "Migration complete: %d column(s) added, %d skipped, "
-            "%d orphan column(s) detected (see warnings above).",
+            "%d orphan column(s) detected (see warnings above). "
+            "%d change(s) tracked in schema_migrations.",
             columns_added,
             columns_skipped,
             orphan_columns,
+            len(applied_keys),
         )
     else:
-        logger.info("Migration: schema is up-to-date, no columns to add.")
+        logger.info(
+            "Migration: schema is up-to-date, no columns to add. "
+            "%d change(s) tracked in schema_migrations.",
+            len(applied_keys),
+        )

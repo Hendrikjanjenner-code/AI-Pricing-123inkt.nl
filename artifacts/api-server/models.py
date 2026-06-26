@@ -1295,3 +1295,22 @@ class FactMarketingVsDiscountDaily(Base):
     toelichting_nl = Column(Text)
 
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SchemaMigration(Base):
+    """
+    Audit trail of schema changes applied automatically by the lightweight
+    auto-migrator (migrate.py). One row per column the migrator has added to an
+    existing table, recording when it was applied. Provides a history so that,
+    after a deployment, it is possible to see exactly which columns were added
+    automatically and when.
+    """
+    __tablename__ = "schema_migrations"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    change_key = Column(String(512), unique=True, nullable=False, index=True)  # e.g. "dim_product.paper_size"
+    change_type = Column(String(50), nullable=False, default="add_column")
+    table_name = Column(String(255), nullable=False)
+    column_name = Column(String(255))
+    ddl = Column(Text)             # the exact DDL statement that was executed
+    applied_at = Column(DateTime, default=datetime.utcnow, index=True)

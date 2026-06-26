@@ -121,6 +121,7 @@ pnpm run typecheck
 - `sku_competition_score` — 26 PCIS scores (backfilled via backfill_new_tables.py)
 - `ab_tests`, `ab_test_results` — 1 test · 26 SKU results (13 AI / 13 CONTROL)
 - `model_runs`, `import_jobs`, `audit_log`
+- `schema_migrations` — audit trail of columns auto-added by `migrate.py` (change_key, table, column, ddl, applied_at)
 
 ## Frontend Pages (15)
 

@@ -9,9 +9,12 @@ GET    /api/admin/clear-data/preview      — Toon rijen per tabel zonder te wis
 GET    /api/admin/sync/status             — Verbindingsstatus DRS + GA4.
 POST   /api/admin/sync                    — Start handmatige sync van DRS én GA4.
 """
+import csv
+import io
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
@@ -228,3 +231,81 @@ def trigger_sync(
         }
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Schema-migratiegeschiedenis
+# ---------------------------------------------------------------------------
+
+def _migratie_rijen(db: Session) -> list[models.SchemaMigration]:
+    """Haal alle geregistreerde auto-migraties op, nieuwste eerst."""
+    return (
+        db.query(models.SchemaMigration)
+        .order_by(models.SchemaMigration.applied_at.desc())
+        .all()
+    )
+
+
+@router.get("/schema-migrations")
+def list_schema_migrations(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role("admin")),
+):
+    """
+    Toon de auditgeschiedenis van automatisch toegepaste schemawijzigingen
+    (kolommen die de auto-migrator aan bestaande tabellen heeft toegevoegd),
+    met tijdstempel. Nieuwste wijziging eerst.
+    """
+    rijen = _migratie_rijen(db)
+    return {
+        "aantal": len(rijen),
+        "migraties": [
+            {
+                "id": r.id,
+                "change_key": r.change_key,
+                "change_type": r.change_type,
+                "table_name": r.table_name,
+                "column_name": r.column_name,
+                "ddl": r.ddl,
+                "applied_at": r.applied_at.isoformat() if r.applied_at else None,
+            }
+            for r in rijen
+        ],
+    }
+
+
+@router.get("/schema-migrations/export")
+def export_schema_migrations(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role("admin")),
+):
+    """Exporteer de schema-migratiegeschiedenis als CSV-download."""
+    rijen = _migratie_rijen(db)
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        ["id", "change_key", "change_type", "table_name", "column_name", "ddl", "applied_at"]
+    )
+    for r in rijen:
+        writer.writerow(
+            [
+                r.id,
+                r.change_key,
+                r.change_type,
+                r.table_name,
+                r.column_name,
+                r.ddl,
+                r.applied_at.isoformat() if r.applied_at else "",
+            ]
+        )
+    buffer.seek(0)
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    return StreamingResponse(
+        iter([buffer.getvalue()]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="schema_migrations_{stamp}.csv"'
+        },
+    )

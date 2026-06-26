@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useListUsers, useCreateUser, useDeleteUser, useUpdateUser } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2, UserPlus, AlertTriangle, Database } from "lucide-react";
+import { Trash2, UserPlus, AlertTriangle, Database, History, Download, RefreshCw } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getAuthToken } from "@/lib/auth";
 
@@ -41,6 +41,48 @@ export default function Instellingen() {
   const [clearBevestig, setClearBevestig] = useState("");
   const [previewData, setPreviewData] = useState<any>(null);
   const [previewLaden, setPreviewLaden] = useState(false);
+
+  const [migraties, setMigraties] = useState<any[]>([]);
+  const [migratiesLaden, setMigratiesLaden] = useState(false);
+
+  const laadMigraties = async () => {
+    setMigratiesLaden(true);
+    try {
+      const res = await fetch(`${BASE}/api/admin/schema-migrations`, {
+        headers: { Authorization: `Bearer ${getAuthToken()}` },
+      });
+      const d = await res.json();
+      setMigraties(d.migraties ?? []);
+    } catch {
+      toast({ title: "Migratiegeschiedenis ophalen mislukt", variant: "destructive" });
+    } finally {
+      setMigratiesLaden(false);
+    }
+  };
+
+  const exporteerMigraties = async () => {
+    try {
+      const res = await fetch(`${BASE}/api/admin/schema-migrations/export`, {
+        headers: { Authorization: `Bearer ${getAuthToken()}` },
+      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "schema_migrations.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast({ title: "Export mislukt", variant: "destructive" });
+    }
+  };
+
+  useEffect(() => {
+    if (user?.role === "admin") laadMigraties();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.role]);
 
   const laadPreview = async () => {
     setPreviewLaden(true);
@@ -290,6 +332,74 @@ export default function Instellingen() {
                 </DialogFooter>
               </DialogContent>
             </Dialog>
+          </CardContent>
+        </Card>
+      )}
+
+      {user?.role === "admin" && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <History className="w-5 h-5" />
+                  Schema-migratiegeschiedenis
+                </CardTitle>
+                <CardDescription>
+                  Kolommen die automatisch aan bestaande tabellen zijn toegevoegd, met tijdstempel.
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" className="gap-2" onClick={laadMigraties} disabled={migratiesLaden}>
+                  <RefreshCw className={`w-4 h-4 ${migratiesLaden ? "animate-spin" : ""}`} />
+                  Vernieuwen
+                </Button>
+                <Button variant="outline" size="sm" className="gap-2" onClick={exporteerMigraties} disabled={migraties.length === 0}>
+                  <Download className="w-4 h-4" />
+                  Exporteren (CSV)
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Tabel</TableHead>
+                  <TableHead>Kolom</TableHead>
+                  <TableHead>Type wijziging</TableHead>
+                  <TableHead className="text-right">Toegepast op</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {migratiesLaden ? (
+                  Array.from({ length: 3 }).map((_, i) => (
+                    <TableRow key={i}>
+                      {[1, 2, 3, 4].map(j => <TableCell key={j}><Skeleton className="h-6 w-full" /></TableCell>)}
+                    </TableRow>
+                  ))
+                ) : migraties.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
+                      Nog geen automatische schemawijzigingen geregistreerd.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  migraties.map((m) => (
+                    <TableRow key={m.id}>
+                      <TableCell className="font-mono text-xs">{m.table_name}</TableCell>
+                      <TableCell className="font-mono text-xs">{m.column_name}</TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">{m.change_type}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right text-xs tabular-nums text-muted-foreground">
+                        {m.applied_at ? new Date(m.applied_at).toLocaleString("nl-NL") : "—"}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
           </CardContent>
         </Card>
       )}
