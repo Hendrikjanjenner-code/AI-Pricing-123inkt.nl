@@ -10,6 +10,14 @@ import auth as auth_utils
 
 router = APIRouter(prefix="/api/uploads", tags=["drs"])
 
+
+def _trunc(value: str | None, limit: int) -> str | None:
+    """Truncate string to column VARCHAR limit to prevent StringDataRightTruncation."""
+    if value is None:
+        return None
+    return value[:limit] if len(value) > limit else value
+
+
 # ── Column definitions (real DATAREPORT structure) ───────────────────────────
 # Headers are stored lowercase after parsing.
 
@@ -439,10 +447,10 @@ async def import_drs(
             if not pc:
                 continue
 
-            naam = row.get("titel", "").strip() or pc
-            merk = row.get("merk", "").strip() or None
-            soort = row.get("soort", "").strip() or None       # Soort → product_type
-            oem_code = row.get("oem", "").strip() or None
+            naam = _trunc(row.get("titel", "").strip() or pc, 500)
+            merk = _trunc(row.get("merk", "").strip() or None, 255)
+            soort = _trunc(row.get("soort", "").strip() or None, 50)
+            oem_code = _trunc(row.get("oem", "").strip() or None, 100)
 
             vp_excl = _safe_float(row.get("verkoopprijs excl btw"))
             vp_incl = _safe_float(row.get("verkoopprijs incl btw"))
@@ -469,8 +477,8 @@ async def import_drs(
             pad = hier_path_by_sku.get(pc, "")
             segments = [s.strip() for s in pad.split(" | ")] if pad else []
             # category = level-2 segment (bijv. "Paper_copy"), of level-1 als er maar 1 niveau is
-            categorie = segments[1] if len(segments) >= 2 else (segments[0] if segments else None)
-            product_group = pad or None  # volledig pad als product_group
+            categorie = _trunc(segments[1] if len(segments) >= 2 else (segments[0] if segments else None), 255)
+            product_group = _trunc(pad or None, 255)
 
             if not pad:
                 warnings.append(f"SKU '{pc}': geen Hierarchy-pad gevonden, category/product_group leeg gelaten")
@@ -572,11 +580,15 @@ async def import_drs(
         }
 
     except Exception as e:
-        job.status = "failed"
-        job.error_message = str(e)
-        job.completed_at = datetime.utcnow()
-        db.commit()
-        raise HTTPException(status_code=500, detail=f"DRS import mislukt: {str(e)}")
+        db.rollback()
+        try:
+            job.status = "failed"
+            job.error_message = str(e)[:500]
+            job.completed_at = datetime.utcnow()
+            db.commit()
+        except Exception:
+            db.rollback()
+        raise HTTPException(status_code=500, detail=f"DRS import mislukt: {str(e)[:400]}")
 
 
 def _log_audit(db: Session, entity_type: str, entity_id: str, action: str,

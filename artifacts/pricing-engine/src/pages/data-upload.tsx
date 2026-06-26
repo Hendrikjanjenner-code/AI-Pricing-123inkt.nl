@@ -97,8 +97,10 @@ function DrsWizardCard() {
         body: fd,
       });
       if (!res.ok) {
-        const detail = (await res.json()).detail || await res.text();
-        throw new Error(detail);
+        const text = await res.text();
+        let detail = text;
+        try { detail = JSON.parse(text)?.detail || text; } catch {}
+        throw new Error(detail.length > 400 ? detail.slice(0, 400) + "…" : detail);
       }
       const data: DrsValidation = await res.json();
       setValidatie(data);
@@ -123,8 +125,10 @@ function DrsWizardCard() {
         body: fd,
       });
       if (!res.ok) {
-        const detail = (await res.json()).detail || await res.text();
-        throw new Error(detail);
+        const text = await res.text();
+        let detail = text;
+        try { detail = JSON.parse(text)?.detail || text; } catch {}
+        throw new Error(detail.length > 400 ? detail.slice(0, 400) + "…" : detail);
       }
       const data: DrsImportResult = await res.json();
       setResultaat(data);
