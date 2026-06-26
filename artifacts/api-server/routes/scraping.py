@@ -15,12 +15,23 @@ from datetime import datetime
 router = APIRouter(prefix="/api/scraping", tags=["scraping"])
 
 
+@router.get("/status")
+def get_scraping_status(
+    current_user: User = Depends(get_current_user),
+):
+    """Geef de status van de vereiste scraping-packages terug."""
+    from services.scraping_engine import check_scraping_dependencies
+    return check_scraping_dependencies()
+
+
 @router.get("/configs")
 def get_scraping_configs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Haal alle concurrent-configuraties op."""
+    from services.scraping_engine import check_scraping_dependencies
+    deps = check_scraping_dependencies()
     concurrenten = db.query(DimCompetitor).filter(DimCompetitor.active == True).all()
     resultaat = []
     for c in concurrenten:
@@ -64,7 +75,7 @@ def get_scraping_configs(
                 for cfg in configs
             ],
         })
-    return {"concurrenten": resultaat, "totaal": len(resultaat)}
+    return {"concurrenten": resultaat, "totaal": len(resultaat), "dependencies": deps}
 
 
 @router.post("/configs")
@@ -198,7 +209,12 @@ def test_scrape(
     if not url:
         raise HTTPException(status_code=400, detail="url is verplicht")
 
-    from services.scraping_engine import scrape_competitor_product, SCRAPE_SKIPPED_ROBOTS
+    from services.scraping_engine import (
+        scrape_competitor_product, SCRAPE_SKIPPED_ROBOTS, check_scraping_dependencies,
+    )
+    deps = check_scraping_dependencies()
+    if not deps["ok"]:
+        raise HTTPException(status_code=503, detail=deps["message"])
     config = {
         "title_selector": payload.get("title_selector"),
         "price_selector": payload.get("price_selector"),
@@ -237,6 +253,11 @@ def run_scrape(
         raise HTTPException(status_code=404, detail="Concurrent niet gevonden")
     if not concurrent.scraping_enabled:
         raise HTTPException(status_code=400, detail="Scraping uitgeschakeld voor deze concurrent")
+
+    from services.scraping_engine import check_scraping_dependencies
+    deps = check_scraping_dependencies()
+    if not deps["ok"]:
+        raise HTTPException(status_code=503, detail=deps["message"])
 
     configs = db.query(CompetitorScrapeConfig).filter(
         CompetitorScrapeConfig.competitor_id == competitor_id,

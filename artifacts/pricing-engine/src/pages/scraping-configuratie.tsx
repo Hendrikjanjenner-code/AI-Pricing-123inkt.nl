@@ -10,11 +10,21 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Globe, Play, Plus, RefreshCw, CheckCircle2, XCircle, Clock, AlertTriangle, CalendarClock, Pencil, Trash2 } from "lucide-react";
+import { Globe, Play, Plus, RefreshCw, CheckCircle2, XCircle, Clock, AlertTriangle, CalendarClock, Pencil, Trash2, HelpCircle, ChevronDown, PackageX } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { getAuthToken } from "@/lib/auth";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
 
 async function apiFetch(path: string, options?: RequestInit) {
   const token = getAuthToken();
@@ -22,7 +32,16 @@ async function apiFetch(path: string, options?: RequestInit) {
     ...options,
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(options?.headers || {}) },
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    let detail = await res.text();
+    try {
+      const parsed = JSON.parse(detail);
+      detail = parsed.detail || detail;
+    } catch {
+      /* tekst-respons, laat staan */
+    }
+    throw new ApiError(res.status, detail);
+  }
   return res.json();
 }
 
@@ -33,6 +52,7 @@ const STATUS_ICON: Record<string, React.ReactElement> = {
   SCRAPE_FAILED_BLOCKED: <AlertTriangle className="w-4 h-4 text-amber-500" />,
   SCRAPE_SKIPPED_ROBOTS: <AlertTriangle className="w-4 h-4 text-amber-500" />,
   SCRAPE_FAILED_INVALID_PRICE: <XCircle className="w-4 h-4 text-red-500" />,
+  SCRAPE_FAILED_DEPENDENCY: <PackageX className="w-4 h-4 text-red-500" />,
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -42,7 +62,86 @@ const STATUS_LABELS: Record<string, string> = {
   SCRAPE_FAILED_BLOCKED: "Geblokkeerd",
   SCRAPE_SKIPPED_ROBOTS: "Robots.txt",
   SCRAPE_FAILED_INVALID_PRICE: "Ongeldige prijs",
+  SCRAPE_FAILED_DEPENDENCY: "Pakket ontbreekt",
 };
+
+// Leesbare uitleg + kleurcodering per status
+type StatusTone = "groen" | "oranje" | "rood";
+const STATUS_META: Record<string, { tone: StatusTone; uitleg: string }> = {
+  SCRAPE_SUCCESS: { tone: "groen", uitleg: "Productdata succesvol opgehaald." },
+  SCRAPE_FAILED_TIMEOUT: { tone: "rood", uitleg: "De pagina reageerde niet op tijd. Probeer het later opnieuw." },
+  SCRAPE_FAILED_SELECTOR_MISSING: { tone: "rood", uitleg: "Een CSS-selector vond geen element op de pagina. Controleer de selectors." },
+  SCRAPE_FAILED_BLOCKED: { tone: "oranje", uitleg: "De website blokkeerde het verzoek (bijv. HTTP 403/429)." },
+  SCRAPE_SKIPPED_ROBOTS: { tone: "oranje", uitleg: "Overgeslagen omdat robots.txt scrapen van deze pagina verbiedt." },
+  SCRAPE_FAILED_INVALID_PRICE: { tone: "rood", uitleg: "De gevonden prijs kon niet worden gelezen. Controleer de prijs-selector." },
+  SCRAPE_FAILED_DEPENDENCY: { tone: "rood", uitleg: "Vereiste Python-packages ontbreken op de server." },
+};
+
+const TONE_BADGE: Record<StatusTone, string> = {
+  groen: "bg-green-100 text-green-800 border-green-200",
+  oranje: "bg-amber-100 text-amber-800 border-amber-200",
+  rood: "bg-red-100 text-red-800 border-red-200",
+};
+
+function StatusBadge({ status }: { status: string }) {
+  const meta = STATUS_META[status];
+  const tone: StatusTone = meta?.tone ?? "oranje";
+  return (
+    <span
+      title={meta?.uitleg || status}
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${TONE_BADGE[tone]}`}
+    >
+      {STATUS_ICON[status] || <Clock className="w-3.5 h-3.5" />}
+      {STATUS_LABELS[status] || status}
+    </span>
+  );
+}
+
+function SelectorHelp() {
+  const [open, setOpen] = useState(false);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <Card className="border-blue-200 bg-blue-50/50">
+        <CollapsibleTrigger className="w-full">
+          <div className="flex items-center justify-between px-4 py-3 cursor-pointer">
+            <div className="flex items-center gap-2 text-sm font-medium text-blue-900">
+              <HelpCircle className="w-4 h-4" />
+              Hoe vul ik CSS-selectors in? (stap voor stap)
+            </div>
+            <ChevronDown className={`w-4 h-4 text-blue-700 transition-transform ${open ? "rotate-180" : ""}`} />
+          </div>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <CardContent className="pt-0 text-sm text-blue-950 space-y-3">
+            <p>
+              Een <strong>CSS-selector</strong> vertelt de scraper precies wáár op de pagina een gegeven staat —
+              bijvoorbeeld de prijs of de productnaam. Je hoeft niet te programmeren; je kopieert de selector uit je browser.
+            </p>
+            <ol className="list-decimal pl-5 space-y-1.5">
+              <li>Open de productpagina van de concurrent in <strong>Google Chrome</strong>.</li>
+              <li>Klik met de rechtermuisknop op de prijs en kies <strong>"Inspecteren"</strong> (Inspect). De DevTools openen.</li>
+              <li>Het bijbehorende stukje HTML licht op. Klik er met de rechtermuisknop op.</li>
+              <li>Kies <strong>"Copy" → "Copy selector"</strong>. Plak die waarde in het veld "Prijs".</li>
+              <li>Herhaal dit voor de productnaam (veld "Titel") en eventueel voorraad en levertijd.</li>
+              <li>Klik op <strong>"Test URL"</strong> hieronder om te controleren of de prijs correct wordt gevonden.</li>
+            </ol>
+            <div className="rounded-md bg-white/70 border border-blue-200 px-3 py-2 font-mono text-xs">
+              <div className="text-blue-700 mb-1">Voorbeelden:</div>
+              Prijs: <span className="text-blue-900">.price-block__price</span><br />
+              Titel: <span className="text-blue-900">h1.product-title</span><br />
+              Voorraad: <span className="text-blue-900">.stock-status</span>
+            </div>
+            <p className="text-xs text-blue-800">
+              Tip: een selector die met een punt begint (<code>.</code>) verwijst naar een CSS-class, een hekje
+              (<code>#</code>) naar een uniek id. Werkt een selector niet? Maak hem korter of kies een
+              specifieker element.
+            </p>
+          </CardContent>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
+  );
+}
 
 export default function ScrapingConfiguratie() {
   const { toast } = useToast();
@@ -53,6 +152,7 @@ export default function ScrapingConfiguratie() {
   const [testResultaat, setTestResultaat] = useState<any>(null);
   const [testenBezig, setTestenBezig] = useState(false);
   const [runBezig, setRunBezig] = useState<number | null>(null);
+  const [depStatus, setDepStatus] = useState<{ ok: boolean; message: string } | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [nieuwSlotDialogOpen, setNieuwSlotDialogOpen] = useState(false);
   const [nieuwSlotTijd, setNieuwSlotTijd] = useState("09:00");
@@ -101,7 +201,14 @@ export default function ScrapingConfiguratie() {
       setConfigs(c);
       setResultaten(r);
       setRooster(s);
-    } catch { toast({ title: "Fout", description: "Kon gegevens niet laden", variant: "destructive" }); }
+      if (c?.dependencies) setDepStatus({ ok: c.dependencies.ok, message: c.dependencies.message });
+    } catch (e: any) {
+      if (e instanceof ApiError && e.status === 503) {
+        setDepStatus({ ok: false, message: e.message });
+      } else {
+        toast({ title: "Fout", description: "Kon gegevens niet laden", variant: "destructive" });
+      }
+    }
     setLaden(false);
   }
 
@@ -178,7 +285,15 @@ export default function ScrapingConfiguratie() {
         body: JSON.stringify({ url: testUrl, price_selector: testPriceSelector, title_selector: testTitleSelector }),
       });
       setTestResultaat(r);
-    } catch { toast({ title: "Test mislukt", variant: "destructive" }); }
+    } catch (e: any) {
+      if (e instanceof ApiError && e.status === 503) {
+        setDepStatus({ ok: false, message: e.message });
+        toast({ title: "Scraping niet beschikbaar", description: e.message, variant: "destructive" });
+      } else {
+        setTestResultaat({ scrape_status: "SCRAPE_FAILED_TIMEOUT", error_message: e?.message || "Onbekende fout" });
+        toast({ title: "Test mislukt", variant: "destructive" });
+      }
+    }
     setTestenBezig(false);
   }
 
@@ -223,7 +338,14 @@ export default function ScrapingConfiguratie() {
       });
       toast({ title: "Scrape uitgevoerd", description: `Statussen: ${r.statussen?.join(", ") || r.status}` });
       laadData();
-    } catch { toast({ title: "Scrape mislukt", variant: "destructive" }); }
+    } catch (e: any) {
+      if (e instanceof ApiError && e.status === 503) {
+        setDepStatus({ ok: false, message: e.message });
+        toast({ title: "Scraping niet beschikbaar", description: e.message, variant: "destructive" });
+      } else {
+        toast({ title: "Scrape mislukt", variant: "destructive" });
+      }
+    }
     setRunBezig(null);
   }
 
@@ -306,6 +428,20 @@ export default function ScrapingConfiguratie() {
           </div>
         </div>
 
+        {depStatus && !depStatus.ok && (
+          <Alert variant="destructive" className="border-red-300 bg-red-50">
+            <PackageX className="h-4 w-4" />
+            <AlertTitle>Scraping is niet beschikbaar</AlertTitle>
+            <AlertDescription>
+              {depStatus.message}
+              <span className="block mt-1 text-xs">
+                Installeer de ontbrekende Python-packages en herstart daarna de server. Pas hierna werken de
+                test- en scrape-knoppen weer.
+              </span>
+            </AlertDescription>
+          </Alert>
+        )}
+
         <Tabs defaultValue="concurrenten">
           <TabsList>
             <TabsTrigger value="concurrenten">Concurrenten</TabsTrigger>
@@ -341,12 +477,9 @@ export default function ScrapingConfiguratie() {
                         </div>
                         <div className="text-right shrink-0 space-y-2">
                           {c.laatste_scrape && (
-                            <div className="text-xs text-muted-foreground">
-                              <Clock className="w-3 h-3 inline mr-1" />
-                              {new Date(c.laatste_scrape).toLocaleDateString("nl-NL")}
-                              {c.laatste_status && (
-                                <span className="ml-2">{STATUS_LABELS[c.laatste_status] || c.laatste_status}</span>
-                              )}
+                            <div className="text-xs text-muted-foreground flex items-center justify-end gap-2">
+                              <span><Clock className="w-3 h-3 inline mr-1" />{new Date(c.laatste_scrape).toLocaleDateString("nl-NL")}</span>
+                              {c.laatste_status && <StatusBadge status={c.laatste_status} />}
                             </div>
                           )}
                           <div className="flex gap-1 justify-end">
@@ -461,34 +594,90 @@ export default function ScrapingConfiguratie() {
             </div>
           </TabsContent>
 
-          <TabsContent value="test" className="mt-4">
+          <TabsContent value="test" className="mt-4 space-y-4">
+            <SelectorHelp />
             <Card>
               <CardHeader>
                 <CardTitle className="text-sm">Test scrape uitvoeren</CardTitle>
-                <CardDescription>Voer een eenmalige testscrape uit op een URL. Robots.txt wordt gerespecteerd.</CardDescription>
+                <CardDescription>
+                  Probeer één URL uit met je selectors. Je krijgt direct te zien of de prijs gevonden is —
+                  zonder een volledige scrape-run te starten. Robots.txt wordt gerespecteerd.
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div><Label>URL *</Label><Input value={testUrl} onChange={e => setTestUrl(e.target.value)} placeholder="https://www.concurrent.nl/product/xyz" /></div>
                 <div className="grid grid-cols-2 gap-4">
-                  <div><Label>Titel-selector</Label><Input value={testTitleSelector} onChange={e => setTestTitleSelector(e.target.value)} placeholder=".product-title" /></div>
-                  <div><Label>Prijs-selector</Label><Input value={testPriceSelector} onChange={e => setTestPriceSelector(e.target.value)} placeholder=".price" /></div>
-                </div>
-                <Button onClick={testScrape} disabled={testenBezig || !testUrl}>
-                  <Play className="w-4 h-4 mr-2" />{testenBezig ? "Testen..." : "Test uitvoeren"}
-                </Button>
-                {testResultaat && (
-                  <div className="mt-4 p-4 rounded-lg border bg-muted/30 space-y-2">
-                    <div className="flex items-center gap-2 font-medium">
-                      {STATUS_ICON[testResultaat.scrape_status] || <Clock className="w-4 h-4" />}
-                      {STATUS_LABELS[testResultaat.scrape_status] || testResultaat.scrape_status}
-                    </div>
-                    {testResultaat.product_title && <div className="text-sm"><span className="text-muted-foreground">Titel:</span> {testResultaat.product_title}</div>}
-                    {testResultaat.price_inc_vat && <div className="text-sm"><span className="text-muted-foreground">Prijs:</span> €{testResultaat.price_inc_vat}</div>}
-                    {testResultaat.stock_status && <div className="text-sm"><span className="text-muted-foreground">Voorraad:</span> {testResultaat.stock_status}</div>}
-                    {testResultaat.delivery_days && <div className="text-sm"><span className="text-muted-foreground">Levertijd:</span> {testResultaat.delivery_days} dagen</div>}
-                    {testResultaat.error_message && <div className="text-sm text-red-600"><span className="text-muted-foreground">Fout:</span> {testResultaat.error_message}</div>}
+                  <div>
+                    <Label>Titel-selector</Label>
+                    <Input value={testTitleSelector} onChange={e => setTestTitleSelector(e.target.value)} placeholder=".product-title" />
+                    <p className="text-xs text-muted-foreground mt-1">CSS-selector van de productnaam.</p>
                   </div>
-                )}
+                  <div>
+                    <Label>Prijs-selector</Label>
+                    <Input value={testPriceSelector} onChange={e => setTestPriceSelector(e.target.value)} placeholder=".price" />
+                    <p className="text-xs text-muted-foreground mt-1">CSS-selector van het prijselement.</p>
+                  </div>
+                </div>
+                <Button onClick={testScrape} disabled={testenBezig || !testUrl || (depStatus ? !depStatus.ok : false)}>
+                  <Play className="w-4 h-4 mr-2" />{testenBezig ? "Testen..." : "Test URL"}
+                </Button>
+
+                {testResultaat && (() => {
+                  const meta = STATUS_META[testResultaat.scrape_status];
+                  const tone: StatusTone = meta?.tone ?? "oranje";
+                  const geslaagd = testResultaat.scrape_status === "SCRAPE_SUCCESS";
+                  const prijsGevonden = testResultaat.price_inc_vat != null;
+                  const panelTone =
+                    tone === "groen" ? "border-green-200 bg-green-50"
+                    : tone === "oranje" ? "border-amber-200 bg-amber-50"
+                    : "border-red-200 bg-red-50";
+                  return (
+                    <div className={`mt-2 p-4 rounded-lg border ${panelTone} space-y-3`}>
+                      <div className="flex items-center gap-2">
+                        <StatusBadge status={testResultaat.scrape_status} />
+                        <span className="text-sm font-medium">
+                          {geslaagd
+                            ? (prijsGevonden ? "Prijs gevonden" : "Pagina opgehaald, maar geen prijs gevonden")
+                            : "Test mislukt"}
+                        </span>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{meta?.uitleg || "Onbekende status."}</p>
+
+                      {geslaagd && (
+                        <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+                          <div>
+                            <span className="text-muted-foreground">Prijs: </span>
+                            {prijsGevonden
+                              ? <span className="font-semibold">€{Number(testResultaat.price_inc_vat).toFixed(2)}</span>
+                              : <span className="text-amber-700">niet gevonden — controleer de prijs-selector</span>}
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">Voorraad: </span>
+                            {testResultaat.stock_status === "op_voorraad" ? "Op voorraad"
+                              : testResultaat.stock_status === "niet_op_voorraad" ? "Niet op voorraad"
+                              : "Onbekend"}
+                          </div>
+                          {testResultaat.product_title && (
+                            <div className="col-span-2">
+                              <span className="text-muted-foreground">Titel: </span>{testResultaat.product_title}
+                            </div>
+                          )}
+                          {testResultaat.delivery_days != null && (
+                            <div>
+                              <span className="text-muted-foreground">Levertijd: </span>{testResultaat.delivery_days} dag(en)
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {testResultaat.error_message && (
+                        <div className="text-sm text-red-700 bg-red-100/60 rounded px-3 py-2">
+                          <span className="font-medium">Foutmelding: </span>{testResultaat.error_message}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </CardContent>
             </Card>
           </TabsContent>
@@ -513,13 +702,13 @@ export default function ScrapingConfiguratie() {
                         <TableCell className="font-medium text-sm">{r.competitor_name}</TableCell>
                         <TableCell className="text-sm max-w-[200px] truncate">{r.product_title || <span className="text-muted-foreground italic">—</span>}</TableCell>
                         <TableCell className="text-right font-mono text-sm">{r.price_inc_vat ? `€${r.price_inc_vat.toFixed(2)}` : "—"}</TableCell>
-                        <TableCell className="text-sm">{r.stock_status || "—"}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1">
-                            {STATUS_ICON[r.scrape_status] || <Clock className="w-4 h-4 text-muted-foreground" />}
-                            <span className="text-xs">{STATUS_LABELS[r.scrape_status] || r.scrape_status}</span>
-                          </div>
+                        <TableCell className="text-sm">
+                          {r.stock_status === "op_voorraad" ? "Op voorraad"
+                            : r.stock_status === "niet_op_voorraad" ? "Niet op voorraad"
+                            : r.stock_status === "onbekend" ? "Onbekend"
+                            : (r.stock_status || "—")}
                         </TableCell>
+                        <TableCell><StatusBadge status={r.scrape_status} /></TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {new Date(r.scraped_at).toLocaleString("nl-NL")}
                         </TableCell>

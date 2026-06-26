@@ -3,6 +3,7 @@ AI Pricing Decision Engine — FastAPI main entry point.
 Registers all API routers under the /api prefix.
 """
 import os
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -33,6 +34,13 @@ async def lifespan(app: FastAPI):
     # 3. Always ensure the 4 demo user accounts exist (needed for login)
     from seed import seed_users_only
     seed_users_only()
+    # 3b. Controleer scraping-dependencies en log een duidelijke waarschuwing
+    from services.scraping_engine import check_scraping_dependencies
+    _scrape_deps = check_scraping_dependencies()
+    if not _scrape_deps["ok"]:
+        logging.getLogger("uvicorn.error").warning(
+            "Scraping-dependencies ontbreken: %s", _scrape_deps["message"]
+        )
     # 4. Only seed demo product/price/sales data when explicitly requested
     if os.environ.get("SEED_DEMO_DATA", "false").lower() in ("1", "true", "yes"):
         seed_database()

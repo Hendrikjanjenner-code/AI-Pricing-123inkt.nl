@@ -23,6 +23,40 @@ SCRAPE_FAILED_SELECTOR_MISSING = "SCRAPE_FAILED_SELECTOR_MISSING"
 SCRAPE_FAILED_BLOCKED = "SCRAPE_FAILED_BLOCKED"
 SCRAPE_SKIPPED_ROBOTS = "SCRAPE_SKIPPED_ROBOTS"
 SCRAPE_FAILED_INVALID_PRICE = "SCRAPE_FAILED_INVALID_PRICE"
+SCRAPE_FAILED_DEPENDENCY = "SCRAPE_FAILED_DEPENDENCY"
+
+# ── Vereiste Python-packages voor scraping ──────────────────────────────────
+REQUIRED_PACKAGES = ("requests", "bs4")
+DEPENDENCY_HELP = (
+    "De Python-packages 'requests' en 'beautifulsoup4' zijn vereist voor scraping. "
+    "Installeer ze en herstart de server."
+)
+
+
+def check_scraping_dependencies() -> dict:
+    """
+    Controleer of de scraping-packages geladen kunnen worden.
+    Geeft een dict terug met: ok (bool), missing (list[str]), message (str).
+    """
+    missing: list[str] = []
+    try:
+        import requests  # noqa: F401
+    except ImportError:
+        missing.append("requests")
+    try:
+        import bs4  # noqa: F401
+    except ImportError:
+        missing.append("beautifulsoup4")
+
+    if missing:
+        return {
+            "ok": False,
+            "missing": missing,
+            "message": (
+                f"Ontbrekende package(s): {', '.join(missing)}. {DEPENDENCY_HELP}"
+            ),
+        }
+    return {"ok": True, "missing": [], "message": "Alle scraping-packages zijn geïnstalleerd."}
 
 # ── Per-domein throttle state (in-memory voor demo) ────────────────────────
 _last_request_times: dict[str, list[datetime]] = {}
@@ -191,8 +225,8 @@ def scrape_competitor_product(
                 from bs4 import BeautifulSoup
             except ImportError:
                 return {
-                    "scrape_status": SCRAPE_FAILED_TIMEOUT,
-                    "error_message": "requests/BeautifulSoup niet geïnstalleerd",
+                    "scrape_status": SCRAPE_FAILED_DEPENDENCY,
+                    "error_message": DEPENDENCY_HELP,
                 }
 
             headers = {
@@ -298,7 +332,7 @@ def scrape_competitor_category(
             result["product_url"] = link
             results.append(result)
     except ImportError:
-        results = [{"scrape_status": SCRAPE_FAILED_TIMEOUT, "error_message": "BeautifulSoup niet beschikbaar"}]
+        results = [{"scrape_status": SCRAPE_FAILED_DEPENDENCY, "error_message": DEPENDENCY_HELP}]
     except Exception as exc:
         results = [{"scrape_status": SCRAPE_FAILED_TIMEOUT, "error_message": str(exc)}]
     return results
