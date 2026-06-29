@@ -1,0 +1,214 @@
+Analyseer de huidige scraping configuratie en los de foutopsporing structureel op.
+
+Doel:
+Ik wil exact kunnen zien waarom scraping nu een error geeft en welke stappen nodig zijn om scraping werkend te krijgen.
+
+Maak geen aannames. Inspecteer de bestaande code, routes, database, frontend en logs.
+
+Controleer specifiek:
+
+1. Backend scraping modules
+- bestaat scraping_engine.py?
+- bestaan functies voor test scrape, run scrape en scrape results?
+- worden requests/BeautifulSoup/Playwright correct gebruikt?
+- is error handling aanwezig?
+- worden timeouts, selectors en invalid prices netjes afgevangen?
+
+2. API endpoints
+Controleer of deze endpoints bestaan en werken:
+- GET /api/scraping/configs
+- POST /api/scraping/configs
+- POST /api/scraping/test
+- POST /api/scraping/run
+- GET /api/scraping/results
+- GET /api/scraping/logs
+
+Als een endpoint ontbreekt:
+- maak het aan
+- koppel het aan de juiste backend service
+- documenteer wat is toegevoegd
+
+3. Database
+Controleer of deze tabellen bestaan:
+- dim_competitor
+- competitor_scrape_config
+- fact_scrape_result
+- fact_competitor_offer_daily
+- scrape_log
+
+Controleer of alle benodigde velden aanwezig zijn:
+- competitor_id
+- competitor_name
+- base_url
+- product_url
+- price_selector
+- title_selector
+- stock_selector
+- delivery_selector
+- active
+- scrape_status
+- error_message
+- scraped_at
+
+Als tabellen of velden ontbreken:
+- maak migrations aan
+- voer migrations uit
+- toon een duidelijke melding
+
+4. Frontend scraping configuratie
+Controleer de pagina “Scraping Configuratie”.
+
+De gebruiker moet kunnen:
+- concurrent toevoegen
+- product-URL invoeren
+- CSS selectors invoeren
+- test scrape uitvoeren
+- scrape resultaat bekijken
+- error details bekijken
+- scrape log openen
+
+Als een onderdeel ontbreekt:
+- voeg het toe
+
+5. Foutdiagnose
+Maak een duidelijke debugpagina:
+
+“Scraping Diagnose”
+
+Toon hier:
+- laatste scrape status
+- gebruikte URL
+- gebruikte selectors
+- HTTP status code
+- gevonden producttitel
+- gevonden prijs
+- gevonden voorraadstatus
+- gevonden levertijd
+- volledige error message
+- mogelijke oorzaak
+- aanbevolen vervolgstap
+
+Voorbeelden van oorzaken:
+- URL niet bereikbaar
+- robots.txt blokkeert scraping
+- selector klopt niet
+- prijsselector vindt geen waarde
+- JavaScript pagina vereist Playwright
+- timeout
+- 403/429 rate limit
+- invalid price format
+- product niet gevonden
+- database save error
+
+6. Test scrape flow
+Maak de test scrape flow als volgt:
+
+Stap 1:
+Valideer URL
+
+Stap 2:
+Controleer robots.txt
+
+Stap 3:
+Haal HTML op
+
+Stap 4:
+Controleer HTTP status
+
+Stap 5:
+Pas selectors toe
+
+Stap 6:
+Parse prijs
+
+Stap 7:
+Parse voorraad
+
+Stap 8:
+Toon preview
+
+Stap 9:
+Sla alleen op bij bevestiging
+
+7. Scraping checklist
+Maak een pagina:
+
+“Scraping Stappenplan”
+
+Toon een checklist:
+
+- Concurrent aangemaakt
+- Base URL ingevuld
+- Product URL ingevuld
+- Selectors ingevuld
+- Robots.txt toegestaan
+- Test scrape succesvol
+- Prijs gevonden
+- Titel gevonden
+- Voorraadstatus gevonden
+- Resultaat opgeslagen
+- Scheduler actief
+- Laatste scrape succesvol
+
+8. Scheduler
+Controleer of scraping 3x per dag kan draaien:
+- 08:00
+- 13:00
+- 18:00
+
+Maak de scheduler configureerbaar.
+
+Toon:
+- scheduler status
+- volgende run
+- laatste run
+- aantal succesvolle scrapes
+- aantal mislukte scrapes
+
+9. Logging
+Voeg uitgebreide logging toe aan iedere scraping stap.
+
+Maak logs zichtbaar in de UI.
+
+Log minimaal:
+- timestamp
+- competitor
+- URL
+- stap
+- status
+- error message
+- duration_ms
+
+10. Veilig scraping gedrag
+Implementeer:
+- rate limiting
+- random delay
+- retry met exponential backoff
+- timeout
+- user-agent configuratie
+- respecteer robots.txt
+- geen captcha bypass
+- geen anti-bot omzeiling
+
+11. Output
+Geef na analyse een duidelijke lijst:
+
+A. Wat werkt nu?
+B. Wat geeft error?
+C. Waar ontstaat de error?
+D. Welke code is aangepast?
+E. Welke database-aanpassing is gedaan?
+F. Welke stappen moet ik als gebruiker nog doen?
+G. Hoe test ik of scraping werkt?
+
+12. Acceptatiecriteria
+Na uitvoering moet ik kunnen:
+- naar Scraping Configuratie gaan
+- een concurrent toevoegen
+- product URL en selectors invullen
+- op “Test scrape” klikken
+- exact zien waar de scrape faalt of slaagt
+- bij succes titel, prijs, voorraad en levertijd zien
+- bij fout een duidelijke oorzaak en vervolgstap zien
+- scraping 3x per dag plannen
+- scrape logs bekijken
