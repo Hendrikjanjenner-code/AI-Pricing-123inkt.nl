@@ -10,11 +10,12 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Globe, Play, Plus, RefreshCw, CheckCircle2, XCircle, Clock, AlertTriangle, CalendarClock, Pencil, Trash2, HelpCircle, ChevronDown, PackageX } from "lucide-react";
+import { Globe, Play, Plus, RefreshCw, CheckCircle2, XCircle, Clock, AlertTriangle, CalendarClock, Pencil, Trash2, HelpCircle, ChevronDown, PackageX, ScanSearch } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { getAuthToken } from "@/lib/auth";
+import { getAuthToken, useAuth } from "@/lib/auth";
+import SelectorSuggesties from "@/components/scraping/SelectorSuggesties";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -145,6 +146,9 @@ function SelectorHelp() {
 
 export default function ScrapingConfiguratie() {
   const { toast } = useToast();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+
   const [configs, setConfigs] = useState<any>(null);
   const [resultaten, setResultaten] = useState<any>(null);
   const [rooster, setRooster] = useState<any>(null);
@@ -158,6 +162,9 @@ export default function ScrapingConfiguratie() {
   const [nieuwSlotTijd, setNieuwSlotTijd] = useState("09:00");
   const [nieuwSlotLabel, setNieuwSlotLabel] = useState("");
   const [slotBezig, setSlotBezig] = useState<number | null>(null);
+
+  const [analyseResultaat, setAnalyseResultaat] = useState<any>(null);
+  const [analyserenBezig, setAnalyserenBezig] = useState(false);
 
   // Nieuw concurrent formulier
   const [nieuwNaam, setNieuwNaam] = useState("");
@@ -275,16 +282,38 @@ export default function ScrapingConfiguratie() {
     } catch { toast({ title: "Fout", description: "Deactiveren mislukt", variant: "destructive" }); }
   }
 
+  async function analyseHtml(url?: string) {
+    const targetUrl = url || testUrl;
+    if (!targetUrl) return;
+    setAnalyserenBezig(true);
+    setAnalyseResultaat(null);
+    try {
+      const r = await apiFetch("/api/scraping/analyze-html", {
+        method: "POST",
+        body: JSON.stringify({ url: targetUrl }),
+      });
+      setAnalyseResultaat(r);
+    } catch (e: any) {
+      toast({ title: "Analyse mislukt", description: e?.message || "Onbekende fout", variant: "destructive" });
+    }
+    setAnalyserenBezig(false);
+  }
+
   async function testScrape() {
     if (!testUrl) return;
     setTestenBezig(true);
     setTestResultaat(null);
+    setAnalyseResultaat(null);
     try {
       const r = await apiFetch("/api/scraping/test", {
         method: "POST",
         body: JSON.stringify({ url: testUrl, price_selector: testPriceSelector, title_selector: testTitleSelector }),
       });
       setTestResultaat(r);
+      // Auto-trigger analyse wanneer de scrape niet geslaagd is
+      if (r.scrape_status && r.scrape_status !== "SCRAPE_SUCCESS") {
+        analyseHtml(testUrl);
+      }
     } catch (e: any) {
       if (e instanceof ApiError && e.status === 503) {
         setDepStatus({ ok: false, message: e.message });
@@ -292,6 +321,7 @@ export default function ScrapingConfiguratie() {
       } else {
         setTestResultaat({ scrape_status: "SCRAPE_FAILED_TIMEOUT", error_message: e?.message || "Onbekende fout" });
         toast({ title: "Test mislukt", variant: "destructive" });
+        analyseHtml(testUrl);
       }
     }
     setTestenBezig(false);
@@ -648,9 +678,19 @@ export default function ScrapingConfiguratie() {
                     <p className="text-xs text-muted-foreground mt-1">CSS-selector van het prijselement.</p>
                   </div>
                 </div>
-                <Button onClick={testScrape} disabled={testenBezig || !testUrl || (depStatus ? !depStatus.ok : false)}>
-                  <Play className="w-4 h-4 mr-2" />{testenBezig ? "Testen..." : "Test URL"}
-                </Button>
+                <div className="flex gap-2">
+                  <Button onClick={testScrape} disabled={testenBezig || !testUrl || (depStatus ? !depStatus.ok : false)}>
+                    <Play className="w-4 h-4 mr-2" />{testenBezig ? "Testen..." : "Test URL"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => analyseHtml()}
+                    disabled={analyserenBezig || !testUrl || (depStatus ? !depStatus.ok : false)}
+                  >
+                    <ScanSearch className="w-4 h-4 mr-2" />
+                    {analyserenBezig ? "Analyseren..." : "Analyseer HTML"}
+                  </Button>
+                </div>
 
                 {testResultaat && (() => {
                   const meta = STATUS_META[testResultaat.scrape_status];
@@ -708,6 +748,19 @@ export default function ScrapingConfiguratie() {
                     </div>
                   );
                 })()}
+
+                {analyserenBezig && (
+                  <div className="mt-2 space-y-2">
+                    <Skeleton className="h-4 w-48" />
+                    <Skeleton className="h-28 w-full" />
+                  </div>
+                )}
+
+                {analyseResultaat && !analyserenBezig && (
+                  <div className="mt-2">
+                    <SelectorSuggesties resultaat={analyseResultaat} isAdmin={isAdmin} />
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

@@ -365,6 +365,85 @@ def add_scrape_schedule(
     return {"status": "aangemaakt", "id": nieuw.id, "time_slot": nieuw.time_slot}
 
 
+@router.post("/analyze-html")
+def analyze_html(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Analyseer een URL (of raw HTML voor Admin) en geef gerangschikte selector-suggesties terug.
+    HTML wordt nooit in de database opgeslagen.
+    """
+    if current_user.role not in ("admin", "pricing_manager", "analyst"):
+        raise HTTPException(status_code=403, detail="Onvoldoende rechten")
+
+    url = (payload.get("url") or "").strip()
+    html_snippet = payload.get("html_snippet") if current_user.role == "admin" else None
+
+    if not url and not html_snippet:
+        raise HTTPException(status_code=400, detail="url of html_snippet is verplicht")
+
+    from services.scraping_engine import (
+        _check_robots_txt, _throttle, _get_domain, USER_AGENT,
+        check_scraping_dependencies, SCRAPE_FAILED_BLOCKED,
+    )
+
+    deps = check_scraping_dependencies()
+    if not deps["ok"]:
+        raise HTTPException(status_code=503, detail=deps["message"])
+
+    html = html_snippet or ""
+    http_status = 200
+
+    if url and not html_snippet:
+        # Robots.txt
+        if not _check_robots_txt(url):
+            from services.html_analyser import analyse_html as _analyse
+            result = _analyse(url, "", 403, is_admin=(current_user.role == "admin"))
+            return _result_to_dict(result)
+
+        try:
+            import requests
+        except ImportError:
+            raise HTTPException(status_code=503, detail="requests-pakket niet geïnstalleerd")
+
+        domain = _get_domain(url)
+        _throttle(domain, max_per_minute=5)
+        headers = {
+            "User-Agent": USER_AGENT,
+            "Accept-Language": "nl-NL,nl;q=0.9",
+        }
+        try:
+            resp = requests.get(url, headers=headers, timeout=15)
+            http_status = resp.status_code
+            html = resp.text
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Pagina ophalen mislukt: {exc}")
+
+    from services.html_analyser import analyse_html as _analyse
+    result = _analyse(url, html, http_status, is_admin=(current_user.role == "admin"))
+    return _result_to_dict(result)
+
+
+def _result_to_dict(result) -> dict:
+    def cand_list(lst):
+        return [{"selector": c.selector, "sample_text": c.sample_text, "score": c.score} for c in lst]
+
+    out = {
+        "prijs_kandidaten": cand_list(result.prijs_kandidaten),
+        "titel_kandidaten": cand_list(result.titel_kandidaten),
+        "voorraad_kandidaten": cand_list(result.voorraad_kandidaten),
+        "js_rendering_waarschijnlijk": result.js_rendering_waarschijnlijk,
+        "geblokkeerd": result.geblokkeerd,
+        "blok_reden": result.blok_reden,
+        "aanbevolen_actie": result.aanbevolen_actie,
+    }
+    if result.html_preview is not None:
+        out["html_preview"] = result.html_preview
+    return out
+
+
 @router.get("/results")
 def get_scrape_results(
     competitor_id: int = None,
