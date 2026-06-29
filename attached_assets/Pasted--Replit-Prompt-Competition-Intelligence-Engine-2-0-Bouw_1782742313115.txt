@@ -1,0 +1,503 @@
+# Replit Prompt – Competition Intelligence Engine 2.0
+
+Bouw de volledige concurrentiemodule opnieuw op.
+
+## DOEL
+
+Maak van de huidige concurrentiemodule één geïntegreerde **Competition Intelligence Engine**.
+
+Deze engine moet zelfstandig:
+
+* concurrenten ontdekken;
+* concurrenten beoordelen;
+* assortimenten analyseren;
+* producten matchen;
+* pricing vergelijken;
+* concurrentstrategieën herkennen;
+* concurrenten rangschikken;
+* managementadvies geven.
+
+Belangrijk:
+
+De gebruiker hoeft **geen URL's per SKU** meer in te voeren.
+
+De gebruiker hoeft **geen concurrenten handmatig op te bouwen**.
+
+De AI ondersteunt dit proces.
+
+---
+
+# 1. CENTRALE FILOSOFIE
+
+De AI moet niet uitgaan van:
+
+"Welke concurrent verkoopt exact hetzelfde product?"
+
+Maar van:
+
+"Welke concurrent is commercieel relevant voor deze categorie?"
+
+Dat betekent dat een concurrent relevant kan zijn zonder veel EAN-overlap.
+
+Voorbeeld:
+
+Categorie:
+
+Schrijfwaren
+
+123inkt:
+
+* BIC
+* Pilot
+* Schneider
+
+Concurrent:
+
+Discount Office
+
+* Stabilo
+* Parker
+* Pentel
+* BIC
+
+Ondanks beperkte EAN-overlap is Discount Office een belangrijke categorieconcurrent.
+
+---
+
+# 2. ARCHITECTUUR
+
+Maak één centrale module:
+
+Competition Intelligence Engine
+
+Deze bestaat uit:
+
+A.
+Competitor Discovery
+
+B.
+Competitor Profiling
+
+C.
+Category Competition
+
+D.
+AI Matching
+
+E.
+Pricing Intelligence
+
+F.
+Competitive Strategy Recognition
+
+G.
+Management Intelligence
+
+Alle onderdelen gebruiken dezelfde database en dezelfde DRS-hiërarchie.
+
+Er mogen geen dubbele berekeningen bestaan.
+
+---
+
+# 3. COMPETITOR DISCOVERY
+
+De AI ontdekt automatisch concurrenten.
+
+Niet handmatig.
+
+Gebruik:
+
+* DRS categorie
+* DRS merken
+* productnamen
+* OEM codes
+* EAN
+* MPN
+* categorie zoekwoorden
+
+De AI zoekt vervolgens relevante webshops.
+
+Nieuwe concurrenten worden voorgesteld.
+
+De gebruiker hoeft alleen goed te keuren.
+
+---
+
+# 4. CATEGORIE IS LEIDEND
+
+Gebruik de volledige DRS-hiërarchie.
+
+Concurrentie wordt altijd bepaald op:
+
+Categorie
+
+↓
+
+Subcategorie
+
+↓
+
+Sub-subcategorie
+
+↓
+
+Producttype
+
+Niet op SKU.
+
+SKU is pas de laatste stap.
+
+---
+
+# 5. AI MATCHING
+
+Gebruik AI Matching.
+
+Niet alleen:
+
+EAN
+
+Maar ook:
+
+* MPN
+* OEM
+* merk
+* producttype
+* toepassing
+* verpakking
+* hoeveelheid
+* prijssegment
+* materiaal
+* formaat
+* functionele toepassing
+
+Output:
+
+Exact Match
+
+Sterke Match
+
+Functionele Match
+
+Categorie Alternatief
+
+Geen Match
+
+Iedere match krijgt:
+
+Confidence
+
+*
+
+Nederlandse uitleg.
+
+---
+
+# 6. CATEGORY COMPETITION
+
+Per categorie moet de AI berekenen:
+
+Category Relevance Score
+
+Category Coverage Index
+
+Category Authority Score
+
+Assortment Gap Score
+
+Pricing Relevance Score
+
+Traffic Relevance Score
+
+Opportunity Score
+
+Alle scores:
+
+0-100
+
+Iedere score moet uitlegbaar zijn.
+
+---
+
+# 7. COMPETITOR PROFILING
+
+Maak automatisch een profiel.
+
+Per concurrent:
+
+* assortimentsgrootte
+* merken
+* categoriebreedte
+* prijssegment
+* premium aandeel
+* budget aandeel
+* voorraadindicatie
+* levertijd
+* prijsactiviteit
+* gevonden SKU's
+* functionele overlap
+
+Geen handmatige invoer.
+
+---
+
+# 8. PRICING STRATEGY RECOGNITION
+
+Gebruik historische prijsdata.
+
+De AI moet herkennen:
+
+Everyday Low Price
+
+Promotion Driven
+
+Market Share Attack
+
+Margin Protection
+
+Inventory Clearance
+
+Price Leader
+
+Price Follower
+
+Voor iedere strategie:
+
+Confidence
+
+*
+
+uitleg.
+
+---
+
+# 9. COMPETITOR RELEVANCE
+
+Maak drie onafhankelijke relevanties.
+
+A.
+
+Pricing Relevance
+
+Gebruik voor repricing.
+
+B.
+
+Assortment Relevance
+
+Gebruik voor Category Management.
+
+C.
+
+Traffic Relevance
+
+Gebruik voor SEO en Traffic Intelligence.
+
+Belangrijk:
+
+Een concurrent kan:
+
+hoog scoren op assortiment
+
+maar laag op pricing.
+
+---
+
+# 10. ASSORTIMENT GAP
+
+Analyseer:
+
+* ontbrekende merken
+* ontbrekende producttypen
+* ontbrekende prijssegmenten
+* ontbrekende verpakkingen
+* ontbrekende premiumlijnen
+* ontbrekende budgetlijnen
+
+Toon:
+
+Opportunity Score
+
+*
+
+Commercieel advies.
+
+---
+
+# 11. UI
+
+Maak één menu:
+
+Competition Intelligence
+
+Daaronder:
+
+Dashboard
+
+Concurrent Discovery
+
+Concurrenten
+
+Categorie Analyse
+
+AI Matching
+
+Assortiment Gap
+
+Pricing Analyse
+
+Strategie Analyse
+
+Discovery Log
+
+Instellingen
+
+Niet meer.
+
+---
+
+# 12. DASHBOARD
+
+Maak één overzicht.
+
+Per categorie:
+
+Top 10 concurrenten
+
+Relevantie
+
+Category Authority
+
+Pricing Score
+
+Traffic Score
+
+Assortiment Score
+
+Gemiste merken
+
+Gemiste producttypen
+
+Gemiste prijssegmenten
+
+OEM-Huismerk kansen
+
+Concurrentstrategie
+
+Laatste prijswijzigingen
+
+---
+
+# 13. MANAGEMENTVIEW
+
+Per categorie:
+
+Waarom is concurrent X relevant?
+
+Waarom niet?
+
+Wat missen wij?
+
+Welke leverancier ontbreekt?
+
+Welke merken ontbreken?
+
+Welke prijssegmenten ontbreken?
+
+Welke categorie heeft grootste groeipotentie?
+
+Welke concurrent moeten wij monitoren?
+
+---
+
+# 14. EENVOUD
+
+Maak de gebruikersinterface extreem eenvoudig.
+
+De gebruiker ziet nooit tientallen losse scores.
+
+Gebruik een verkeerslichtmodel:
+
+Groen = belangrijk
+
+Oranje = monitoren
+
+Rood = niet relevant
+
+Klikt de gebruiker op een concurrent?
+
+Dan pas de detailanalyse.
+
+---
+
+# 15. BUSINESSREGELS
+
+1.
+
+Geen URL's per SKU.
+
+2.
+
+Categorieën zijn leidend.
+
+3.
+
+AI ontdekt concurrenten.
+
+4.
+
+AI stelt concurrenten voor.
+
+5.
+
+Gebruiker keurt goed.
+
+6.
+
+AI Matching ondersteunt.
+
+7.
+
+Geen automatische repricing.
+
+8.
+
+Alles moet uitlegbaar zijn.
+
+9.
+
+Geen dubbele berekeningen.
+
+10.
+
+DRS is de enige Product Master.
+
+11.
+
+Competition Intelligence is de enige bron voor concurrentie.
+
+12.
+
+Alle andere modules (Pricing, BCG, Traffic, Forecasting en Reporting) gebruiken deze centrale Competition Intelligence Engine.
+
+---
+
+# 16. ACCEPTATIECRITERIA
+
+Na implementatie moet ik:
+
+* geen URL's per SKU hoeven invoeren;
+* automatisch nieuwe concurrenten laten ontdekken;
+* automatisch nieuwe assortimenten laten analyseren;
+* automatisch relevante concurrenten per categorie zien;
+* concurrenten kunnen goedkeuren of afwijzen;
+* functionele AI-matches zien;
+* concurrentstrategieën zien;
+* OEM versus huismerk vergelijken;
+* assortimentsgaten zien;
+* managementadvies ontvangen;
+* één duidelijk dashboard hebben zonder dubbele informatie.
+
+Belangrijkste ontwerpregel:
+
+**Maak de gebruiker niet verantwoordelijk voor het onderhouden van concurrenten. Laat de AI het zware werk doen en presenteer alleen de informatie die nodig is om een onderbouwde commerciële beslissing te nemen.**

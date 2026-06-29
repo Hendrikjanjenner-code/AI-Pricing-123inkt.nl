@@ -1,0 +1,447 @@
+Bouw verder op de bestaande AI Pricing Engine.
+
+Voeg een nieuwe module toe:
+
+Category Competition Intelligence + AI Matching
+
+Doel:
+De tool moet niet alleen identieke SKU’s vergelijken op EAN, maar ook categorieconcurrentie, assortimentsrelevantie en functionele productoverlap kunnen analyseren.
+
+Voorbeeld:
+123inkt verkoopt binnen Schrijfwaren een bepaald type BIC pen.
+Discount Office verkoopt mogelijk een ander type BIC pen of andere merken binnen dezelfde categorie.
+Ook zonder exacte EAN-match kan Discount Office strategisch relevante concurrent zijn binnen de categorie.
+
+---
+
+MODULE 1 — CATEGORY COMPETITION INTELLIGENCE
+
+Maak een nieuwe pagina:
+
+“Categorie Concurrentie Analyse”
+
+De gebruiker moet per categorie kunnen zien:
+- welke concurrenten relevant zijn;
+- welke concurrenten categorieleider zijn;
+- hoe breed ons assortiment is;
+- hoe breed het assortiment van concurrenten is;
+- welke merken wij missen;
+- welke producttypes wij missen;
+- waar prijssegmenten ontbreken;
+- waar commerciële kansen liggen.
+
+Gebruik de DRS-hiërarchie als centrale categorieboom.
+
+Filters:
+- categorie
+- subcategorie
+- sub-subcategorie
+- merk
+- producttype
+- prijssegment
+- concurrent
+- exact match / functionele match / geen match
+
+---
+
+NIEUWE SCORES
+
+1. Category Relevance Score, CRS
+
+Meet hoe relevant een concurrent is binnen een categorie.
+
+Berekening:
+- assortimentsoverlap: 25%
+- merkoverlap: 15%
+- prijssegmentoverlap: 15%
+- categoriebreedte: 15%
+- marktzichtbaarheid: 10%
+- prijsactiviteit: 10%
+- voorraadbeschikbaarheid: 5%
+- leveringssnelheid: 5%
+
+Output 0–100.
+
+Classificatie:
+- 80–100 = Primaire categorieconcurrent
+- 60–79 = Sterke categorieconcurrent
+- 40–59 = Monitoren
+- 0–39 = Lage relevantie
+
+2. Category Coverage Index, CCI
+
+Meet hoe compleet ons assortiment is ten opzichte van concurrenten.
+
+Output:
+- aantal eigen SKU’s
+- aantal concurrent SKU’s
+- coverage %
+- ontbrekende productgroepen
+- ontbrekende merken
+
+3. Category Overlap Score, COS
+
+Meet overlap op:
+- EAN
+- merk
+- producttype
+- toepassing
+- prijssegment
+- doelgroep
+- verpakkingseenheid
+
+4. Brand Presence Score, BPS
+
+Meet welke merken wij voeren versus concurrenten.
+
+Toon:
+- merken die wij hebben
+- merken die concurrent heeft
+- merken die wij missen
+- merken die concurrent mist
+
+5. Assortment Gap Score, AGS
+
+Meet welke commerciële gaten er zitten in ons assortiment.
+
+Voorbeelden:
+- wij missen premiumsegment;
+- wij missen budgetsegment;
+- wij missen duurzame productlijn;
+- wij missen grootverpakking;
+- wij missen bepaald merk.
+
+6. Category Authority Score, CAS
+
+Meet hoe dominant een concurrent is binnen een categorie.
+
+Gebaseerd op:
+- aantal SKU’s;
+- aantal merken;
+- prijsbreedte;
+- voorraad;
+- zichtbaarheid;
+- prijsactiviteit;
+- productdiepte.
+
+7. Category Opportunity Score, COS_OPP
+
+Meet commerciële kans voor 123inkt.
+
+Gebaseerd op:
+- assortimentstekort;
+- marktvraag;
+- margepotentie;
+- huismerkpotentie;
+- concurrentiedruk;
+- trafficpotentie.
+
+---
+
+MODULE 2 — AI MATCHING ENGINE
+
+Maak een nieuwe module:
+
+backend/app/services/ai_matching_engine.py
+
+Doel:
+Producten matchen op meer dan alleen EAN.
+
+Matchtypes:
+- EXACT_EAN_MATCH
+- EXACT_MPN_MATCH
+- STRONG_PRODUCT_MATCH
+- FUNCTIONAL_MATCH
+- CATEGORY_ALTERNATIVE
+- BRAND_ALTERNATIVE
+- PRICE_SEGMENT_ALTERNATIVE
+- NO_MATCH
+
+Matchingcriteria:
+- EAN
+- MPN
+- OEM code
+- merk
+- producttitel
+- producttype
+- toepassing
+- categoriepad
+- prijssegment
+- verpakkingseenheid
+- hoeveelheid
+- kleur
+- formaat
+- materiaal
+- doelgroep
+- zoekwoorden
+
+Match confidence:
+0.00–1.00
+
+Classificatie:
+- 0.90–1.00 = Exact / zeer sterk
+- 0.75–0.89 = Sterke match
+- 0.55–0.74 = Functionele match
+- 0.35–0.54 = Categorie-alternatief
+- <0.35 = Geen bruikbare match
+
+Belangrijk:
+AI Matching mag niet automatisch pricing bepalen.
+AI Matching levert advies en confidence.
+Pricing mag alleen beïnvloed worden bij voldoende confidence en duidelijke explainability.
+
+---
+
+AI MATCHING FUNCTIONALITEIT
+
+Maak functies:
+- normalize_product_title()
+- extract_product_attributes()
+- classify_product_type()
+- classify_price_segment()
+- calculate_identifier_match()
+- calculate_brand_match()
+- calculate_title_similarity()
+- calculate_pack_size_similarity()
+- calculate_functional_similarity()
+- calculate_category_similarity()
+- calculate_final_match_confidence()
+- generate_match_explanation_nl()
+
+Voor functionele matching:
+Voorbeeld:
+- BIC Cristal blauw
+- BIC Atlantis blauw
+- Pilot balpen blauw
+
+Deze zijn niet exact hetzelfde, maar kunnen dezelfde klantbehoefte vervullen.
+
+De tool moet dit herkennen als:
+FUNCTIONAL_MATCH of CATEGORY_ALTERNATIVE.
+
+---
+
+MODULE 3 — ASSORTIMENT GAP ANALYSE
+
+Maak een pagina:
+
+“Assortiment Gap Analyse”
+
+Per categorie tonen:
+- ontbrekende merken;
+- ontbrekende producttypes;
+- ontbrekende prijssegmenten;
+- ontbrekende verpakkingsgroottes;
+- concurrenten met breder assortiment;
+- commerciële kans;
+- aanbevolen actie.
+
+Aanbevolen acties:
+- ASSORTMENT_EXPAND
+- ADD_BRAND
+- ADD_PRIVATE_LABEL
+- ADD_PREMIUM_SEGMENT
+- ADD_BUDGET_SEGMENT
+- ADD_BULK_PACK
+- MONITOR_ONLY
+- NO_ACTION
+
+---
+
+MODULE 4 — CATEGORY MARKET MAP
+
+Maak een visuele categoriekaart.
+
+Per categorie:
+- 123inkt positie
+- concurrentpositie
+- aantal SKU’s
+- prijsrange
+- merkenrange
+- overlap
+- authority score
+- opportunity score
+
+Visualisaties:
+- category heatmap
+- merk overlap matrix
+- prijssegment matrix
+- concurrent relevance ranking
+- missing brands chart
+
+---
+
+DATABASE UITBREIDINGEN
+
+Maak tabellen:
+
+category_competitor_snapshot
+- snapshot_id
+- date
+- category_path
+- competitor_id
+- competitor_name
+- sku_count
+- brand_count
+- min_price
+- max_price
+- avg_price
+- in_stock_ratio
+- delivery_score
+- price_activity_score
+- category_authority_score
+
+category_relevance_score
+- date
+- category_path
+- competitor_id
+- assortment_overlap_score
+- brand_overlap_score
+- price_segment_overlap_score
+- category_breadth_score
+- market_visibility_score
+- price_activity_score
+- stock_availability_score
+- delivery_speed_score
+- category_relevance_score
+- relevance_class
+- explanation_nl
+
+ai_product_match
+- match_id
+- date
+- own_sku_id
+- competitor_product_id
+- competitor_id
+- match_type
+- match_confidence
+- identifier_score
+- brand_score
+- title_similarity_score
+- pack_size_score
+- functional_similarity_score
+- category_similarity_score
+- price_segment_score
+- explanation_nl
+- approved
+- approved_by
+
+assortment_gap_analysis
+- date
+- category_path
+- missing_brand
+- missing_product_type
+- missing_price_segment
+- missing_pack_size
+- competitor_examples
+- opportunity_score
+- recommended_action
+- explanation_nl
+
+---
+
+API ENDPOINTS
+
+Voeg toe:
+
+GET /api/category-competition
+GET /api/category-competition/{category_path}
+GET /api/category-competition/relevance
+POST /api/category-competition/calculate
+
+GET /api/ai-matching/suggestions
+POST /api/ai-matching/run
+POST /api/ai-matching/approve
+POST /api/ai-matching/reject
+GET /api/ai-matching/explain/{match_id}
+
+GET /api/assortment-gap
+GET /api/assortment-gap/{category_path}
+POST /api/assortment-gap/calculate
+
+---
+
+FRONTEND PAGINA’S
+
+Voeg toe:
+
+1. Categorie Concurrentie Analyse
+2. AI Matching
+3. Assortiment Gap Analyse
+4. Category Market Map
+5. Concurrentie Relevantie per Categorie
+
+---
+
+AI MATCHING PAGINA
+
+Toon:
+- eigen SKU
+- concurrentproduct
+- matchtype
+- confidence
+- matchreden
+- gevonden overeenkomsten
+- gevonden verschillen
+- prijsverschil
+- verpakking verschil
+- goedkeuren
+- afwijzen
+- handmatig koppelen
+
+Gebruik duidelijke labels:
+- Exacte match
+- Sterke match
+- Functionele match
+- Categorie-alternatief
+- Geen match
+
+---
+
+CATEGORY COMPETITION DASHBOARD
+
+Toon per categorie:
+- top relevante concurrenten
+- category relevance score
+- category authority score
+- category coverage index
+- category overlap score
+- assortment gap score
+- ontbrekende merken
+- ontbrekende segmenten
+- recommended action
+
+Voorbeeld output:
+“Discount Office heeft slechts 12% exacte EAN-overlap, maar scoort 89/100 op Category Relevance binnen Schrijfwaren. Reden: breed assortiment, sterke merkdekking, meerdere prijssegmenten en hoge categorieautoriteit.”
+
+---
+
+BUSINESSREGELS
+
+1. Concurrentierelevantie op categorieniveau is niet hetzelfde als SKU-match.
+2. Een concurrent kan strategisch relevant zijn zonder veel exacte EAN-matches.
+3. Exacte matches zijn nodig voor directe repricing.
+4. Functionele matches zijn geschikt voor assortimentsanalyse en categoriepositionering.
+5. Category alternatives mogen niet automatisch directe prijsaanpassing veroorzaken.
+6. AI Matching moet altijd uitlegbaar zijn.
+7. Handmatige goedkeuring moet mogelijk zijn.
+8. DRS-hiërarchie is leidend voor categorie-analyse.
+9. Huismerk-first strategie blijft leidend.
+10. A-merken kunnen trafficdrivers zijn; huismerk is marge-driver.
+
+---
+
+ACCEPTATIECRITERIA
+
+Na implementatie moet ik kunnen:
+- een categorie kiezen, bijvoorbeeld Schrijfwaren;
+- zien welke concurrenten relevant zijn binnen die categorie;
+- zien dat Discount Office relevant kan zijn ondanks beperkte exacte SKU-overlap;
+- functionele productmatches zien;
+- AI match confidence bekijken;
+- matches goedkeuren of afwijzen;
+- ontbrekende merken en producttypes zien;
+- assortiment gaps analyseren;
+- categorieadvies krijgen;
+- zien of ons assortiment relevant genoeg is binnen de markt;
+- pricing niet automatisch laten beïnvloeden door lage-confidence matches.
