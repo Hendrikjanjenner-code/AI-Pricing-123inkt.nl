@@ -46,8 +46,11 @@ interface FilterOptions {
 
 export interface SmartFilterValues {
   categorie_id: number | null;
+  categorie_naam: string | null;
   subcategorie_id: number | null;
+  subcategorie_naam: string | null;
   sub_subcategorie_id: number | null;
+  sub_subcategorie_naam: string | null;
   merken: string[];
   merktype: string | null;          // "huismerk" | "a_merk" | "overig" | null
   bcg_intern: string | null;
@@ -57,8 +60,11 @@ export interface SmartFilterValues {
 
 export const EMPTY_FILTERS: SmartFilterValues = {
   categorie_id: null,
+  categorie_naam: null,
   subcategorie_id: null,
+  subcategorie_naam: null,
   sub_subcategorie_id: null,
+  sub_subcategorie_naam: null,
   merken: [],
   merktype: null,
   bcg_intern: null,
@@ -68,6 +74,10 @@ export const EMPTY_FILTERS: SmartFilterValues = {
 
 interface SmartFiltersProps {
   onChange: (filters: SmartFilterValues) => void;
+  /** Incrementing this value resets the internal filter state to EMPTY_FILTERS */
+  resetKey?: number;
+  /** Called when the user clicks "Wis alles" inside the filter panel */
+  onClearAll?: () => void;
   className?: string;
 }
 
@@ -226,9 +236,16 @@ function SingleCombobox({
 
 // ── Hoofd SmartFilters component ─────────────────────────────────────────────
 
-export default function SmartFilters({ onChange, className }: SmartFiltersProps) {
+export default function SmartFilters({ onChange, resetKey, onClearAll, className }: SmartFiltersProps) {
   const [filters, setFilters] = useState<SmartFilterValues>(EMPTY_FILTERS);
   const [collapsed, setCollapsed] = useState(false);
+
+  // Reset internal state whenever the parent increments resetKey
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) { isFirstRender.current = false; return; }
+    setFilters(EMPTY_FILTERS);
+  }, [resetKey]);
 
   // Hiërarchie data
   const [categories, setCategories] = useState<HierarchyNode[]>([]);
@@ -262,7 +279,6 @@ export default function SmartFilters({ onChange, className }: SmartFiltersProps)
       : `${BASE}/api/category-hierarchy/subcategories`;
     fetch(url, { headers: authHeader })
       .then(r => r.json()).then(setSubcategories).catch(() => {}).finally(() => setLoadingSubs(false));
-    // Reset lager niveau
     setSubSubcategories([]);
   }, [filters.categorie_id]);
 
@@ -282,9 +298,16 @@ export default function SmartFilters({ onChange, className }: SmartFiltersProps)
   const update = useCallback(<K extends keyof SmartFilterValues>(key: K, value: SmartFilterValues[K]) => {
     setFilters(prev => {
       const next = { ...prev, [key]: value };
-      // Cascade reset
-      if (key === "categorie_id") { next.subcategorie_id = null; next.sub_subcategorie_id = null; }
-      if (key === "subcategorie_id") { next.sub_subcategorie_id = null; }
+      if (key === "categorie_id") {
+        next.subcategorie_id = null;
+        next.subcategorie_naam = null;
+        next.sub_subcategorie_id = null;
+        next.sub_subcategorie_naam = null;
+      }
+      if (key === "subcategorie_id") {
+        next.sub_subcategorie_id = null;
+        next.sub_subcategorie_naam = null;
+      }
       return next;
     });
   }, []);
@@ -296,7 +319,10 @@ export default function SmartFilters({ onChange, className }: SmartFiltersProps)
     }));
   }, []);
 
-  const resetAll = () => { setFilters(EMPTY_FILTERS); };
+  const resetAll = () => {
+    setFilters(EMPTY_FILTERS);
+    onClearAll?.();
+  };
 
   const activeCount = [
     filters.categorie_id, filters.subcategorie_id, filters.sub_subcategorie_id,
@@ -336,16 +362,27 @@ export default function SmartFilters({ onChange, className }: SmartFiltersProps)
         </div>
       </div>
 
-      {/* Filter grid */}
+      {/* Filter grid — 2 kolommen op mobiel, 4 kolommen op md+ (2 rijen van 4) */}
       {!collapsed && (
-        <div className="p-4 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+        <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
           {/* 1. Categorie */}
           <SingleCombobox
             label="Categorie"
             placeholder={loadingCats ? "Laden…" : "Alle categorieën"}
             options={catOptions}
             value={filters.categorie_id ? String(filters.categorie_id) : null}
-            onChange={v => update("categorie_id", v ? Number(v) : null)}
+            onChange={v => {
+              const naam = v ? (catOptions.find(o => o.value === v)?.label ?? null) : null;
+              setFilters(prev => ({
+                ...prev,
+                categorie_id: v ? Number(v) : null,
+                categorie_naam: naam,
+                subcategorie_id: null,
+                subcategorie_naam: null,
+                sub_subcategorie_id: null,
+                sub_subcategorie_naam: null,
+              }));
+            }}
           />
 
           {/* 2. Subcategorie */}
@@ -354,7 +391,16 @@ export default function SmartFilters({ onChange, className }: SmartFiltersProps)
             placeholder={loadingSubs ? "Laden…" : filters.categorie_id ? "Alle subcategorieën" : "Kies eerst categorie"}
             options={subOptions}
             value={filters.subcategorie_id ? String(filters.subcategorie_id) : null}
-            onChange={v => update("subcategorie_id", v ? Number(v) : null)}
+            onChange={v => {
+              const naam = v ? (subOptions.find(o => o.value === v)?.label ?? null) : null;
+              setFilters(prev => ({
+                ...prev,
+                subcategorie_id: v ? Number(v) : null,
+                subcategorie_naam: naam,
+                sub_subcategorie_id: null,
+                sub_subcategorie_naam: null,
+              }));
+            }}
           />
 
           {/* 3. Sub-subcategorie */}
@@ -363,7 +409,14 @@ export default function SmartFilters({ onChange, className }: SmartFiltersProps)
             placeholder={loadingSubSubs ? "Laden…" : filters.subcategorie_id ? "Alle sub-sub" : "Kies subcategorie"}
             options={subSubOptions}
             value={filters.sub_subcategorie_id ? String(filters.sub_subcategorie_id) : null}
-            onChange={v => update("sub_subcategorie_id", v ? Number(v) : null)}
+            onChange={v => {
+              const naam = v ? (subSubOptions.find(o => o.value === v)?.label ?? null) : null;
+              setFilters(prev => ({
+                ...prev,
+                sub_subcategorie_id: v ? Number(v) : null,
+                sub_subcategorie_naam: naam,
+              }));
+            }}
             disabled={!filters.subcategorie_id}
           />
 
@@ -422,20 +475,20 @@ export default function SmartFilters({ onChange, className }: SmartFiltersProps)
         <div className="px-4 pb-3 flex flex-wrap gap-1.5">
           {filters.categorie_id && (
             <ActiveBadge
-              label={`Categorie: ${catOptions.find(o => o.value === String(filters.categorie_id))?.label}`}
-              onRemove={() => update("categorie_id", null)}
+              label={`Categorie: ${filters.categorie_naam ?? catOptions.find(o => o.value === String(filters.categorie_id))?.label}`}
+              onRemove={() => setFilters(prev => ({ ...prev, categorie_id: null, categorie_naam: null, subcategorie_id: null, subcategorie_naam: null, sub_subcategorie_id: null, sub_subcategorie_naam: null }))}
             />
           )}
           {filters.subcategorie_id && (
             <ActiveBadge
-              label={`Sub: ${subOptions.find(o => o.value === String(filters.subcategorie_id))?.label}`}
-              onRemove={() => update("subcategorie_id", null)}
+              label={`Sub: ${filters.subcategorie_naam ?? subOptions.find(o => o.value === String(filters.subcategorie_id))?.label}`}
+              onRemove={() => setFilters(prev => ({ ...prev, subcategorie_id: null, subcategorie_naam: null, sub_subcategorie_id: null, sub_subcategorie_naam: null }))}
             />
           )}
           {filters.sub_subcategorie_id && (
             <ActiveBadge
-              label={`Sub-sub: ${subSubOptions.find(o => o.value === String(filters.sub_subcategorie_id))?.label}`}
-              onRemove={() => update("sub_subcategorie_id", null)}
+              label={`Sub-sub: ${filters.sub_subcategorie_naam ?? subSubOptions.find(o => o.value === String(filters.sub_subcategorie_id))?.label}`}
+              onRemove={() => setFilters(prev => ({ ...prev, sub_subcategorie_id: null, sub_subcategorie_naam: null }))}
             />
           )}
           {filters.merken.map(m => (

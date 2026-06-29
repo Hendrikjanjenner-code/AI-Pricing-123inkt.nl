@@ -30,40 +30,121 @@ const LIFECYCLE_LABELS: Record<string, string> = {
   new: "Nieuw",
 };
 
-// Mapping van categorie-id naar naam (wordt gevuld vanuit SmartFilters callback)
-const catNameCache: Record<number, string> = {};
-const subNameCache: Record<number, string> = {};
+function isEmptyFilters(f: SmartFilterValues): boolean {
+  return (
+    f.categorie_id === null &&
+    f.subcategorie_id === null &&
+    f.sub_subcategorie_id === null &&
+    f.merken.length === 0 &&
+    f.merktype === null &&
+    f.bcg_intern === null &&
+    f.bcg_extern === null &&
+    f.actie_nodig === null
+  );
+}
+
+function filtersEqual(a: SmartFilterValues, b: SmartFilterValues): boolean {
+  return (
+    a.categorie_id === b.categorie_id &&
+    a.subcategorie_id === b.subcategorie_id &&
+    a.sub_subcategorie_id === b.sub_subcategorie_id &&
+    a.merken.length === b.merken.length &&
+    a.merken.every((m, i) => m === b.merken[i]) &&
+    a.merktype === b.merktype &&
+    a.bcg_intern === b.bcg_intern &&
+    a.bcg_extern === b.bcg_extern &&
+    a.actie_nodig === b.actie_nodig
+  );
+}
 
 export default function Producten() {
   const [page, setPage] = useState(1);
+
+  // resetKey: incrementing counter passed to SmartFilters to reset its internal UI
+  const [resetKey, setResetKey] = useState(0);
+
+  // Staged: what the user is composing but hasn't applied yet
+  const [stagedZoekterm, setStagedZoekterm] = useState("");
+  const [stagedFilters, setStagedFilters] = useState<SmartFilterValues>(EMPTY_FILTERS);
+
+  // Applied: what actually drives the API call and client-side filter
   const [zoekterm, setZoekterm] = useState("");
-  const [filters, setFilters] = useState<SmartFilterValues>(EMPTY_FILTERS);
-  const [catName, setCatName] = useState<string | null>(null);
-  const [subName, setSubName] = useState<string | null>(null);
+  const [appliedFilters, setAppliedFilters] = useState<SmartFilterValues>(EMPTY_FILTERS);
+
+  const hasPendingChanges =
+    stagedZoekterm !== zoekterm || !filtersEqual(stagedFilters, appliedFilters);
+
+  const hasApplied = zoekterm !== "" || !isEmptyFilters(appliedFilters);
+  const hasAnything = hasPendingChanges || hasApplied;
+
+  const applySearch = useCallback(() => {
+    setZoekterm(stagedZoekterm);
+    setAppliedFilters(stagedFilters);
+    setPage(1);
+  }, [stagedZoekterm, stagedFilters]);
+
+  const clearAll = useCallback(() => {
+    setStagedZoekterm("");
+    setStagedFilters(EMPTY_FILTERS);
+    setZoekterm("");
+    setAppliedFilters(EMPTY_FILTERS);
+    setPage(1);
+    setResetKey(k => k + 1);
+  }, []);
 
   const { data, isLoading } = useListProducts({
     page,
     page_size: 100,
     search: zoekterm || undefined,
-    category: catName || undefined,
+    category: appliedFilters.categorie_naam || undefined,
   });
 
   const handleFiltersChange = useCallback((f: SmartFilterValues) => {
-    setFilters(f);
-    setPage(1);
-    // We kunnen categorie-naam niet direct uit de ID afleiden hier,
-    // maar de SmartFilters component levert ons de ID.
-    // Voor de API-call halen we de naam op via de cache die SmartFilters populiert.
-    // Tijdelijke oplossing: gebruik geen server-side categorie-filter voor nu;
-    // client-side filtering werkt prima op 100 items.
+    setStagedFilters(f);
   }, []);
 
-  // Client-side filtering boven op API-resultaten
+  // Client-side filtering on all 8 dimensions using applied (not staged) filters
   const items = (data?.items || []).filter(sku => {
-    if (filters.merken.length > 0 && !filters.merken.includes(sku.brand || "")) return false;
-    if (filters.merktype === "huismerk" && !sku.is_private_label) return false;
-    if (filters.merktype === "a_merk" && !sku.is_a_brand) return false;
-    if (filters.merktype === "overig" && (sku.is_private_label || sku.is_a_brand)) return false;
+    const af = appliedFilters;
+
+    // Categorie — also enforced server-side via API category param, but client-side as safety net
+    if (af.categorie_naam && sku.category !== af.categorie_naam) return false;
+
+    // Subcategorie
+    if (af.subcategorie_naam && sku.subcategory !== af.subcategorie_naam) return false;
+
+    // Sub-subcategorie (field may be absent on older records)
+    if (af.sub_subcategorie_naam) {
+      const skuSubSub = (sku as Record<string, unknown>).sub_subcategory as string | null | undefined;
+      if (skuSubSub !== af.sub_subcategorie_naam) return false;
+    }
+
+    // Merk (multi-select)
+    if (af.merken.length > 0 && !af.merken.includes(sku.brand || "")) return false;
+
+    // Merktype
+    if (af.merktype === "huismerk" && !sku.is_private_label) return false;
+    if (af.merktype === "a_merk" && !sku.is_a_brand) return false;
+    if (af.merktype === "overig" && (sku.is_private_label || sku.is_a_brand)) return false;
+
+    // BCG intern (field may be absent)
+    if (af.bcg_intern) {
+      const skuBcgInt = (sku as Record<string, unknown>).bcg_intern as string | null | undefined;
+      if (skuBcgInt !== af.bcg_intern) return false;
+    }
+
+    // BCG extern (field may be absent)
+    if (af.bcg_extern) {
+      const skuBcgExt = (sku as Record<string, unknown>).bcg_extern as string | null | undefined;
+      if (skuBcgExt !== af.bcg_extern) return false;
+    }
+
+    // Actie nodig (field may be absent)
+    if (af.actie_nodig !== null) {
+      const skuActie = (sku as Record<string, unknown>).actie_nodig as boolean | null | undefined;
+      if (Boolean(skuActie) !== af.actie_nodig) return false;
+    }
+
     return true;
   });
 
@@ -79,21 +160,39 @@ export default function Producten() {
         </div>
       </div>
 
-      {/* Zoekbalk */}
+      {/* Zoekbalk + Zoeken-knop + Wis alles */}
       <div className="flex items-center gap-3 bg-card p-3 border rounded-lg">
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Zoek op SKU-ID, naam of merk..."
             className="pl-9 bg-background"
-            value={zoekterm}
-            onChange={e => { setZoekterm(e.target.value); setPage(1); }}
+            value={stagedZoekterm}
+            onChange={e => setStagedZoekterm(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") applySearch(); }}
           />
         </div>
+        <Button
+          onClick={applySearch}
+          variant={hasPendingChanges ? "default" : "outline"}
+          className="shrink-0"
+        >
+          <Search className="h-4 w-4 mr-2" />
+          Zoeken
+        </Button>
+        {hasAnything && (
+          <Button variant="ghost" size="sm" className="shrink-0 text-muted-foreground" onClick={clearAll}>
+            Wis alles
+          </Button>
+        )}
       </div>
 
-      {/* Slimme filters */}
-      <SmartFilters onChange={handleFiltersChange} />
+      {/* Slimme filters — resetKey lets the parent reset filter UI; onClearAll wires panel clear to parent */}
+      <SmartFilters
+        onChange={handleFiltersChange}
+        resetKey={resetKey}
+        onClearAll={clearAll}
+      />
 
       {/* Tabel */}
       <div className="border rounded-md bg-card">
