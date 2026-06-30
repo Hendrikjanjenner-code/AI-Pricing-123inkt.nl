@@ -1,12 +1,14 @@
 """
-Competition Intelligence endpoints.
+Competition Intelligence Engine 2.0 — API routes.
 
-Exposes PCIS scores, competition classes, reference prices and
-competitor exclusion data per SKU.
+Alle eindpunten voor de Competition Intelligence module:
+- Bestaande PCIS/SKU-routes (backward compatible)
+- Nieuwe discovery, profiling, categorie-scores, AI-matching,
+  assortimentsgap, strategie en management-intelligence routes.
 """
 from typing import Optional
 from datetime import date, timedelta
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
 import models
@@ -15,7 +17,7 @@ import auth as auth_utils
 router = APIRouter(prefix="/api/competition", tags=["competition"])
 
 
-# ── Summary ──────────────────────────────────────────────────────────────────
+# ── Bestaande: Summary ────────────────────────────────────────────────────────
 
 @router.get("/summary")
 def get_competition_summary(
@@ -25,17 +27,11 @@ def get_competition_summary(
     scores = db.query(models.SkuCompetitionScore).all()
     if not scores:
         return {
-            "total_skus_scored": 0,
-            "avg_pcis": 0,
-            "critical_count": 0,
-            "strong_count": 0,
-            "influence_count": 0,
-            "monitor_count": 0,
-            "ignore_count": 0,
-            "avg_price_index": 1.0,
-            "total_competitors_excluded": 0,
-            "downward_pressure_count": 0,
-            "upward_opportunity_count": 0,
+            "total_skus_scored": 0, "avg_pcis": 0,
+            "critical_count": 0, "strong_count": 0,
+            "influence_count": 0, "monitor_count": 0, "ignore_count": 0,
+            "avg_price_index": 1.0, "total_competitors_excluded": 0,
+            "downward_pressure_count": 0, "upward_opportunity_count": 0,
         }
 
     avg_pcis = sum(s.pcis_score or 0 for s in scores) / len(scores)
@@ -47,8 +43,6 @@ def get_competition_summary(
     price_indexed = [s for s in scores if s.price_index is not None]
     avg_pi = sum(s.price_index for s in price_indexed) / len(price_indexed) if price_indexed else 1.0
     total_excluded = sum(s.competitors_excluded or 0 for s in scores)
-
-    # Price index < 0.97 = downward pressure; > 1.03 = upward opportunity
     downward = sum(1 for s in price_indexed if s.price_index < 0.97)
     upward = sum(1 for s in price_indexed if s.price_index > 1.03)
 
@@ -67,7 +61,7 @@ def get_competition_summary(
     }
 
 
-# ── SKU list ─────────────────────────────────────────────────────────────────
+# ── Bestaande: SKU-lijst ──────────────────────────────────────────────────────
 
 @router.get("/skus")
 def list_competition_skus(
@@ -91,7 +85,6 @@ def list_competition_skus(
         q = q.filter(models.SkuCompetitionScore.sku_id.in_(sku_ids))
 
     total = q.count()
-
     col_map = {
         "pcis_score": models.SkuCompetitionScore.pcis_score,
         "price_index": models.SkuCompetitionScore.price_index,
@@ -100,23 +93,19 @@ def list_competition_skus(
     }
     sort_col = col_map.get(sort_by or "pcis_score", models.SkuCompetitionScore.pcis_score)
     q = q.order_by(sort_col.asc() if sort_dir == "asc" else sort_col.desc())
-
     items = q.offset((page - 1) * page_size).limit(page_size).all()
     sku_ids_page = [s.sku_id for s in items]
     products = {
         p.sku_id: p
         for p in db.query(models.DimProduct).filter(models.DimProduct.sku_id.in_(sku_ids_page)).all()
     }
-
     return {
         "items": [_score_out(s, products.get(s.sku_id)) for s in items],
-        "total": total,
-        "page": page,
-        "page_size": page_size,
+        "total": total, "page": page, "page_size": page_size,
     }
 
 
-# ── SKU detail ───────────────────────────────────────────────────────────────
+# ── Bestaande: SKU-detail ─────────────────────────────────────────────────────
 
 @router.get("/skus/{sku_id}")
 def get_sku_competition_detail(
@@ -132,7 +121,6 @@ def get_sku_competition_detail(
     )
     product = db.query(models.DimProduct).filter(models.DimProduct.sku_id == sku_id).first()
 
-    from datetime import date, timedelta
     recent_date = date.today() - timedelta(days=14)
     comp_prices = (
         db.query(models.FactCompetitorPriceDaily)
@@ -144,7 +132,6 @@ def get_sku_competition_detail(
         .all()
     )
 
-    # Build per-competitor summary (most recent price)
     seen: set = set()
     competitor_detail = []
     ref_price = float(score.reference_price) if score and score.reference_price else None
@@ -183,7 +170,7 @@ def get_sku_competition_detail(
     }
 
 
-# ── Charts ───────────────────────────────────────────────────────────────────
+# ── Bestaande: Charts ─────────────────────────────────────────────────────────
 
 @router.get("/charts/pcis-distribution")
 def get_pcis_distribution(
@@ -191,13 +178,15 @@ def get_pcis_distribution(
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     classes = ["Critical", "Strong", "Influence", "Monitor", "Ignore"]
-    result = []
-    for cls in classes:
-        count = db.query(models.SkuCompetitionScore).filter(
-            models.SkuCompetitionScore.competition_class == cls
-        ).count()
-        result.append({"class": cls, "count": count})
-    return result
+    return [
+        {
+            "class": cls,
+            "count": db.query(models.SkuCompetitionScore).filter(
+                models.SkuCompetitionScore.competition_class == cls
+            ).count(),
+        }
+        for cls in classes
+    ]
 
 
 @router.get("/charts/price-index-by-category")
@@ -218,7 +207,6 @@ def get_price_index_by_category(
         p = products.get(score.sku_id)
         cat = p.category if p else "Unknown"
         category_data.setdefault(cat, []).append(float(score.price_index))
-
     return [
         {
             "category": cat,
@@ -234,7 +222,6 @@ def get_sub_scores_by_class(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    """Average sub-scores grouped by competition class (for radar charts)."""
     classes = ["Critical", "Strong", "Influence", "Monitor", "Ignore"]
     result = []
     for cls in classes:
@@ -245,8 +232,7 @@ def get_sub_scores_by_class(
             continue
         n = len(rows)
         result.append({
-            "class": cls,
-            "count": n,
+            "class": cls, "count": n,
             "avg_product_comparability": round(sum(r.product_comparability_score or 0 for r in rows) / n, 3),
             "avg_price_sensitivity": round(sum(r.price_sensitivity_score or 0 for r in rows) / n, 3),
             "avg_substitution": round(sum(r.substitution_score or 0 for r in rows) / n, 3),
@@ -258,7 +244,389 @@ def get_sub_scores_by_class(
     return result
 
 
-# ── Strategy Recognition ─────────────────────────────────────────────────────
+# ── NIEUW: Dashboard ──────────────────────────────────────────────────────────
+
+@router.get("/dashboard")
+def get_competition_dashboard(
+    category: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """
+    Top-10 concurrenten per categorie met alle 7 scores, verkeerslicht,
+    strategie-label en laatste prijswijziging.
+    """
+    q = db.query(models.CategoryCompetitorRelevance)
+    if category:
+        q = q.filter(models.CategoryCompetitorRelevance.category == category)
+    rows = q.order_by(
+        models.CategoryCompetitorRelevance.category,
+        models.CategoryCompetitorRelevance.combined_score.desc(),
+    ).all()
+
+    # Groepeer per categorie en neem top-10
+    categories: dict = {}
+    for row in rows:
+        cat_items = categories.setdefault(row.category, [])
+        if len(cat_items) < 10:
+            cat_items.append(_category_score_out(row))
+
+    # Haal profielen en strategieën op
+    profielen = {p.competitor_name: p for p in db.query(models.CompetitorProfile).all()}
+    strategieen = {
+        s.competitor_name: s
+        for s in db.query(models.CompetitorStrategyResult)
+        .order_by(
+            models.CompetitorStrategyResult.competitor_name,
+            models.CompetitorStrategyResult.run_date.desc(),
+        )
+        .all()
+    }
+
+    # Verrijk per concurrent
+    result = []
+    for cat, items in categories.items():
+        for item in items:
+            naam = item["competitor_name"]
+            profiel = profielen.get(naam)
+            strategie = strategieen.get(naam)
+            item["assortment_size"] = profiel.assortment_size if profiel else None
+            item["price_segment"] = profiel.price_segment if profiel else None
+            item["last_price_change_date"] = (
+                profiel.last_price_change_date.isoformat()
+                if profiel and profiel.last_price_change_date else None
+            )
+            item["strategy_type"] = strategie.strategy_type if strategie else None
+            item["strategy_label_nl"] = strategie.strategy_label_nl if strategie else None
+            item["strategy_confidence"] = strategie.confidence if strategie else None
+        result.append({"category": cat, "competitors": items})
+
+    return {
+        "categories": result,
+        "total_categories": len(result),
+        "filter_category": category,
+    }
+
+
+# ── NIEUW: Discovery ──────────────────────────────────────────────────────────
+
+@router.get("/discovery")
+def list_discovery_queue(
+    status: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    q = db.query(models.CompetitorDiscoveryQueue)
+    if status:
+        q = q.filter(models.CompetitorDiscoveryQueue.status == status)
+    total = q.count()
+    items = (
+        q.order_by(
+            models.CompetitorDiscoveryQueue.confidence.desc(),
+            models.CompetitorDiscoveryQueue.created_at.desc(),
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return {
+        "items": [_discovery_out(i) for i in items],
+        "total": total, "page": page, "page_size": page_size,
+    }
+
+
+@router.post("/discovery/run")
+def trigger_discovery_run(
+    categories: Optional[list[str]] = None,
+    min_confidence: float = Query(0.60, ge=0.0, le=1.0),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """Start een nieuwe discovery-run (synchronous voor de pilot)."""
+    from engine.competitor_discovery import run_discovery
+    result = run_discovery(db, categories=categories, min_confidence=min_confidence)
+    return {"status": "completed", **result}
+
+
+@router.post("/discovery/{item_id}/approve")
+def approve_discovery_item(
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    item = db.query(models.CompetitorDiscoveryQueue).filter(
+        models.CompetitorDiscoveryQueue.id == item_id
+    ).first()
+    if not item:
+        raise HTTPException(404, "Discovery-item niet gevonden")
+    item.status = "APPROVED"
+    item.approved_by = current_user.username
+    from datetime import datetime
+    item.approved_at = datetime.utcnow()
+    db.commit()
+    return {"status": "approved", "id": item_id}
+
+
+@router.post("/discovery/{item_id}/reject")
+def reject_discovery_item(
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    item = db.query(models.CompetitorDiscoveryQueue).filter(
+        models.CompetitorDiscoveryQueue.id == item_id
+    ).first()
+    if not item:
+        raise HTTPException(404, "Discovery-item niet gevonden")
+    item.status = "REJECTED"
+    item.approved_by = current_user.username
+    from datetime import datetime
+    item.approved_at = datetime.utcnow()
+    db.commit()
+    return {"status": "rejected", "id": item_id}
+
+
+# ── NIEUW: Concurrenten (profielen) ──────────────────────────────────────────
+
+@router.get("/competitors")
+def list_competitors(
+    relevance_label: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    q = db.query(models.CompetitorProfile)
+    if relevance_label:
+        q = q.filter(models.CompetitorProfile.relevance_label == relevance_label)
+    total = q.count()
+    items = (
+        q.order_by(models.CompetitorProfile.functional_overlap_score.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return {
+        "items": [_profile_out(p) for p in items],
+        "total": total, "page": page, "page_size": page_size,
+    }
+
+
+@router.get("/competitors/{competitor_name}")
+def get_competitor_profile(
+    competitor_name: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    profile = (
+        db.query(models.CompetitorProfile)
+        .filter(models.CompetitorProfile.competitor_name == competitor_name)
+        .first()
+    )
+    if not profile:
+        raise HTTPException(404, f"Concurrent '{competitor_name}' niet gevonden")
+
+    # Haal categoriescores op
+    cat_scores = (
+        db.query(models.CategoryCompetitorRelevance)
+        .filter(models.CategoryCompetitorRelevance.competitor_name == competitor_name)
+        .order_by(models.CategoryCompetitorRelevance.combined_score.desc())
+        .all()
+    )
+
+    # Haal strategie op
+    strategie = (
+        db.query(models.CompetitorStrategyResult)
+        .filter(models.CompetitorStrategyResult.competitor_name == competitor_name)
+        .order_by(models.CompetitorStrategyResult.run_date.desc())
+        .first()
+    )
+
+    return {
+        "profile": _profile_out(profile),
+        "category_scores": [_category_score_out(r) for r in cat_scores],
+        "strategy": _strategy_out(strategie) if strategie else None,
+    }
+
+
+# ── NIEUW: Categorie Analyse ──────────────────────────────────────────────────
+
+@router.get("/categories")
+def list_category_scores(
+    category: Optional[str] = Query(None),
+    relevance_label: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    q = db.query(models.CategoryCompetitorRelevance)
+    if category:
+        q = q.filter(models.CategoryCompetitorRelevance.category == category)
+    if relevance_label:
+        q = q.filter(models.CategoryCompetitorRelevance.relevance_label == relevance_label)
+    total = q.count()
+    items = (
+        q.order_by(
+            models.CategoryCompetitorRelevance.category,
+            models.CategoryCompetitorRelevance.combined_score.desc(),
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return {
+        "items": [_category_score_out(r) for r in items],
+        "total": total, "page": page, "page_size": page_size,
+    }
+
+
+@router.get("/categories/{category_name}")
+def get_category_detail(
+    category_name: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    rows = (
+        db.query(models.CategoryCompetitorRelevance)
+        .filter(models.CategoryCompetitorRelevance.category == category_name)
+        .order_by(models.CategoryCompetitorRelevance.combined_score.desc())
+        .all()
+    )
+    if not rows:
+        raise HTTPException(404, f"Categorie '{category_name}' niet gevonden")
+
+    # Assortimentsgaten
+    gaps = (
+        db.query(models.AssortmentGap)
+        .filter(models.AssortmentGap.category == category_name)
+        .order_by(models.AssortmentGap.opportunity_score.desc())
+        .limit(20)
+        .all()
+    )
+
+    return {
+        "category": category_name,
+        "competitors": [_category_score_out(r) for r in rows],
+        "assortment_gaps": [_gap_out(g) for g in gaps],
+        "total_competitors": len(rows),
+        "high_count": sum(1 for r in rows if r.relevance_label == "HIGH"),
+        "monitor_count": sum(1 for r in rows if r.relevance_label == "MONITOR"),
+        "avg_coverage_index": round(sum(r.coverage_index or 0 for r in rows) / len(rows), 1) if rows else 0,
+        "avg_opportunity_score": round(sum(r.opportunity_score or 0 for r in rows) / len(rows), 1) if rows else 0,
+    }
+
+
+# ── NIEUW: AI Matching ────────────────────────────────────────────────────────
+
+@router.get("/ai-matching")
+def list_ai_matches(
+    match_type: Optional[str] = Query(None),
+    min_confidence: float = Query(0.0, ge=0.0, le=1.0),
+    status: Optional[str] = Query(None),
+    sku_id: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    q = db.query(models.AiMatchResult)
+    if match_type:
+        q = q.filter(models.AiMatchResult.match_type == match_type)
+    if min_confidence > 0:
+        q = q.filter(models.AiMatchResult.confidence >= min_confidence)
+    if status:
+        q = q.filter(models.AiMatchResult.status == status)
+    if sku_id:
+        q = q.filter(models.AiMatchResult.own_sku_id == sku_id)
+
+    total = q.count()
+    items = (
+        q.order_by(models.AiMatchResult.confidence.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    # Verrijk met productnamen
+    sku_ids = [i.own_sku_id for i in items]
+    products = {
+        p.sku_id: p
+        for p in db.query(models.DimProduct).filter(models.DimProduct.sku_id.in_(sku_ids)).all()
+    }
+
+    return {
+        "items": [_match_out(m, products.get(m.own_sku_id)) for m in items],
+        "total": total, "page": page, "page_size": page_size,
+    }
+
+
+@router.post("/ai-matching/{match_id}/approve")
+def approve_match(
+    match_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    match = db.query(models.AiMatchResult).filter(models.AiMatchResult.id == match_id).first()
+    if not match:
+        raise HTTPException(404, "Match niet gevonden")
+    match.status = "APPROVED"
+    match.approved_by = current_user.username
+    from datetime import datetime
+    match.approved_at = datetime.utcnow()
+    db.commit()
+    return {"status": "approved", "id": match_id}
+
+
+@router.post("/ai-matching/{match_id}/reject")
+def reject_match(
+    match_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    match = db.query(models.AiMatchResult).filter(models.AiMatchResult.id == match_id).first()
+    if not match:
+        raise HTTPException(404, "Match niet gevonden")
+    match.status = "REJECTED"
+    match.approved_by = current_user.username
+    from datetime import datetime
+    match.approved_at = datetime.utcnow()
+    db.commit()
+    return {"status": "rejected", "id": match_id}
+
+
+# ── NIEUW: Assortiment Gap ────────────────────────────────────────────────────
+
+@router.get("/assortment-gap")
+def list_assortment_gaps(
+    category: Optional[str] = Query(None),
+    gap_type: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    q = db.query(models.AssortmentGap)
+    if category:
+        q = q.filter(models.AssortmentGap.category == category)
+    if gap_type:
+        q = q.filter(models.AssortmentGap.gap_type == gap_type)
+    total = q.count()
+    items = (
+        q.order_by(models.AssortmentGap.opportunity_score.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return {
+        "items": [_gap_out(g) for g in items],
+        "total": total, "page": page, "page_size": page_size,
+    }
+
+
+# ── NIEUW: Strategie Analyse (verbeterd) ──────────────────────────────────────
 
 @router.get("/strategies")
 def get_competitor_strategies(
@@ -267,11 +635,36 @@ def get_competitor_strategies(
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     """
-    Classificeer alle concurrenten naar één van 7 strategietypen
-    op basis van prijshistorie van de afgelopen lookback_days dagen.
+    Retourneert de meest recente strategie per concurrent uit de database
+    (backfill of live run). Valt terug op real-time berekening als er geen data is.
     """
-    from engine.competitor_strategy_engine import analyseer_alle_concurrenten
+    # Probeer eerst de opgeslagen resultaten
+    stored = (
+        db.query(models.CompetitorStrategyResult)
+        .order_by(
+            models.CompetitorStrategyResult.competitor_name,
+            models.CompetitorStrategyResult.run_date.desc(),
+        )
+        .all()
+    )
 
+    # Deduplicate — één per competitor
+    seen: dict = {}
+    for s in stored:
+        if s.competitor_name not in seen:
+            seen[s.competitor_name] = _strategy_out(s)
+
+    if seen:
+        return {
+            "strategieen": list(seen.values()),
+            "periode": f"Opgeslagen data (meest recente per concurrent)",
+            "lookback_days": lookback_days,
+            "totaal_concurrenten": len(seen),
+            "source": "stored",
+        }
+
+    # Fallback: live berekening
+    from engine.competitor_strategy_engine import analyseer_alle_concurrenten
     since = date.today() - timedelta(days=lookback_days)
     rijen = (
         db.query(models.FactCompetitorPriceDaily)
@@ -282,9 +675,7 @@ def get_competitor_strategies(
         )
         .all()
     )
-
-    # Groepeer per concurrent: {naam: [(datum, prijs)]}
-    prijsdata: dict[str, list[tuple[date, float]]] = {}
+    prijsdata: dict = {}
     for r in rijen:
         naam = r.competitor_name or "Onbekend"
         if r.price is None:
@@ -292,19 +683,55 @@ def get_competitor_strategies(
         prijsdata.setdefault(naam, []).append((r.date, float(r.price)))
 
     if not prijsdata:
-        return {
-            "strategieen": [],
-            "periode": f"Geen data de afgelopen {lookback_days} dagen",
-            "lookback_days": lookback_days,
-        }
+        return {"strategieen": [], "periode": "Geen data", "lookback_days": lookback_days}
 
     resultaten = analyseer_alle_concurrenten(prijsdata)
-
     return {
         "strategieen": resultaten,
         "periode": f"{since.isoformat()} – {date.today().isoformat()}",
         "lookback_days": lookback_days,
         "totaal_concurrenten": len(resultaten),
+        "source": "live",
+    }
+
+
+# ── NIEUW: Management Intelligence ────────────────────────────────────────────
+
+@router.get("/management")
+def get_management_intelligence(
+    category: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    from engine.management_intelligence import build_management_insights
+    insights = build_management_insights(db, category=category)
+    return {
+        "insights": insights,
+        "total_categories": len(insights),
+        "filter_category": category,
+    }
+
+
+# ── NIEUW: Discovery Log ──────────────────────────────────────────────────────
+
+@router.get("/discovery-log")
+def list_discovery_runs(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    total = db.query(models.CompetitorDiscoveryRun).count()
+    items = (
+        db.query(models.CompetitorDiscoveryRun)
+        .order_by(models.CompetitorDiscoveryRun.started_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return {
+        "items": [_run_out(r) for r in items],
+        "total": total, "page": page, "page_size": page_size,
     }
 
 
@@ -312,8 +739,7 @@ def get_competitor_strategies(
 
 def _score_out(s: models.SkuCompetitionScore, product=None) -> dict:
     return {
-        "id": s.id,
-        "sku_id": s.sku_id,
+        "id": s.id, "sku_id": s.sku_id,
         "product_name": product.product_name if product else s.sku_id,
         "category": product.category if product else None,
         "brand": product.brand if product else None,
@@ -340,17 +766,152 @@ def _product_brief(p) -> dict:
     if not p:
         return {}
     return {
-        "sku_id": p.sku_id,
-        "product_name": p.product_name,
-        "brand": p.brand,
-        "category": p.category,
-        "subcategory": p.subcategory,
-        "is_private_label": p.is_private_label,
-        "is_a_brand": p.is_a_brand,
+        "sku_id": p.sku_id, "product_name": p.product_name,
+        "brand": p.brand, "category": p.category, "subcategory": p.subcategory,
+        "is_private_label": p.is_private_label, "is_a_brand": p.is_a_brand,
         "lifecycle_status": p.lifecycle_status,
         "current_price": float(p.current_price) if p.current_price else None,
         "cost_price": float(p.cost_price) if p.cost_price else None,
         "min_price": float(p.min_price) if p.min_price else None,
         "max_price": float(p.max_price) if p.max_price else None,
         "stock_quantity": p.stock_quantity,
+    }
+
+
+def _profile_out(p: models.CompetitorProfile) -> dict:
+    return {
+        "id": p.id,
+        "competitor_name": p.competitor_name,
+        "domain": p.domain,
+        "assortment_size": p.assortment_size,
+        "category_breadth": p.category_breadth,
+        "top_brands": p.top_brands or [],
+        "top_categories": p.top_categories or [],
+        "price_segment": p.price_segment,
+        "premium_share_pct": p.premium_share_pct,
+        "budget_share_pct": p.budget_share_pct,
+        "avg_price_index": p.avg_price_index,
+        "price_change_frequency": p.price_change_frequency,
+        "last_price_change_date": p.last_price_change_date.isoformat() if p.last_price_change_date else None,
+        "avg_delivery_days": p.avg_delivery_days,
+        "in_stock_rate": p.in_stock_rate,
+        "functional_overlap_score": p.functional_overlap_score,
+        "relevance_label": p.relevance_label,
+        "traffic_light": p.traffic_light,
+        "run_date": p.run_date.isoformat() if p.run_date else None,
+    }
+
+
+def _category_score_out(r: models.CategoryCompetitorRelevance) -> dict:
+    return {
+        "id": r.id,
+        "competitor_name": r.competitor_name,
+        "category": r.category,
+        "relevance_score": r.relevance_score,
+        "coverage_index": r.coverage_index,
+        "authority_score": r.authority_score,
+        "assortment_gap_score": r.assortment_gap_score,
+        "pricing_relevance_score": r.pricing_relevance_score,
+        "traffic_relevance_score": r.traffic_relevance_score,
+        "opportunity_score": r.opportunity_score,
+        "combined_score": r.combined_score,
+        "relevance_label": r.relevance_label,
+        "traffic_light": r.traffic_light,
+        "relevance_explanation": r.relevance_explanation,
+        "opportunity_explanation": r.opportunity_explanation,
+        "missing_brands": r.missing_brands or [],
+        "run_date": r.run_date.isoformat() if r.run_date else None,
+    }
+
+
+def _match_out(m: models.AiMatchResult, product=None) -> dict:
+    return {
+        "id": m.id,
+        "own_sku_id": m.own_sku_id,
+        "product_name": product.product_name if product else m.own_sku_id,
+        "category": product.category if product else None,
+        "competitor_name": m.competitor_name,
+        "competitor_sku": m.competitor_sku,
+        "competitor_url": m.competitor_url,
+        "match_type": m.match_type,
+        "confidence": m.confidence,
+        "explanation_nl": m.explanation_nl,
+        "ean_match": m.ean_match,
+        "mpn_match": m.mpn_match,
+        "oem_match": m.oem_match,
+        "brand_match": m.brand_match,
+        "product_type_match": m.product_type_match,
+        "price_segment_match": m.price_segment_match,
+        "competitor_price": float(m.competitor_price) if m.competitor_price else None,
+        "own_price": float(m.own_price) if m.own_price else None,
+        "price_diff_pct": m.price_diff_pct,
+        "status": m.status,
+        "approved_by": m.approved_by,
+        "run_date": m.run_date.isoformat() if m.run_date else None,
+    }
+
+
+def _strategy_out(s: models.CompetitorStrategyResult) -> dict:
+    return {
+        "id": s.id,
+        "competitor_name": s.competitor_name,
+        "run_date": s.run_date.isoformat() if s.run_date else None,
+        "strategy_type": s.strategy_type,
+        "strategy_label_nl": s.strategy_label_nl,
+        "confidence": s.confidence,
+        "explanation_nl": s.explanation_nl,
+        "recommended_action_nl": s.recommended_action_nl,
+        "period_days": s.period_days,
+        "data_points": s.data_points,
+        "previous_strategy_type": s.previous_strategy_type,
+        "strategy_changed": s.strategy_changed,
+    }
+
+
+def _gap_out(g: models.AssortmentGap) -> dict:
+    return {
+        "id": g.id,
+        "category": g.category,
+        "competitor_name": g.competitor_name,
+        "gap_type": g.gap_type,
+        "gap_value": g.gap_value,
+        "opportunity_score": g.opportunity_score,
+        "explanation_nl": g.explanation_nl,
+        "competitor_has": g.competitor_has,
+        "potential_revenue_eur": g.potential_revenue_eur,
+        "run_date": g.run_date.isoformat() if g.run_date else None,
+    }
+
+
+def _discovery_out(i: models.CompetitorDiscoveryQueue) -> dict:
+    return {
+        "id": i.id,
+        "domain": i.domain,
+        "competitor_name": i.competitor_name,
+        "discovery_reason": i.discovery_reason,
+        "discovery_method": i.discovery_method,
+        "categories": i.categories or [],
+        "confidence": i.confidence,
+        "status": i.status,
+        "approved_by": i.approved_by,
+        "approved_at": i.approved_at.isoformat() if i.approved_at else None,
+        "run_id": i.run_id,
+        "created_at": i.created_at.isoformat() if i.created_at else None,
+    }
+
+
+def _run_out(r: models.CompetitorDiscoveryRun) -> dict:
+    return {
+        "id": r.id,
+        "run_id": r.run_id,
+        "started_at": r.started_at.isoformat() if r.started_at else None,
+        "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+        "status": r.status,
+        "categories_searched": r.categories_searched or [],
+        "candidates_found": r.candidates_found,
+        "candidates_new": r.candidates_new,
+        "candidates_approved": r.candidates_approved,
+        "candidates_rejected": r.candidates_rejected,
+        "parameters": r.parameters or {},
+        "error_message": r.error_message,
     }

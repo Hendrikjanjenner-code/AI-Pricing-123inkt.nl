@@ -28,6 +28,19 @@ import SkuConcurrentieAnalyse from "@/pages/sku-concurrentie";
 import Elasticiteitsmonitor from "@/pages/elasticiteit";
 import HuismerkImpact from "@/pages/huismerk-impact";
 
+// Competition Intelligence Engine 2.0
+import CompetitionDashboard from "@/pages/competition-dashboard";
+import CompetitionDiscovery from "@/pages/competition-discovery";
+import CompetitionCompetitors from "@/pages/competition-competitors";
+import CompetitorDetail from "@/pages/competition-competitor-detail";
+import CompetitionCategories from "@/pages/competition-categories";
+import CompetitionAiMatching from "@/pages/competition-ai-matching";
+import CompetitionAssortmentGap from "@/pages/competition-assortment-gap";
+import CompetitionStrategies from "@/pages/competition-strategies";
+import CompetitionManagement from "@/pages/competition-management";
+import CompetitionDiscoveryLog from "@/pages/competition-discovery-log";
+import CompetitionSettings from "@/pages/competition-settings";
+
 // Nieuwe module-pagina's
 import ScrapingConfiguratie from "@/pages/scraping-configuratie";
 import ProductMatching from "@/pages/product-matching";
@@ -119,17 +132,50 @@ function Router() {
         <ProtectedRoute><ProductDetail /></ProtectedRoute>
       </Route>
 
-      {/* Concurrentie-intelligentie (PCIS) */}
+      {/* Competition Intelligence Engine 2.0 — SUB-ROUTES FIRST (most specific) */}
+      <Route path="/competition/discovery">
+        <ProtectedRoute><CompetitionDiscovery /></ProtectedRoute>
+      </Route>
+      <Route path="/competition/competitors/:id">
+        <ProtectedRoute><CompetitorDetail /></ProtectedRoute>
+      </Route>
+      <Route path="/competition/competitors">
+        <ProtectedRoute><CompetitionCompetitors /></ProtectedRoute>
+      </Route>
+      <Route path="/competition/categories/:category_name">
+        <ProtectedRoute><CompetitionCategories /></ProtectedRoute>
+      </Route>
+      <Route path="/competition/categories">
+        <ProtectedRoute><CompetitionCategories /></ProtectedRoute>
+      </Route>
+      <Route path="/competition/ai-matching">
+        <ProtectedRoute><CompetitionAiMatching /></ProtectedRoute>
+      </Route>
+      <Route path="/competition/assortment-gap">
+        <ProtectedRoute><CompetitionAssortmentGap /></ProtectedRoute>
+      </Route>
+      <Route path="/competition/strategies">
+        <ProtectedRoute><CompetitionStrategies /></ProtectedRoute>
+      </Route>
+      <Route path="/competition/management">
+        <ProtectedRoute><CompetitionManagement /></ProtectedRoute>
+      </Route>
+      <Route path="/competition/discovery-log">
+        <ProtectedRoute><CompetitionDiscoveryLog /></ProtectedRoute>
+      </Route>
+      <Route path="/competition/settings">
+        <ProtectedRoute><CompetitionSettings /></ProtectedRoute>
+      </Route>
+      {/* CI Dashboard — catches /competition exactly */}
+      <Route path="/competition">
+        <ProtectedRoute><CompetitionDashboard /></ProtectedRoute>
+      </Route>
+
+      {/* Concurrentie-intelligentie (PCIS) — legacy */}
       <Route path="/concurrentie">
         <ProtectedRoute><ConcurrentieIntelligence /></ProtectedRoute>
       </Route>
       <Route path="/concurrentie/:sku_id">
-        <ProtectedRoute><ConcurrentieDetail /></ProtectedRoute>
-      </Route>
-      <Route path="/competition">
-        <ProtectedRoute><ConcurrentieIntelligence /></ProtectedRoute>
-      </Route>
-      <Route path="/competition/:sku_id">
         <ProtectedRoute><ConcurrentieDetail /></ProtectedRoute>
       </Route>
 

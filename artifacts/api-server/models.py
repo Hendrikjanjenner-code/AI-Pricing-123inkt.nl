@@ -1315,3 +1315,222 @@ class SchemaMigration(Base):
     column_name = Column(String(255))
     ddl = Column(Text)             # the exact DDL statement that was executed
     applied_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPETITION INTELLIGENCE ENGINE 2.0
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CompetitorDiscoveryQueue(Base):
+    """
+    Automatisch ontdekte concurrenten die wachten op goedkeuring (PROPOSED)
+    of al zijn verwerkt (APPROVED / REJECTED).
+    """
+    __tablename__ = "competitor_discovery_queue"
+
+    id = Column(Integer, primary_key=True, index=True)
+    domain = Column(String(500), nullable=False)
+    competitor_name = Column(String(255))
+    discovery_reason = Column(Text)
+    discovery_method = Column(String(100))   # KEYWORD / OEM / CATEGORY / EAN / PATTERN
+    categories = Column(JSON)                # lijst categorie-namen waar overlap is
+    confidence = Column(Float, default=0.0)  # 0.0–1.0
+    status = Column(String(50), default="PROPOSED")  # PROPOSED / APPROVED / REJECTED
+    approved_by = Column(String(100))
+    approved_at = Column(DateTime)
+    run_id = Column(String(100), index=True) # koppeling aan discovery-run
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CompetitorProfile(Base):
+    """
+    Automatisch opgebouwd profiel per goedgekeurde concurrent
+    op basis van scrape- en prijsdata.
+    """
+    __tablename__ = "competitor_profile"
+
+    id = Column(Integer, primary_key=True, index=True)
+    competitor_name = Column(String(255), nullable=False, unique=True, index=True)
+    domain = Column(String(500))
+
+    # Assortiment
+    assortment_size = Column(Integer, default=0)     # aantal SKU's in onze categorieën
+    category_breadth = Column(Integer, default=0)    # aantal categorieën
+    top_brands = Column(JSON)                        # lijst top-5 merken
+    top_categories = Column(JSON)                    # lijst top-5 categorieën
+
+    # Prijssegment
+    price_segment = Column(String(50))               # BUDGET / MIDDEN / PREMIUM
+    premium_share_pct = Column(Float)                # % premium SKU's
+    budget_share_pct = Column(Float)                 # % budget SKU's
+    avg_price_index = Column(Float)                  # eigen prijs / concurrent gemiddeld
+
+    # Activiteit
+    price_change_frequency = Column(Float)           # prijswijzigingen per week
+    last_price_change_date = Column(Date)
+    avg_delivery_days = Column(Float)
+    in_stock_rate = Column(Float)                    # % tijd op voorraad
+
+    # Relevantie
+    functional_overlap_score = Column(Float)         # 0–1 functionele overlap
+    relevance_label = Column(String(20))             # HIGH / MONITOR / LOW
+
+    # Verkeerslichtstatus voor UI
+    traffic_light = Column(String(10))               # green / orange / red
+
+    run_date = Column(Date)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CategoryCompetitorRelevance(Base):
+    """
+    Zeven categoryscores per concurrent per DRS-categorie.
+    Vormt de basis voor de categorie-analyseview en managementadviezen.
+    """
+    __tablename__ = "category_competitor_relevance"
+
+    id = Column(Integer, primary_key=True, index=True)
+    competitor_name = Column(String(255), nullable=False, index=True)
+    category = Column(String(255), nullable=False, index=True)
+
+    # Zeven scores 0–100
+    relevance_score = Column(Float, default=0.0)          # Category Relevance Score
+    coverage_index = Column(Float, default=0.0)           # Coverage Index
+    authority_score = Column(Float, default=0.0)          # Authority Score
+    assortment_gap_score = Column(Float, default=0.0)     # Assortment Gap Score
+    pricing_relevance_score = Column(Float, default=0.0)  # Pricing Relevance Score
+    traffic_relevance_score = Column(Float, default=0.0)  # Traffic Relevance Score
+    opportunity_score = Column(Float, default=0.0)        # Opportunity Score
+
+    # Gecombineerde relevantieclassificatie
+    combined_score = Column(Float, default=0.0)
+    relevance_label = Column(String(20))  # HIGH / MONITOR / LOW
+    traffic_light = Column(String(10))    # green / orange / red
+
+    # Textverklaringen
+    relevance_explanation = Column(Text)
+    opportunity_explanation = Column(Text)
+
+    # Ontbrekende data
+    missing_brands = Column(JSON)
+    missing_product_types = Column(JSON)
+    missing_price_segments = Column(JSON)
+
+    run_date = Column(Date)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AiMatchResult(Base):
+    """
+    AI-matching resultaat per eigen SKU gekoppeld aan een concurrent-SKU.
+    Geeft match-type, confidence en Nederlandse uitleg.
+    """
+    __tablename__ = "ai_match_result"
+
+    id = Column(Integer, primary_key=True, index=True)
+    own_sku_id = Column(String(100), nullable=False, index=True)
+    competitor_name = Column(String(255), nullable=False)
+    competitor_sku = Column(String(200))
+    competitor_url = Column(Text)
+
+    # Match-resultaat
+    match_type = Column(String(50))   # Exact / Sterk / Functioneel / Categorie_Alternatief / Geen_Match
+    confidence = Column(Float, default=0.0)  # 0.0–1.0
+    explanation_nl = Column(Text)
+
+    # Gebruikte signalen
+    ean_match = Column(Boolean, default=False)
+    mpn_match = Column(Boolean, default=False)
+    oem_match = Column(Boolean, default=False)
+    brand_match = Column(Boolean, default=False)
+    product_type_match = Column(Boolean, default=False)
+    price_segment_match = Column(Boolean, default=False)
+
+    # Prijsdata
+    competitor_price = Column(Numeric(10, 4))
+    own_price = Column(Numeric(10, 4))
+    price_diff_pct = Column(Float)
+
+    # Status
+    status = Column(String(50), default="PENDING")   # PENDING / APPROVED / REJECTED
+    approved_by = Column(String(100))
+    approved_at = Column(DateTime)
+
+    run_date = Column(Date, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CompetitorStrategyResult(Base):
+    """
+    Strategie-herkenningsresultaat per concurrent (verrijkt met confidence + uitleg).
+    Bevat ook historiek van strategiewisselingen.
+    """
+    __tablename__ = "competitor_strategy_result"
+
+    id = Column(Integer, primary_key=True, index=True)
+    competitor_name = Column(String(255), nullable=False, index=True)
+    run_date = Column(Date, nullable=False, index=True)
+
+    strategy_type = Column(String(100))   # EVERYDAY_LOW_PRICE / PROMOTION_DRIVEN / etc.
+    strategy_label_nl = Column(String(255))
+    confidence = Column(Float, default=0.0)
+    explanation_nl = Column(Text)
+    recommended_action_nl = Column(Text)
+
+    # Periode
+    period_days = Column(Integer, default=30)
+    data_points = Column(Integer, default=0)
+
+    # Historisch: vorige strategie (voor tijdlijn)
+    previous_strategy_type = Column(String(100))
+    strategy_changed = Column(Boolean, default=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AssortmentGap(Base):
+    """
+    Assortimentsgap per categorie: welke merken, typen, segmenten ontbreken.
+    """
+    __tablename__ = "assortment_gap"
+
+    id = Column(Integer, primary_key=True, index=True)
+    category = Column(String(255), nullable=False, index=True)
+    competitor_name = Column(String(255), nullable=False)
+
+    gap_type = Column(String(50))     # MERK / PRODUCTTYPE / PRIJSSEGMENT / OEM_KANS
+    gap_value = Column(String(500))   # naam van het ontbrekende merk / type / segment
+    opportunity_score = Column(Float, default=0.0)   # 0–100
+    explanation_nl = Column(Text)
+
+    # Extra context
+    competitor_has = Column(Boolean, default=True)  # concurrent heeft dit, wij niet
+    potential_revenue_eur = Column(Float)            # geschat revenue-potentieel
+
+    run_date = Column(Date)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CompetitorDiscoveryRun(Base):
+    """
+    Log van elke discovery-run: wanneer, hoeveel gevonden, parameters.
+    """
+    __tablename__ = "competitor_discovery_run"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_id = Column(String(100), unique=True, nullable=False, index=True)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime)
+    status = Column(String(50), default="running")  # running / completed / failed
+
+    categories_searched = Column(JSON)
+    candidates_found = Column(Integer, default=0)
+    candidates_new = Column(Integer, default=0)
+    candidates_approved = Column(Integer, default=0)
+    candidates_rejected = Column(Integer, default=0)
+
+    parameters = Column(JSON)     # discovery-parameters gebruikt
+    error_message = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
