@@ -1,10 +1,13 @@
 """Dashboard KPI summary and chart data endpoints."""
+import logging
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func, text
 from database import get_db
 import models
 import auth as auth_utils
+
+logger = logging.getLogger("uvicorn.error")
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -14,6 +17,7 @@ def get_dashboard_summary(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
+    logger.info("dashboard API started: /summary user_id=%s", current_user.id)
     recs = db.query(models.FactPricingRecommendationDaily)
 
     total = recs.count()
@@ -35,6 +39,7 @@ def get_dashboard_summary(
     dq_score = round(skus_with_cost / total_skus, 2) if total_skus > 0 else 1.0
     total_competitor_prices = db.query(models.FactCompetitorPriceDaily).count()
 
+    logger.info("dashboard API completed: /summary user_id=%s total_recs=%s", current_user.id, total)
     return {
         "total_margin_uplift": float(margin_uplift),
         "total_recommendations": total,

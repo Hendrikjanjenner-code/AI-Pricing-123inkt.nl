@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { useLoginUser, getGetCurrentUserQueryKey } from "@workspace/api-client-react";
-import { setAuthToken } from "@/lib/auth";
+import { setAuthToken, setCachedUser } from "@/lib/auth";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,14 +22,16 @@ export default function Login() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/auth/health")
+    fetch("/api/auth/health", { signal: AbortSignal.timeout(5000) })
       .then(r => (r.ok ? r.json() : null))
       .then(data => {
         if (!cancelled && data?.environment === "development" && data?.dev_admin_available) {
           setDevAdminAvailable(true);
         }
       })
-      .catch(() => {});
+      .catch(err => {
+        console.warn("[login] auth/health probe failed (non-blocking):", err?.message || err);
+      });
     return () => {
       cancelled = true;
     };
@@ -37,14 +39,25 @@ export default function Login() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.info("[login] login started for user:", gebruikersnaam);
     try {
       const res = await loginMutation.mutateAsync({
         data: { username: gebruikersnaam, password: wachtwoord }
       });
+      console.info("[login] login success");
       setAuthToken(res.token);
-      await queryClient.resetQueries({ queryKey: getGetCurrentUserQueryKey() });
+      // Hydrate the user optimistically from the login response itself so
+      // the dashboard can render immediately without waiting on a follow-up
+      // GET /me round-trip (which may be slow or transiently fail).
+      setCachedUser(res.user);
+      console.info("[login] token stored, user cached");
+      // Refresh the cached /me query in the background; AuthProvider no
+      // longer blocks navigation on this resolving.
+      queryClient.resetQueries({ queryKey: getGetCurrentUserQueryKey() });
+      console.info("[login] dashboard route opened");
       setLocation("/");
     } catch (err: any) {
+      console.error("[login] login failed:", err?.data?.detail || err?.message || err);
       toast({
         title: "Aanmelden mislukt",
         description: err?.data?.detail || err?.message || "Ongeldige inloggegevens",

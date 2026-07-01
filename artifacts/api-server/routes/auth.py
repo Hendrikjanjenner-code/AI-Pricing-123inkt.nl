@@ -51,12 +51,16 @@ class AuthResponse(BaseModel):
 
 @router.post("/login", response_model=AuthResponse)
 def login(req: LoginRequest, db: Session = Depends(get_db)):
+    logger.info("login started: username=%s", req.username)
     user = db.query(models.User).filter(models.User.username == req.username).first()
     if not user or not auth_utils.verify_password(req.password, user.hashed_password):
+        logger.warning("login failed: invalid credentials for username=%s", req.username)
         raise HTTPException(status_code=401, detail="Invalid credentials")
     if not user.is_active:
+        logger.warning("login failed: account disabled for username=%s", req.username)
         raise HTTPException(status_code=401, detail="Account disabled")
     token = auth_utils.create_access_token({"sub": str(user.id)})
+    logger.info("login success: username=%s user_id=%s role=%s", req.username, user.id, user.role)
     return {"user": UserOut.from_orm_user(user), "token": token}
 
 

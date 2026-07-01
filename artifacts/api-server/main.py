@@ -15,20 +15,43 @@ from contextlib import asynccontextmanager
 from database import engine, Base
 from seed import seed_database
 from migrate import run_migrations
+
+logger = logging.getLogger("uvicorn.error")
+
 from routes import (
     auth, products, categories, recommendations,
     dashboard, uploads, data_quality, substitutions,
     model_health, exports, users, skus, competition, ab_tests,
     concurrentie, elasticiteit, huismerk,
-    scraping, matching, monitoring, execution, audit_log,
+    monitoring, execution, audit_log,
     bcg,
     traffic, search_demand,
     cost, procurement, economic, reporting, bcg_transitions,
     category_hierarchy, break_even, ecosystem, explainability,
-    admin, pilot, drs, paper_copy, priceshape,
+    admin, pilot,
 )
 
-logger = logging.getLogger("uvicorn.error")
+# Optional modules (DRS import, PriceShape import, competitor scraping, AI
+# product matching, XLS/XLSX import) are imported individually, each in its
+# own try/except. An import-time failure in one of them (e.g. a missing
+# optional dependency) only disables that module — it can never crash the
+# whole backend process and therefore can never block login/dashboard
+# startup. This is intentionally done at import time (before router
+# registration) since a bad top-level `from routes import (...)` for any of
+# these names would otherwise abort the entire module load.
+import importlib
+
+disabled_optional_routers: set[str] = set()
+_optional_router_modules: dict[str, object] = {}
+for _mod_name in ("scraping", "matching", "drs", "paper_copy", "priceshape"):
+    try:
+        _optional_router_modules[_mod_name] = importlib.import_module(f"routes.{_mod_name}")
+    except Exception as exc:
+        disabled_optional_routers.add(_mod_name)
+        logger.error(
+            "Optional module '%s' failed to import and has been disabled "
+            "(login/dashboard remain unaffected): %s", _mod_name, exc,
+        )
 
 APP_VERSION = "1.0.0"
 
@@ -188,6 +211,35 @@ def _build_health_payload() -> dict:
     except Exception as exc:
         database_status = f"error: {exc}"
 
+    # Merge auth-subsystem diagnostics so /api/health is a single source of
+    # truth for "is login possible right now" without a second round-trip.
+    auth_status: dict = {"available": False}
+    try:
+        from routes.auth import auth_health
+        from database import SessionLocal
+        db = SessionLocal()
+        try:
+            auth_status = {"available": True, **auth_health(db=db)}
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.error("health: auth subsystem diagnostics failed: %s", exc)
+        auth_status = {"available": False, "error": str(exc)}
+
+    # Optional/non-critical modules — reported for visibility, never block
+    # overall status. Each check is isolated so one broken optional module
+    # can't take down /api/health itself.
+    optional_modules: dict = {}
+    try:
+        from services.scraping_engine import check_scraping_dependencies
+        optional_modules["scraping"] = check_scraping_dependencies()
+    except Exception as exc:
+        optional_modules["scraping"] = {"ok": False, "message": str(exc)}
+    optional_modules["drs"] = {"ok": "drs" not in disabled_optional_routers}
+    optional_modules["priceshape"] = {"ok": "priceshape" not in disabled_optional_routers}
+    optional_modules["ai_matching"] = {"ok": "matching" not in disabled_optional_routers}
+    optional_modules["xls_import"] = {"ok": "paper_copy" not in disabled_optional_routers}
+
     return {
         "status": "ok" if startup_state["backend_status"] == "running" and database_status == "connected" else "degraded",
         "backend_status": startup_state["backend_status"],
@@ -197,6 +249,8 @@ def _build_health_payload() -> dict:
         "app_version": APP_VERSION,
         "started_at": startup_state["started_at"],
         "last_start_error": startup_state["last_start_error"],
+        "auth": auth_status,
+        "optional_modules": optional_modules,
     }
 
 
@@ -230,8 +284,6 @@ app.include_router(ab_tests.router)
 app.include_router(concurrentie.router)
 app.include_router(elasticiteit.router)
 app.include_router(huismerk.router)
-app.include_router(scraping.router)
-app.include_router(matching.router)
 app.include_router(monitoring.router)
 app.include_router(execution.router)
 app.include_router(audit_log.router)
@@ -250,6 +302,18 @@ app.include_router(ecosystem.router)
 app.include_router(explainability.router)
 app.include_router(admin.router)
 app.include_router(pilot.router)
-app.include_router(drs.router)
-app.include_router(paper_copy.router)
-app.include_router(priceshape.router)
+
+# Register whichever optional modules imported successfully above. Modules
+# that failed to import were already recorded in disabled_optional_routers
+# and are simply skipped here — registration is also wrapped in try/except
+# in case a router raises during include_router itself (e.g. duplicate
+# path/tag registration), so that failure mode is equally non-fatal.
+for _name, _mod in _optional_router_modules.items():
+    try:
+        app.include_router(_mod.router)
+    except Exception as exc:
+        disabled_optional_routers.add(_name)
+        logger.error(
+            "Optional module '%s' failed to register and has been disabled "
+            "(login/dashboard remain unaffected): %s", _name, exc,
+        )

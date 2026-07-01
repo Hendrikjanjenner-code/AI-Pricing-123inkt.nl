@@ -18,6 +18,35 @@ const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 let _baseUrl: string | null = null;
 let _authTokenGetter: AuthTokenGetter | null = null;
 
+// Default request timeout (ms). Ensures a non-responding backend always
+// surfaces an error instead of leaving callers (and their UI loading
+// states) hanging forever. Callers can still pass their own `signal`;
+// in that case both signals are combined so either can abort the request.
+const DEFAULT_TIMEOUT_MS = 15_000;
+let _defaultTimeoutMs: number | null = DEFAULT_TIMEOUT_MS;
+
+/**
+ * Override (or disable, with `null`) the default per-request timeout applied
+ * by `customFetch` when the caller does not supply their own `AbortSignal`.
+ */
+export function setDefaultTimeout(timeoutMs: number | null): void {
+  _defaultTimeoutMs = timeoutMs;
+}
+
+function resolveSignal(existing: AbortSignal | null | undefined): AbortSignal | undefined {
+  if (!_defaultTimeoutMs) return existing ?? undefined;
+
+  const timeoutSignal = AbortSignal.timeout(_defaultTimeoutMs);
+  if (!existing) return timeoutSignal;
+
+  // Combine caller-provided signal with the timeout signal when supported.
+  if (typeof (AbortSignal as any).any === "function") {
+    return (AbortSignal as any).any([existing, timeoutSignal]);
+  }
+
+  return existing;
+}
+
 /**
  * Set a base URL that is prepended to every relative request URL
  * (i.e. paths that start with `/`).
@@ -359,8 +388,22 @@ export async function customFetch<T = unknown>(
   }
 
   const requestInfo = { method, url: resolveUrl(input) };
+  const signal = resolveSignal(init.signal);
 
-  const response = await fetch(input, { ...init, method, headers });
+  let response: Response;
+  try {
+    response = await fetch(input, { ...init, method, headers, signal });
+  } catch (cause) {
+    if (cause instanceof Error && cause.name === "TimeoutError") {
+      throw new Error(
+        `Request timed out: ${method} ${requestInfo.url} did not respond within ${_defaultTimeoutMs}ms`,
+      );
+    }
+    if (cause instanceof Error && cause.name === "AbortError") {
+      throw new Error(`Request aborted: ${method} ${requestInfo.url}`);
+    }
+    throw cause;
+  }
 
   if (!response.ok) {
     const errorData = await parseErrorBody(response, method);

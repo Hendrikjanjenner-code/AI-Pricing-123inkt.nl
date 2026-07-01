@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 import { ArrowUpRight, ArrowDownRight, AlertTriangle, CheckCircle2, ShieldAlert } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { InfoTooltip } from "@/components/InfoTooltip";
+import { WidgetError } from "@/components/WidgetError";
 
 const STRATEGIE_LABELS: Record<string, string> = {
   SUBSTITUTION_PORTFOLIO: "Substitutieportfolio",
@@ -20,11 +21,15 @@ const STRATEGIE_LABELS: Record<string, string> = {
 };
 
 export default function Dashboard() {
-  const { data: summary, isLoading: loadingSummary } = useGetDashboardSummary();
-  const { data: marginData } = useGetMarginByCategory();
-  const { data: recsData } = useGetRecsByStrategy();
-  const { data: confData } = useGetConfidenceDistribution();
-  const { data: priceData } = useGetPriceChangeDistribution();
+  const { data: summary, isLoading: loadingSummary, isError: summaryError } = useGetDashboardSummary();
+  const { data: marginData, isLoading: loadingMargin, isError: marginError } = useGetMarginByCategory();
+  const { data: recsData, isLoading: loadingRecs, isError: recsError } = useGetRecsByStrategy();
+  const { data: confData, isLoading: loadingConf, isError: confError } = useGetConfidenceDistribution();
+  const { data: priceData, isLoading: loadingPrice, isError: priceError } = useGetPriceChangeDistribution();
+
+  if (summaryError) {
+    console.error("[dashboard] failed to load summary");
+  }
 
   const formatBedrag = (val: number) => new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(val);
   const formatGetal = (val: number) => new Intl.NumberFormat('nl-NL').format(val);
@@ -39,6 +44,10 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {[1,2,3,4].map(i => <Skeleton key={i} className="h-[120px] w-full" />)}
         </div>
+      ) : summaryError ? (
+        <Card className="p-6">
+          <WidgetError message="Kon dashboardsamenvatting niet laden." />
+        </Card>
       ) : summary && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Card>
@@ -121,7 +130,9 @@ export default function Dashboard() {
             <CardTitle>Margeverbetering per categorie</CardTitle>
           </CardHeader>
           <CardContent className="h-[300px]">
-            {marginData ? (
+            {marginError ? (
+              <WidgetError />
+            ) : marginData ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={marginData}>
                   <XAxis dataKey="category" fontSize={12} tickLine={false} axisLine={false} />
@@ -130,7 +141,7 @@ export default function Dashboard() {
                   <Bar dataKey="margin_uplift" fill="var(--primary)" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
-            ) : <Skeleton className="w-full h-full" />}
+            ) : loadingMargin ? <Skeleton className="w-full h-full" /> : <WidgetError />}
           </CardContent>
         </Card>
 
@@ -139,7 +150,9 @@ export default function Dashboard() {
             <CardTitle>Adviezen per strategie</CardTitle>
           </CardHeader>
           <CardContent className="h-[300px]">
-            {recsData ? (
+            {recsError ? (
+              <WidgetError />
+            ) : recsData ? (
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -159,7 +172,7 @@ export default function Dashboard() {
                   <Tooltip formatter={(val: number, name: string) => [val, name]} />
                 </PieChart>
               </ResponsiveContainer>
-            ) : <Skeleton className="w-full h-full" />}
+            ) : loadingRecs ? <Skeleton className="w-full h-full" /> : <WidgetError />}
           </CardContent>
         </Card>
 
@@ -168,7 +181,9 @@ export default function Dashboard() {
             <CardTitle>Verdeling prijswijzigingen</CardTitle>
           </CardHeader>
           <CardContent className="h-[300px]">
-            {priceData ? (
+            {priceError ? (
+              <WidgetError />
+            ) : priceData ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={priceData}>
                   <XAxis dataKey="bucket" fontSize={12} tickLine={false} axisLine={false} />
@@ -177,7 +192,7 @@ export default function Dashboard() {
                   <Bar dataKey="count" fill="var(--chart-4)" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
-            ) : <Skeleton className="w-full h-full" />}
+            ) : loadingPrice ? <Skeleton className="w-full h-full" /> : <WidgetError />}
           </CardContent>
         </Card>
 
@@ -186,7 +201,9 @@ export default function Dashboard() {
             <CardTitle>Modelbetrouwbaarheid</CardTitle>
           </CardHeader>
           <CardContent className="h-[300px]">
-            {confData ? (
+            {confError ? (
+              <WidgetError />
+            ) : confData ? (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={confData}>
                   <XAxis dataKey="bucket" fontSize={12} tickLine={false} axisLine={false} />
@@ -195,7 +212,7 @@ export default function Dashboard() {
                   <Line type="monotone" dataKey="count" stroke="var(--chart-2)" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
                 </LineChart>
               </ResponsiveContainer>
-            ) : <Skeleton className="w-full h-full" />}
+            ) : loadingConf ? <Skeleton className="w-full h-full" /> : <WidgetError />}
           </CardContent>
         </Card>
       </div>
