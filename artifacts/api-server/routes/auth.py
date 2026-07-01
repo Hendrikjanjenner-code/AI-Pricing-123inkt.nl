@@ -1,17 +1,26 @@
 """Authentication routes: login, logout, me, health."""
+import asyncio
 import logging
 import os
+import time
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError, DBAPIError, TimeoutError as SATimeoutError
 from pydantic import BaseModel
-from database import get_db, engine
+from database import get_db, engine, SessionLocal
 import models
 import auth as auth_utils
 
 logger = logging.getLogger("uvicorn.error")
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+# Hard end-to-end deadline for a single login attempt. Chosen so that a slow
+# or unreachable database (or any other unexpected slowdown) fails fast with
+# a structured error instead of hanging the request/worker indefinitely.
+LOGIN_TIMEOUT_SECONDS = float(os.environ.get("LOGIN_TIMEOUT_SECONDS", "5"))
 
 
 class LoginRequest(BaseModel):
@@ -49,19 +58,102 @@ class AuthResponse(BaseModel):
     token: str
 
 
-@router.post("/login", response_model=AuthResponse)
-def login(req: LoginRequest, db: Session = Depends(get_db)):
-    logger.info("login started: username=%s", req.username)
-    user = db.query(models.User).filter(models.User.username == req.username).first()
-    if not user or not auth_utils.verify_password(req.password, user.hashed_password):
-        logger.warning("login failed: invalid credentials for username=%s", req.username)
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    if not user.is_active:
-        logger.warning("login failed: account disabled for username=%s", req.username)
-        raise HTTPException(status_code=401, detail="Account disabled")
-    token = auth_utils.create_access_token({"sub": str(user.id)})
-    logger.info("login success: username=%s user_id=%s role=%s", req.username, user.id, user.role)
-    return {"user": UserOut.from_orm_user(user), "token": token}
+def _run_login(username: str, password: str) -> dict:
+    """
+    Runs the full blocking login flow (DB connect + query + password check +
+    token generation) synchronously. Executed inside a worker thread that is
+    itself wrapped by a hard deadline in the `login` route below, so a slow
+    or unreachable database can never hang the request past that deadline.
+
+    Opens its own DB session (rather than relying on FastAPI's Depends(get_db))
+    so that even the connection-acquisition step — which is where an
+    unreachable database typically blocks — is covered by the deadline.
+    """
+    logger.info("login: db session opening for username=%s", username)
+    db = SessionLocal()
+    try:
+        logger.info("login: db session opened for username=%s", username)
+
+        logger.info("login: user query started for username=%s", username)
+        user = db.query(models.User).filter(models.User.username == username).first()
+        logger.info("login: user query completed for username=%s found=%s", username, bool(user))
+
+        logger.info("login: password check started for username=%s", username)
+        password_ok = bool(user) and auth_utils.verify_password(password, user.hashed_password)
+        logger.info("login: password check completed for username=%s ok=%s", username, password_ok)
+
+        if not password_ok:
+            logger.warning("login: invalid credentials for username=%s", username)
+            return {"ok": False, "status_code": 401, "error_code": "INVALID_CREDENTIALS", "detail": "Invalid credentials"}
+
+        if not user.is_active:
+            logger.warning("login: account disabled for username=%s", username)
+            return {"ok": False, "status_code": 401, "error_code": "ACCOUNT_DISABLED", "detail": "Account disabled"}
+
+        logger.info("login: token generation started for username=%s", username)
+        token = auth_utils.create_access_token({"sub": str(user.id)})
+        logger.info("login: token generation completed for username=%s", username)
+
+        return {"ok": True, "user": UserOut.from_orm_user(user), "token": token}
+    finally:
+        db.close()
+        logger.info("login: db session closed for username=%s", username)
+
+
+@router.post("/login")
+async def login(req: LoginRequest):
+    started_at = time.monotonic()
+    logger.info("login: request received for username=%s", req.username)
+    loop = asyncio.get_running_loop()
+    try:
+        result = await asyncio.wait_for(
+            loop.run_in_executor(None, _run_login, req.username, req.password),
+            timeout=LOGIN_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        elapsed = time.monotonic() - started_at
+        logger.error(
+            "login: TIMEOUT after %.2fs (limit %.1fs) for username=%s — likely a slow/unreachable database",
+            elapsed, LOGIN_TIMEOUT_SECONDS, req.username,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error_code": "LOGIN_TIMEOUT",
+                "detail": "Login timed out. The database may be slow or unreachable. Please try again shortly.",
+            },
+        )
+    except (OperationalError, DBAPIError, SATimeoutError) as exc:
+        logger.error("login: DB_UNREACHABLE for username=%s: %s", req.username, exc)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error_code": "DB_UNREACHABLE",
+                "detail": "Could not reach the database. Please try again shortly.",
+            },
+        )
+    except Exception as exc:
+        logger.error("login: unexpected error for username=%s: %s", req.username, exc, exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error_code": "LOGIN_ERROR",
+                "detail": "An unexpected error occurred during login.",
+            },
+        )
+
+    if not result["ok"]:
+        logger.info("login: response returned (%s) for username=%s", result["error_code"], req.username)
+        return JSONResponse(
+            status_code=result["status_code"],
+            content={"error_code": result["error_code"], "detail": result["detail"]},
+        )
+
+    logger.info(
+        "login: response returned (success) for username=%s in %.2fs",
+        req.username, time.monotonic() - started_at,
+    )
+    return {"user": result["user"], "token": result["token"]}
 
 
 @router.post("/logout")
