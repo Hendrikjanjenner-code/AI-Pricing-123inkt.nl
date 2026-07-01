@@ -1,0 +1,100 @@
+Onderzoek en herstel de HTTP 500 Internal Server Error bij inloggen.
+
+Doel:
+De login moet weer werken zonder 500-error. Analyseer eerst de backend error logs en fix daarna gericht.
+
+Controleer specifiek:
+
+1. Auth backend
+- login endpoint
+- auth router registratie
+- user model
+- password hashing
+- JWT generation
+- token expiry
+- pydantic schemas
+- database query naar gebruiker
+
+2. Database
+Controleer:
+- bestaat de users tabel?
+- bestaan verplichte kolommen?
+- bestaat admin/test gebruiker?
+- zijn password_hash velden gevuld?
+- zijn rollen correct?
+- zijn migrations uitgevoerd?
+
+3. Environment variables
+Controleer:
+- JWT_SECRET
+- DATABASE_URL
+- APP_ENV
+- CORS settings
+
+Als JWT_SECRET ontbreekt:
+- voeg veilige fallback toe voor development
+- toon duidelijke waarschuwing
+- laat login niet crashen
+
+4. Veelvoorkomende oorzaken
+Zoek naar:
+- ontbrekende users tabel
+- ontbrekende admin user
+- verkeerd password hash formaat
+- bcrypt/passlib error
+- JWT secret missing
+- database session error
+- circular import door nieuwe modules
+- response schema mismatch
+- frontend stuurt verkeerde payload
+
+5. Maak login foutbestendig
+Bij fout:
+- geef nette 401 bij verkeerde login
+- geef nette 400 bij ontbrekende velden
+- geef nooit 500 voor normale loginfouten
+- log technische details alleen backend-side
+
+6. Voeg healthcheck toe
+Maak endpoint:
+
+GET /api/auth/health
+
+Toon:
+- auth_router_loaded
+- database_connected
+- users_table_exists
+- admin_user_exists
+- jwt_configured
+- password_hashing_ok
+
+7. Herstel admin gebruiker
+Maak veilige seed-functie:
+
+create_default_admin_if_missing()
+
+Alleen in development.
+
+Gebruik:
+email: admin@example.com
+password: admin123
+role: Admin
+
+Toon daarna in de UI:
+“Development admin account beschikbaar”
+
+8. Acceptatiecriteria
+Na fix moet:
+- loginpagina laden
+- verkeerde login 401 geven
+- correcte login token teruggeven
+- gebruiker wordt doorgestuurd naar dashboard
+- /api/auth/health werkt
+- bestaande data niet worden verwijderd
+- database niet worden gereset
+- importdata behouden blijven
+
+Belangrijk:
+Verwijder geen bestaande data.
+Reset de database niet.
+Maak eerst diagnose zichtbaar en fix daarna gericht.
