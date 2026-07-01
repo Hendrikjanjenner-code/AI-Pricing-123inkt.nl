@@ -1,21 +1,28 @@
-"""DRS Datareport import endpoints — validate + upsert via XLSX (Sales + Hierarchy tabs)."""
+"""DRS Datareport import endpoints — validate + upsert via XLSX (Sales + Hierarchy tabs).
+
+Low-level parsing/validation primitives (safe_float, safe_date, truncate) are
+shared with every other import source via engine/import_engine.py.
+"""
 import io
 from datetime import datetime, date as _date
 from typing import Optional
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
 import models
 import auth as auth_utils
+from engine.import_engine import (
+    safe_float as _safe_float,
+    safe_date as _safe_date,
+    truncate as _trunc,
+    build_preview,
+    IMPORT_MODES,
+    DEFAULT_IMPORT_MODE,
+)
 
 router = APIRouter(prefix="/api/uploads", tags=["drs"])
 
-
-def _trunc(value: str | None, limit: int) -> str | None:
-    """Truncate string to column VARCHAR limit to prevent StringDataRightTruncation."""
-    if value is None:
-        return None
-    return value[:limit] if len(value) > limit else value
+DRS_REPLACE_CONFIRM_PHRASE = "VERVANG ALLE DRS DATA"
 
 
 # ── Column definitions (real DATAREPORT structure) ───────────────────────────
@@ -46,32 +53,54 @@ SALES_OPTIONAL = [
 HIERARCHY_REQUIRED = ["productcode", "name", "path"]
 
 
-def _load_drs_xlsx(content: bytes) -> tuple[list[dict], list[dict], list[str]]:
-    """
-    Parse DRS XLSX and return (sales_rows, hierarchy_rows, warnings).
-    Raises HTTPException when file is unreadable or required tabs are missing.
-    """
-    try:
-        import openpyxl
-    except ImportError:
-        raise HTTPException(status_code=500, detail="openpyxl is niet geïnstalleerd; XLSX niet ondersteund")
+SALES_SHEET_NAMES = ["sales", "verkoop", "verkoopdata"]
+HIERARCHY_SHEET_NAMES = ["hierarchy", "hiërarchie", "hierarchie", "categorieën", "categories"]
 
-    try:
-        wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"XLSX bestand kon niet worden geopend: {e}")
 
-    sheet_names_lower = {ws.title.lower().strip(): ws.title for ws in wb.worksheets}
+def _load_drs_xlsx(content: bytes, filename: str = "") -> tuple[list[dict], list[dict], list[str]]:
+    """
+    Parse a DRS workbook (XLSX or legacy XLS) and return
+    (sales_rows, hierarchy_rows, warnings). Raises HTTPException when the
+    file is unreadable or the required Sales/Hierarchy tabs are missing.
+    Sheet lookup and cell parsing are delegated to the shared engine module
+    so DRS gets the same XLS support as every other import source.
+    """
+    from engine.import_engine import (
+        open_xlsx_workbook, xlsx_worksheet_to_rows,
+        open_xls_workbook, xls_sheet_to_rows,
+    )
+
     warnings: list[str] = []
+    is_xls = (filename or "").lower().endswith(".xls") and not (filename or "").lower().endswith(".xlsx")
 
-    def _get_sheet(candidates: list[str]):
-        for c in candidates:
-            if c in sheet_names_lower:
-                return wb[sheet_names_lower[c]]
-        return None
+    if is_xls:
+        wb = open_xls_workbook(content)
+        sheet_names_lower = {name.lower().strip(): name for name in wb.sheet_names()}
 
-    sales_ws = _get_sheet(["sales", "verkoop", "verkoopdata"])
-    hier_ws = _get_sheet(["hierarchy", "hiërarchie", "hierarchie", "categorieën", "categories"])
+        def _get_sheet(candidates: list[str]):
+            for c in candidates:
+                if c in sheet_names_lower:
+                    return wb.sheet_by_name(sheet_names_lower[c])
+            return None
+
+        sales_ws = _get_sheet(SALES_SHEET_NAMES)
+        hier_ws = _get_sheet(HIERARCHY_SHEET_NAMES)
+        found_names = wb.sheet_names()
+        to_rows = lambda ws: xls_sheet_to_rows(wb, ws)
+    else:
+        wb = open_xlsx_workbook(content)
+        sheet_names_lower = {ws.title.lower().strip(): ws.title for ws in wb.worksheets}
+
+        def _get_sheet(candidates: list[str]):
+            for c in candidates:
+                if c in sheet_names_lower:
+                    return wb[sheet_names_lower[c]]
+            return None
+
+        sales_ws = _get_sheet(SALES_SHEET_NAMES)
+        hier_ws = _get_sheet(HIERARCHY_SHEET_NAMES)
+        found_names = [ws.title for ws in wb.worksheets]
+        to_rows = xlsx_worksheet_to_rows
 
     missing = []
     if sales_ws is None:
@@ -82,46 +111,14 @@ def _load_drs_xlsx(content: bytes) -> tuple[list[dict], list[dict], list[str]]:
         raise HTTPException(
             status_code=400,
             detail=f"Verplichte tabbladen ontbreken: {', '.join(missing)}. "
-                   f"Gevonden tabbladen: {', '.join(ws.title for ws in wb.worksheets)}"
+                   f"Gevonden tabbladen: {', '.join(found_names)}"
         )
 
-    def _sheet_to_rows(ws) -> list[dict]:
-        rows_iter = ws.iter_rows(values_only=True)
-        headers = [str(c).strip().lower() if c is not None else "" for c in next(rows_iter, [])]
-        rows = []
-        for row in rows_iter:
-            if all(v is None or str(v).strip() == "" for v in row):
-                continue
-            row_dict: dict = {}
-            for h, v in zip(headers, row):
-                row_dict[h] = "" if v is None else str(v).strip()
-            rows.append(row_dict)
-        return rows
-
-    sales_rows = _sheet_to_rows(sales_ws)
-    hier_rows = _sheet_to_rows(hier_ws)
-    wb.close()
+    sales_rows = to_rows(sales_ws)
+    hier_rows = to_rows(hier_ws)
+    if not is_xls:
+        wb.close()
     return sales_rows, hier_rows, warnings
-
-
-def _safe_float(val: str | None) -> Optional[float]:
-    if not val or str(val).strip() == "":
-        return None
-    try:
-        return float(str(val).replace(",", "."))
-    except (ValueError, TypeError):
-        return None
-
-
-def _safe_date(val: str | None) -> Optional[_date]:
-    if not val or str(val).strip() == "":
-        return None
-    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d"):
-        try:
-            return datetime.strptime(str(val).strip(), fmt).date()
-        except ValueError:
-            continue
-    return None
 
 
 def _is_inactive(val: str | None) -> bool:
@@ -166,14 +163,15 @@ async def validate_drs(
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     """
-    Valideer een DRS Datareport XLSX-bestand (tabbladen Sales + Hierarchy) zonder op te slaan.
-    Retourneert een gestructureerd validatierapport.
+    Valideer een DRS Datareport-bestand (XLSX of XLS, tabbladen Sales + Hierarchy)
+    zonder op te slaan. Retourneert een gestructureerd validatierapport.
     """
-    if not (file.filename or "").lower().endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="Alleen XLSX-bestanden worden ondersteund voor DRS import")
+    fname = (file.filename or "")
+    if not fname.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Alleen XLSX- of XLS-bestanden worden ondersteund voor DRS import")
 
     content = await file.read()
-    sales_rows, hier_rows, warnings = _load_drs_xlsx(content)
+    sales_rows, hier_rows, warnings = _load_drs_xlsx(content, fname)
 
     fouten: list[dict] = []
     sku_gezien: dict[str, list[int]] = {}
@@ -319,6 +317,8 @@ async def validate_drs(
         "errors_by_type": fouten_per_type,
         "warnings": warnings[:50],
         "kan_importeren": kan_importeren,
+        "preview": build_preview(sales_rows),
+        "preview_hierarchy": build_preview(hier_rows),
     }
 
 
@@ -327,26 +327,49 @@ async def validate_drs(
 @router.post("/drs")
 async def import_drs(
     file: UploadFile = File(...),
+    mode: str = Form(DEFAULT_IMPORT_MODE),
+    confirm_phrase: str | None = Form(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
     """
-    Importeer een DRS Datareport XLSX-bestand.
+    Importeer een DRS Datareport-bestand (XLSX of XLS).
     - Upsert alle SKU's uit het Sales-tabblad in dim_product.
     - Bouw de hiërarchieboom op vanuit de unieke path-waarden in het Hierarchy-tabblad.
     - Synchroniseer dim_category op basis van level-1 knooppunten.
     - Logt elke aanmaak/update in audit_log.
+
+    `mode` bepaalt het importgedrag:
+    - "aanvullen": alleen nieuwe SKU's toevoegen, bestaande SKU's ongemoeid laten.
+    - "updaten" (standaard): bestaande SKU's bijwerken, nieuwe toevoegen.
+    - "vervangen": zoals "updaten", maar verwijdert daarna ook alle DRS-SKU's
+      die niet in dit bestand voorkomen. Vereist `confirm_phrase` exact gelijk
+      aan DRS_REPLACE_CONFIRM_PHRASE — data wordt nooit stilzwijgend verwijderd.
     """
-    if not (file.filename or "").lower().endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="Alleen XLSX-bestanden worden ondersteund voor DRS import")
+    fname = (file.filename or "")
+    if not fname.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Alleen XLSX- of XLS-bestanden worden ondersteund voor DRS import")
+
+    if mode not in IMPORT_MODES:
+        raise HTTPException(status_code=400, detail=f"Ongeldige mode '{mode}'. Kies uit: {', '.join(IMPORT_MODES)}")
+
+    if mode == "vervangen" and confirm_phrase != DRS_REPLACE_CONFIRM_PHRASE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Voor 'vervangen' is de exacte bevestigingszin vereist: '{DRS_REPLACE_CONFIRM_PHRASE}'"
+        )
 
     content = await file.read()
-    sales_rows, hier_rows, file_warnings = _load_drs_xlsx(content)
+    sales_rows, hier_rows, file_warnings = _load_drs_xlsx(content, fname)
+    file_type = "xls" if fname.lower().endswith(".xls") else "xlsx"
 
     job = models.ImportJob(
         upload_type="drs",
         filename=file.filename or "drs.xlsx",
-        status="processing",
+        source="DRS",
+        file_type=file_type,
+        import_mode=mode,
+        status="nieuw",
         uploaded_by=current_user.username,
         created_at=datetime.utcnow(),
     )
@@ -355,11 +378,12 @@ async def import_drs(
     db.refresh(job)
 
     try:
-        sku_created = sku_updated = 0
+        sku_created = sku_updated = sku_skipped = 0
         hier_created = hier_updated = 0
         cat_created = cat_updated = 0
         warnings: list[str] = list(file_warnings)
         now = datetime.utcnow()
+        seen_skus: set[str] = set()
 
         # ── Step 1: Bouw mapping productcode → path vanuit Hierarchy-tab ─────
         hier_path_by_sku: dict[str, str] = {}
@@ -484,7 +508,13 @@ async def import_drs(
             if not pad:
                 warnings.append(f"SKU '{pc}': geen Hierarchy-pad gevonden, category/product_group leeg gelaten")
 
+            seen_skus.add(pc)
             existing = existing_products.get(pc)
+
+            if existing and mode == "aanvullen":
+                # "aanvullen": alleen nieuwe SKU's toevoegen, bestaande overslaan.
+                sku_skipped += 1
+                continue
 
             if existing:
                 existing.product_name = naam
@@ -547,23 +577,49 @@ async def import_drs(
                 existing_products[pc] = new_product
                 sku_created += 1
 
+        # ── Step 5: "vervangen" — verwijder DRS-SKU's die niet in dit bestand voorkomen ──
+        sku_deleted = 0
+        if mode == "vervangen":
+            stale_products = [
+                p for sku, p in existing_products.items()
+                if sku not in seen_skus and (p.import_source or "").upper() == "DRS"
+            ]
+            for p in stale_products:
+                db.delete(p)
+                sku_deleted += 1
+            if stale_products:
+                _log_audit(db, "dim_product", "DRS_REPLACE", "delete", current_user.username,
+                           {"skus_deleted": [p.sku_id for p in stale_products][:100]},
+                           {"count": sku_deleted, "filename": job.filename})
+
         # Eén samenvattende audit-entry i.p.v. duizenden losse inserts
         _log_audit(db, "dim_product", "DRS_IMPORT", "import", current_user.username,
                    None, {"skus_created": sku_created, "skus_updated": sku_updated,
-                          "filename": job.filename})
+                          "skus_skipped": sku_skipped, "skus_deleted": sku_deleted,
+                          "mode": mode, "filename": job.filename})
         db.commit()
 
         totaal = sku_created + sku_updated
         job.rows_processed = totaal
         job.rows_failed = 0
-        job.status = "completed"
+        job.warnings_json = warnings[:200]
+        job.status = "bijgewerkt" if mode in ("updaten", "vervangen") and sku_updated > 0 else "geimporteerd"
         job.completed_at = now
         db.commit()
 
+        mode_msg = {
+            "aanvullen": f"{sku_skipped} bestaande SKU's overgeslagen (aanvullen-modus).",
+            "updaten": "",
+            "vervangen": f"{sku_deleted} verouderde DRS-SKU's verwijderd (vervangen-modus).",
+        }.get(mode, "")
+
         return {
             "job_id": job.id,
+            "mode": mode,
             "skus_created": sku_created,
             "skus_updated": sku_updated,
+            "skus_skipped": sku_skipped,
+            "skus_deleted": sku_deleted,
             "hierarchy_created": hier_created,
             "hierarchy_updated": hier_updated,
             "categories_created": cat_created,
@@ -573,14 +629,14 @@ async def import_drs(
             "warnings": warnings,
             "message": (
                 f"DRS import voltooid: {sku_created} nieuwe SKU's, {sku_updated} bijgewerkt. "
-                f"Hiërarchie: {hier_created} nieuw, {hier_updated} bijgewerkt."
-            ),
+                f"Hiërarchie: {hier_created} nieuw, {hier_updated} bijgewerkt. {mode_msg}"
+            ).strip(),
         }
 
     except Exception as e:
         db.rollback()
         try:
-            job.status = "failed"
+            job.status = "fout"
             job.error_message = str(e)[:500]
             job.completed_at = datetime.utcnow()
             db.commit()

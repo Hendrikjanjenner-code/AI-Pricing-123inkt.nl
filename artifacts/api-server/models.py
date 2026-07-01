@@ -134,6 +134,10 @@ class FactCompetitorPriceDaily(Base):
     competitor_name = Column(String(255), nullable=False)
     price = Column(Numeric(10, 4))
     url = Column(Text)
+    # Provenance of the row (e.g. "manual", "priceshape", "scraper"). Used to
+    # scope destructive "vervangen" cleanups to a single pipeline so importing
+    # one source never deletes competitor prices captured by another.
+    source = Column(String(50), default="manual")
 
 
 class FactInventoryDaily(Base):
@@ -206,7 +210,11 @@ class ImportJob(Base):
     id = Column(Integer, primary_key=True, index=True)
     upload_type = Column(String(100), nullable=False)
     filename = Column(String(500), nullable=False)
-    status = Column(String(50), default="pending")  # pending, processing, completed, failed
+    # Volledige statuslevenscyclus (zie engine/import_engine.py STATUS_LIFECYCLE):
+    # nieuw, concept, gevalideerd, geimporteerd, bijgewerkt, opgeslagen, fout.
+    # Oudere waarden (pending/processing/completed/failed) blijven bestaan in
+    # historische rijen en worden door de frontend nog steeds herkend.
+    status = Column(String(50), default="nieuw")
     rows_processed = Column(Integer, default=0)
     rows_failed = Column(Integer, default=0)
     error_message = Column(Text)
@@ -215,6 +223,8 @@ class ImportJob(Base):
     completed_at = Column(DateTime)
     import_mode = Column(String(50))       # aanvullen / updaten / vervangen
     warnings_json = Column(JSON)           # lijst met waarschuwingen van deze import
+    source = Column(String(50))            # PriceShape / DRS / Handmatig / Paper_Copy
+    file_type = Column(String(10))         # csv / xlsx / xls
 
 
 class AuditLog(Base):

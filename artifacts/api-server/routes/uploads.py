@@ -1,6 +1,11 @@
-"""CSV and XLSX upload endpoints for all data types."""
+"""CSV, XLSX and XLS upload endpoints for all data types.
+
+File parsing/decoding and low-level validation primitives live in the
+central Data Integration Engine (`engine/import_engine.py`) and are reused
+here rather than duplicated — the same module backs the PriceShape and DRS
+import routes.
+"""
 import io
-import csv
 import zipfile
 from datetime import datetime
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Query
@@ -8,91 +13,13 @@ from sqlalchemy.orm import Session
 from database import get_db
 import models
 import auth as auth_utils
-
-
-def _decode_csv_bytes(content: bytes) -> str:
-    """
-    Decode raw CSV bytes to text, robust to the encodings end users actually
-    produce: UTF-8 (with/without BOM), Windows-1252/CP1252 (Excel default on
-    Western-European Windows), classic Mac Roman, and Latin-1.
-
-    Strategy:
-      1. Prefer strict UTF-8 (handles BOM) — the modern default.
-      2. Otherwise use charset-normalizer to detect the legacy code page so
-         that special chars (€, smart quotes, accented letters) survive.
-      3. Fall back to CP1252, then Latin-1 (never raises — every byte maps).
-    """
-    try:
-        return content.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        pass
-
-    try:
-        from charset_normalizer import from_bytes
-
-        # Constrain detection to the encodings end users actually produce.
-        # Without this, charset-normalizer mis-detects short Western-European
-        # text as Eastern-European code pages (e.g. cp775, mac_latin2), which
-        # garbles €, smart quotes and accented characters.
-        match = from_bytes(
-            content,
-            cp_isolation=["utf_8", "cp1252", "mac_roman", "latin_1"],
-        ).best()
-        if match is not None and match.encoding:
-            try:
-                return content.decode(match.encoding)
-            except (UnicodeDecodeError, LookupError):
-                pass
-    except ImportError:
-        pass
-
-    # Deterministic fallback: CP1252 (Excel/Windows default) before Latin-1, so
-    # bytes 0x80–0x9F map to € and smart quotes instead of control characters.
-    try:
-        return content.decode("cp1252")
-    except UnicodeDecodeError:
-        return content.decode("latin-1")
-
-
-def _file_to_rows(content: bytes, filename: str, warnings: list | None = None) -> list[dict]:
-    """
-    Parse uploaded file bytes into a list of row dicts.
-    Supports .csv (UTF-8/CP1252/Mac-Roman/Latin-1) and .xlsx (first sheet only).
-    Values are always returned as strings to match csv.DictReader behaviour.
-    If an XLSX contains multiple sheets, an informative warning is appended to
-    the optional `warnings` list — the first sheet is always used.
-    """
-    fname = (filename or "").lower()
-    if fname.endswith(".xlsx"):
-        try:
-            import openpyxl
-        except ImportError:
-            raise HTTPException(status_code=500, detail="openpyxl is niet geïnstalleerd; XLSX niet ondersteund")
-        wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-        if len(wb.worksheets) > 1 and warnings is not None:
-            sheet_names = ", ".join(ws.title for ws in wb.worksheets)
-            warnings.append(
-                f"Alleen het eerste werkblad wordt ingelezen (werkbladen gevonden: {sheet_names})"
-            )
-        ws = wb.worksheets[0]
-        rows_iter = ws.iter_rows(values_only=True)
-        headers = [str(c).strip() if c is not None else "" for c in next(rows_iter, [])]
-        if not headers:
-            wb.close()
-            return []
-        rows = []
-        for row in rows_iter:
-            row_dict = {}
-            for h, v in zip(headers, row):
-                row_dict[h] = "" if v is None else str(v).strip()
-            rows.append(row_dict)
-        wb.close()
-        return rows
-    else:
-        text = _decode_csv_bytes(content)
-        text = text.replace('\r\n', '\n').replace('\r', '\n')
-        reader = csv.DictReader(io.StringIO(text))
-        return list(reader)
+from engine.import_engine import (
+    file_to_rows as _file_to_rows,
+    safe_float as _safe_float,
+    safe_int as _safe_int,
+    validate_ean as _validate_ean,
+    PREVIEW_ROW_LIMIT,
+)
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 
@@ -105,12 +32,16 @@ async def _process_upload(
     processor,
 ) -> dict:
     """Generic upload processor that creates an import job."""
+    fname = file.filename or "unknown.csv"
+    file_ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else "csv"
     job = models.ImportJob(
         upload_type=upload_type,
-        filename=file.filename or "unknown.csv",
-        status="processing",
+        filename=fname,
+        status="nieuw",
         uploaded_by=user.username,
         created_at=datetime.utcnow(),
+        source="Handmatig",
+        file_type=file_ext,
     )
     db.add(job)
     db.commit()
@@ -119,13 +50,14 @@ async def _process_upload(
     try:
         content = await file.read()
         file_warnings: list = []
-        rows = _file_to_rows(content, file.filename or "", file_warnings)
+        rows = _file_to_rows(content, fname, file_warnings)
         processed, failed, warnings = processor(rows, db)
         warnings = file_warnings + warnings
         job.rows_processed = processed
         job.rows_failed = failed
-        job.status = "completed"
+        job.status = "geimporteerd"
         job.completed_at = datetime.utcnow()
+        job.warnings_json = warnings[:50]
         db.commit()
         return {
             "job_id": job.id,
@@ -135,25 +67,11 @@ async def _process_upload(
             "message": f"Uploaded {processed} rows successfully",
         }
     except Exception as e:
-        job.status = "failed"
+        job.status = "fout"
         job.error_message = str(e)
         job.completed_at = datetime.utcnow()
         db.commit()
         raise HTTPException(status_code=400, detail=f"Upload failed: {str(e)}")
-
-
-def _safe_float(val: str | None) -> float | None:
-    try:
-        return float(val) if val and val.strip() else None
-    except (ValueError, TypeError):
-        return None
-
-
-def _safe_int(val: str | None) -> int | None:
-    try:
-        return int(val) if val and val.strip() else None
-    except (ValueError, TypeError):
-        return None
 
 
 def _r(row: dict, *keys: str) -> str | None:
@@ -222,21 +140,6 @@ def _enforce_row_validation(row: dict, rij: int, warnings: list) -> bool:
             invalid = True
 
     return not invalid
-
-
-def _validate_ean(ean: str) -> bool:
-    """Check EAN-13 or EAN-8 check-digit. Returns True if valid."""
-    ean = ean.strip().replace(" ", "")
-    if not ean.isdigit():
-        return False
-    if len(ean) == 13:
-        total = sum(int(d) * (1 if i % 2 == 0 else 3) for i, d in enumerate(ean[:12]))
-        return (10 - (total % 10)) % 10 == int(ean[12])
-    if len(ean) == 8:
-        weights = [3, 1, 3, 1, 3, 1, 3]
-        total = sum(int(d) * w for d, w in zip(ean[:7], weights))
-        return (10 - (total % 10)) % 10 == int(ean[7])
-    return False
 
 
 def _process_products(rows, db: Session):
@@ -498,7 +401,7 @@ async def validate_csv(
         else:
             mislukt += 1
 
-        if i <= 10:
+        if i <= PREVIEW_ROW_LIMIT:
             preview.append(row_norm)
 
     dubbele_skus = [sku for sku, rijen in sku_gezien.items() if len(rijen) > 1]
@@ -531,21 +434,42 @@ async def validate_csv(
 
 @router.get("")
 def list_uploads(
+    source: str | None = Query(None, description="Filter op bron: PriceShape, DRS, Handmatig, Paper_Copy"),
+    status: str | None = Query(None, description="Filter op status uit de importlevenscyclus"),
+    upload_type: str | None = Query(None, description="Filter op importtype"),
+    limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    jobs = db.query(models.ImportJob).order_by(models.ImportJob.created_at.desc()).limit(50).all()
+    """
+    Importgeschiedenis over alle bronnen (Handmatig, PriceShape, DRS, Paper_Copy).
+    Bedoeld om herbruikt te worden door een toekomstige 'Data Integratie'
+    dashboardpagina; ondersteunt filteren op bron/status/type.
+    """
+    q = db.query(models.ImportJob)
+    if source:
+        q = q.filter(models.ImportJob.source == source)
+    if status:
+        q = q.filter(models.ImportJob.status == status)
+    if upload_type:
+        q = q.filter(models.ImportJob.upload_type == upload_type)
+    jobs = q.order_by(models.ImportJob.created_at.desc()).limit(limit).all()
     return [
         {
             "id": j.id,
             "upload_type": j.upload_type,
             "filename": j.filename,
             "status": j.status,
+            "source": j.source,
+            "file_type": j.file_type,
+            "import_mode": j.import_mode,
             "rows_processed": j.rows_processed,
             "rows_failed": j.rows_failed,
             "error_message": j.error_message,
+            "warnings": j.warnings_json or [],
             "uploaded_by": j.uploaded_by,
             "created_at": j.created_at.isoformat() if j.created_at else None,
+            "completed_at": j.completed_at.isoformat() if j.completed_at else None,
         }
         for j in jobs
     ]

@@ -4,11 +4,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import {
   Upload, FileSpreadsheet, Loader2, CheckCircle2, XCircle,
   AlertTriangle, ChevronDown, ChevronUp, Download, Database,
   Clock, Package, Truck, TrendingUp, ArrowRight, ArrowLeft,
+  ShieldAlert, History, RefreshCw, Wifi, WifiOff,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -52,8 +56,11 @@ interface DrsValidation {
 
 interface DrsImportResult {
   job_id: number;
+  mode?: string;
   skus_created: number;
   skus_updated: number;
+  skus_skipped?: number;
+  skus_deleted?: number;
   hierarchy_created: number;
   hierarchy_updated: number;
   categories_created: number;
@@ -62,6 +69,12 @@ interface DrsImportResult {
   warnings: string[];
   message: string;
 }
+
+const IMPORT_MODE_LABELS: Record<string, string> = {
+  aanvullen: "Aanvullen (alleen nieuwe SKU's toevoegen)",
+  updaten: "Updaten (standaard — nieuw toevoegen, bestaand bijwerken)",
+  vervangen: "Volledig vervangen (verwijdert SKU's uit deze bron die niet in het bestand staan)",
+};
 
 // ── DRS Import Wizard ──────────────────────────────────────────────────────
 
@@ -74,18 +87,23 @@ function DrsWizardCard() {
   const [bestand, setBestand] = useState<File | null>(null);
   const [validatie, setValidatie] = useState<DrsValidation | null>(null);
   const [resultaat, setResultaat] = useState<DrsImportResult | null>(null);
+  const [mode, setMode] = useState<"aanvullen" | "updaten" | "vervangen">("updaten");
+  const [confirmPhrase, setConfirmPhrase] = useState("");
+  const DRS_REPLACE_PHRASE = "VERVANG ALLE DRS DATA";
 
   const handleBestand = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (!f.name.toLowerCase().endsWith(".xlsx")) {
-      toast({ title: "Verkeerd bestandstype", description: "Alleen XLSX-bestanden worden ondersteund voor DRS import.", variant: "destructive" });
+    if (!f.name.toLowerCase().endsWith(".xlsx") && !f.name.toLowerCase().endsWith(".xls")) {
+      toast({ title: "Verkeerd bestandstype", description: "Alleen XLSX- of XLS-bestanden worden ondersteund voor DRS import.", variant: "destructive" });
       return;
     }
     setBestand(f);
     setValidatie(null);
     setResultaat(null);
     setStap(1);
+    setMode("updaten");
+    setConfirmPhrase("");
     if (e.target) e.target.value = "";
     setValidating(true);
     try {
@@ -115,10 +133,16 @@ function DrsWizardCard() {
 
   const handleImporteer = async () => {
     if (!bestand) return;
+    if (mode === "vervangen" && confirmPhrase !== DRS_REPLACE_PHRASE) {
+      toast({ title: "Bevestiging vereist", description: `Typ exact: '${DRS_REPLACE_PHRASE}'`, variant: "destructive" });
+      return;
+    }
     setImporting(true);
     try {
       const fd = new FormData();
       fd.append("file", bestand, bestand.name);
+      fd.append("mode", mode);
+      if (mode === "vervangen") fd.append("confirm_phrase", confirmPhrase);
       const res = await fetch(`${BASE}/api/uploads/drs`, {
         method: "POST",
         headers: { Authorization: `Bearer ${TOKEN()}` },
@@ -146,6 +170,8 @@ function DrsWizardCard() {
     setBestand(null);
     setValidatie(null);
     setResultaat(null);
+    setMode("updaten");
+    setConfirmPhrase("");
   };
 
   const stapKleur = (n: number) =>
@@ -315,6 +341,34 @@ function DrsWizardCard() {
               Bestaande SKU's worden bijgewerkt via upsert. Nieuwe SKU's worden aangemaakt.
               Alle wijzigingen worden gelogd in het auditlogboek.
             </p>
+
+            <div className="space-y-3 border-t pt-3">
+              <Label className="text-sm font-medium">Importmodus</Label>
+              <RadioGroup value={mode} onValueChange={(v) => setMode(v as any)}>
+                {(["aanvullen", "updaten", "vervangen"] as const).map(m => (
+                  <div key={m} className="flex items-start gap-2">
+                    <RadioGroupItem value={m} id={`drs-${m}`} className="mt-0.5" />
+                    <Label htmlFor={`drs-${m}`} className="text-sm font-normal cursor-pointer">{IMPORT_MODE_LABELS[m]}</Label>
+                  </div>
+                ))}
+              </RadioGroup>
+
+              {mode === "vervangen" && (
+                <div className="rounded-md border border-amber-300 bg-amber-50/50 p-3 space-y-2">
+                  <div className="text-xs text-amber-700 flex items-start gap-1 font-medium">
+                    <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                    Deze actie verwijdert alle bestaande DRS-SKU's die niet in dit bestand voorkomen.
+                    Typ ter bevestiging exact: <code className="font-mono">{DRS_REPLACE_PHRASE}</code>
+                  </div>
+                  <Input
+                    value={confirmPhrase}
+                    onChange={e => setConfirmPhrase(e.target.value)}
+                    placeholder={DRS_REPLACE_PHRASE}
+                    className="font-mono text-sm"
+                  />
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -322,7 +376,7 @@ function DrsWizardCard() {
         {stap === 3 && resultaat && (
           <div className="rounded-md border p-4 space-y-3 bg-emerald-50/50 border-emerald-200">
             <div className="text-sm font-medium text-emerald-700 flex items-center gap-2">
-              <CheckCircle2 className="w-5 h-5" />DRS import geslaagd
+              <CheckCircle2 className="w-5 h-5" />DRS import geslaagd ({resultaat.mode || "updaten"})
             </div>
             <div className="grid grid-cols-3 gap-4 text-sm">
               <div className="space-y-1">
@@ -338,6 +392,12 @@ function DrsWizardCard() {
                 <div className="text-xs text-muted-foreground">Categorieën gesynchroniseerd</div>
               </div>
             </div>
+            {((resultaat.skus_skipped ?? 0) > 0 || (resultaat.skus_deleted ?? 0) > 0) && (
+              <div className="flex gap-4 text-xs text-muted-foreground">
+                {(resultaat.skus_skipped ?? 0) > 0 && <span>{resultaat.skus_skipped} overgeslagen</span>}
+                {(resultaat.skus_deleted ?? 0) > 0 && <span className="text-red-500">{resultaat.skus_deleted} verwijderd (vervangen-modus)</span>}
+              </div>
+            )}
             {resultaat.warnings.length > 0 && (
               <div className="space-y-1">
                 {resultaat.warnings.slice(0, 3).map((w, i) => (
@@ -359,7 +419,7 @@ function DrsWizardCard() {
           <div className="relative flex-1">
             <Input
               type="file"
-              accept=".xlsx"
+              accept=".xlsx,.xls"
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               onChange={handleBestand}
               disabled={validating}
@@ -367,7 +427,7 @@ function DrsWizardCard() {
             <Button variant="outline" className="w-full text-sm" size="sm" disabled={validating}>
               {validating
                 ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Valideren…</>
-                : <><Upload className="mr-2 h-4 w-4" />{bestand ? bestand.name : "XLSX kiezen (Sales + Hierarchy)"}</>
+                : <><Upload className="mr-2 h-4 w-4" />{bestand ? bestand.name : "XLSX of XLS kiezen (Sales + Hierarchy)"}</>
               }
             </Button>
           </div>
@@ -384,7 +444,12 @@ function DrsWizardCard() {
             <Button variant="outline" size="sm" onClick={() => setStap(1)}>
               <ArrowLeft className="mr-1 h-4 w-4" />Terug
             </Button>
-            <Button size="sm" onClick={handleImporteer} disabled={importing} className="ml-auto">
+            <Button
+              size="sm"
+              onClick={handleImporteer}
+              disabled={importing || (mode === "vervangen" && confirmPhrase !== DRS_REPLACE_PHRASE)}
+              className="ml-auto"
+            >
               {importing
                 ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Importeren…</>
                 : <><CheckCircle2 className="mr-2 h-4 w-4" />Bevestig import {validatie?.sales.rows_valid} SKU's</>
@@ -399,6 +464,454 @@ function DrsWizardCard() {
           </Button>
         )}
       </CardFooter>
+    </Card>
+  );
+}
+
+// ── PriceShape connector & upload wizard ────────────────────────────────────
+
+interface PriceShapeConnection {
+  configured: boolean;
+  reachable: boolean;
+  status: string;
+  message: string;
+}
+
+interface PriceShapeValidation {
+  job_id: number;
+  bestandsnaam: string;
+  samenvatting: {
+    rijen_totaal: number; rijen_geldig: number; rijen_ongeldig: number;
+    unieke_concurrenten: number; skus_niet_gevonden: number;
+  };
+  errors: Array<{ rij: number; veld: string; type?: string; bericht: string }>;
+  errors_by_type: Record<string, number>;
+  warnings: string[];
+  skus_niet_gevonden: string[];
+  kan_importeren: boolean;
+  preview: Record<string, string>[];
+}
+
+interface PriceShapeImportResult {
+  job_id: number;
+  mode: string;
+  created: number;
+  updated: number;
+  skipped: number;
+  removed: number;
+  rows_processed: number;
+  warnings: string[];
+  skus_niet_gevonden: string[];
+  message: string;
+}
+
+interface PriceShapeJobRow {
+  id: number;
+  filename: string;
+  source: string;
+  file_type: string | null;
+  import_mode: string | null;
+  status: string;
+  rows_processed: number;
+  rows_failed: number;
+  error_message: string | null;
+  warnings: string[];
+  uploaded_by: string;
+  created_at: string;
+  completed_at: string | null;
+}
+
+const PRICESHAPE_REPLACE_PHRASE = "VERVANG ALLE PRICESHAPE DATA";
+
+const PS_STATUS_BADGE: Record<string, { label: string; className: string }> = {
+  nieuw: { label: "Nieuw", className: "bg-muted text-muted-foreground border-muted" },
+  gevalideerd: { label: "Gevalideerd", className: "bg-blue-50 text-blue-600 border-blue-200" },
+  geimporteerd: { label: "Geïmporteerd", className: "bg-emerald-50 text-emerald-600 border-emerald-200" },
+  bijgewerkt: { label: "Bijgewerkt", className: "bg-emerald-50 text-emerald-600 border-emerald-200" },
+  opgeslagen: { label: "Opgeslagen", className: "bg-emerald-50 text-emerald-600 border-emerald-200" },
+  fout: { label: "Fout", className: "bg-red-50 text-red-600 border-red-200" },
+};
+
+async function priceshapeFetch(path: string, init?: RequestInit) {
+  const res = await fetch(`${BASE}${path}`, {
+    ...init,
+    headers: { ...(init?.headers || {}), Authorization: `Bearer ${TOKEN()}` },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let detail = text;
+    try {
+      const parsed = JSON.parse(text);
+      detail = typeof parsed?.detail === "string" ? parsed.detail : (parsed?.detail?.message || JSON.stringify(parsed?.detail) || text);
+    } catch {}
+    throw new Error(detail.length > 500 ? detail.slice(0, 500) + "…" : detail);
+  }
+  return res.json();
+}
+
+function PriceShapeWizardCard() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const [connection, setConnection] = useState<PriceShapeConnection | null>(null);
+  const [connectionLoading, setConnectionLoading] = useState(true);
+  const [jobs, setJobs] = useState<PriceShapeJobRow[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(true);
+
+  const [bestand, setBestand] = useState<File | null>(null);
+  const [validating, setValidating] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [rapport, setRapport] = useState<PriceShapeValidation | null>(null);
+  const [resultaat, setResultaat] = useState<PriceShapeImportResult | null>(null);
+  const [mode, setMode] = useState<"aanvullen" | "updaten" | "vervangen">("updaten");
+  const [confirmPhrase, setConfirmPhrase] = useState("");
+
+  const laadConnection = async () => {
+    setConnectionLoading(true);
+    try {
+      setConnection(await priceshapeFetch("/api/uploads/priceshape/connection"));
+    } catch (e: any) {
+      toast({ title: "Verbindingsstatus laden mislukt", description: e.message, variant: "destructive" });
+    } finally {
+      setConnectionLoading(false);
+    }
+  };
+
+  const laadJobs = async () => {
+    setJobsLoading(true);
+    try {
+      setJobs(await priceshapeFetch("/api/uploads/priceshape/jobs"));
+    } catch (e: any) {
+      toast({ title: "Importlog laden mislukt", description: e.message, variant: "destructive" });
+    } finally {
+      setJobsLoading(false);
+    }
+  };
+
+  useEffect(() => { laadConnection(); laadJobs(); }, []);
+
+  const handleBestand = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (!f.name.toLowerCase().match(/\.(csv|xlsx|xls)$/)) {
+      toast({ title: "Verkeerd bestandstype", description: "Alleen CSV-, XLSX- of XLS-bestanden worden ondersteund.", variant: "destructive" });
+      return;
+    }
+    setBestand(f);
+    setRapport(null);
+    setResultaat(null);
+    setMode("updaten");
+    setConfirmPhrase("");
+    if (e.target) e.target.value = "";
+
+    setValidating(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", f, f.name);
+      const data = await priceshapeFetch("/api/uploads/priceshape/validate", { method: "POST", body: fd });
+      setRapport(data);
+      laadJobs();
+    } catch (err: any) {
+      toast({ title: "Validatiefout", description: err.message, variant: "destructive" });
+      setBestand(null);
+    } finally {
+      setValidating(false);
+    }
+  };
+
+  const handleImporteer = async () => {
+    if (!bestand) return;
+    if (mode === "vervangen" && confirmPhrase !== PRICESHAPE_REPLACE_PHRASE) {
+      toast({ title: "Bevestiging vereist", description: `Typ exact: '${PRICESHAPE_REPLACE_PHRASE}'`, variant: "destructive" });
+      return;
+    }
+    setImporting(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", bestand, bestand.name);
+      fd.append("mode", mode);
+      if (mode === "vervangen") fd.append("confirm_phrase", confirmPhrase);
+      const data = await priceshapeFetch("/api/uploads/priceshape/import", { method: "POST", body: fd });
+      setResultaat(data);
+      toast({ title: "Import voltooid", description: data.message });
+      laadJobs();
+      queryClient.invalidateQueries({ queryKey: ["/api/uploads"] });
+    } catch (err: any) {
+      toast({ title: "Import mislukt", description: err.message, variant: "destructive" });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const reset = () => {
+    setBestand(null);
+    setRapport(null);
+    setResultaat(null);
+    setMode("updaten");
+    setConfirmPhrase("");
+  };
+
+  const previewKolommen = rapport?.preview?.length ? Object.keys(rapport.preview[0]) : [];
+
+  return (
+    <Card className={`col-span-full ${rapport ? (rapport.kan_importeren ? "border-emerald-300" : "border-red-300") : ""}`}>
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Database className="h-5 w-5 text-primary" />
+              PriceShape
+              <Badge className="bg-primary/10 text-primary border-primary/20 text-xs">Concurrentiedata</Badge>
+              {connectionLoading ? (
+                <Badge variant="outline" className="text-xs">Verbinding controleren…</Badge>
+              ) : connection?.reachable ? (
+                <Badge className="bg-emerald-50 text-emerald-600 border-emerald-200 text-xs flex items-center gap-1">
+                  <Wifi className="w-3 h-3" />Verbonden
+                </Badge>
+              ) : connection?.configured ? (
+                <Badge className="bg-amber-50 text-amber-600 border-amber-200 text-xs flex items-center gap-1">
+                  <WifiOff className="w-3 h-3" />Niet bereikbaar
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-xs flex items-center gap-1 text-muted-foreground">
+                  <WifiOff className="w-3 h-3" />Niet geconfigureerd
+                </Badge>
+              )}
+            </CardTitle>
+            <CardDescription className="mt-1 text-sm">
+              Importeer concurrentieprijzen van PriceShape als CSV, XLSX of XLS. Rijen matchen op
+              SKU, EAN of OEM/MPN. Kolommen: sku/ean/oem, competitor_name, competitor_price, timestamp.
+            </CardDescription>
+          </div>
+          <Button variant="ghost" size="sm" className="h-7 text-xs shrink-0" onClick={() => { laadConnection(); laadJobs(); }}>
+            <RefreshCw className="w-3 h-3 mr-1" />Vernieuwen
+          </Button>
+        </div>
+        {connection && !connectionLoading && (
+          <p className="text-xs text-muted-foreground">{connection.message}</p>
+        )}
+      </CardHeader>
+
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap gap-1">
+          {["sku / ean / oem", "competitor_name", "competitor_price", "timestamp"].map(v => (
+            <Badge key={v} className="text-xs font-mono bg-primary/10 text-primary border-primary/20">{v}</Badge>
+          ))}
+          {["import_source"].map(v => (
+            <Badge key={v} variant="outline" className="text-xs font-mono">{v}</Badge>
+          ))}
+        </div>
+
+        {validating && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="w-4 h-4 animate-spin" />Bestand wordt gevalideerd…
+          </div>
+        )}
+
+        {rapport && (
+          <div className="rounded-md border p-4 space-y-3 bg-muted/30">
+            <div className="text-sm font-medium">Validatierapport: {rapport.bestandsnaam}</div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+              <div><div className="text-lg font-bold">{rapport.samenvatting.rijen_totaal}</div><div className="text-xs text-muted-foreground">Rijen totaal</div></div>
+              <div><div className="text-lg font-bold text-emerald-600">{rapport.samenvatting.rijen_geldig}</div><div className="text-xs text-muted-foreground">Geldig</div></div>
+              <div><div className="text-lg font-bold text-red-500">{rapport.samenvatting.rijen_ongeldig}</div><div className="text-xs text-muted-foreground">Ongeldig</div></div>
+              <div><div className="text-lg font-bold">{rapport.samenvatting.unieke_concurrenten}</div><div className="text-xs text-muted-foreground">Concurrenten</div></div>
+              <div><div className="text-lg font-bold text-amber-500">{rapport.samenvatting.skus_niet_gevonden}</div><div className="text-xs text-muted-foreground">SKU's niet gevonden</div></div>
+            </div>
+
+            {rapport.skus_niet_gevonden.length > 0 && (
+              <div className="text-xs text-amber-600 flex items-start gap-1">
+                <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
+                Niet gevonden: {rapport.skus_niet_gevonden.slice(0, 5).join(", ")}
+                {rapport.skus_niet_gevonden.length > 5 ? ` +${rapport.skus_niet_gevonden.length - 5} meer` : ""}
+              </div>
+            )}
+
+            {Object.keys(rapport.errors_by_type).length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(rapport.errors_by_type).map(([type, count]) => (
+                  <Badge key={type} variant="outline" className="text-xs font-mono">{type}: {count}</Badge>
+                ))}
+              </div>
+            )}
+
+            {rapport.warnings.length > 0 && (
+              <div className="space-y-1">
+                {rapport.warnings.slice(0, 5).map((w, i) => (
+                  <div key={i} className="text-xs text-amber-600 flex items-start gap-1">
+                    <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />{w}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {rapport.kan_importeren ? (
+              <div className="text-xs text-emerald-600 flex items-center gap-1 font-medium">
+                <CheckCircle2 className="w-4 h-4" /> Bestand is klaar voor import
+              </div>
+            ) : (
+              <div className="text-xs text-red-600 flex items-center gap-1 font-medium">
+                <XCircle className="w-4 h-4" /> Los eerst de foutmeldingen op voordat je importeert
+              </div>
+            )}
+          </div>
+        )}
+
+        {previewKolommen.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Voorbeeld — eerste {rapport!.preview.length} rijen</div>
+            <div className="border rounded-md overflow-x-auto max-h-56">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {previewKolommen.map(k => <TableHead key={k} className="whitespace-nowrap text-xs font-mono">{k}</TableHead>)}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rapport!.preview.map((row, i) => (
+                    <TableRow key={i}>
+                      {previewKolommen.map(k => (
+                        <TableCell key={k} className="whitespace-nowrap text-xs">{row[k] || "—"}</TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        )}
+
+        {rapport?.kan_importeren && !resultaat && (
+          <div className="space-y-3 border-t pt-4">
+            <Label className="text-sm font-medium">Importmodus</Label>
+            <RadioGroup value={mode} onValueChange={(v) => setMode(v as any)}>
+              {(["aanvullen", "updaten", "vervangen"] as const).map(m => (
+                <div key={m} className="flex items-start gap-2">
+                  <RadioGroupItem value={m} id={`ps-${m}`} className="mt-0.5" />
+                  <Label htmlFor={`ps-${m}`} className="text-sm font-normal cursor-pointer">{IMPORT_MODE_LABELS[m]}</Label>
+                </div>
+              ))}
+            </RadioGroup>
+
+            {mode === "vervangen" && (
+              <div className="rounded-md border border-amber-300 bg-amber-50/50 p-3 space-y-2">
+                <div className="text-xs text-amber-700 flex items-start gap-1 font-medium">
+                  <ShieldAlert className="w-4 h-4 mt-0.5 shrink-0" />
+                  Deze actie verwijdert alle bestaande PriceShape-concurrentieprijzen die niet in dit bestand voorkomen.
+                  Typ ter bevestiging exact: <code className="font-mono">{PRICESHAPE_REPLACE_PHRASE}</code>
+                </div>
+                <Input
+                  value={confirmPhrase}
+                  onChange={e => setConfirmPhrase(e.target.value)}
+                  placeholder={PRICESHAPE_REPLACE_PHRASE}
+                  className="font-mono text-sm"
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {resultaat && (
+          <div className="rounded-md border p-4 space-y-2 bg-emerald-50/50 border-emerald-200">
+            <div className="text-sm font-medium text-emerald-700 flex items-center gap-2">
+              <CheckCircle2 className="w-5 h-5" />{resultaat.message}
+            </div>
+            <div className="grid grid-cols-4 gap-4 text-sm">
+              <div><div className="text-xl font-bold text-emerald-600">{resultaat.created}</div><div className="text-xs text-muted-foreground">Nieuw</div></div>
+              <div><div className="text-xl font-bold text-emerald-600">{resultaat.updated}</div><div className="text-xs text-muted-foreground">Bijgewerkt</div></div>
+              <div><div className="text-xl font-bold text-muted-foreground">{resultaat.skipped}</div><div className="text-xs text-muted-foreground">Overgeslagen</div></div>
+              <div><div className="text-xl font-bold text-red-500">{resultaat.removed}</div><div className="text-xs text-muted-foreground">Verwijderd</div></div>
+            </div>
+          </div>
+        )}
+      </CardContent>
+
+      <CardFooter className="flex gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-[240px]">
+          <Input
+            type="file"
+            accept=".csv,.xlsx,.xls"
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            onChange={handleBestand}
+            disabled={validating || importing}
+          />
+          <Button variant="outline" className="w-full text-sm" size="sm" disabled={validating || importing}>
+            {validating
+              ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Valideren…</>
+              : <><Upload className="mr-2 h-4 w-4" />{bestand ? bestand.name : "CSV, XLSX of XLS kiezen"}</>
+            }
+          </Button>
+        </div>
+
+        {rapport?.kan_importeren && !resultaat && (
+          <Button
+            size="sm"
+            onClick={handleImporteer}
+            disabled={importing || (mode === "vervangen" && confirmPhrase !== PRICESHAPE_REPLACE_PHRASE)}
+            className="ml-auto"
+          >
+            {importing
+              ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Importeren…</>
+              : <><CheckCircle2 className="mr-2 h-4 w-4" />Import uitvoeren</>
+            }
+          </Button>
+        )}
+
+        {resultaat && (
+          <Button variant="outline" size="sm" onClick={reset} className="ml-auto">
+            Nieuwe import
+          </Button>
+        )}
+      </CardFooter>
+
+      {jobs.length > 0 && (
+        <CardContent className="pt-0">
+          <div className="border-t pt-4">
+            <div className="text-sm font-medium flex items-center gap-2 mb-2">
+              <History className="w-4 h-4" />PriceShape-importlog
+            </div>
+            <div className="border rounded-md overflow-x-auto max-h-64">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Bestand</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Modus</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Verwerkt</TableHead>
+                    <TableHead className="text-right">Mislukt</TableHead>
+                    <TableHead>Door</TableHead>
+                    <TableHead className="text-right">Datum</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {jobsLoading ? (
+                    <TableRow><TableCell colSpan={8} className="text-center text-muted-foreground text-xs py-4">Laden…</TableCell></TableRow>
+                  ) : jobs.slice(0, 10).map(job => {
+                    const badge = PS_STATUS_BADGE[job.status] || { label: job.status, className: "" };
+                    return (
+                      <TableRow key={job.id}>
+                        <TableCell className="text-xs font-medium truncate max-w-[160px]">{job.filename}</TableCell>
+                        <TableCell className="text-xs uppercase text-muted-foreground">{job.file_type || "—"}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{job.import_mode || "—"}</TableCell>
+                        <TableCell><Badge variant="outline" className={`text-xs ${badge.className}`}>{badge.label}</Badge></TableCell>
+                        <TableCell className="text-right text-xs tabular-nums">{job.rows_processed}</TableCell>
+                        <TableCell className="text-right text-xs tabular-nums">
+                          <span className={job.rows_failed > 0 ? "text-red-500" : ""}>{job.rows_failed}</span>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{job.uploaded_by}</TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground tabular-nums">
+                          {new Date(job.created_at).toLocaleString("nl-NL")}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        </CardContent>
+      )}
     </Card>
   );
 }
@@ -807,6 +1320,12 @@ export default function Gegevensintegratie() {
       <div>
         <h2 className="text-lg font-semibold mb-3">Primaire databron</h2>
         <DrsWizardCard />
+      </div>
+
+      {/* PriceShape connector — full width */}
+      <div>
+        <h2 className="text-lg font-semibold mb-3">Concurrentiedata (PriceShape)</h2>
+        <PriceShapeWizardCard />
       </div>
 
       {/* Secondary uploads */}
