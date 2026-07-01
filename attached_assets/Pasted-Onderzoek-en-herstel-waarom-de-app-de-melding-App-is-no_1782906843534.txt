@@ -1,0 +1,130 @@
+Onderzoek en herstel waarom de app de melding “App is not running” geeft.
+
+Doel:
+De applicatie moet weer starten zonder foutmelding. Analyseer eerst de oorzaak en fix daarna gericht.
+
+Controleer stap voor stap:
+
+1. Startproces
+- Controleer package.json
+- Controleer start/dev scripts
+- Controleer of frontend en backend correct starten
+- Controleer of de juiste poort wordt gebruikt
+- Controleer Replit run command
+- Controleer .replit configuratie
+
+2. Backend
+- Start FastAPI/backend handmatig
+- Controleer terminal errors
+- Controleer ontbrekende imports
+- Controleer syntax errors
+- Controleer database connection errors
+- Controleer migrations
+- Controleer environment variables
+
+3. Frontend
+- Start React/Vite frontend handmatig
+- Controleer npm install / pnpm install
+- Controleer ontbrekende packages
+- Controleer build errors
+- Controleer API base URL
+- Controleer proxy config
+
+4. Laatste wijzigingen
+Controleer specifiek wijzigingen aan:
+- Data Integration Engine
+- PriceShape connector
+- DRS connector
+- XLS/XLSX import
+- Competition Intelligence Engine
+- scraping modules
+- database models
+- API routes
+
+Zoek naar:
+- dubbele imports
+- ontbrekende dependencies
+- verkeerd benoemde bestanden
+- kapotte route-registratie
+- verkeerde databasevelden
+- circular imports
+
+5. Dependencies
+Controleer of deze packages correct geïnstalleerd zijn:
+- fastapi
+- uvicorn
+- sqlalchemy
+- pandas
+- openpyxl
+- xlrd
+- python-multipart
+- pydantic
+- requests
+- beautifulsoup4
+- playwright indien gebruikt
+
+Installeer ontbrekende dependencies.
+
+6. Database
+Controleer:
+- bestaat database?
+- zijn tabellen aanwezig?
+- draaien migrations?
+- zijn nieuwe models correct geregistreerd?
+- zijn kolomnamen consistent?
+- blokkeert een migration het starten?
+
+Als migrations stuk zijn:
+- herstel migration
+- maak veilige nieuwe migration
+- verwijder geen bestaande data
+
+7. Foutdiagnosepagina
+Maak of herstel een endpoint:
+
+GET /api/health
+
+Moet teruggeven:
+- backend_status
+- database_status
+- frontend_status
+- environment
+- app_version
+- last_start_error indien beschikbaar
+
+8. Logging
+Voeg duidelijke startup logging toe:
+- backend gestart
+- database verbonden
+- routes geladen
+- frontend beschikbaar
+- import modules geladen
+- errors met stacktrace
+
+9. Fixstrategie
+Werk niet blind.
+Geef eerst overzicht:
+
+A. Wat is de exacte fout?
+B. In welk bestand ontstaat de fout?
+C. Welke regel veroorzaakt de fout?
+D. Welke dependency of configuratie ontbreekt?
+E. Welke fix is toegepast?
+
+10. Acceptatiecriteria
+Na herstel moet:
+- Replit geen “App is not running” meer tonen
+- backend starten
+- frontend starten
+- /api/health werken
+- hoofdscherm laden
+- database verbonden zijn
+- bestaande data behouden blijven
+- geen demo-data teruggezet worden
+- CSV/XLSX import nog werken
+- DRS/PriceShape/Data Integration modules niet crashen bij ontbreken van credentials
+
+Belangrijk:
+Verwijder geen bestaande data.
+Reset de database niet zonder expliciete toestemming.
+Als een module nog niet volledig werkt, zet deze tijdelijk op disabled maar laat de app wel starten.
