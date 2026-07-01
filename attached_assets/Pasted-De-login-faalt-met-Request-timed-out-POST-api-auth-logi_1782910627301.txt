@@ -1,0 +1,87 @@
+De login faalt met:
+
+Request timed out: POST /api/auth/login did not respond within 15000ms
+
+Onderzoek waarom /api/auth/login blijft hangen en herstel dit gericht.
+
+Controleer specifiek:
+
+1. Backend login endpoint
+- Wordt /api/auth/login geraakt?
+- Komt de request binnen?
+- Blijft de functie hangen vóór database query, tijdens database query, password check of JWT generatie?
+- Voeg logging toe per stap:
+  - login request received
+  - database session opened
+  - user query started
+  - user query completed
+  - password check started
+  - password check completed
+  - token generation started
+  - token generation completed
+  - response returned
+
+2. Database timeout
+Controleer of de databaseverbinding hangt.
+Test:
+- SELECT 1
+- users tabel bestaat
+- admin user bestaat
+- query op email werkt
+
+Als database niet bereikbaar is:
+- toon duidelijke fout
+- laat endpoint binnen 2 seconden falen
+- geen infinite wait
+
+3. Password hashing
+Controleer of bcrypt/passlib hangt of crasht.
+Als password_hash ongeldig is:
+- geef 401
+- log technische fout backend-side
+- geen timeout
+
+4. JWT generatie
+Controleer of JWT_SECRET bestaat.
+Als JWT_SECRET ontbreekt:
+- gebruik development fallback
+- log waarschuwing
+- geen crash of timeout
+
+5. Voeg harde backend timeout toe
+/api/auth/login mag nooit langer dan 5 seconden duren.
+
+Bij fout:
+- return 500 met duidelijke error_code
+- frontend toont foutmelding
+- geen infinite loading
+
+6. Maak debug endpoint
+
+GET /api/auth/debug-login
+
+Dit endpoint test zonder wachtwoord:
+- backend bereikbaar
+- database bereikbaar
+- users tabel bestaat
+- admin user bestaat
+- password hashing beschikbaar
+- JWT_SECRET beschikbaar
+
+7. Frontend
+Zorg dat login altijd loading=false zet in finally.
+Bij timeout:
+- toon foutmelding
+- gebruiker kan opnieuw proberen
+- app blijft bruikbaar
+
+8. Acceptatiecriteria
+Na fix:
+- /api/auth/debug-login werkt
+- /api/health werkt
+- verkeerde login geeft 401 binnen 3 sec
+- correcte login geeft token binnen 3 sec
+- geen timeout meer
+- dashboard opent na login
+- database wordt niet gereset
+- bestaande data blijft behouden
