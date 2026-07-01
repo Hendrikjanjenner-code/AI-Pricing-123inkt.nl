@@ -282,3 +282,48 @@ def fetch_price_history(
         len(rows), len(sku_ids), lookback_days,
     )
     return rows
+
+
+def push_price_updates(records: list[dict]) -> dict:
+    """
+    Stuur goedgekeurde prijsadviezen naar DRS via een API-push.
+
+    Args:
+        records: Lijst van prijsupdate-dicts, elk met minimaal:
+                 {sku_id, recommended_price, min_price, max_price, reason_code}
+
+    Returns:
+        {
+          'accepted_count': int,   — aantal door DRS bevestigde records
+          'response':       Any,   — ruwe DRS-response (indien JSON)
+        }
+
+    Raises:
+        ConnectorError — bij ontbrekende configuratie, netwerkfout, of een
+        niet-2xx antwoord van DRS. Geen enkele record wordt als verwerkt
+        beschouwd wanneer deze functie een ConnectorError opgooit.
+    """
+    if not records:
+        raise ConnectorError("push_price_updates vereist minimaal één record.")
+
+    creds = _get_credentials()
+    payload = {"updates": records}
+
+    try:
+        with _make_client(creds) as client:
+            resp = client.post("/prices/update", json=payload)
+            resp.raise_for_status()
+            try:
+                data = resp.json()
+            except json.JSONDecodeError:
+                data = {}
+    except httpx.HTTPStatusError as exc:
+        raise ConnectorError(
+            f"DRS prijs-push mislukt: HTTP {exc.response.status_code} — {exc.response.text[:200]}"
+        ) from exc
+    except httpx.RequestError as exc:
+        raise ConnectorError(f"DRS niet bereikbaar bij prijs-push: {exc}") from exc
+
+    accepted_count = data.get("accepted_count", len(records)) if isinstance(data, dict) else len(records)
+    logger.info("DRS: %d prijsupdates gepusht (bevestigd: %d)", len(records), accepted_count)
+    return {"accepted_count": accepted_count, "response": data}

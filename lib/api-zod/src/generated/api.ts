@@ -989,6 +989,43 @@ export const ExportRecommendationsResponse = zod.object({
 });
 
 /**
+ * @summary Push approved recommendations directly to DRS via API
+ */
+export const PushRecommendationsToDrsQueryParams = zod.object({
+  date: zod.coerce.string().nullish(),
+});
+
+export const PushRecommendationsToDrsResponse = zod.object({
+  export_id: zod.number(),
+  pushed_count: zod.number(),
+  accepted_count: zod.number().nullish(),
+  status: zod.string(),
+});
+
+/**
+ * @summary List the export history (exportlog)
+ */
+export const GetExportHistoryQueryParams = zod.object({
+  limit: zod.coerce.number().optional(),
+});
+
+export const GetExportHistoryResponse = zod.object({
+  items: zod.array(
+    zod.object({
+      id: zod.number(),
+      export_type: zod.string(),
+      record_count: zod.number(),
+      recommendation_ids: zod.array(zod.number()),
+      performed_by: zod.string().nullish(),
+      timestamp: zod.string().nullish(),
+      status: zod.string(),
+      error_details: zod.string().nullish(),
+    }),
+  ),
+  total: zod.number(),
+});
+
+/**
  * @summary List all users
  */
 export const ListUsersResponseItem = zod.object({

@@ -27,10 +27,13 @@ import type {
   CreateUserRequest,
   DashboardSummary,
   DataQualityReport,
+  DrsPushResult,
   ErrorResponse,
+  ExportHistoryResponse,
   ExportRecommendationsParams,
   ExportResult,
   FileUploadRequest,
+  GetExportHistoryParams,
   HealthStatus,
   ImportJob,
   ListProductsParams,
@@ -43,6 +46,7 @@ import type {
   PriceChangeBucket,
   Product,
   ProductListResponse,
+  PushRecommendationsToDrsParams,
   Recommendation,
   RecommendationDetail,
   RecommendationListResponse,
@@ -3154,6 +3158,201 @@ export function useExportRecommendations<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getExportRecommendationsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Push approved recommendations directly to DRS via API
+ */
+export const getPushRecommendationsToDrsUrl = (
+  params?: PushRecommendationsToDrsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/exports/recommendations/push-drs?${stringifiedParams}`
+    : `/api/exports/recommendations/push-drs`;
+};
+
+export const pushRecommendationsToDrs = async (
+  params?: PushRecommendationsToDrsParams,
+  options?: RequestInit,
+): Promise<DrsPushResult> => {
+  return customFetch<DrsPushResult>(getPushRecommendationsToDrsUrl(params), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getPushRecommendationsToDrsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof pushRecommendationsToDrs>>,
+    TError,
+    { params?: PushRecommendationsToDrsParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof pushRecommendationsToDrs>>,
+  TError,
+  { params?: PushRecommendationsToDrsParams },
+  TContext
+> => {
+  const mutationKey = ["pushRecommendationsToDrs"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof pushRecommendationsToDrs>>,
+    { params?: PushRecommendationsToDrsParams }
+  > = (props) => {
+    const { params } = props ?? {};
+
+    return pushRecommendationsToDrs(params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PushRecommendationsToDrsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof pushRecommendationsToDrs>>
+>;
+
+export type PushRecommendationsToDrsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Push approved recommendations directly to DRS via API
+ */
+export const usePushRecommendationsToDrs = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof pushRecommendationsToDrs>>,
+    TError,
+    { params?: PushRecommendationsToDrsParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof pushRecommendationsToDrs>>,
+  TError,
+  { params?: PushRecommendationsToDrsParams },
+  TContext
+> => {
+  return useMutation(getPushRecommendationsToDrsMutationOptions(options));
+};
+
+/**
+ * @summary List the export history (exportlog)
+ */
+export const getGetExportHistoryUrl = (params?: GetExportHistoryParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/exports/history?${stringifiedParams}`
+    : `/api/exports/history`;
+};
+
+export const getExportHistory = async (
+  params?: GetExportHistoryParams,
+  options?: RequestInit,
+): Promise<ExportHistoryResponse> => {
+  return customFetch<ExportHistoryResponse>(getGetExportHistoryUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetExportHistoryQueryKey = (
+  params?: GetExportHistoryParams,
+) => {
+  return [`/api/exports/history`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetExportHistoryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getExportHistory>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetExportHistoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getExportHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetExportHistoryQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getExportHistory>>
+  > = ({ signal }) => getExportHistory(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getExportHistory>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetExportHistoryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getExportHistory>>
+>;
+export type GetExportHistoryQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List the export history (exportlog)
+ */
+
+export function useGetExportHistory<
+  TData = Awaited<ReturnType<typeof getExportHistory>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetExportHistoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getExportHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetExportHistoryQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

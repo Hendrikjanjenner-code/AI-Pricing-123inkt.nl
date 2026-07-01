@@ -183,11 +183,31 @@ class FactPricingRecommendationDaily(Base):
     approved_by = Column(String(100))
     approved_at = Column(DateTime)
     exported = Column(Boolean, default=False)
+    # Verwerkingsstatus na export: 'niet_verwerkt' (nog niet geëxporteerd) of
+    # 'verwerkt' (succesvol geëxporteerd naar DRS, via API-push of bestand).
+    # Losstaand van approval_status, zodat concept -> review -> goedgekeurd ->
+    # export -> verwerkt volledig zichtbaar blijft.
+    processing_status = Column(String(50), default="niet_verwerkt")
+    processed_at = Column(DateTime)
     model_version = Column(String(50))
     override_price = Column(Numeric(10, 4))
     override_reason = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ExportLog(Base):
+    """Volledige exportgeschiedenis: elke API-push of bestand-download naar DRS."""
+    __tablename__ = "export_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    export_type = Column(String(20), nullable=False)  # api_push, csv, xlsx, xls
+    record_count = Column(Integer, default=0)
+    recommendation_ids = Column(JSON)  # lijst van bron-recommendation-IDs
+    performed_by = Column(String(100))
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    status = Column(String(20), default="success")  # success, failed
+    error_details = Column(Text)
 
 
 class ModelRun(Base):

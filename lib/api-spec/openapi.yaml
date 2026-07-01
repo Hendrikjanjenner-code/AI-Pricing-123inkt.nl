@@ -759,6 +759,42 @@ paths:
               schema:
                 $ref: "#/components/schemas/ExportResult"
 
+  /exports/recommendations/push-drs:
+    post:
+      operationId: pushRecommendationsToDrs
+      tags: [exports]
+      summary: Push approved recommendations directly to DRS via API
+      parameters:
+        - name: date
+          in: query
+          schema:
+            type: ["string", "null"]
+      responses:
+        "200":
+          description: API-push result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DrsPushResult"
+
+  /exports/history:
+    get:
+      operationId: getExportHistory
+      tags: [exports]
+      summary: List the export history (exportlog)
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Export history list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportHistoryResponse"
+
   /users:
     get:
       operationId: listUsers
@@ -1512,3 +1548,50 @@ components:
         filename:
           type: string
       required: [exported_count, date, download_url, filename]
+
+    DrsPushResult:
+      type: object
+      properties:
+        export_id:
+          type: integer
+        pushed_count:
+          type: integer
+        accepted_count:
+          type: ["integer", "null"]
+        status:
+          type: string
+      required: [export_id, pushed_count, status]
+
+    ExportHistoryEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+        export_type:
+          type: string
+        record_count:
+          type: integer
+        recommendation_ids:
+          type: array
+          items:
+            type: integer
+        performed_by:
+          type: ["string", "null"]
+        timestamp:
+          type: ["string", "null"]
+        status:
+          type: string
+        error_details:
+          type: ["string", "null"]
+      required: [id, export_type, record_count, recommendation_ids, status]
+
+    ExportHistoryResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExportHistoryEntry"
+        total:
+          type: integer
+      required: [items, total]

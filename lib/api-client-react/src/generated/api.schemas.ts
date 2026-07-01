@@ -530,6 +530,33 @@ export interface ExportResult {
   filename: string;
 }
 
+export interface DrsPushResult {
+  export_id: number;
+  pushed_count: number;
+  /** @nullable */
+  accepted_count?: number | null;
+  status: string;
+}
+
+export interface ExportHistoryEntry {
+  id: number;
+  export_type: string;
+  record_count: number;
+  recommendation_ids: number[];
+  /** @nullable */
+  performed_by?: string | null;
+  /** @nullable */
+  timestamp?: string | null;
+  status: string;
+  /** @nullable */
+  error_details?: string | null;
+}
+
+export interface ExportHistoryResponse {
+  items: ExportHistoryEntry[];
+  total: number;
+}
+
 export type ListProductsParams = {
   /**
    * @nullable
@@ -605,4 +632,15 @@ export type ExportRecommendationsParams = {
    * @nullable
    */
   date?: string | null;
+};
+
+export type PushRecommendationsToDrsParams = {
+  /**
+   * @nullable
+   */
+  date?: string | null;
+};
+
+export type GetExportHistoryParams = {
+  limit?: number;
 };

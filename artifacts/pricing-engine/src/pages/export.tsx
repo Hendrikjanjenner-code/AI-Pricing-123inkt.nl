@@ -1,22 +1,35 @@
 import { useState } from "react";
-import { useExportRecommendations } from "@workspace/api-client-react";
+import {
+  useExportRecommendations,
+  getExportRecommendationsQueryKey,
+  usePushRecommendationsToDrs,
+  useGetExportHistory,
+} from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
-import { Download, ExternalLink, CheckCircle } from "lucide-react";
+import { Download, Send, CheckCircle, AlertTriangle } from "lucide-react";
 
 export default function Prijsexport() {
   const [datum, setDatum] = useState(format(new Date(), "yyyy-MM-dd"));
   const { toast } = useToast();
-  const exportMut = useExportRecommendations();
-  const [resultaat, setResultaat] = useState<{url: string, count: number, filename: string} | null>(null);
+  const exportQuery = useExportRecommendations(
+    { date: datum },
+    { query: { enabled: false, queryKey: getExportRecommendationsQueryKey({ date: datum }) } },
+  );
+  const pushMut = usePushRecommendationsToDrs();
+  const { data: history, refetch: refetchHistory } = useGetExportHistory({ limit: 20 });
+  const [resultaat, setResultaat] = useState<{ url: string; count: number; filename: string } | null>(null);
 
   const handleExport = async () => {
     try {
-      const res = await exportMut.mutateAsync({ params: { date: datum } });
+      const { data: res } = await exportQuery.refetch();
+      if (!res) throw new Error("Geen resultaat");
       setResultaat({ url: res.download_url, count: res.exported_count, filename: res.filename });
       toast({ title: "Export succesvol aangemaakt" });
     } catch {
@@ -24,16 +37,37 @@ export default function Prijsexport() {
     }
   };
 
+  const handlePushDrs = async () => {
+    try {
+      const res = await pushMut.mutateAsync({ params: { date: datum } });
+      toast({ title: "Naar DRS gepusht", description: `${res.pushed_count} adviezen verwerkt.` });
+      refetchHistory();
+    } catch (err: any) {
+      toast({
+        title: "DRS-push mislukt",
+        description: err?.body?.detail || "DRS is niet bereikbaar of gaf een fout terug.",
+        variant: "destructive",
+      });
+      refetchHistory();
+    }
+  };
+
+  const baseUrl = import.meta.env.BASE_URL;
+  const downloadHref = (fmt: "csv" | "xlsx" | "xls") => {
+    const path = fmt === "csv" ? "download" : `download/${fmt}`;
+    return `${baseUrl}api/exports/recommendations/${path}?date=${datum}`;
+  };
+
   return (
-    <div className="space-y-6 max-w-3xl">
+    <div className="space-y-6 max-w-4xl">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Prijsexport</h1>
-        <p className="text-muted-foreground mt-1">Genereer de definitieve prijspayload voor downstream systemen.</p>
+        <p className="text-muted-foreground mt-1">Stuur goedgekeurde prijsadviezen naar DRS: via API-push of als bestand.</p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Payload aanmaken</CardTitle>
+          <CardTitle>Export aanmaken</CardTitle>
           <CardDescription>Exporteert alle 'goedgekeurde' en 'overschreven' adviezen voor een specifieke datum.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -42,30 +76,91 @@ export default function Prijsexport() {
             <Input id="datum" type="date" value={datum} onChange={(e) => setDatum(e.target.value)} />
           </div>
 
-          <Button onClick={handleExport} disabled={exportMut.isPending}>
-            {exportMut.isPending ? "Aanmaken..." : "Export genereren"}
-          </Button>
+          <div className="flex flex-wrap gap-3">
+            <Button onClick={handleExport} disabled={exportQuery.isFetching}>
+              {exportQuery.isFetching ? "Controleren..." : "Export voorbereiden"}
+            </Button>
+            <Button onClick={handlePushDrs} disabled={pushMut.isPending} variant="default" className="bg-blue-600 hover:bg-blue-700">
+              <Send className="w-4 h-4 mr-2" />
+              {pushMut.isPending ? "Pushen naar DRS..." : "Push naar DRS (API)"}
+            </Button>
+          </div>
 
           {resultaat && (
-            <div className="mt-8 p-6 bg-emerald-50 border border-emerald-200 rounded-md">
+            <div className="mt-4 p-6 bg-emerald-50 border border-emerald-200 rounded-md">
               <div className="flex items-center gap-3 text-emerald-800 font-medium mb-2">
-                <CheckCircle className="w-5 h-5" /> Export gereed
+                <CheckCircle className="w-5 h-5" /> {resultaat.count} goedgekeurde adviezen klaar voor export
               </div>
-              <p className="text-emerald-700 text-sm mb-4">
-                {resultaat.count} goedgekeurde prijsadviezen succesvol verwerkt.
-              </p>
-              <div className="flex gap-4">
+              <div className="flex flex-wrap gap-3">
                 <Button className="bg-emerald-600 hover:bg-emerald-700 text-white" asChild>
-                  <a href={resultaat.url} download={resultaat.filename}>
+                  <a href={downloadHref("csv")} download>
                     <Download className="w-4 h-4 mr-2" /> CSV downloaden
                   </a>
                 </Button>
-                <Button variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-100">
-                  <ExternalLink className="w-4 h-4 mr-2" /> Doorsturen naar interne prijsmodule
+                <Button variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-100" asChild>
+                  <a href={downloadHref("xlsx")} download>
+                    <Download className="w-4 h-4 mr-2" /> XLSX downloaden
+                  </a>
+                </Button>
+                <Button variant="outline" className="border-emerald-200 text-emerald-700 hover:bg-emerald-100" asChild>
+                  <a href={downloadHref("xls")} download>
+                    <Download className="w-4 h-4 mr-2" /> XLS downloaden
+                  </a>
                 </Button>
               </div>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Exportgeschiedenis</CardTitle>
+          <CardDescription>Elke API-push en bestand-download naar DRS, met status en foutdetails.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Tijdstip</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Aantal</TableHead>
+                <TableHead>Gebruiker</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Foutdetails</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {history?.items?.length ? (
+                history.items.map((entry) => (
+                  <TableRow key={entry.id}>
+                    <TableCell>{entry.timestamp ? format(new Date(entry.timestamp), "dd-MM-yyyy HH:mm") : "-"}</TableCell>
+                    <TableCell className="uppercase text-xs font-medium">{entry.export_type}</TableCell>
+                    <TableCell>{entry.record_count}</TableCell>
+                    <TableCell>{entry.performed_by || "-"}</TableCell>
+                    <TableCell>
+                      {entry.status === "success" ? (
+                        <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
+                          <CheckCircle className="w-3 h-3 mr-1" /> Geslaagd
+                        </Badge>
+                      ) : (
+                        <Badge variant="destructive">
+                          <AlertTriangle className="w-3 h-3 mr-1" /> Mislukt
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground max-w-xs truncate">{entry.error_details || "-"}</TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
+                    Nog geen exports uitgevoerd.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
     </div>

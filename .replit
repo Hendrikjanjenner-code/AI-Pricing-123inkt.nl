@@ -1,4 +1,4 @@
-modules = ["nodejs-24", "python-3.11", "postgresql-16"]
+modules = ["nodejs-24", "python-3.11", "postgresql-16", "python3"]
 
 [deployment]
 router = "application"
@@ -9,7 +9,6 @@ args = ["pnpm", "store", "prune"]
 env = { "CI" = "true" }
 
 [workflows]
-runButton = "Project"
 
 [agent]
 stack = "PNPM_WORKSPACE"
@@ -21,7 +20,7 @@ timeoutMs = 20000
 
 [nix]
 channel = "stable-25_05"
-packages = ["glibcLocales", "libxcrypt", "xcodebuild", "zlib"]
+packages = ["cargo", "glibcLocales", "libiconv", "libxcrypt", "openssl", "pkg-config", "rustc", "xcodebuild", "zlib"]
 
 [[ports]]
 localPort = 8080
