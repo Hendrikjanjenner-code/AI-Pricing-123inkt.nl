@@ -231,7 +231,7 @@ export default function ConcurrentieIntelligence() {
                     <div className="grid grid-cols-12 items-center px-4 py-2.5 text-sm hover:bg-muted/50 cursor-pointer transition-colors">
                       <div className="col-span-3">
                         <div className="font-medium truncate pr-2">{s.product_name}</div>
-                        <div className="text-xs text-muted-foreground">{s.sku_id}</div>
+                        <div className="text-xs text-muted-foreground">{s.sku_id}{s.ean ? ` · EAN ${s.ean}` : ""}</div>
                       </div>
                       <div className="col-span-2 text-xs text-muted-foreground truncate pr-2">{s.category}</div>
                       <div className="col-span-2 flex justify-center">

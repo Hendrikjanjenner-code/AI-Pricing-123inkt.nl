@@ -158,6 +158,7 @@ export default function ProductMatching() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Eigen SKU</TableHead>
+                      <TableHead>EAN / OEM</TableHead>
                       <TableHead>Concurrent</TableHead>
                       <TableHead>Match type</TableHead>
                       <TableHead>Confidence</TableHead>
@@ -172,6 +173,10 @@ export default function ProductMatching() {
                         <TableCell>
                           <div className="font-medium text-sm">{m.product_naam}</div>
                           <div className="text-xs font-mono text-muted-foreground">{m.own_sku_id}</div>
+                        </TableCell>
+                        <TableCell className="text-xs font-mono text-muted-foreground">
+                          <div>EAN: {m.ean || "—"}</div>
+                          <div>OEM: {m.oem_code || "—"}</div>
                         </TableCell>
                         <TableCell>
                           <div className="text-sm font-medium">{m.concurrent}</div>
@@ -208,7 +213,7 @@ export default function ProductMatching() {
                       </TableRow>
                     ))}
                     {!pending.length && (
-                      <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                      <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                         <Link2 className="w-8 h-8 mx-auto mb-2 opacity-30" />
                         Geen openstaande match-voorstellen
                       </TableCell></TableRow>
@@ -226,6 +231,7 @@ export default function ProductMatching() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Eigen SKU</TableHead>
+                      <TableHead>EAN / OEM</TableHead>
                       <TableHead>Concurrent</TableHead>
                       <TableHead>Match type</TableHead>
                       <TableHead>Confidence</TableHead>
@@ -239,6 +245,10 @@ export default function ProductMatching() {
                         <TableCell>
                           <div className="font-medium text-sm">{m.product_naam}</div>
                           <div className="text-xs font-mono text-muted-foreground">{m.own_sku_id}</div>
+                        </TableCell>
+                        <TableCell className="text-xs font-mono text-muted-foreground">
+                          <div>EAN: {m.ean || "—"}</div>
+                          <div>OEM: {m.oem_code || "—"}</div>
                         </TableCell>
                         <TableCell className="text-sm">{m.concurrent}</TableCell>
                         <TableCell>
@@ -254,7 +264,7 @@ export default function ProductMatching() {
                       </TableRow>
                     ))}
                     {!approved.length && (
-                      <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">Nog geen goedgekeurde matches</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground">Nog geen goedgekeurde matches</TableCell></TableRow>
                     )}
                   </TableBody>
                 </Table>

@@ -21,7 +21,7 @@ from routes import (
     traffic, search_demand,
     cost, procurement, economic, reporting, bcg_transitions,
     category_hierarchy, break_even, ecosystem, explainability,
-    admin, pilot, drs,
+    admin, pilot, drs, paper_copy,
 )
 
 
@@ -123,3 +123,4 @@ app.include_router(explainability.router)
 app.include_router(admin.router)
 app.include_router(pilot.router)
 app.include_router(drs.router)
+app.include_router(paper_copy.router)

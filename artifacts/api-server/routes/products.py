@@ -22,6 +22,8 @@ class ProductOut(BaseModel):
     is_a_brand: bool
     lifecycle_status: Optional[str] = None
     strategy_type: Optional[str] = None
+    ean: Optional[str] = None
+    oem_code: Optional[str] = None
     cost_price: Optional[float] = None
     min_price: Optional[float] = None
     max_price: Optional[float] = None
@@ -129,6 +131,8 @@ def _product_out(p: models.DimProduct) -> dict:
         "is_a_brand": p.is_a_brand,
         "lifecycle_status": p.lifecycle_status,
         "strategy_type": p.strategy_type,
+        "ean": p.ean,
+        "oem_code": p.oem_code,
         "cost_price": float(p.cost_price) if p.cost_price else None,
         "min_price": float(p.min_price) if p.min_price else None,
         "max_price": float(p.max_price) if p.max_price else None,

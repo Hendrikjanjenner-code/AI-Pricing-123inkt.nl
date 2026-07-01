@@ -136,6 +136,10 @@ export interface Product {
   stock_quantity?: number | null;
   /** @nullable */
   data_quality_score?: number | null;
+  /** @nullable */
+  ean?: string | null;
+  /** @nullable */
+  oem_code?: string | null;
 }
 
 export interface ProductListResponse {
@@ -251,6 +255,10 @@ export interface Recommendation {
   exported: boolean;
   /** @nullable */
   model_version?: string | null;
+  /** @nullable */
+  ean?: string | null;
+  /** @nullable */
+  oem_code?: string | null;
 }
 
 export interface RecommendationListResponse {
@@ -503,6 +511,10 @@ export interface CompetitorTimeSeriesPoint {
 export interface SkuHistory {
   sku_id: string;
   product_name: string;
+  /** @nullable */
+  ean?: string | null;
+  /** @nullable */
+  oem_code?: string | null;
   price_history: TimeSeriesPoint[];
   sales_history: TimeSeriesPoint[];
   margin_history: TimeSeriesPoint[];

@@ -89,6 +89,8 @@ def get_sku_history(
     return {
         "sku_id": id,
         "product_name": product.product_name,
+        "ean": product.ean,
+        "oem_code": product.oem_code,
         "price_history": price_history,
         "sales_history": sales_history,
         "margin_history": margin_history,

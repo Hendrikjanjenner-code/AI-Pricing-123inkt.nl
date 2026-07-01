@@ -158,6 +158,8 @@ export default function Prijsadviezen() {
                 />
               </TableHead>
               <TableHead>SKU</TableHead>
+              <TableHead>EAN</TableHead>
+              <TableHead>OEM</TableHead>
               <TableHead>Product</TableHead>
               <TableHead>Strategie</TableHead>
               <TableHead className="text-right">Huidige prijs</TableHead>
@@ -173,14 +175,14 @@ export default function Prijsadviezen() {
             {isLoading ? (
               Array.from({ length: 10 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 11 }).map((__, j) => (
+                  {Array.from({ length: 13 }).map((__, j) => (
                     <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                   ))}
                 </TableRow>
               ))
             ) : data?.items?.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={11} className="h-32 text-center text-muted-foreground">
+                <TableCell colSpan={13} className="h-32 text-center text-muted-foreground">
                   Geen adviezen gevonden.
                 </TableCell>
               </TableRow>
@@ -193,6 +195,8 @@ export default function Prijsadviezen() {
                   />
                 </TableCell>
                 <TableCell className="font-mono text-xs">{rec.sku_id}</TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">{rec.ean || "—"}</TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">{rec.oem_code || "—"}</TableCell>
                 <TableCell className="font-medium max-w-[180px] truncate" title={rec.product_name}>
                   {rec.product_name}
                 </TableCell>

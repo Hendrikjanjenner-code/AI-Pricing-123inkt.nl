@@ -170,6 +170,8 @@ export const ListProductsResponse = zod.object({
       current_price: zod.number().nullish(),
       stock_quantity: zod.number().nullish(),
       data_quality_score: zod.number().nullish(),
+      ean: zod.string().nullish(),
+      oem_code: zod.string().nullish(),
     }),
   ),
   total: zod.number(),
@@ -221,6 +223,8 @@ export const GetProductResponse = zod.object({
   current_price: zod.number().nullish(),
   stock_quantity: zod.number().nullish(),
   data_quality_score: zod.number().nullish(),
+  ean: zod.string().nullish(),
+  oem_code: zod.string().nullish(),
 });
 
 /**
@@ -275,6 +279,8 @@ export const UpdateProductResponse = zod.object({
   current_price: zod.number().nullish(),
   stock_quantity: zod.number().nullish(),
   data_quality_score: zod.number().nullish(),
+  ean: zod.string().nullish(),
+  oem_code: zod.string().nullish(),
 });
 
 /**
@@ -381,6 +387,8 @@ export const ListRecommendationsResponse = zod.object({
       approved_by: zod.string().nullish(),
       exported: zod.boolean(),
       model_version: zod.string().nullish(),
+      ean: zod.string().nullish(),
+      oem_code: zod.string().nullish(),
     }),
   ),
   total: zod.number(),
@@ -435,6 +443,8 @@ export const GetRecommendationResponse = zod.object({
     approved_by: zod.string().nullish(),
     exported: zod.boolean(),
     model_version: zod.string().nullish(),
+    ean: zod.string().nullish(),
+    oem_code: zod.string().nullish(),
   }),
   product: zod.object({
     sku_id: zod.string(),
@@ -473,6 +483,8 @@ export const GetRecommendationResponse = zod.object({
     current_price: zod.number().nullish(),
     stock_quantity: zod.number().nullish(),
     data_quality_score: zod.number().nullish(),
+    ean: zod.string().nullish(),
+    oem_code: zod.string().nullish(),
   }),
   competitor_prices: zod.array(
     zod.object({
@@ -539,6 +551,8 @@ export const ApproveRecommendationResponse = zod.object({
   approved_by: zod.string().nullish(),
   exported: zod.boolean(),
   model_version: zod.string().nullish(),
+  ean: zod.string().nullish(),
+  oem_code: zod.string().nullish(),
 });
 
 /**
@@ -588,6 +602,8 @@ export const RejectRecommendationResponse = zod.object({
   approved_by: zod.string().nullish(),
   exported: zod.boolean(),
   model_version: zod.string().nullish(),
+  ean: zod.string().nullish(),
+  oem_code: zod.string().nullish(),
 });
 
 /**
@@ -638,6 +654,8 @@ export const OverrideRecommendationResponse = zod.object({
   approved_by: zod.string().nullish(),
   exported: zod.boolean(),
   model_version: zod.string().nullish(),
+  ean: zod.string().nullish(),
+  oem_code: zod.string().nullish(),
 });
 
 /**
@@ -880,6 +898,8 @@ export const GetSkuHistoryParams = zod.object({
 export const GetSkuHistoryResponse = zod.object({
   sku_id: zod.string(),
   product_name: zod.string(),
+  ean: zod.string().nullish(),
+  oem_code: zod.string().nullish(),
   price_history: zod.array(
     zod.object({
       date: zod.string(),
@@ -948,6 +968,8 @@ export const GetSkuHistoryResponse = zod.object({
       approved_by: zod.string().nullish(),
       exported: zod.boolean(),
       model_version: zod.string().nullish(),
+      ean: zod.string().nullish(),
+      oem_code: zod.string().nullish(),
     }),
   ),
 });

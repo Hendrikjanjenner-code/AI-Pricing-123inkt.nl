@@ -37,4 +37,8 @@ export interface Product {
   stock_quantity?: number | null;
   /** @nullable */
   data_quality_score?: number | null;
+  /** @nullable */
+  ean?: string | null;
+  /** @nullable */
+  oem_code?: string | null;
 }

@@ -961,6 +961,10 @@ components:
           type: ["integer", "null"]
         data_quality_score:
           type: ["number", "null"]
+        ean:
+          type: ["string", "null"]
+        oem_code:
+          type: ["string", "null"]
       required: [sku_id, product_name, is_private_label, is_a_brand]
 
     ProductListResponse:
@@ -1079,6 +1083,10 @@ components:
         exported:
           type: boolean
         model_version:
+          type: ["string", "null"]
+        ean:
+          type: ["string", "null"]
+        oem_code:
           type: ["string", "null"]
       required: [id, date, sku_id, product_name, exported]
 
@@ -1434,6 +1442,10 @@ components:
           type: string
         product_name:
           type: string
+        ean:
+          type: ["string", "null"]
+        oem_code:
+          type: ["string", "null"]
         price_history:
           type: array
           items:

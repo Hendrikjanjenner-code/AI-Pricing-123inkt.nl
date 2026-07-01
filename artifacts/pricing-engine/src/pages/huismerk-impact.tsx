@@ -104,18 +104,19 @@ export default function HuismerkImpact() {
                 <TableHead className="text-right">ISV</TableHead>
                 <TableHead className="text-right">Schakelkans</TableHead>
                 <TableHead>Actie</TableHead>
+                <TableHead>EAN / OEM</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {ladenOverzicht ? (
                 Array.from({ length: 8 }).map((_, i) => (
                   <TableRow key={i}>
-                    {[1,2,3,4,5].map(j => <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>)}
+                    {[1,2,3,4,5,6].map(j => <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>)}
                   </TableRow>
                 ))
               ) : items.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">Geen paren gevonden.</TableCell>
+                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">Geen paren gevonden.</TableCell>
                 </TableRow>
               ) : items.map((s: any) => (
                 <TableRow key={`${s.a_merk_sku}-${s.huismerk_sku}`}
@@ -143,6 +144,10 @@ export default function HuismerkImpact() {
                     <Badge variant="outline" className={`text-[10px] ${ACTIE_KLEUREN[s.aanbevolen_actie] || ""}`}>
                       {s.actie_label}
                     </Badge>
+                  </TableCell>
+                  <TableCell className="text-xs font-mono text-muted-foreground">
+                    <div>A: {s.a_merk_ean || "—"} / {s.a_merk_oem || "—"}</div>
+                    <div>H: {s.huismerk_ean || "—"} / {s.huismerk_oem || "—"}</div>
                   </TableCell>
                 </TableRow>
               ))}

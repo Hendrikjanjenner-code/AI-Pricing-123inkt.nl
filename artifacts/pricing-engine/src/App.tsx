@@ -83,6 +83,7 @@ import ModelDocumentatie from "@/pages/modeldocumentatie";
 
 // Pilot Paper_Copy
 import PilotPaperCopy from "@/pages/pilot-paper-copy";
+import PaperCopyImport from "@/pages/paper-copy-import";
 import DrsIntegratie from "@/pages/drs-integratie";
 import Ga4Integratie from "@/pages/ga4-integratie";
 import KostenoverzichtPilot from "@/pages/kostenoverzicht-pilot";
@@ -378,6 +379,9 @@ function Router() {
       {/* Pilot Paper_Copy */}
       <Route path="/pilot-paper-copy">
         <ProtectedRoute><PilotPaperCopy /></ProtectedRoute>
+      </Route>
+      <Route path="/paper-copy-import">
+        <ProtectedRoute><PaperCopyImport /></ProtectedRoute>
       </Route>
       <Route path="/drs-integratie">
         <ProtectedRoute><DrsIntegratie /></ProtectedRoute>

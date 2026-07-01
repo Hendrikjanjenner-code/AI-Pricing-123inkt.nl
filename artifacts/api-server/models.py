@@ -60,6 +60,7 @@ class DimProduct(Base):
     # DRS Datareport fields
     product_type = Column(String(50))      # OEM / Compatible / Huismerk
     oem_code = Column(String(100))         # OEM artikelnummer
+    ean = Column(String(50))               # EAN-code (barcode)
     afzet_ytd = Column(Float)             # eenheden YTD huidig jaar
     omzet_ytd = Column(Numeric(14, 4))    # omzet YTD huidig jaar
     marge_ytd = Column(Numeric(14, 4))    # marge YTD huidig jaar
@@ -212,6 +213,8 @@ class ImportJob(Base):
     uploaded_by = Column(String(100))
     created_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime)
+    import_mode = Column(String(50))       # aanvullen / updaten / vervangen
+    warnings_json = Column(JSON)           # lijst met waarschuwingen van deze import
 
 
 class AuditLog(Base):

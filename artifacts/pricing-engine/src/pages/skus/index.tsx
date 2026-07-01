@@ -200,6 +200,8 @@ export default function Producten() {
           <TableHeader>
             <TableRow>
               <TableHead>SKU-ID</TableHead>
+              <TableHead>EAN</TableHead>
+              <TableHead>OEM</TableHead>
               <TableHead>Naam</TableHead>
               <TableHead>Merk</TableHead>
               <TableHead>Categorie</TableHead>
@@ -216,20 +218,22 @@ export default function Producten() {
             {isLoading ? (
               Array.from({ length: 10 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 11 }).map((__, j) => (
+                  {Array.from({ length: 13 }).map((__, j) => (
                     <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                   ))}
                 </TableRow>
               ))
             ) : items.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={11} className="h-32 text-center text-muted-foreground">
+                <TableCell colSpan={13} className="h-32 text-center text-muted-foreground">
                   Geen producten gevonden voor de geselecteerde filters.
                 </TableCell>
               </TableRow>
             ) : items.map((sku) => (
               <TableRow key={sku.sku_id} className="group cursor-pointer hover:bg-muted/50">
                 <TableCell className="font-mono text-xs">{sku.sku_id}</TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">{sku.ean || "—"}</TableCell>
+                <TableCell className="font-mono text-xs text-muted-foreground">{sku.oem_code || "—"}</TableCell>
                 <TableCell className="font-medium max-w-[200px] truncate" title={sku.product_name}>
                   {sku.product_name}
                 </TableCell>

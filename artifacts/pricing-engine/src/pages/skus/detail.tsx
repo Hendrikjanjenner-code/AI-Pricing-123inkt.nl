@@ -37,6 +37,8 @@ export default function ProductDetail() {
             <span>{product.brand}</span>
             <span>•</span>
             <span>{product.category} › {product.subcategory}</span>
+            {product.ean && (<><span>•</span><span>EAN: <span className="font-mono">{product.ean}</span></span></>)}
+            {product.oem_code && (<><span>•</span><span>OEM: <span className="font-mono">{product.oem_code}</span></span></>)}
           </div>
         </div>
         <div className="ml-auto flex items-center gap-2">

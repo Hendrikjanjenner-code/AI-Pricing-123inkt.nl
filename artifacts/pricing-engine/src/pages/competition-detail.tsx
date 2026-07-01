@@ -105,6 +105,8 @@ export default function ConcurrentieDetail() {
             <span>{product.sku_id}</span><span>·</span>
             <span>{product.brand}</span><span>·</span>
             <span>{product.category}</span>
+            {product.ean && (<><span>·</span><span>EAN {product.ean}</span></>)}
+            {product.oem_code && (<><span>·</span><span>OEM {product.oem_code}</span></>)}
             {product.is_a_brand && <Badge variant="outline" className="text-xs">A-merk</Badge>}
             {product.is_private_label && <Badge variant="outline" className="text-xs">Huismerk</Badge>}
           </div>

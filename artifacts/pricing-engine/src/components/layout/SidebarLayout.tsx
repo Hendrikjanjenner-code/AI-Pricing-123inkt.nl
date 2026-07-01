@@ -194,6 +194,7 @@ const navGroepen = [
     label: "Pilot Paper_Copy",
     items: [
       { href: "/pilot-paper-copy",          label: "Pilot Dashboard",          icon: FlaskConical },
+      { href: "/paper-copy-import",         label: "DRS Product Import",        icon: FileText },
       { href: "/scraping",                  label: "Scraping Configuratie",     icon: Globe },
       { href: "/drs-integratie",            label: "DRS Integratie",            icon: Database },
       { href: "/ga4-integratie",            label: "GA4 Integratie",            icon: TrendingUp },

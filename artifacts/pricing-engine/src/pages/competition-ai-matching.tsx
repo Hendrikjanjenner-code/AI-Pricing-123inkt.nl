@@ -162,7 +162,11 @@ export default function CompetitionAiMatching() {
                   <div key={m.id} className="grid grid-cols-12 items-start px-4 py-3 text-sm hover:bg-muted/30 transition-colors">
                     <div className="col-span-3">
                       <div className="font-medium truncate pr-2">{m.product_name}</div>
-                      <div className="text-xs text-muted-foreground">{m.own_sku_id}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {m.own_sku_id}
+                        {m.ean ? ` · EAN ${m.ean}` : ""}
+                        {m.oem_code ? ` · OEM ${m.oem_code}` : ""}
+                      </div>
                     </div>
                     <div className="col-span-2">
                       <div className="text-sm truncate">{m.competitor_name}</div>

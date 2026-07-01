@@ -12,6 +12,10 @@ import type { TimeSeriesPoint } from "./timeSeriesPoint";
 export interface SkuHistory {
   sku_id: string;
   product_name: string;
+  /** @nullable */
+  ean?: string | null;
+  /** @nullable */
+  oem_code?: string | null;
   price_history: TimeSeriesPoint[];
   sales_history: TimeSeriesPoint[];
   margin_history: TimeSeriesPoint[];

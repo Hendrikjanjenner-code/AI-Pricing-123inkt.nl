@@ -44,4 +44,8 @@ export interface Recommendation {
   exported: boolean;
   /** @nullable */
   model_version?: string | null;
+  /** @nullable */
+  ean?: string | null;
+  /** @nullable */
+  oem_code?: string | null;
 }

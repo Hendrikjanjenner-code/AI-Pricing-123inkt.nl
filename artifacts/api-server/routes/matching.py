@@ -38,7 +38,8 @@ def get_match_suggestions(
     matches = q.offset((page - 1) * page_size).limit(page_size).all()
 
     concurrenten = {c.competitor_id: c.competitor_name for c in db.query(DimCompetitor).all()}
-    producten = {p.sku_id: p.product_name for p in db.query(DimProduct).all()}
+    producten_obj = {p.sku_id: p for p in db.query(DimProduct).all()}
+    producten = {sku: p.product_name for sku, p in producten_obj.items()}
 
     return {
         "items": [
@@ -46,6 +47,8 @@ def get_match_suggestions(
                 "match_id": m.match_id,
                 "own_sku_id": m.own_sku_id,
                 "product_naam": producten.get(m.own_sku_id, m.own_sku_id),
+                "ean": producten_obj.get(m.own_sku_id).ean if producten_obj.get(m.own_sku_id) else None,
+                "oem_code": producten_obj.get(m.own_sku_id).oem_code if producten_obj.get(m.own_sku_id) else None,
                 "concurrent": concurrenten.get(m.competitor_id, str(m.competitor_id)),
                 "competitor_sku": m.competitor_sku,
                 "competitor_url": m.competitor_url,
