@@ -1,0 +1,470 @@
+Bouw verder op de AI Pricing Engine.
+
+Richt de AI Pricing Engine in als centrale Data Integration Hub tussen externe databronnen (zoals PriceShape), interne systemen (zoals DRS) en de AI Pricing Engine.
+
+====================================================
+DOEL
+====================================================
+
+De AI Pricing Engine wordt de centrale beslislaag.
+
+Alle externe en interne databronnen worden hier eerst geïmporteerd, gevalideerd, verrijkt en opgeslagen.
+
+Daarna maakt uitsluitend de AI Pricing Engine prijsadviezen.
+
+DRS ontvangt alleen goedgekeurde prijswijzigingen.
+
+====================================================
+DATA BRONNEN
+====================================================
+
+De AI Pricing Engine moet meerdere importmethodes ondersteunen.
+
+Ondersteun:
+
+1.
+API
+
+2.
+CSV
+
+3.
+Excel (.xlsx)
+
+4.
+Excel (.xls)
+
+5.
+Handmatige invoer
+
+Iedere bron moet dezelfde validatie en verwerking gebruiken.
+
+Maak daarom één centrale Import Engine.
+
+====================================================
+IMPORT ENGINE
+====================================================
+
+Maak een module:
+
+Data Integration Engine
+
+Deze verwerkt alle imports.
+
+Ondersteunde bronnen:
+
+- PriceShape API
+- PriceShape CSV
+- PriceShape XLSX
+- PriceShape XLS
+- DRS API
+- DRS CSV
+- DRS XLSX
+- DRS XLS
+- Handmatige upload
+
+De gebruiker kiest alleen:
+
+Importbron
+
+en
+
+Bestandstype.
+
+De verwerking moet daarna identiek zijn.
+
+====================================================
+PRICE SHAPE CONNECTOR
+====================================================
+
+Ondersteun:
+
+API
+
+CSV
+
+XLSX
+
+XLS
+
+Na import:
+
+- valideer data
+- map kolommen
+- herken SKU
+- herken EAN
+- herken OEM
+- herken MPN
+- sla concurrentieprijzen op
+- sla timestamp op
+- sla importbron op
+
+Maak automatisch een importlog.
+
+====================================================
+DRS CONNECTOR
+====================================================
+
+Ondersteun:
+
+API
+
+CSV
+
+XLSX
+
+XLS
+
+Importeer:
+
+- Product Master
+- actuele verkoopprijzen
+- actuele inkoopprijzen
+- voorraad
+- historische afzet
+- historische omzet
+- historische marge
+
+Gebruik Productcode als primaire sleutel.
+
+====================================================
+BESTANDSHERKENNING
+====================================================
+
+Na upload moet de AI automatisch herkennen:
+
+CSV
+
+XLS
+
+XLSX
+
+Toon vervolgens:
+
+- bestandsnaam
+- aantal rijen
+- aantal kolommen
+- herkende kolommen
+- ontbrekende verplichte kolommen
+- dubbele productcodes
+- preview eerste 25 regels
+
+====================================================
+AUTOMATISCHE KOLOMMAPPING
+====================================================
+
+De AI moet kolommen automatisch herkennen.
+
+Bijvoorbeeld:
+
+Artikelnummer
+
+Productcode
+
+SKU
+
+worden automatisch gekoppeld aan:
+
+sku_id
+
+EAN
+
+GTIN
+
+Barcode
+
+worden automatisch gekoppeld aan:
+
+ean
+
+OEM
+
+OEM Code
+
+Original Code
+
+worden gekoppeld aan:
+
+oem_code
+
+De gebruiker mag dit handmatig aanpassen.
+
+====================================================
+IMPORTSTATUS
+====================================================
+
+Iedere import krijgt een status.
+
+Nieuw
+
+Gevalideerd
+
+Geïmporteerd
+
+Bijgewerkt
+
+Fout
+
+Concept
+
+Opgeslagen
+
+====================================================
+IMPORT LOG
+====================================================
+
+Maak tabel:
+
+import_log
+
+Velden:
+
+import_id
+
+bron
+
+bestandstype
+
+bestandsnaam
+
+importdatum
+
+gebruiker
+
+records
+
+geslaagd
+
+mislukt
+
+waarschuwingen
+
+status
+
+====================================================
+VERSIEBEHEER
+====================================================
+
+Nieuwe imports mogen bestaande data nooit automatisch verwijderen.
+
+Geef keuze:
+
+Nieuwe data toevoegen
+
+Bestaande producten bijwerken
+
+Alles vervangen
+
+Standaard:
+
+Bijwerken op Productcode.
+
+====================================================
+AI PRICING ENGINE
+====================================================
+
+Gebruik alle geïmporteerde data.
+
+PriceShape:
+
+Concurrentieprijzen
+
+Concurrentvoorraad
+
+Levertijden
+
+Historische prijzen
+
+DRS:
+
+Afzet
+
+Omzet
+
+Marge
+
+Voorraad
+
+Inkoopprijs
+
+Verkoopprijs
+
+De AI combineert beide bronnen.
+
+====================================================
+PRICING DECISION LAYER
+====================================================
+
+Maak daarna:
+
+Prijsadvies
+
+Confidence
+
+Redencodes
+
+Break-even
+
+OEM vs Huismerk
+
+Prijsgap
+
+Elasticiteit
+
+Concurrentieanalyse
+
+Category Competition
+
+AI Matching
+
+====================================================
+APPROVAL WORKFLOW
+====================================================
+
+Concept
+
+↓
+
+Review
+
+↓
+
+Goedgekeurd
+
+↓
+
+Export naar DRS
+
+↓
+
+Verwerkt
+
+Alleen goedgekeurde prijzen mogen naar DRS.
+
+====================================================
+EXPORT
+====================================================
+
+Ondersteun:
+
+DRS API
+
+DRS CSV
+
+DRS XLSX
+
+DRS XLS
+
+Maak exportlog.
+
+====================================================
+DASHBOARD
+====================================================
+
+Nieuwe pagina:
+
+Data Integratie
+
+Toon:
+
+Laatste PriceShape import
+
+Laatste DRS import
+
+Laatste Excel upload
+
+Laatste CSV upload
+
+Laatste API synchronisatie
+
+Aantal producten
+
+Aantal concurrentprijzen
+
+Aantal bijgewerkte producten
+
+Aantal fouten
+
+Aantal waarschuwingen
+
+Importgeschiedenis
+
+====================================================
+BUSINESSREGELS
+====================================================
+
+1.
+
+PriceShape is uitsluitend databron.
+
+2.
+
+DRS is uitvoeringssysteem.
+
+3.
+
+AI Pricing Engine is beslislaag.
+
+4.
+
+Ondersteun API, CSV, XLSX en XLS volledig.
+
+5.
+
+Alle imports gebruiken dezelfde Data Integration Engine.
+
+6.
+
+Data mag nooit automatisch verwijderd worden.
+
+7.
+
+Bestaande data moet persistent opgeslagen blijven.
+
+8.
+
+Elke import moet reproduceerbaar zijn.
+
+9.
+
+Elke prijswijziging moet volledig auditbaar zijn.
+
+10.
+
+Alle imports moeten automatisch worden gelogd.
+
+====================================================
+ACCEPTATIECRITERIA
+====================================================
+
+Na implementatie moet ik:
+
+✓ PriceShape via API kunnen koppelen
+
+✓ PriceShape CSV kunnen uploaden
+
+✓ PriceShape XLSX kunnen uploaden
+
+✓ PriceShape XLS kunnen uploaden
+
+✓ DRS API kunnen gebruiken
+
+✓ DRS CSV kunnen uploaden
+
+✓ DRS XLSX kunnen uploaden
+
+✓ DRS XLS kunnen uploaden
+
+✓ Data automatisch laten mappen
+
+✓ Data persistent opslaan
+
+✓ Data kunnen bijwerken zonder verlies
+
+✓ AI prijsadviezen laten genereren
+
+✓ Goedkeuren
+
+✓ Exporteren naar DRS
+
+✓ Volledige audittrail bekijken
