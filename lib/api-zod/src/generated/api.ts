@@ -71,6 +71,8 @@ export const GetDashboardSummaryResponse = zod.object({
   last_model_run: zod.string().nullish(),
   model_version: zod.string().nullish(),
   data_quality_score: zod.number(),
+  total_skus: zod.number().optional(),
+  total_competitor_prices: zod.number().optional(),
 });
 
 /**
@@ -735,16 +737,46 @@ export const GetDataQualityResponse = zod.object({
 /**
  * @summary List import jobs
  */
+export const listUploadsQueryLimitDefault = 50;
+
+export const ListUploadsQueryParams = zod.object({
+  source: zod.coerce
+    .string()
+    .optional()
+    .describe("Filter op bron: PriceShape, DRS, Handmatig, Paper_Copy"),
+  status: zod.coerce
+    .string()
+    .optional()
+    .describe("Filter op status uit de importlevenscyclus"),
+  upload_type: zod.coerce.string().optional().describe("Filter op importtype"),
+  limit: zod.coerce.number().default(listUploadsQueryLimitDefault),
+});
+
 export const ListUploadsResponseItem = zod.object({
   id: zod.number(),
   upload_type: zod.string(),
   filename: zod.string(),
-  status: zod.enum(["pending", "processing", "completed", "failed"]),
+  status: zod
+    .string()
+    .describe(
+      "Volledige statuslevenscyclus: nieuw, concept, gevalideerd, geimporteerd, bijgewerkt, opgeslagen, fout. Oudere waarden (pending\/processing\/completed\/failed) komen nog voor in historische rijen.",
+    ),
+  source: zod
+    .string()
+    .nullish()
+    .describe("PriceShape, DRS, Handmatig, of Paper_Copy"),
+  file_type: zod.string().nullish().describe("csv, xlsx of xls"),
+  import_mode: zod
+    .string()
+    .nullish()
+    .describe("aanvullen, updaten of vervangen"),
   rows_processed: zod.number(),
   rows_failed: zod.number(),
   error_message: zod.string().nullish(),
+  warnings: zod.array(zod.string()).optional(),
   uploaded_by: zod.string().nullish(),
   created_at: zod.string(),
+  completed_at: zod.string().nullish(),
 });
 export const ListUploadsResponse = zod.array(ListUploadsResponseItem);
 

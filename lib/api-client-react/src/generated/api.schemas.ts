@@ -344,6 +344,8 @@ export interface DashboardSummary {
   /** @nullable */
   model_version?: string | null;
   data_quality_score: number;
+  total_skus?: number;
+  total_competitor_prices?: number;
 }
 
 export interface CategoryMarginItem {
@@ -441,28 +443,37 @@ export interface DataQualityReport {
   summary: DataQualityReportSummary;
 }
 
-export type ImportJobStatus =
-  (typeof ImportJobStatus)[keyof typeof ImportJobStatus];
-
-export const ImportJobStatus = {
-  pending: "pending",
-  processing: "processing",
-  completed: "completed",
-  failed: "failed",
-} as const;
-
 export interface ImportJob {
   id: number;
   upload_type: string;
   filename: string;
-  status: ImportJobStatus;
+  /** Volledige statuslevenscyclus: nieuw, concept, gevalideerd, geimporteerd, bijgewerkt, opgeslagen, fout. Oudere waarden (pending/processing/completed/failed) komen nog voor in historische rijen. */
+  status: string;
+  /**
+   * PriceShape, DRS, Handmatig, of Paper_Copy
+   * @nullable
+   */
+  source?: string | null;
+  /**
+   * csv, xlsx of xls
+   * @nullable
+   */
+  file_type?: string | null;
+  /**
+   * aanvullen, updaten of vervangen
+   * @nullable
+   */
+  import_mode?: string | null;
   rows_processed: number;
   rows_failed: number;
   /** @nullable */
   error_message?: string | null;
+  warnings?: string[];
   /** @nullable */
   uploaded_by?: string | null;
   created_at: string;
+  /** @nullable */
+  completed_at?: string | null;
 }
 
 export interface FileUploadRequest {
@@ -625,6 +636,22 @@ export type ListRecommendationsParams = {
    * @nullable
    */
   sort_dir?: string | null;
+};
+
+export type ListUploadsParams = {
+  /**
+   * Filter op bron: PriceShape, DRS, Handmatig, Paper_Copy
+   */
+  source?: string;
+  /**
+   * Filter op status uit de importlevenscyclus
+   */
+  status?: string;
+  /**
+   * Filter op importtype
+   */
+  upload_type?: string;
+  limit?: number;
 };
 
 export type ExportRecommendationsParams = {

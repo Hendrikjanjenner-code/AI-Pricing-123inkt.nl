@@ -16,6 +16,7 @@ import ProductDetail from "@/pages/skus/detail";
 import Categorieen from "@/pages/categories";
 import CategorieHierarchie from "@/pages/categories-hierarchy";
 import Gegevensintegratie from "@/pages/data-upload";
+import DataIntegratie from "@/pages/data-integratie";
 import Datakwaliteit from "@/pages/data-quality";
 import Substitutiemonitor from "@/pages/substitutions";
 import Modelgezondheid from "@/pages/model-health";
@@ -306,6 +307,9 @@ function Router() {
       </Route>
       <Route path="/data-upload">
         <ProtectedRoute><Gegevensintegratie /></ProtectedRoute>
+      </Route>
+      <Route path="/data-integratie">
+        <ProtectedRoute><DataIntegratie /></ProtectedRoute>
       </Route>
       <Route path="/datakwaliteit">
         <ProtectedRoute><Datakwaliteit /></ProtectedRoute>

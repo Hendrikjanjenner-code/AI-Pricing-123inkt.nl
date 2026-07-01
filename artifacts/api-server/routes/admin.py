@@ -230,6 +230,41 @@ def trigger_sync(
             "counts": ga4_counts,
         }
 
+    # --- Persisteer een importjob zodat de sync zichtbaar is in de
+    #     Data Integratie-geschiedenis (bron="API-Sync") ---
+    try:
+        drs_status = result["drs"]["status"]
+        ga4_status = result["ga4"]["status"]
+        heeft_fout = "error" in (drs_status, ga4_status)
+        beide_niet_geconfigureerd = drs_status == "not_configured" and ga4_status == "not_configured"
+
+        totaal_rijen = sum(result["drs"]["counts"].values()) + sum(result["ga4"]["counts"].values())
+        job_status = "fout" if heeft_fout else ("nieuw" if beide_niet_geconfigureerd else "geimporteerd")
+        onderdelen_msg = f"DRS: {result['drs']['message']} | GA4: {result['ga4']['message']}"
+
+        from database import SessionLocal
+        db_local = SessionLocal()
+        try:
+            sync_job = models.ImportJob(
+                upload_type="api_sync",
+                filename="handmatige-api-sync",
+                status=job_status,
+                rows_processed=totaal_rijen,
+                rows_failed=0,
+                error_message=onderdelen_msg if heeft_fout else None,
+                uploaded_by=current_user.username,
+                created_at=datetime.now(timezone.utc),
+                completed_at=datetime.now(timezone.utc),
+                source="API-Sync",
+                file_type=None,
+            )
+            db_local.add(sync_job)
+            db_local.commit()
+        finally:
+            db_local.close()
+    except Exception:  # noqa: BLE001 — logging van de sync mag de respons nooit blokkeren
+        pass
+
     return result
 
 

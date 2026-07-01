@@ -5,18 +5,36 @@
  * AI Pricing Decision Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { ImportJobStatus } from "./importJobStatus";
 
 export interface ImportJob {
   id: number;
   upload_type: string;
   filename: string;
-  status: ImportJobStatus;
+  /** Volledige statuslevenscyclus: nieuw, concept, gevalideerd, geimporteerd, bijgewerkt, opgeslagen, fout. Oudere waarden (pending/processing/completed/failed) komen nog voor in historische rijen. */
+  status: string;
+  /**
+   * PriceShape, DRS, Handmatig, of Paper_Copy
+   * @nullable
+   */
+  source?: string | null;
+  /**
+   * csv, xlsx of xls
+   * @nullable
+   */
+  file_type?: string | null;
+  /**
+   * aanvullen, updaten of vervangen
+   * @nullable
+   */
+  import_mode?: string | null;
   rows_processed: number;
   rows_failed: number;
   /** @nullable */
   error_message?: string | null;
+  warnings?: string[];
   /** @nullable */
   uploaded_by?: string | null;
   created_at: string;
+  /** @nullable */
+  completed_at?: string | null;
 }

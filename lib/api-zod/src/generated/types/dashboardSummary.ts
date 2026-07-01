@@ -21,4 +21,6 @@ export interface DashboardSummary {
   /** @nullable */
   model_version?: string | null;
   data_quality_score: number;
+  total_skus?: number;
+  total_competitor_prices?: number;
 }

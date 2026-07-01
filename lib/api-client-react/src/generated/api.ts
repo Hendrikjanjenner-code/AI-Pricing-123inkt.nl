@@ -38,6 +38,7 @@ import type {
   ImportJob,
   ListProductsParams,
   ListRecommendationsParams,
+  ListUploadsParams,
   LoginRequest,
   MessageResponse,
   ModelHealth,
@@ -2112,41 +2113,57 @@ export function useGetDataQuality<
 /**
  * @summary List import jobs
  */
-export const getListUploadsUrl = () => {
-  return `/api/uploads`;
+export const getListUploadsUrl = (params?: ListUploadsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/uploads?${stringifiedParams}`
+    : `/api/uploads`;
 };
 
 export const listUploads = async (
+  params?: ListUploadsParams,
   options?: RequestInit,
 ): Promise<ImportJob[]> => {
-  return customFetch<ImportJob[]>(getListUploadsUrl(), {
+  return customFetch<ImportJob[]>(getListUploadsUrl(params), {
     ...options,
     method: "GET",
   });
 };
 
-export const getListUploadsQueryKey = () => {
-  return [`/api/uploads`] as const;
+export const getListUploadsQueryKey = (params?: ListUploadsParams) => {
+  return [`/api/uploads`, ...(params ? [params] : [])] as const;
 };
 
 export const getListUploadsQueryOptions = <
   TData = Awaited<ReturnType<typeof listUploads>>,
   TError = ErrorType<unknown>,
->(options?: {
-  query?: UseQueryOptions<
-    Awaited<ReturnType<typeof listUploads>>,
-    TError,
-    TData
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}) => {
+>(
+  params?: ListUploadsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listUploads>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
   const { query: queryOptions, request: requestOptions } = options ?? {};
 
-  const queryKey = queryOptions?.queryKey ?? getListUploadsQueryKey();
+  const queryKey = queryOptions?.queryKey ?? getListUploadsQueryKey(params);
 
   const queryFn: QueryFunction<Awaited<ReturnType<typeof listUploads>>> = ({
     signal,
-  }) => listUploads({ signal, ...requestOptions });
+  }) => listUploads(params, { signal, ...requestOptions });
 
   return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
     Awaited<ReturnType<typeof listUploads>>,
@@ -2167,15 +2184,18 @@ export type ListUploadsQueryError = ErrorType<unknown>;
 export function useListUploads<
   TData = Awaited<ReturnType<typeof listUploads>>,
   TError = ErrorType<unknown>,
->(options?: {
-  query?: UseQueryOptions<
-    Awaited<ReturnType<typeof listUploads>>,
-    TError,
-    TData
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getListUploadsQueryOptions(options);
+>(
+  params?: ListUploadsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listUploads>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListUploadsQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

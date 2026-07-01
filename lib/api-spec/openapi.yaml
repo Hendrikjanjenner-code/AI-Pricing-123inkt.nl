@@ -545,6 +545,31 @@ paths:
       operationId: listUploads
       tags: [uploads]
       summary: List import jobs
+      parameters:
+        - name: source
+          in: query
+          required: false
+          schema:
+            type: string
+          description: "Filter op bron: PriceShape, DRS, Handmatig, Paper_Copy"
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter op status uit de importlevenscyclus
+        - name: upload_type
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter op importtype
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
       responses:
         "200":
           description: Import jobs
@@ -1262,6 +1287,10 @@ components:
           type: ["string", "null"]
         data_quality_score:
           type: number
+        total_skus:
+          type: integer
+        total_competitor_prices:
+          type: integer
       required:
         - total_margin_uplift
         - total_recommendations
@@ -1408,17 +1437,35 @@ components:
           type: string
         status:
           type: string
-          enum: [pending, processing, completed, failed]
+          description: >-
+            Volledige statuslevenscyclus: nieuw, concept, gevalideerd, geimporteerd,
+            bijgewerkt, opgeslagen, fout. Oudere waarden (pending/processing/completed/failed)
+            komen nog voor in historische rijen.
+        source:
+          type: ["string", "null"]
+          description: "PriceShape, DRS, Handmatig, of Paper_Copy"
+        file_type:
+          type: ["string", "null"]
+          description: "csv, xlsx of xls"
+        import_mode:
+          type: ["string", "null"]
+          description: "aanvullen, updaten of vervangen"
         rows_processed:
           type: integer
         rows_failed:
           type: integer
         error_message:
           type: ["string", "null"]
+        warnings:
+          type: array
+          items:
+            type: string
         uploaded_by:
           type: ["string", "null"]
         created_at:
           type: string
+        completed_at:
+          type: ["string", "null"]
       required: [id, upload_type, filename, status, rows_processed, rows_failed, created_at]
 
     FileUploadRequest:

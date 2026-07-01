@@ -33,6 +33,7 @@ def get_dashboard_summary(
     total_skus = db.query(models.DimProduct).count()
     skus_with_cost = db.query(models.DimProduct).filter(models.DimProduct.cost_price.isnot(None)).count()
     dq_score = round(skus_with_cost / total_skus, 2) if total_skus > 0 else 1.0
+    total_competitor_prices = db.query(models.FactCompetitorPriceDaily).count()
 
     return {
         "total_margin_uplift": float(margin_uplift),
@@ -47,6 +48,8 @@ def get_dashboard_summary(
         "last_model_run": last_run.started_at.isoformat() if last_run else None,
         "model_version": last_run.model_version if last_run else "v1.0.0",
         "data_quality_score": dq_score,
+        "total_skus": total_skus,
+        "total_competitor_prices": total_competitor_prices,
     }
 
 

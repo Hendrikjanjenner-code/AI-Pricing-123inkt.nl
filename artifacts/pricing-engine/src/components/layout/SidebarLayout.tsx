@@ -180,6 +180,7 @@ const navGroepen = [
     items: [
       { href: "/datakwaliteit",      label: "Datakwaliteit",    icon: Database },
       { href: "/gegevensintegratie", label: "Gegevensintegratie", icon: Upload },
+      { href: "/data-integratie",    label: "Data Integratie",  icon: GitMerge },
       { href: "/export",             label: "Prijsexport",       icon: Download },
       { href: "/instellingen",       label: "Instellingen",      icon: Settings },
     ],
