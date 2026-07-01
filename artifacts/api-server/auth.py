@@ -2,6 +2,7 @@
 Authentication utilities: password hashing, JWT token creation/verification,
 and the get_current_user FastAPI dependency.
 """
+import logging
 import os
 import bcrypt
 from datetime import datetime, timedelta
@@ -11,10 +12,28 @@ from jwt.exceptions import InvalidTokenError
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from database import get_db
+from database import get_db, SessionLocal
 import models
 
-SECRET_KEY = os.environ.get("SESSION_SECRET", "dev-secret-key-change-in-production")
+logger = logging.getLogger("uvicorn.error")
+
+DEV_ADMIN_EMAIL = "admin@example.com"
+DEV_ADMIN_USERNAME = "dev_admin"
+DEV_ADMIN_PASSWORD = "admin123"
+
+SECRET_KEY = os.environ.get("SESSION_SECRET")
+if not SECRET_KEY:
+    SECRET_KEY = "dev-secret-key-change-in-production"
+    if os.environ.get("REPLIT_DEPLOYMENT"):
+        logger.error(
+            "SESSION_SECRET is not set in production! Falling back to an insecure "
+            "development key — set the SESSION_SECRET secret immediately."
+        )
+    else:
+        logger.warning(
+            "SESSION_SECRET is not set. Using an insecure development fallback key. "
+            "This is fine for local development but must be set before deploying."
+        )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 
@@ -58,6 +77,46 @@ def get_current_user(
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or inactive")
     return user
+
+
+def create_default_admin_if_missing() -> None:
+    """
+    Dev-only safety net: ensures a recoverable admin login always exists in
+    development, without ever touching or deleting any existing data.
+
+    - Only runs when not deployed (REPLIT_DEPLOYMENT unset), i.e. development.
+    - Only INSERTs a new user if one with DEV_ADMIN_EMAIL doesn't already
+      exist. Never updates, deletes, or resets other rows/tables.
+    """
+    if os.environ.get("REPLIT_DEPLOYMENT"):
+        return  # never auto-create accounts in production
+
+    db = SessionLocal()
+    try:
+        existing = db.query(models.User).filter(
+            models.User.email == DEV_ADMIN_EMAIL
+        ).first()
+        if existing:
+            return
+
+        db.add(models.User(
+            username=DEV_ADMIN_USERNAME,
+            email=DEV_ADMIN_EMAIL,
+            full_name="Development Admin",
+            hashed_password=hash_password(DEV_ADMIN_PASSWORD),
+            role="admin",
+            is_active=True,
+        ))
+        db.commit()
+        logger.info(
+            "Dev admin account created (%s / %s) — development only, safe to ignore in production.",
+            DEV_ADMIN_EMAIL, DEV_ADMIN_USERNAME,
+        )
+    except Exception as exc:
+        db.rollback()
+        logger.error("create_default_admin_if_missing failed (non-fatal): %s", exc)
+    finally:
+        db.close()
 
 
 def require_role(*roles: str):

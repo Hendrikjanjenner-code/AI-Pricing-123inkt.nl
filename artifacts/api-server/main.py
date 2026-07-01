@@ -6,8 +6,10 @@ import os
 import logging
 import traceback
 from datetime import datetime, timezone
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 
 from database import engine, Base
@@ -63,6 +65,11 @@ async def lifespan(app: FastAPI):
         from seed import seed_users_only
         seed_users_only()
         logger.info("Startup: demo user accounts ensured.")
+
+        # 3a. Dev-only safety net: guarantee a recoverable admin login exists
+        # locally without ever touching/deleting existing data (no-op in prod).
+        from auth import create_default_admin_if_missing
+        create_default_admin_if_missing()
 
         # 3b. Controleer scraping-dependencies en log een duidelijke waarschuwing
         from services.scraping_engine import check_scraping_dependencies
@@ -131,6 +138,38 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    Return a clean 400 for malformed/missing request bodies (e.g. login with
+    missing username/password) instead of FastAPI's default 422, and never a
+    bare unhandled 500.
+    """
+    logger.info("Request validation failed on %s %s: %s", request.method, request.url.path, exc.errors())
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={"detail": exc.errors()},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """
+    Last-resort safety net: log the full traceback server-side but never leak
+    internal error details to the client. Prevents raw tracebacks/500s with
+    stack traces from reaching the frontend.
+    """
+    logger.error(
+        "Unhandled exception on %s %s: %s\n%s",
+        request.method, request.url.path, exc, traceback.format_exc(),
+    )
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Internal server error"},
+    )
+
 
 # Health check at /api/healthz and /api/health
 from fastapi.routing import APIRouter

@@ -8,3 +8,4 @@
 - [Data source status cards](data-source-status-cards.md) — action-triggered sources (e.g. admin sync) must persist an ImportJob on every run, not just return JSON, or "last sync" cards silently show nothing.
 - [Bounded "full" history lists](bounded-history-lists.md) — when a spec says "volledige"/full history but the API caps `limit`, add incremental load-more instead of silently truncating; code review flags fixed low caps as not-full.
 - [configureWorkflow does not expand $PORT](workflow-port-env.md) — literal `$PORT` in artifact.toml dev commands isn't shell-expanded via configureWorkflow; hardcode the artifact's localPort explicitly.
+- [Duplicate legacy workflows cause DB race 500s](duplicate-workflow-db-race.md) — manual .replit workflows left alongside auto-generated artifact workflows can double-start a service and race on create_all, crashing the backend.

@@ -1,10 +1,15 @@
-"""Authentication routes: login, logout, me."""
+"""Authentication routes: login, logout, me, health."""
+import logging
+import os
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from pydantic import BaseModel
-from database import get_db
+from database import get_db, engine
 import models
 import auth as auth_utils
+
+logger = logging.getLogger("uvicorn.error")
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -63,3 +68,69 @@ def logout():
 @router.get("/me", response_model=UserOut)
 def get_me(current_user: models.User = Depends(auth_utils.get_current_user)):
     return UserOut.from_orm_user(current_user)
+
+
+@router.get("/health")
+def auth_health(db: Session = Depends(get_db)):
+    """
+    Diagnostics for the auth subsystem. Reports each dependency independently
+    so a broken login can be root-caused without digging through server logs.
+    """
+    database_connected = False
+    users_table_exists = False
+    admin_user_exists = False
+    dev_admin_available = False
+    password_hashing_working = False
+
+    try:
+        db.execute(text("SELECT 1"))
+        database_connected = True
+    except Exception as exc:
+        logger.error("auth/health: database connectivity check failed: %s", exc)
+
+    if database_connected:
+        try:
+            from sqlalchemy import inspect as sa_inspect
+            users_table_exists = sa_inspect(engine).has_table("users")
+        except Exception as exc:
+            logger.error("auth/health: users table existence check failed: %s", exc)
+
+        if users_table_exists:
+            try:
+                admin_user_exists = db.query(models.User).filter(
+                    models.User.role == "admin"
+                ).first() is not None
+                dev_admin_available = db.query(models.User).filter(
+                    models.User.email == auth_utils.DEV_ADMIN_EMAIL
+                ).first() is not None
+            except Exception as exc:
+                logger.error("auth/health: admin user lookup failed: %s", exc)
+
+    jwt_configured = bool(auth_utils.SECRET_KEY)
+    jwt_roundtrip_ok = False
+    try:
+        _test_token = auth_utils.create_access_token({"sub": "healthcheck"})
+        import jwt as pyjwt
+        pyjwt.decode(_test_token, auth_utils.SECRET_KEY, algorithms=[auth_utils.ALGORITHM])
+        jwt_roundtrip_ok = True
+    except Exception as exc:
+        logger.error("auth/health: JWT round-trip check failed: %s", exc)
+
+    try:
+        _test_hash = auth_utils.hash_password("healthcheck")
+        password_hashing_working = auth_utils.verify_password("healthcheck", _test_hash)
+    except Exception as exc:
+        logger.error("auth/health: password hashing check failed: %s", exc)
+
+    is_development = not bool(os.environ.get("REPLIT_DEPLOYMENT"))
+
+    return {
+        "auth_router_loaded": True,
+        "database_connected": database_connected,
+        "users_table_exists": users_table_exists,
+        "admin_user_exists": admin_user_exists,
+        "jwt_configured": jwt_configured and jwt_roundtrip_ok,
+        "password_hashing_working": password_hashing_working,
+        "environment": "development" if is_development else "production",
+        "dev_admin_available": is_development and dev_admin_available,
+    }

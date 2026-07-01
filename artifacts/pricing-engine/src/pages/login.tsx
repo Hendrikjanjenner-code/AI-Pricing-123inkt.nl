@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { useLoginUser, getGetCurrentUserQueryKey } from "@workspace/api-client-react";
 import { setAuthToken } from "@/lib/auth";
@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Box } from "lucide-react";
+import { Box, Info } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Login() {
@@ -16,8 +16,24 @@ export default function Login() {
   const queryClient = useQueryClient();
   const [gebruikersnaam, setGebruikersnaam] = useState("");
   const [wachtwoord, setWachtwoord] = useState("");
+  const [devAdminAvailable, setDevAdminAvailable] = useState(false);
 
   const loginMutation = useLoginUser();
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/auth/health")
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (!cancelled && data?.environment === "development" && data?.dev_admin_available) {
+          setDevAdminAvailable(true);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,6 +91,15 @@ export default function Login() {
                 autoComplete="current-password"
               />
             </div>
+            {devAdminAvailable && (
+              <div className="flex items-start gap-2 rounded-md border border-dashed border-muted-foreground/30 bg-muted/40 p-3 text-xs text-muted-foreground">
+                <Info className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>
+                  Development admin account available — inloggen met{" "}
+                  <code className="font-mono">dev_admin</code> / <code className="font-mono">admin123</code>
+                </span>
+              </div>
+            )}
           </CardContent>
           <CardFooter>
             <Button className="w-full" type="submit" disabled={loginMutation.isPending}>
