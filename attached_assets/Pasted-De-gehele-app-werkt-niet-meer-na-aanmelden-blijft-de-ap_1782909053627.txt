@@ -1,0 +1,145 @@
+De gehele app werkt niet meer: na aanmelden blijft de applicatie oneindig laden.
+
+Onderzoek en herstel dit als hoogste prioriteit.
+
+Doel:
+De app moet weer volledig starten, inloggen en naar het dashboard navigeren zonder infinite loading.
+
+Controleer stap voor stap:
+
+1. Frontend login flow
+- Login submit handler
+- API call naar login endpoint
+- loading state
+- error handling
+- token opslag
+- redirect na login
+- auth context/provider
+- protected routes
+- dashboard route
+
+Zoek specifiek naar:
+- loading state die nooit op false wordt gezet
+- promise die blijft hangen
+- ontbrekende catch/finally
+- login response die niet matcht met frontend verwachting
+- token wordt niet opgeslagen
+- user object ontbreekt
+- redirect naar route die niet bestaat
+
+2. Backend auth
+Controleer:
+- login endpoint werkt
+- response bevat access_token
+- response bevat user data
+- juiste HTTP statuscodes
+- geen 500 error
+- geen database timeout
+- geen JWT error
+
+3. API verbinding
+Controleer:
+- frontend API base URL
+- proxy config
+- CORS
+- backend poort
+- network errors
+- timeout errors
+
+4. Dashboard load
+Controleer of login wel lukt maar dashboard vastloopt door:
+- kapotte dashboard API
+- ontbrekende data
+- importmodule crash
+- PriceShape/DRS connector die credentials mist
+- scrapingmodule die bij startup blokkeert
+- infinite fetch loop
+- useEffect dependency probleem
+
+5. Nieuwe modules tijdelijk veilig maken
+Als een module de app blokkeert, zet deze tijdelijk op disabled maar laat de app starten.
+
+Controleer vooral:
+- Data Integration Engine
+- DRS connector
+- PriceShape connector
+- XLS/XLSX import
+- Competition Intelligence
+- Scraping Engine
+- AI Matching
+- Dashboard widgets
+
+Belangrijk:
+Geen enkele optionele module mag login of dashboard blokkeren.
+
+6. Voeg timeouts toe
+Alle API calls moeten een timeout krijgen.
+
+Als een endpoint niet reageert:
+- loading stoppen
+- foutmelding tonen
+- app blijft bruikbaar
+
+7. Auth healthcheck
+Maak of herstel:
+
+GET /api/auth/health
+GET /api/health
+
+Deze moeten tonen:
+- backend running
+- database connected
+- auth loaded
+- users table exists
+- admin user exists
+- jwt configured
+- frontend can reach backend
+
+8. Frontend fallback
+Als dashboarddata niet geladen kan worden:
+toon dashboard alsnog met melding:
+
+“Data tijdelijk niet beschikbaar”
+
+Niet infinite loading.
+
+9. Logging
+Voeg duidelijke logs toe:
+- login gestart
+- login success
+- token opgeslagen
+- user geladen
+- dashboard route geopend
+- dashboard API gestart
+- dashboard API voltooid
+- error details
+
+10. Fix output
+Geef na analyse een overzicht:
+
+A. Waar bleef de app hangen?
+B. Was login succesvol?
+C. Welk endpoint faalde?
+D. Welke frontend state bleef laden?
+E. Welke fix is toegepast?
+F. Welke modules zijn tijdelijk disabled?
+G. Hoe test ik dat login werkt?
+
+11. Acceptatiecriteria
+Na fix moet:
+- app starten
+- loginpagina laden
+- login binnen 3 seconden resultaat geven
+- verkeerde login duidelijke fout tonen
+- correcte login naar dashboard gaan
+- dashboard nooit oneindig laden
+- kapotte modules tonen foutmelding in plaats van crash
+- bestaande data behouden blijven
+- database niet gereset worden
+- demo-data niet teruggezet worden
+
+Belangrijk:
+Verwijder geen data.
+Reset database niet.
+Maak optionele modules fail-safe.
+Login en dashboard moeten altijd prioriteit hebben.
