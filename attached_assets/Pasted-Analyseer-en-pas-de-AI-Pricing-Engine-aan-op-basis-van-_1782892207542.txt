@@ -1,0 +1,352 @@
+Analyseer en pas de AI Pricing Engine aan op basis van het geüploade bestand:
+
+“Test Document AI Pricing Papier.xlsx”
+
+Doel:
+De AI Pricing Engine moet de kolomtitels uit rij 1 gebruiken als vaste databronstructuur en alle rijen daaronder importeren als echte productdata. De geïmporteerde data moet blijvend worden opgeslagen in de database en mag niet verdwijnen wanneer ik later een nieuwe prompt geef of nieuwe functionaliteit toevoeg.
+
+---
+
+BELANGRIJKSTE OPDRACHT
+
+1. Gebruik rij 1 als kolomdefinitie
+2. Gebruik alle data vanaf rij 2 als productdata
+3. Verwijder demo-data
+4. Sla geïmporteerde data persistent op
+5. Toon EAN en OEM duidelijk bij iedere SKU
+6. Zorg dat data niet wordt overschreven of verwijderd bij nieuwe prompts
+7. Voeg een duidelijke “Opslaan”-functie toe
+8. Voeg importlogs toe
+9. Voeg validatie toe
+10. Maak het geschikt voor de pilotcategorie Paper_Copy
+
+---
+
+BESTANDSTRUCTUUR
+
+Het bestand bevat de volgende kolommen:
+
+productcode
+Titel
+Merk
+Soort
+EAN
+OEM
+Afzet_YTD
+Omzet_YTD
+Marge_YTD
+Afzet_YTD_1_jaar
+Omzet_YTD_1_jaar
+Marge_YTD_1_jaar
+Afzet_YTD_2_jaar
+Omzet_YTD_2_jaar
+Marge_YTD_2_jaar
+Inkoopprijs ex BTW
+Verkoopprijs incl BTW
+Verkoopprijs excl BTW
+Gemiddeld aantal stuks per order YTD
+Gemiddeld aantal stuks per order YTD -1
+Gemiddeld aantal stuks per order YTD -2
+Aanmaakdatum
+Eerste verkoop
+Active/Inactive
+productHierarchy
+
+Gebruik deze kolommen exact als importmapping.
+
+---
+
+DATABASE
+
+Maak of update de tabel:
+
+product_master
+
+Velden:
+
+sku_id = productcode
+product_title = Titel
+brand = Merk
+product_type = Soort
+ean = EAN
+oem_code = OEM
+units_ytd = Afzet_YTD
+revenue_ytd = Omzet_YTD
+margin_ytd = Marge_YTD
+units_ytd_1 = Afzet_YTD_1_jaar
+revenue_ytd_1 = Omzet_YTD_1_jaar
+margin_ytd_1 = Marge_YTD_1_jaar
+units_ytd_2 = Afzet_YTD_2_jaar
+revenue_ytd_2 = Omzet_YTD_2_jaar
+margin_ytd_2 = Marge_YTD_2_jaar
+cost_price_ex_vat = Inkoopprijs ex BTW
+sales_price_inc_vat = Verkoopprijs incl BTW
+sales_price_ex_vat = Verkoopprijs excl BTW
+avg_units_per_order_ytd = Gemiddeld aantal stuks per order YTD
+avg_units_per_order_ytd_1 = Gemiddeld aantal stuks per order YTD -1
+avg_units_per_order_ytd_2 = Gemiddeld aantal stuks per order YTD -2
+created_date = Aanmaakdatum
+first_sale_date = Eerste verkoop
+status = Active/Inactive
+product_hierarchy = productHierarchy
+category = Paper_Copy
+
+---
+
+BELANGRIJK OVER EAN EN OEM
+
+EAN en OEM moeten zichtbaar zijn in:
+
+- SKU detailpagina
+- Pricing Grid
+- Product Master
+- AI Matching
+- Competition Intelligence
+- Scraping Matching
+- OEM versus Huismerk Analyse
+
+EAN moet gebruikt worden voor exacte productmatching.
+
+OEM moet gebruikt worden voor:
+- OEM productkoppeling
+- origineel versus huismerk vergelijking
+- concurrentiematching
+- prijsgap-analyse
+
+Als EAN ontbreekt of ongeldig is:
+- markeer als waarschuwing
+- blokkeer import niet
+
+Als OEM ontbreekt:
+- markeer als aandachtspunt
+- blokkeer import niet
+
+---
+
+DATA OPSLAAN / PERSISTENTIE
+
+De tool moet geïmporteerde data bewaren.
+
+Voeg toe:
+
+1. Opslaan-knop
+Naam:
+“Import opslaan”
+
+2. Importstatus
+Toon:
+- Concept
+- Gevalideerd
+- Opgeslagen
+- Fout
+
+3. Importlog
+Maak tabel:
+
+import_log
+
+Velden:
+- import_id
+- filename
+- import_type
+- imported_at
+- imported_by
+- rows_total
+- rows_success
+- rows_failed
+- errors
+- status
+
+4. Data mag niet verdwijnen bij:
+- nieuwe prompt
+- nieuwe module
+- refresh
+- herstart van app
+- opnieuw openen van Replit
+- nieuwe CSV/XLSX upload
+
+5. Nieuwe import moet keuze geven:
+- bestaande data aanvullen
+- bestaande data updaten op productcode
+- bestaande data volledig vervangen na bevestiging
+
+Standaard:
+Update op productcode, niet verwijderen.
+
+---
+
+FRONTEND
+
+Maak pagina:
+
+“DRS Product Import”
+
+Functionaliteit:
+- XLSX upload
+- preview van eerste 25 regels
+- kolommen uit rij 1 tonen
+- automatische mapping
+- validatie
+- opslaan
+- importlog bekijken
+
+Toon na import:
+
+- aantal producten
+- aantal actieve producten
+- aantal inactieve producten
+- aantal merken
+- aantal OEM-artikelen
+- aantal Compatible/Huismerk-artikelen
+- aantal ontbrekende EAN
+- aantal ontbrekende OEM
+- gemiddelde verkoopprijs
+- totale YTD omzet
+- totale YTD marge
+- totale YTD afzet
+
+---
+
+PILOT CATEGORIE
+
+Alle geïmporteerde producten uit dit bestand moeten standaard vallen onder:
+
+category = Paper_Copy
+
+Gebruik productHierarchy als aanvullende hiërarchie.
+
+Als productHierarchy leeg of fout is:
+- gebruik Paper_Copy
+- toon waarschuwing
+
+---
+
+AI PRICING ENGINE INTEGRATIE
+
+Gebruik deze data in:
+
+1. Pricing Grid
+- toon productcode
+- titel
+- merk
+- soort
+- EAN
+- OEM
+- verkoopprijs incl/excl btw
+- inkoopprijs
+- afzet YTD
+- omzet YTD
+- marge YTD
+
+2. BCG Intelligence
+Gebruik:
+- Afzet_YTD
+- Omzet_YTD
+- Marge_YTD
+- YTD-1
+- YTD-2
+
+3. Prijsgap Analyse
+Gebruik:
+- Soort
+- OEM
+- EAN
+- Merk
+- verkoopprijs
+- inkoopprijs
+
+4. Huismerk-first strategie
+Gebruik Soort om onderscheid te maken tussen:
+- Original/OEM
+- Compatible/Huismerk
+
+5. Competition Intelligence
+Gebruik:
+- EAN
+- OEM
+- Merk
+- Titel
+- productHierarchy
+
+6. AI Matching
+Gebruik:
+- EAN voor exacte match
+- OEM voor OEM-match
+- Titel voor titelmatch
+- Merk voor merkmatch
+- productHierarchy voor categoriematch
+
+---
+
+VALIDATIE
+
+Controleer bij import:
+
+Verplichte velden:
+- productcode
+- Titel
+- Merk
+- Soort
+
+Aanbevolen velden:
+- EAN
+- OEM
+- Verkoopprijs incl BTW
+- Verkoopprijs excl BTW
+- Inkoopprijs ex BTW
+- Afzet_YTD
+- Omzet_YTD
+- Marge_YTD
+
+Fouten:
+- dubbele productcode
+- ontbrekende productcode
+- negatieve verkoopprijs
+- negatieve inkoopprijs
+- ongeldige datum
+- ongeldige numerieke waarde
+
+Waarschuwingen:
+- ontbrekende EAN
+- ontbrekende OEM
+- ontbrekende marge
+- ontbrekende omzet
+- ontbrekende productHierarchy
+- inactive product
+
+---
+
+BELANGRIJK: GEEN DATA VERWIJDEREN
+
+Voeg guardrail toe:
+
+Nooit automatisch productdata verwijderen.
+
+Alleen verwijderen als Admin expliciet kiest:
+
+“Alle productdata verwijderen”
+
+En daarna bevestigt:
+
+“Ik begrijp dat alle productdata wordt verwijderd”
+
+---
+
+ACCEPTATIECRITERIA
+
+Na implementatie moet ik kunnen:
+
+- Test Document AI Pricing Papier.xlsx uploaden
+- kolommen uit rij 1 automatisch laten herkennen
+- producten uit rij 2 en verder importeren
+- data opslaan in database
+- data terugzien na refresh
+- data terugzien na nieuwe prompt
+- EAN en OEM zien bij iedere SKU
+- Paper_Copy als pilotcategorie gebruiken
+- producten gebruiken in Pricing Grid
+- producten gebruiken in AI Matching
+- producten gebruiken in Competition Intelligence
+- importlogs bekijken
+- waarschuwingen zien bij ontbrekende EAN/OEM
+- demo-data volledig verwijderen zonder echte data te verwijderen
