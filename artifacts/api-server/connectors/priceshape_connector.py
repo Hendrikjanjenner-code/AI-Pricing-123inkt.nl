@@ -24,7 +24,12 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT = 30  # seconden
+_TIMEOUT = 30  # seconden (REST-API-aanroepen)
+
+# Feed-exports kunnen tientallen tot honderden MB's zijn en enkele minuten duren
+# om te downloaden. Ruime read-timeout, maar strakke connect-timeout zodat een
+# echt onbereikbare host snel faalt.
+_FEED_TIMEOUT = httpx.Timeout(connect=15.0, read=600.0, write=30.0, pool=15.0)
 
 
 class ConnectorError(Exception):
@@ -128,7 +133,7 @@ def _fetch_feed(feed_url: str) -> tuple[bytes, str]:
     from connectors.net import safe_get, UnsafeURLError
 
     try:
-        resp = safe_get(feed_url, timeout=_TIMEOUT)
+        resp = safe_get(feed_url, timeout=_FEED_TIMEOUT)
         if resp.status_code in (401, 403):
             raise ConnectorError(
                 f"PriceShape feed weigerde toegang (HTTP {resp.status_code}). "
@@ -302,24 +307,32 @@ def fetch_feed_rows(db=None) -> list[dict]:
 
 
 def _check_feed_connection(cfg: dict) -> dict:
-    """Lichtgewicht bereikbaarheidscheck voor de feed-URL (zonder volledige parse)."""
-    from connectors.net import safe_get, UnsafeURLError
+    """
+    Lichtgewicht bereikbaarheidscheck voor de feed-URL. Gebruikt een streaming-
+    request zodat een grote feed (tientallen–honderden MB's) NIET volledig wordt
+    gedownload; alleen status/headers en de eerste bytes worden gecontroleerd.
+    """
+    from connectors.net import safe_stream, UnsafeURLError
 
     feed_url = cfg["feed_url"]
     try:
-        resp = safe_get(feed_url, timeout=_TIMEOUT)
-        if resp.status_code in (401, 403):
-            return {
-                "configured": True, "reachable": True, "status": "auth_error",
-                "message": f"Feed bereikbaar maar toegang geweigerd (HTTP {resp.status_code}). "
-                           "Controleer of de feed-URL/token nog geldig is.",
-            }
-        resp.raise_for_status()
-        if not resp.content:
-            return {
-                "configured": True, "reachable": True, "status": "error",
-                "message": "Feed opgehaald maar leeg.",
-            }
+        # Ruime connect + read: sommige export-endpoints bufferen de hele feed
+        # vóór het eerste byte, dus een te korte read geeft valse alarmen.
+        probe_timeout = httpx.Timeout(connect=15.0, read=90.0, write=15.0, pool=15.0)
+        with safe_stream(feed_url, timeout=probe_timeout) as resp:
+            if resp.status_code in (401, 403):
+                return {
+                    "configured": True, "reachable": True, "status": "auth_error",
+                    "message": f"Feed bereikbaar maar toegang geweigerd (HTTP {resp.status_code}). "
+                               "Controleer of de feed-URL/token nog geldig is.",
+                }
+            resp.raise_for_status()
+            first = next(resp.iter_bytes(1024), b"")
+            if not first:
+                return {
+                    "configured": True, "reachable": True, "status": "error",
+                    "message": "Feed opgehaald maar leeg.",
+                }
     except UnsafeURLError as exc:
         return {"configured": True, "reachable": False, "status": "error", "message": str(exc)}
     except httpx.HTTPStatusError as exc:

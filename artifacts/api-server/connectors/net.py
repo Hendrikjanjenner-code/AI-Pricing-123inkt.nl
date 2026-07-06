@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+from contextlib import contextmanager
+from typing import Iterator
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -97,7 +99,7 @@ def validate_external_url(url: str) -> None:
 def safe_get(
     url: str,
     *,
-    timeout: float = 30.0,
+    timeout: float | httpx.Timeout = 30.0,
     max_redirects: int = 5,
 ) -> httpx.Response:
     """
@@ -121,6 +123,42 @@ def safe_get(
                 current = urljoin(current, location)
                 continue
             return resp
+    raise UnsafeURLError(
+        f"Te veel redirects (>{max_redirects}) bij het ophalen van de feed."
+    )
+
+
+@contextmanager
+def safe_stream(
+    url: str,
+    *,
+    timeout: float | httpx.Timeout = 30.0,
+    max_redirects: int = 5,
+) -> Iterator[httpx.Response]:
+    """
+    SSRF-veilige streaming-GET: identieke redirect-validatie als safe_get, maar
+    de response-body wordt NIET vooraf ingelezen. Ideaal voor bereikbaarheids-
+    checks op grote feeds — de status/headers zijn beschikbaar zonder de hele
+    payload te downloaden. Gebruik als context manager:
+
+        with safe_stream(url) as resp:
+            resp.status_code            # beschikbaar
+            first = next(resp.iter_bytes(1024), b"")  # optioneel eerste bytes
+    """
+    current = url
+    with httpx.Client(timeout=timeout, follow_redirects=False) as client:
+        for _ in range(max_redirects + 1):
+            validate_external_url(current)
+            with client.stream("GET", current) as resp:
+                if resp.is_redirect:
+                    location = resp.headers.get("location")
+                    if not location:
+                        yield resp
+                        return
+                    current = urljoin(current, location)
+                    continue
+                yield resp
+                return
     raise UnsafeURLError(
         f"Te veel redirects (>{max_redirects}) bij het ophalen van de feed."
     )
