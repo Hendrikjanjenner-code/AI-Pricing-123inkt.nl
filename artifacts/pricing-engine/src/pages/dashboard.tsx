@@ -8,6 +8,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { InfoTooltip } from "@/components/InfoTooltip";
 import { WidgetError } from "@/components/WidgetError";
 import { getAuthHeaders } from "@/lib/auth";
+import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -36,11 +38,21 @@ const CONN_STATUS_DOT: Record<ConnStatus, string> = {
   error: "bg-red-500",
 };
 
+function connectorStatusOf(c: ConnectorStatus): ConnStatus {
+  return c.configured ? (c.last_test_status ?? "error") : "not_configured";
+}
+
+function isProblemStatus(status: ConnStatus): boolean {
+  return status === "unreachable" || status === "auth_error" || status === "error";
+}
+
 function DatabronnenStrip() {
   const [connectors, setConnectors] = useState<ConnectorStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const hasDataRef = useRef(false);
+  const prevStatusRef = useRef<Record<string, ConnStatus>>({});
+  const { toast } = useToast();
 
   useEffect(() => {
     let active = true;
@@ -56,6 +68,34 @@ function DatabronnenStrip() {
         const ordered = ["priceshape", "drs", "ga4"]
           .map((name) => data.find((c) => c.name === name))
           .filter(Boolean) as ConnectorStatus[];
+
+        // Detect healthy → unhealthy transitions and warn once per transition.
+        // Skip on the very first successful load so we only alert on changes,
+        // not on connectors that were already down when the page opened.
+        const prev = prevStatusRef.current;
+        const isFirstLoad = !hasDataRef.current;
+        const nextStatuses: Record<string, ConnStatus> = {};
+        for (const c of ordered) {
+          const status = connectorStatusOf(c);
+          nextStatuses[c.name] = status;
+          if (!isFirstLoad) {
+            const previous = prev[c.name];
+            if (previous === "ok" && isProblemStatus(status)) {
+              toast({
+                title: `Databron probleem: ${c.label}`,
+                description: `${c.label} is niet meer bereikbaar (${CONN_STATUS_LABEL[status]}). Bekijk de connectoren voor details.`,
+                variant: "destructive",
+                action: (
+                  <ToastAction altText="Bekijk connectoren" asChild>
+                    <Link href="/connectoren">Details</Link>
+                  </ToastAction>
+                ),
+              });
+            }
+          }
+        }
+        prevStatusRef.current = nextStatuses;
+
         hasDataRef.current = true;
         setConnectors(ordered);
         setError(false);
@@ -96,9 +136,7 @@ function DatabronnenStrip() {
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <span className="text-sm font-medium text-muted-foreground">Databronnen</span>
           {connectors.map((c) => {
-            const status: ConnStatus = c.configured
-              ? (c.last_test_status ?? "error")
-              : "not_configured";
+            const status: ConnStatus = connectorStatusOf(c);
             const isOk = status === "ok";
             return (
               <Link
