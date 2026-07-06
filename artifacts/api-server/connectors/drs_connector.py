@@ -28,15 +28,35 @@ class ConnectorError(Exception):
     """Fout bij verbinding met of data-ophalen uit DRS."""
 
 
-def _get_credentials() -> dict:
-    """Lees DRS-credentials uit omgevingsvariabelen."""
+def _get_credentials(db=None) -> dict:
+    """
+    Lees DRS-credentials: DB-config heeft voorrang op omgevingsvariabelen.
+    Gooit ConnectorError als geen van beide aanwezig is.
+    """
+    if db is not None:
+        try:
+            from connectors.crypto import decrypt_credentials
+            import models as _models
+            cfg = db.query(_models.ConnectorConfig).filter(
+                _models.ConnectorConfig.connector_name == "drs"
+            ).first()
+            if cfg and cfg.encrypted_credentials:
+                creds = decrypt_credentials(cfg.encrypted_credentials)
+                base_url = creds.get("api_url", "").rstrip("/")
+                api_key = creds.get("api_key", "")
+                tenant_id = creds.get("tenant_id", "")
+                if base_url and api_key:
+                    return {"base_url": base_url, "api_key": api_key, "tenant_id": tenant_id}
+        except Exception:
+            pass
+
     base_url = os.environ.get("DRS_API_URL", "").rstrip("/")
     api_key = os.environ.get("DRS_API_KEY", "")
     tenant_id = os.environ.get("DRS_TENANT_ID", "")
 
     if not base_url or not api_key:
         raise ConnectorError(
-            "DRS niet geconfigureerd. Stel DRS_API_URL en DRS_API_KEY in als omgevingsvariabelen."
+            "DRS niet geconfigureerd. Stel DRS_API_URL en DRS_API_KEY in als omgevingsvariabelen of gebruik de Connectoren-pagina."
         )
     return {"base_url": base_url, "api_key": api_key, "tenant_id": tenant_id}
 
@@ -52,20 +72,20 @@ def _make_client(creds: dict) -> httpx.Client:
     return httpx.Client(base_url=creds["base_url"], headers=headers, timeout=_TIMEOUT)
 
 
-def check_connection() -> dict:
+def check_connection(db=None) -> dict:
     """
     Test de DRS-verbinding zonder data op te halen.
 
     Returns:
         {
-          'configured': bool,   — env vars aanwezig
+          'configured': bool,   — env vars of DB-config aanwezig
           'reachable':  bool,   — API reageert op health-check
           'status':     str,    — 'ok' | 'not_configured' | 'unreachable' | 'auth_error'
           'message':    str,    — leesbare uitleg
         }
     """
     try:
-        creds = _get_credentials()
+        creds = _get_credentials(db=db)
     except ConnectorError as exc:
         return {
             "configured": False,
@@ -111,6 +131,7 @@ def check_connection() -> dict:
 def fetch_product_catalog(
     filters: dict | None = None,
     page_size: int = 500,
+    db=None,
 ) -> list[dict]:
     """
     Haal de volledige productcatalogus op uit DRS.
@@ -125,7 +146,7 @@ def fetch_product_catalog(
         cost_price, selling_price, stock_qty, sales_qty_7d,
         sales_qty_30d, last_sale_date, supplier_id
     """
-    creds = _get_credentials()
+    creds = _get_credentials(db=db)
     params: dict[str, Any] = {"page_size": page_size}
     if filters:
         if "category" in filters:
@@ -171,6 +192,7 @@ def fetch_sales_history(
     date_from: str,
     date_to: str,
     sku_ids: list[str] | None = None,
+    db=None,
 ) -> list[dict]:
     """
     Haal dagelijkse verkoopdata op uit DRS voor een datumbereik.
@@ -183,7 +205,7 @@ def fetch_sales_history(
     Returns:
         Lijst van verkooprijen: {sku_id, date, qty_sold, revenue, avg_price}
     """
-    creds = _get_credentials()
+    creds = _get_credentials(db=db)
     params: dict[str, Any] = {"date_from": date_from, "date_to": date_to}
     if sku_ids:
         params["sku_ids"] = ",".join(sku_ids)
@@ -205,7 +227,7 @@ def fetch_sales_history(
     return rows
 
 
-def fetch_stock_levels(sku_ids: list[str] | None = None) -> list[dict]:
+def fetch_stock_levels(sku_ids: list[str] | None = None, db=None) -> list[dict]:
     """
     Haal actuele voorraadstanden op uit DRS (snapshot van vandaag).
 
@@ -215,7 +237,7 @@ def fetch_stock_levels(sku_ids: list[str] | None = None) -> list[dict]:
     Returns:
         Lijst van voorraad-dicts: {sku_id, stock_qty, warehouse, as_of_date}
     """
-    creds = _get_credentials()
+    creds = _get_credentials(db=db)
     params: dict[str, Any] = {}
     if sku_ids:
         params["sku_ids"] = ",".join(sku_ids)

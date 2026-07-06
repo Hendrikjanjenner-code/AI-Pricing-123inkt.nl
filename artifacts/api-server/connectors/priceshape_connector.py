@@ -31,8 +31,28 @@ class ConnectorError(Exception):
     """Fout bij verbinding met of data-ophalen uit PriceShape."""
 
 
-def _get_credentials() -> dict:
-    """Lees PriceShape-credentials uit omgevingsvariabelen."""
+def _get_credentials(db=None) -> dict:
+    """
+    Lees PriceShape-credentials: DB-config heeft voorrang op omgevingsvariabelen.
+    Gooit ConnectorError als geen van beide aanwezig is.
+    """
+    if db is not None:
+        try:
+            from connectors.crypto import decrypt_credentials
+            import models as _models
+            cfg = db.query(_models.ConnectorConfig).filter(
+                _models.ConnectorConfig.connector_name == "priceshape"
+            ).first()
+            if cfg and cfg.encrypted_credentials:
+                creds = decrypt_credentials(cfg.encrypted_credentials)
+                base_url = creds.get("api_url", "").rstrip("/")
+                api_key = creds.get("api_key", "")
+                account_id = creds.get("account_id", "")
+                if base_url and api_key:
+                    return {"base_url": base_url, "api_key": api_key, "account_id": account_id}
+        except Exception:
+            pass
+
     base_url = os.environ.get("PRICESHAPE_API_URL", "").rstrip("/")
     api_key = os.environ.get("PRICESHAPE_API_KEY", "")
     account_id = os.environ.get("PRICESHAPE_ACCOUNT_ID", "")
@@ -40,7 +60,7 @@ def _get_credentials() -> dict:
     if not base_url or not api_key:
         raise ConnectorError(
             "PriceShape niet geconfigureerd. Stel PRICESHAPE_API_URL en "
-            "PRICESHAPE_API_KEY in als omgevingsvariabelen."
+            "PRICESHAPE_API_KEY in als omgevingsvariabelen of gebruik de Connectoren-pagina."
         )
     return {"base_url": base_url, "api_key": api_key, "account_id": account_id}
 
@@ -56,20 +76,20 @@ def _make_client(creds: dict) -> httpx.Client:
     return httpx.Client(base_url=creds["base_url"], headers=headers, timeout=_TIMEOUT)
 
 
-def check_connection() -> dict:
+def check_connection(db=None) -> dict:
     """
     Test de PriceShape-verbinding zonder data op te halen.
 
     Returns:
         {
-          'configured': bool,   — env vars aanwezig
+          'configured': bool,   — env vars of DB-config aanwezig
           'reachable':  bool,   — API reageert op health-check
           'status':     str,    — 'ok' | 'not_configured' | 'unreachable' | 'auth_error' | 'error'
           'message':    str,    — leesbare uitleg
         }
     """
     try:
-        creds = _get_credentials()
+        creds = _get_credentials(db=db)
     except ConnectorError as exc:
         return {
             "configured": False,
@@ -117,6 +137,7 @@ def fetch_competitor_prices(
     eans: list[str] | None = None,
     updated_after: str | None = None,
     page_size: int = 500,
+    db=None,
 ) -> list[dict]:
     """
     Haal actuele concurrentieprijzen op uit PriceShape.
@@ -135,7 +156,7 @@ def fetch_competitor_prices(
         sku_id, ean, oem_code, mpn, competitor_name, competitor_price,
         currency, url, in_stock, scraped_at, import_source
     """
-    creds = _get_credentials()
+    creds = _get_credentials(db=db)
     params: dict[str, Any] = {"page_size": page_size}
     if sku_ids:
         params["sku_ids"] = ",".join(sku_ids)

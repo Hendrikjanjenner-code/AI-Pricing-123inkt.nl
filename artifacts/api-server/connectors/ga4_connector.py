@@ -22,15 +22,40 @@ class ConnectorError(Exception):
     """Fout bij verbinding met of data-ophalen uit Google Analytics 4."""
 
 
-def _get_credentials() -> dict:
-    """Lees GA4-credentials uit omgevingsvariabelen."""
+def _get_credentials(db=None) -> dict:
+    """
+    Lees GA4-credentials: DB-config heeft voorrang op omgevingsvariabelen.
+    Gooit ConnectorError als geen van beide aanwezig is.
+    """
+    if db is not None:
+        try:
+            from connectors.crypto import decrypt_credentials
+            import models as _models
+            cfg = db.query(_models.ConnectorConfig).filter(
+                _models.ConnectorConfig.connector_name == "ga4"
+            ).first()
+            if cfg and cfg.encrypted_credentials:
+                creds = decrypt_credentials(cfg.encrypted_credentials)
+                property_id = creds.get("property_id", "").strip()
+                sa_key_raw = creds.get("service_account_key", "").strip()
+                if property_id and sa_key_raw:
+                    try:
+                        sa_key = json.loads(sa_key_raw)
+                    except json.JSONDecodeError as exc:
+                        raise ConnectorError(f"Opgeslagen GA4 service_account_key is geen geldige JSON: {exc}") from exc
+                    return {"property_id": property_id, "service_account_key": sa_key}
+        except ConnectorError:
+            raise
+        except Exception:
+            pass
+
     property_id = os.environ.get("GA4_PROPERTY_ID", "").strip()
     sa_key_raw = os.environ.get("GA4_SERVICE_ACCOUNT_KEY", "").strip()
 
     if not property_id or not sa_key_raw:
         raise ConnectorError(
             "GA4 niet geconfigureerd. "
-            "Stel GA4_PROPERTY_ID en GA4_SERVICE_ACCOUNT_KEY in als omgevingsvariabelen."
+            "Stel GA4_PROPERTY_ID en GA4_SERVICE_ACCOUNT_KEY in als omgevingsvariabelen of gebruik de Connectoren-pagina."
         )
 
     try:
@@ -104,7 +129,7 @@ def _run_report(client, property_path: str, request_body: dict) -> list[dict]:
     return rows
 
 
-def check_connection() -> dict:
+def check_connection(db=None) -> dict:
     """
     Test de GA4-verbinding door een minimaal API-verzoek te doen.
 
@@ -117,7 +142,7 @@ def check_connection() -> dict:
         }
     """
     try:
-        creds = _get_credentials()
+        creds = _get_credentials(db=db)
     except ConnectorError as exc:
         return {
             "configured": False,
@@ -168,6 +193,7 @@ def fetch_traffic_data(
     date_from: str,
     date_to: str,
     sku_ids: list[str] | None = None,
+    db=None,
 ) -> list[dict]:
     """
     Haal dagelijkse traffic-metrics op per SKU-productpagina uit GA4.
@@ -183,7 +209,7 @@ def fetch_traffic_data(
     Returns:
         Lijst van dicts: {date, page_path, sessions, pageviews, add_to_cart, orders}
     """
-    creds = _get_credentials()
+    creds = _get_credentials(db=db)
     client = _make_client(creds)
 
     request_body: dict[str, Any] = {
@@ -239,6 +265,7 @@ def fetch_conversion_data(
     date_from: str,
     date_to: str,
     segment: str = "all",
+    db=None,
 ) -> list[dict]:
     """
     Haal dagelijkse conversie-metrics op uit GA4.
@@ -253,7 +280,7 @@ def fetch_conversion_data(
     Returns:
         Lijst van dicts: {date, channel, sessions, add_to_cart, orders, revenue, conversion_rate}
     """
-    creds = _get_credentials()
+    creds = _get_credentials(db=db)
     client = _make_client(creds)
 
     request_body: dict[str, Any] = {
@@ -314,6 +341,7 @@ def fetch_conversion_data(
 def fetch_channel_breakdown(
     date_from: str,
     date_to: str,
+    db=None,
 ) -> list[dict]:
     """
     Haal traffic per kanaal en apparaat op uit GA4 voor rapportage.
@@ -321,7 +349,7 @@ def fetch_channel_breakdown(
     Returns:
         Lijst van dicts: {date, channel, device, sessions, pageviews, orders}
     """
-    creds = _get_credentials()
+    creds = _get_credentials(db=db)
     client = _make_client(creds)
 
     request_body: dict[str, Any] = {

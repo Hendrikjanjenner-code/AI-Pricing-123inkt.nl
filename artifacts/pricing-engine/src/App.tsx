@@ -82,6 +82,8 @@ import EntryProductsAnalyse from "@/pages/entry-products";
 // Help & Explainability System
 import ModelDocumentatie from "@/pages/modeldocumentatie";
 
+import Connectoren from "@/pages/connectoren";
+
 // Pilot Paper_Copy
 import PilotPaperCopy from "@/pages/pilot-paper-copy";
 import PaperCopyImport from "@/pages/paper-copy-import";
@@ -310,6 +312,9 @@ function Router() {
       </Route>
       <Route path="/data-integratie">
         <ProtectedRoute><DataIntegratie /></ProtectedRoute>
+      </Route>
+      <Route path="/connectoren">
+        <ProtectedRoute><Connectoren /></ProtectedRoute>
       </Route>
       <Route path="/datakwaliteit">
         <ProtectedRoute><Datakwaliteit /></ProtectedRoute>

@@ -113,16 +113,17 @@ def preview_clear_data(
 
 @router.get("/sync/status")
 def sync_status(
+    db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.require_role("admin")),
 ):
     """
     Controleer de verbindingsstatus van DRS en GA4 zonder data op te halen.
 
-    Geen authenticatie richting de externe APIs; valideert alleen of de
-    omgevingsvariabelen aanwezig en de endpoints bereikbaar zijn.
+    Controleert DB-geconfigureerde credentials eerst; valt terug op
+    omgevingsvariabelen als er geen DB-config aanwezig is.
     """
-    drs_status = drs_connector.check_connection()
-    ga4_status = ga4_connector.check_connection()
+    drs_status = drs_connector.check_connection(db=db)
+    ga4_status = ga4_connector.check_connection(db=db)
 
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),

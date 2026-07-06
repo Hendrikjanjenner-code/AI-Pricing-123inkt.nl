@@ -1567,3 +1567,28 @@ class CompetitorDiscoveryRun(Base):
     parameters = Column(JSON)     # discovery-parameters gebruikt
     error_message = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ConnectorConfig(Base):
+    """
+    Opgeslagen connector-instellingen per bron (priceshape, drs, ga4).
+    Geheimen worden versleuteld opgeslagen; worden nooit als plaintext
+    teruggegeven via de API. Env-variabelen blijven werken als terugval.
+    """
+    __tablename__ = "connector_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    connector_name = Column(String(50), unique=True, nullable=False, index=True)
+    # Versleutelde velden (Fernet, nooit leesbaar terug via API)
+    encrypted_credentials = Column(Text)
+    # Welke velden zijn ingevuld (als lijst, veilig te tonen)
+    fields_configured = Column(JSON)
+    # Status na laatste test
+    last_test_status = Column(String(50))   # ok / auth_error / unreachable / error
+    last_test_message = Column(Text)
+    last_tested_at = Column(DateTime)
+    last_synced_at = Column(DateTime)
+    # Wie heeft de connector ingesteld/gewijzigd
+    configured_by = Column(String(100))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

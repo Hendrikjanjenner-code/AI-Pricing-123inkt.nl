@@ -28,7 +28,7 @@ from routes import (
     traffic, search_demand,
     cost, procurement, economic, reporting, bcg_transitions,
     category_hierarchy, break_even, ecosystem, explainability,
-    admin, pilot,
+    admin, pilot, connectors,
 )
 
 # Optional modules (DRS import, PriceShape import, competitor scraping, AI
@@ -302,6 +302,7 @@ app.include_router(ecosystem.router)
 app.include_router(explainability.router)
 app.include_router(admin.router)
 app.include_router(pilot.router)
+app.include_router(connectors.router)
 
 # Register whichever optional modules imported successfully above. Modules
 # that failed to import were already recorded in disabled_optional_routers

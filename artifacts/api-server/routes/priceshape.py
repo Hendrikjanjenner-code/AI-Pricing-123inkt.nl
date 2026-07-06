@@ -442,8 +442,10 @@ async def list_priceshape_jobs(
 
 @router.get("/connection")
 async def check_priceshape_connection(
+    db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    """Test de PriceShape API-verbinding (env-var based) zonder data op te halen."""
+    """Test de PriceShape API-verbinding zonder data op te halen.
+    Controleert DB-geconfigureerde credentials eerst; valt terug op omgevingsvariabelen."""
     from connectors import priceshape_connector
-    return priceshape_connector.check_connection()
+    return priceshape_connector.check_connection(db=db)

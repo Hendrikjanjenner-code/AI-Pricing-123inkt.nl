@@ -51,6 +51,7 @@ import {
   BrainCircuit,
   Binoculars,
   Map,
+  Server,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -181,6 +182,7 @@ const navGroepen = [
       { href: "/datakwaliteit",      label: "Datakwaliteit",    icon: Database },
       { href: "/gegevensintegratie", label: "Gegevensintegratie", icon: Upload },
       { href: "/data-integratie",    label: "Data Integratie",  icon: GitMerge },
+      { href: "/connectoren",        label: "Connectoren",       icon: Server },
       { href: "/export",             label: "Prijsexport",       icon: Download },
       { href: "/instellingen",       label: "Instellingen",      icon: Settings },
     ],
