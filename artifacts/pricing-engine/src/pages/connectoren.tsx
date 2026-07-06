@@ -16,12 +16,21 @@ const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 type ConnStatus = "ok" | "not_configured" | "unreachable" | "auth_error" | "error";
 
+interface FieldOption {
+  value: string;
+  label: string;
+}
+
 interface FieldDef {
   key: string;
   label: string;
   required: boolean;
   secret: boolean;
   placeholder: string;
+  type?: "select" | "text";
+  options?: FieldOption[];
+  default?: string;
+  mode?: string;
 }
 
 interface ConnectorSummary {
@@ -105,7 +114,24 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
     setTestResult(null);
   };
 
-  const allRequired = connector.fields
+  // Modus-ondersteuning: connectors met een "mode"-veld tonen een keuze en
+  // filteren hun velden op de gekozen modus.
+  const modeField = connector.fields.find((f) => f.key === "mode");
+  const storedMode = connector.fields_filled.includes("feed_url")
+    ? "feed"
+    : connector.fields_filled.includes("api_url") || connector.fields_filled.includes("api_key")
+    ? "rest"
+    : modeField?.default ?? "rest";
+  const currentMode = formValues.mode ?? storedMode;
+
+  const visibleFields = connector.fields.filter(
+    (f) => f.key !== "mode" && (!f.mode || f.mode === currentMode)
+  );
+
+  const buildPayload = () =>
+    modeField ? { ...formValues, mode: currentMode } : formValues;
+
+  const allRequired = visibleFields
     .filter((f) => f.required)
     .every(
       (f) =>
@@ -121,7 +147,7 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
       const resp = await fetch(`${BASE}/api/connectors/${connector.name}/test`, {
         method: "POST",
         headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ credentials: formValues }),
+        body: JSON.stringify({ credentials: buildPayload() }),
       });
       const data = await resp.json();
       if (!resp.ok) {
@@ -143,7 +169,7 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
       const resp = await fetch(`${BASE}/api/connectors/${connector.name}/save`, {
         method: "POST",
         headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
-        body: JSON.stringify({ credentials: formValues }),
+        body: JSON.stringify({ credentials: buildPayload() }),
       });
       const data = await resp.json();
       if (!resp.ok) {
@@ -318,7 +344,33 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
                 Vul de verbindingsgegevens in en test de verbinding voor je opslaat.
                 Geheimen worden versleuteld opgeslagen en nooit teruggetoond.
               </p>
-              {connector.fields.map((field) => (
+
+              {modeField && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">{modeField.label}</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {modeField.options?.map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => {
+                          setFormValues((v) => ({ ...v, mode: opt.value }));
+                          setTestResult(null);
+                        }}
+                        className={`text-left rounded-md border px-3 py-2 text-xs transition-colors ${
+                          currentMode === opt.value
+                            ? "border-primary bg-primary/5 text-foreground font-medium"
+                            : "border-input hover:bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {visibleFields.map((field) => (
                 <div key={field.key} className="space-y-1">
                   <Label className="text-xs" htmlFor={`${connector.name}-${field.key}`}>
                     {field.label}
@@ -327,7 +379,20 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
                       <span className="text-muted-foreground ml-1">(optioneel)</span>
                     )}
                   </Label>
-                  {field.key === "service_account_key" ? (
+                  {field.type === "select" ? (
+                    <select
+                      id={`${connector.name}-${field.key}`}
+                      value={formValues[field.key] ?? field.default ?? ""}
+                      onChange={(e) => handleInput(field.key, e.target.value)}
+                      className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      {field.options?.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : field.key === "service_account_key" ? (
                     <Textarea
                       id={`${connector.name}-${field.key}`}
                       placeholder={field.placeholder}

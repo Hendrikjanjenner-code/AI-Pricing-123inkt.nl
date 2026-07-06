@@ -174,6 +174,110 @@ def _log_audit(db: Session, entity_type: str, entity_id: str, action: str,
     db.add(entry)
 
 
+def persist_competitor_rows(db: Session, rows: list[dict], mode: str, username: str,
+                            filename: str = "") -> dict:
+    """
+    Upsert PriceShape-concurrentieprijzen in fact_competitor_price_daily.
+
+    Gedeeld door de handmatige upload-endpoint én de connector feed-synchronisatie,
+    zodat beide exact dezelfde matching-, versiebeheer- en herkomstregels volgen.
+    Rijen die niet aan een bekende SKU matchen worden overgeslagen (nooit stil
+    gedropt uit het rapport dat de aanroeper zelf opstelt). Commit gebeurt hier.
+
+    Returns {created, updated, skipped, removed}.
+    """
+    created = updated = skipped = removed = 0
+    now = datetime.utcnow()
+    today = now.date()
+
+    all_products = db.query(models.DimProduct.sku_id, models.DimProduct.ean, models.DimProduct.oem_code).all()
+    known_skus = {p.sku_id for p in all_products}
+    sku_by_ean = {p.ean: p.sku_id for p in all_products if p.ean}
+    sku_by_oem = {p.oem_code: p.sku_id for p in all_products if p.oem_code}
+
+    # Dagen die deze batch raakt, voor de optionele "vervangen" opschoning.
+    touched_dates: set[_date] = set()
+    # (datum, sku_id, competitor_name) → gezien, om upserts te versnellen.
+    seen_keys: set[tuple] = set()
+
+    for row in rows:
+        sku_id, matched_via = _match_sku(row, sku_by_ean, sku_by_oem, known_skus)
+        if not sku_id:
+            continue  # onbekende rijen worden overgeslagen (gerapporteerd door de aanroeper)
+
+        comp_naam = _trunc(get_alias(row, *COMPETITOR_NAME_ALIASES), 255)
+        prijs = _safe_float(get_alias(row, *COMPETITOR_PRICE_ALIASES))
+        if prijs is None or not comp_naam:
+            continue
+
+        ts = _safe_date(get_alias(row, *TIMESTAMP_ALIASES)) or today
+        url = get_alias(row, *URL_ALIASES)
+        touched_dates.add(ts)
+
+        # Scope the upsert match to rows this connector previously wrote
+        # (source == SOURCE_NAME). A row with the same
+        # (date, sku_id, competitor_name) key that was created by another
+        # pipeline (manual entry, scraper, paper-copy, ...) must never be
+        # overwritten or have its provenance silently reassigned.
+        existing = (
+            db.query(models.FactCompetitorPriceDaily)
+            .filter(
+                models.FactCompetitorPriceDaily.date == ts,
+                models.FactCompetitorPriceDaily.sku_id == sku_id,
+                models.FactCompetitorPriceDaily.competitor_name == comp_naam,
+                models.FactCompetitorPriceDaily.source == SOURCE_NAME,
+            )
+            .first()
+        )
+        seen_keys.add((ts, sku_id, comp_naam))
+
+        if existing and mode == "aanvullen":
+            skipped += 1
+            continue
+
+        if existing:
+            existing.price = prijs
+            existing.source = SOURCE_NAME
+            if url:
+                existing.url = url
+            updated += 1
+        else:
+            db.add(models.FactCompetitorPriceDaily(
+                date=ts, sku_id=sku_id, competitor_name=comp_naam, price=prijs, url=url,
+                source=SOURCE_NAME,
+            ))
+            created += 1
+
+    db.flush()
+
+    if mode == "vervangen" and touched_dates:
+        # Only ever delete rows previously written by THIS connector
+        # (source == SOURCE_NAME). Competitor prices captured by other
+        # pipelines (manual uploads, scrapers, paper-copy, etc.) on the
+        # same dates must never be touched by a PriceShape replace.
+        existing_in_scope = (
+            db.query(models.FactCompetitorPriceDaily)
+            .filter(
+                models.FactCompetitorPriceDaily.date.in_(touched_dates),
+                models.FactCompetitorPriceDaily.source == SOURCE_NAME,
+            )
+            .all()
+        )
+        for rec in existing_in_scope:
+            key = (rec.date, rec.sku_id, rec.competitor_name)
+            if key not in seen_keys:
+                db.delete(rec)
+                removed += 1
+
+    _log_audit(db, "fact_competitor_price_daily", "PRICESHAPE_IMPORT", "import", username,
+               None, {"created": created, "updated": updated, "skipped": skipped, "removed": removed,
+                      "mode": mode, "filename": filename},
+               details=f"import_source={SOURCE_NAME} mode={mode}")
+    db.commit()
+
+    return {"created": created, "updated": updated, "skipped": skipped, "removed": removed}
+
+
 @router.post("/validate")
 async def validate_priceshape(
     file: UploadFile = File(...),
@@ -279,95 +383,11 @@ async def import_priceshape(
     db.refresh(job)
 
     try:
-        created = updated = skipped = 0
-        now = datetime.utcnow()
-        today = now.date()
-
-        all_products = db.query(models.DimProduct.sku_id, models.DimProduct.ean, models.DimProduct.oem_code).all()
-        known_skus = {p.sku_id for p in all_products}
-        sku_by_ean = {p.ean: p.sku_id for p in all_products if p.ean}
-        sku_by_oem = {p.oem_code: p.sku_id for p in all_products if p.oem_code}
-
-        # Dagen die dit bestand raakt, voor de optionele "vervangen" opschoning.
-        touched_dates: set[_date] = set()
-        # (datum, sku_id, competitor_name) → bestaande rij, om upserts te versnellen.
-        seen_keys: set[tuple] = set()
-
-        for row in rows:
-            sku_id, matched_via = _match_sku(row, sku_by_ean, sku_by_oem, known_skus)
-            if not sku_id:
-                continue  # al gerapporteerd in _run_validation; import slaat onbekende rijen over
-
-            comp_naam = _trunc(get_alias(row, *COMPETITOR_NAME_ALIASES), 255)
-            prijs = _safe_float(get_alias(row, *COMPETITOR_PRICE_ALIASES))
-            if prijs is None or not comp_naam:
-                continue
-
-            ts = _safe_date(get_alias(row, *TIMESTAMP_ALIASES)) or today
-            url = get_alias(row, *URL_ALIASES)
-            touched_dates.add(ts)
-
-            # Scope the upsert match to rows this connector previously wrote
-            # (source == SOURCE_NAME). A row with the same
-            # (date, sku_id, competitor_name) key that was created by another
-            # pipeline (manual entry, scraper, paper-copy, ...) must never be
-            # overwritten or have its provenance silently reassigned.
-            existing = (
-                db.query(models.FactCompetitorPriceDaily)
-                .filter(
-                    models.FactCompetitorPriceDaily.date == ts,
-                    models.FactCompetitorPriceDaily.sku_id == sku_id,
-                    models.FactCompetitorPriceDaily.competitor_name == comp_naam,
-                    models.FactCompetitorPriceDaily.source == SOURCE_NAME,
-                )
-                .first()
-            )
-            seen_keys.add((ts, sku_id, comp_naam))
-
-            if existing and mode == "aanvullen":
-                skipped += 1
-                continue
-
-            if existing:
-                existing.price = prijs
-                existing.source = SOURCE_NAME
-                if url:
-                    existing.url = url
-                updated += 1
-            else:
-                db.add(models.FactCompetitorPriceDaily(
-                    date=ts, sku_id=sku_id, competitor_name=comp_naam, price=prijs, url=url,
-                    source=SOURCE_NAME,
-                ))
-                created += 1
-
-        db.flush()
-
-        removed = 0
-        if mode == "vervangen" and touched_dates:
-            # Only ever delete rows previously written by THIS connector
-            # (source == SOURCE_NAME). Competitor prices captured by other
-            # pipelines (manual uploads, scrapers, paper-copy, etc.) on the
-            # same dates must never be touched by a PriceShape replace.
-            existing_in_scope = (
-                db.query(models.FactCompetitorPriceDaily)
-                .filter(
-                    models.FactCompetitorPriceDaily.date.in_(touched_dates),
-                    models.FactCompetitorPriceDaily.source == SOURCE_NAME,
-                )
-                .all()
-            )
-            for rec in existing_in_scope:
-                key = (rec.date, rec.sku_id, rec.competitor_name)
-                if key not in seen_keys:
-                    db.delete(rec)
-                    removed += 1
-
-        _log_audit(db, "fact_competitor_price_daily", "PRICESHAPE_IMPORT", "import", current_user.username,
-                   None, {"created": created, "updated": updated, "skipped": skipped, "removed": removed,
-                          "mode": mode, "filename": job.filename},
-                   details=f"import_source={SOURCE_NAME} mode={mode}")
-        db.commit()
+        res = persist_competitor_rows(db, rows, mode, current_user.username, filename=job.filename)
+        created = res["created"]
+        updated = res["updated"]
+        skipped = res["skipped"]
+        removed = res["removed"]
 
         total = created + updated
         job.rows_processed = total

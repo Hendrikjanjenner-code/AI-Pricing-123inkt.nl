@@ -31,10 +31,15 @@ class ConnectorError(Exception):
     """Fout bij verbinding met of data-ophalen uit PriceShape."""
 
 
-def _get_credentials(db=None) -> dict:
+def _get_raw_config(db=None) -> dict:
     """
-    Lees PriceShape-credentials: DB-config heeft voorrang op omgevingsvariabelen.
-    Gooit ConnectorError als geen van beide aanwezig is.
+    Lees de volledige PriceShape-connectorconfig (inclusief `mode`): DB-config
+    heeft voorrang op omgevingsvariabelen. Geeft {} terug als niets is ingesteld.
+
+    De connector kent twee modi die náást elkaar bestaan:
+      - "rest": klassieke REST-API (api_url + api_key + account_id)
+      - "feed": PriceShape output-feed als één URL die CSV/JSON/XML teruggeeft
+                (feed_url + feed_format)
     """
     if db is not None:
         try:
@@ -45,24 +50,291 @@ def _get_credentials(db=None) -> dict:
             ).first()
             if cfg and cfg.encrypted_credentials:
                 creds = decrypt_credentials(cfg.encrypted_credentials)
-                base_url = creds.get("api_url", "").rstrip("/")
-                api_key = creds.get("api_key", "")
-                account_id = creds.get("account_id", "")
-                if base_url and api_key:
-                    return {"base_url": base_url, "api_key": api_key, "account_id": account_id}
+                if creds:
+                    return creds
         except Exception:
             pass
 
-    base_url = os.environ.get("PRICESHAPE_API_URL", "").rstrip("/")
+    env: dict = {}
+    feed_url = os.environ.get("PRICESHAPE_FEED_URL", "").strip()
+    if feed_url:
+        env["mode"] = "feed"
+        env["feed_url"] = feed_url
+        env["feed_format"] = os.environ.get("PRICESHAPE_FEED_FORMAT", "auto")
+        return env
+
+    base_url = os.environ.get("PRICESHAPE_API_URL", "").strip()
     api_key = os.environ.get("PRICESHAPE_API_KEY", "")
-    account_id = os.environ.get("PRICESHAPE_ACCOUNT_ID", "")
+    if base_url and api_key:
+        env["mode"] = "rest"
+        env["api_url"] = base_url
+        env["api_key"] = api_key
+        env["account_id"] = os.environ.get("PRICESHAPE_ACCOUNT_ID", "")
+    return env
+
+
+def _get_mode(creds: dict) -> str:
+    """Bepaal de actieve modus ('rest' | 'feed') uit een config-dict."""
+    m = (creds.get("mode") or "").strip().lower()
+    if m in ("rest", "feed"):
+        return m
+    if (creds.get("feed_url") or "").strip():
+        return "feed"
+    return "rest"
+
+
+def _get_credentials(db=None) -> dict:
+    """
+    Lees PriceShape REST-credentials. DB-config heeft voorrang op omgevingsvariabelen.
+    Gooit ConnectorError als de REST-modus niet is geconfigureerd.
+    """
+    raw = _get_raw_config(db=db)
+    base_url = (raw.get("api_url") or "").rstrip("/")
+    api_key = raw.get("api_key") or ""
+    account_id = raw.get("account_id") or ""
 
     if not base_url or not api_key:
         raise ConnectorError(
-            "PriceShape niet geconfigureerd. Stel PRICESHAPE_API_URL en "
+            "PriceShape (REST) niet geconfigureerd. Stel PRICESHAPE_API_URL en "
             "PRICESHAPE_API_KEY in als omgevingsvariabelen of gebruik de Connectoren-pagina."
         )
     return {"base_url": base_url, "api_key": api_key, "account_id": account_id}
+
+
+def _get_feed_config(db=None) -> dict:
+    """
+    Lees PriceShape feed-config (feed_url + feed_format). DB-config heeft voorrang
+    op omgevingsvariabelen. Gooit ConnectorError als de feed-modus niet is ingesteld.
+    """
+    raw = _get_raw_config(db=db)
+    feed_url = (raw.get("feed_url") or "").strip()
+    if not feed_url:
+        raise ConnectorError(
+            "PriceShape feed-URL niet geconfigureerd. Stel PRICESHAPE_FEED_URL in als "
+            "omgevingsvariabele of gebruik de Connectoren-pagina."
+        )
+    return {"feed_url": feed_url, "feed_format": (raw.get("feed_format") or "auto").strip().lower()}
+
+
+# ── Feed-modus: ophalen + formaatdetectie + parsing (CSV / JSON / XML) ──────
+
+def _fetch_feed(feed_url: str) -> tuple[bytes, str]:
+    """
+    Haal de PriceShape output-feed op via één URL. Elke (redirect-)hop wordt tegen
+    SSRF gevalideerd — export-URL's wijzen vaak door naar opslag/CDN, maar mogen
+    niet naar een intern/privaat adres verwijzen. Geeft (ruwe bytes, content-type)
+    terug. Gooit ConnectorError bij fouten.
+    """
+    from connectors.net import safe_get, UnsafeURLError
+
+    try:
+        resp = safe_get(feed_url, timeout=_TIMEOUT)
+        if resp.status_code in (401, 403):
+            raise ConnectorError(
+                f"PriceShape feed weigerde toegang (HTTP {resp.status_code}). "
+                "Controleer of de feed-URL (met token) nog geldig is."
+            )
+        resp.raise_for_status()
+        return resp.content, resp.headers.get("content-type", "")
+    except UnsafeURLError as exc:
+        raise ConnectorError(str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        raise ConnectorError(
+            f"PriceShape feed ophalen mislukt: HTTP {exc.response.status_code}"
+        ) from exc
+    except httpx.RequestError as exc:
+        raise ConnectorError(f"PriceShape feed niet bereikbaar: {exc}") from exc
+
+
+def _detect_feed_format(content: bytes, content_type: str, declared: str) -> str:
+    """
+    Bepaal het feed-formaat ('csv' | 'json' | 'xml'). Een expliciet gekozen
+    formaat wint; anders wordt content-type en daarna de inhoud gesnifft.
+    """
+    d = (declared or "auto").strip().lower()
+    if d in ("csv", "json", "xml"):
+        return d
+
+    ct = (content_type or "").lower()
+    if "json" in ct:
+        return "json"
+    if "xml" in ct:
+        return "xml"
+    if "csv" in ct:
+        return "csv"
+
+    head = content[:512].lstrip()
+    if head[:1] in (b"{", b"["):
+        return "json"
+    if head[:1] == b"<":
+        return "xml"
+    return "csv"
+
+
+def _stringify(value) -> str:
+    """Zet een scalar/complex JSON-waarde om naar een string (mirror van CSV-cellen)."""
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        import json as _json
+        return _json.dumps(value, ensure_ascii=False)
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value).strip()
+
+
+def _json_extract_rows(data) -> list:
+    """Vind de lijst met rij-objecten binnen een JSON-payload."""
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for key in ("items", "products", "data", "results", "rows", "records", "prices"):
+            val = data.get(key)
+            if isinstance(val, list):
+                return val
+        for val in data.values():
+            if isinstance(val, list):
+                return val
+        return [data]
+    return []
+
+
+def _localname(tag: str) -> str:
+    """Strip XML-namespace uit een tag ('{ns}product' -> 'product')."""
+    return tag.rsplit("}", 1)[-1] if "}" in tag else tag
+
+
+def _xml_record_elements(root) -> list:
+    """
+    Bepaal welke XML-elementen de records vormen. Dekt de gangbare vormen:
+      • lijst:            <products><product>…</product><product>…</product></products>
+      • enkel record:     <products><product>…</product></products>
+      • dubbele wrapper:  <export><products><product>…</product></products></export>
+      • record = root:    <product><sku>…</sku><prijs>…</prijs></product>
+      • attribuut-record: <items><item sku=".." price=".."/></items>
+    """
+    children = list(root)
+    if not children:
+        # Root zonder kind-elementen: het record zit in de root zelf (attributen).
+        return [root]
+
+    # Eén wrapper met een homogene lijst kleinkinderen → daal af naar die lijst.
+    if len(children) == 1:
+        grand = list(children[0])
+        gtags = {_localname(g.tag) for g in grand}
+        if grand and len(gtags) == 1:
+            return grand
+
+    # Zien de directe kinderen eruit als records (eigen sub-elementen of attributen)?
+    have_record_signal = sum(
+        1 for c in children if len(list(c)) > 0 or len(c.attrib) > 0
+    )
+    if have_record_signal == 0:
+        # Kinderen zijn platte veld-elementen → de root is één enkel record.
+        return [root]
+    return children
+
+
+def _parse_feed_rows(content: bytes, content_type: str, fmt: str) -> list[dict]:
+    """
+    Parse feed-bytes naar een lijst rij-dicts met kleingeschreven sleutels en
+    string-waarden — identiek aan het formaat van engine.import_engine.file_to_rows,
+    zodat dezelfde alias-/matchinglogica hergebruikt kan worden.
+    """
+    if fmt == "json":
+        import json as _json
+        try:
+            data = _json.loads(content.decode("utf-8-sig"))
+        except (UnicodeDecodeError, _json.JSONDecodeError) as exc:
+            raise ConnectorError(f"PriceShape JSON-feed kon niet worden gelezen: {exc}") from exc
+        rows: list[dict] = []
+        for r in _json_extract_rows(data):
+            if isinstance(r, dict):
+                rows.append({str(k).strip().lower(): _stringify(v) for k, v in r.items()})
+        return rows
+
+    if fmt == "xml":
+        import xml.etree.ElementTree as ET
+        try:
+            root = ET.fromstring(content)
+        except ET.ParseError as exc:
+            raise ConnectorError(f"PriceShape XML-feed kon niet worden gelezen: {exc}") from exc
+        record_parents = _xml_record_elements(root)
+        rows = []
+        for el in record_parents:
+            row: dict = {}
+            for k, v in el.attrib.items():
+                row[_localname(str(k)).strip().lower()] = (v or "").strip()
+            for child in el:
+                row[_localname(child.tag).strip().lower()] = (child.text or "").strip()
+            if row:
+                rows.append(row)
+        return rows
+
+    # CSV (default) — hergebruik de robuuste decoder van de import-engine.
+    import csv
+    import io
+    from engine.import_engine import decode_csv_bytes
+
+    text = decode_csv_bytes(content).replace("\r\n", "\n").replace("\r", "\n")
+    delimiter = ","
+    try:
+        sample = text[:4096]
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+        delimiter = dialect.delimiter
+    except csv.Error:
+        pass
+    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+    return [{(k or "").strip().lower(): (v or "") for k, v in row.items()} for row in reader]
+
+
+def fetch_feed_rows(db=None) -> list[dict]:
+    """
+    Haal de PriceShape output-feed op en parse deze naar rij-dicts.
+    Automatische formaatdetectie tenzij feed_format expliciet csv/json/xml is.
+    """
+    cfg = _get_feed_config(db=db)
+    content, content_type = _fetch_feed(cfg["feed_url"])
+    fmt = _detect_feed_format(content, content_type, cfg["feed_format"])
+    rows = _parse_feed_rows(content, content_type, fmt)
+    logger.info("PriceShape feed: %d rijen geparsed (formaat=%s)", len(rows), fmt)
+    return rows
+
+
+def _check_feed_connection(cfg: dict) -> dict:
+    """Lichtgewicht bereikbaarheidscheck voor de feed-URL (zonder volledige parse)."""
+    from connectors.net import safe_get, UnsafeURLError
+
+    feed_url = cfg["feed_url"]
+    try:
+        resp = safe_get(feed_url, timeout=_TIMEOUT)
+        if resp.status_code in (401, 403):
+            return {
+                "configured": True, "reachable": True, "status": "auth_error",
+                "message": f"Feed bereikbaar maar toegang geweigerd (HTTP {resp.status_code}). "
+                           "Controleer of de feed-URL/token nog geldig is.",
+            }
+        resp.raise_for_status()
+        if not resp.content:
+            return {
+                "configured": True, "reachable": True, "status": "error",
+                "message": "Feed opgehaald maar leeg.",
+            }
+    except UnsafeURLError as exc:
+        return {"configured": True, "reachable": False, "status": "error", "message": str(exc)}
+    except httpx.HTTPStatusError as exc:
+        return {
+            "configured": True, "reachable": True, "status": "error",
+            "message": f"PriceShape feed fout: HTTP {exc.response.status_code}",
+        }
+    except httpx.RequestError as exc:
+        return {
+            "configured": True, "reachable": False, "status": "unreachable",
+            "message": f"PriceShape feed niet bereikbaar: {exc}",
+        }
+
+    return {"configured": True, "reachable": True, "status": "ok",
+            "message": "PriceShape feed-verbinding succesvol."}
 
 
 def _make_client(creds: dict) -> httpx.Client:
@@ -88,6 +360,22 @@ def check_connection(db=None) -> dict:
           'message':    str,    — leesbare uitleg
         }
     """
+    raw = _get_raw_config(db=db)
+    if not raw:
+        return {
+            "configured": False,
+            "reachable": False,
+            "status": "not_configured",
+            "message": "PriceShape niet geconfigureerd (geen REST-sleutel of feed-URL).",
+        }
+
+    if _get_mode(raw) == "feed":
+        try:
+            return _check_feed_connection(_get_feed_config(db=db))
+        except ConnectorError as exc:
+            return {"configured": False, "reachable": False,
+                    "status": "not_configured", "message": str(exc)}
+
     try:
         creds = _get_credentials(db=db)
     except ConnectorError as exc:

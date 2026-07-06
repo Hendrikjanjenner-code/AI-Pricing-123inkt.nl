@@ -18,10 +18,6 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta, date as _date
 from typing import Optional, Any
 
-import ipaddress
-import socket
-from urllib.parse import urlparse
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -34,64 +30,18 @@ from connectors.crypto import encrypt_credentials, decrypt_credentials
 
 # ── SSRF guard ─────────────────────────────────────────────────────────────
 
-_PRIVATE_NETWORKS = [
-    ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),
-    ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("127.0.0.0/8"),
-    ipaddress.ip_network("169.254.0.0/16"),  # link-local
-    ipaddress.ip_network("::1/128"),
-    ipaddress.ip_network("fc00::/7"),
-    ipaddress.ip_network("fe80::/10"),
-]
+from connectors.net import validate_external_url as _validate_url, UnsafeURLError
 
 
 def _validate_external_url(url: str) -> None:
     """
-    Blokkeer SSRF door te controleren of de URL naar een extern,
-    niet-privaat adres verwijst.
-    Gooit HTTPException 400 als de URL verdacht is.
+    Blokkeer SSRF via de gedeelde validator (connectors/net.py) en vertaal een
+    onveilige URL naar een HTTP 400 voor de API-laag.
     """
     try:
-        parsed = urlparse(url)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Ongeldige URL.")
-
-    if parsed.scheme not in ("http", "https"):
-        raise HTTPException(status_code=400, detail="Alleen http:// en https:// zijn toegestaan.")
-
-    hostname = parsed.hostname
-    if not hostname:
-        raise HTTPException(status_code=400, detail="URL bevat geen geldige hostnaam.")
-
-    # Blokkeer directe IP-literalen in private ranges
-    try:
-        addr = ipaddress.ip_address(hostname)
-        for net in _PRIVATE_NETWORKS:
-            if addr in net:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Privé- of loopback-IP-adres niet toegestaan: {hostname}",
-                )
-    except ValueError:
-        # Hostnaam is een domeinnaam — los op en controleer het resultaat
-        try:
-            resolved = socket.getaddrinfo(hostname, None)
-        except socket.gaierror:
-            # Niet oplosbaar — doorlaten (echte fout wordt bij http-aanroep afgevangen)
-            return
-        for _fam, _type, _proto, _canon, sockaddr in resolved:
-            ip_str = sockaddr[0]
-            try:
-                addr = ipaddress.ip_address(ip_str)
-                for net in _PRIVATE_NETWORKS:
-                    if addr in net:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"De hostnaam '{hostname}' verwijst naar een privé-adres ({ip_str}) — niet toegestaan.",
-                        )
-            except ValueError:
-                pass
+        _validate_url(url)
+    except UnsafeURLError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 router = APIRouter(prefix="/api/connectors", tags=["connectors"])
 
@@ -100,12 +50,31 @@ router = APIRouter(prefix="/api/connectors", tags=["connectors"])
 
 CONNECTOR_FIELDS = {
     "priceshape": [
+        {"key": "mode", "label": "Verbindingstype", "required": False, "secret": False,
+         "type": "select", "default": "rest", "placeholder": "",
+         "options": [
+             {"value": "rest", "label": "REST API (endpoint + sleutel)"},
+             {"value": "feed", "label": "Output-feed (één URL: CSV/JSON/XML)"},
+         ]},
+        # REST-modus
         {"key": "api_url",    "label": "API URL",    "required": True,  "secret": False,
-         "placeholder": "https://api.priceshape.com/v1"},
+         "mode": "rest", "placeholder": "https://api.priceshape.com/v1"},
         {"key": "api_key",    "label": "API Sleutel", "required": True,  "secret": True,
-         "placeholder": "ps_live_…"},
+         "mode": "rest", "placeholder": "ps_live_…"},
         {"key": "account_id", "label": "Account ID", "required": False, "secret": False,
-         "placeholder": "optioneel"},
+         "mode": "rest", "placeholder": "optioneel"},
+        # Feed-modus
+        {"key": "feed_url", "label": "Feed-URL", "required": True, "secret": True,
+         "mode": "feed",
+         "placeholder": "https://public.priceshape.io/export/…?token=…"},
+        {"key": "feed_format", "label": "Formaat", "required": False, "secret": False,
+         "mode": "feed", "type": "select", "default": "auto", "placeholder": "",
+         "options": [
+             {"value": "auto", "label": "Automatisch detecteren"},
+             {"value": "csv",  "label": "CSV"},
+             {"value": "json", "label": "JSON"},
+             {"value": "xml",  "label": "XML"},
+         ]},
     ],
     "drs": [
         {"key": "api_url",   "label": "API URL",    "required": True,  "secret": False,
@@ -136,6 +105,21 @@ def _validate_name(name: str) -> str:
     if name not in VALID_CONNECTORS:
         raise HTTPException(status_code=404, detail=f"Onbekende connector '{name}'. Kies uit: {', '.join(VALID_CONNECTORS)}")
     return name
+
+
+def _resolve_mode(fields_def: list[dict], creds: dict) -> Optional[str]:
+    """
+    Bepaal de actieve modus voor een connector die meerdere verbindingsmodi kent.
+    Geeft None terug als de connector geen 'mode'-veld heeft (enkel-modus connector).
+    """
+    mode_field = next((f for f in fields_def if f["key"] == "mode"), None)
+    if not mode_field:
+        return None
+    valid = {o["value"] for o in mode_field.get("options", [])}
+    chosen = (creds.get("mode") or "").strip().lower()
+    if chosen in valid:
+        return chosen
+    return mode_field.get("default") or (next(iter(valid), None))
 
 
 def _get_config(db: Session, name: str) -> Optional[models.ConnectorConfig]:
@@ -180,7 +164,10 @@ def _connector_summary(db: Session, name: str) -> dict:
 def _check_env_configured(name: str) -> bool:
     import os
     if name == "priceshape":
-        return bool(os.environ.get("PRICESHAPE_API_URL") and os.environ.get("PRICESHAPE_API_KEY"))
+        return bool(
+            os.environ.get("PRICESHAPE_FEED_URL")
+            or (os.environ.get("PRICESHAPE_API_URL") and os.environ.get("PRICESHAPE_API_KEY"))
+        )
     if name == "drs":
         return bool(os.environ.get("DRS_API_URL") and os.environ.get("DRS_API_KEY"))
     if name == "ga4":
@@ -265,9 +252,24 @@ def save_connector(
         if v and v.strip():
             creds[k] = v.strip()
 
-    # Controleer vereiste velden
+    # Bepaal de actieve modus (voor connectors met meerdere verbindingsmodi).
     fields_def = CONNECTOR_FIELDS[name]
-    required_keys = [f["key"] for f in fields_def if f["required"]]
+    mode = _resolve_mode(fields_def, creds)
+    if mode is not None:
+        creds["mode"] = mode
+        # Verwijder velden van de andere modus zodat de opgeslagen config
+        # coherent blijft (geen achtergebleven REST-sleutel bij een feed-config).
+        allowed = {
+            f["key"] for f in fields_def
+            if not f.get("mode") or f.get("mode") == mode
+        }
+        creds = {k: v for k, v in creds.items() if k in allowed}
+
+    # Controleer vereiste velden (modus-bewust)
+    required_keys = [
+        f["key"] for f in fields_def
+        if f["required"] and (not f.get("mode") or f.get("mode") == mode)
+    ]
     missing = [k for k in required_keys if not creds.get(k, "").strip()]
     if missing:
         raise HTTPException(status_code=400,
@@ -424,10 +426,28 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
     try:
         if name == "priceshape":
             from connectors import priceshape_connector
-            priceshape_connector._get_credentials(db=db)
-            prices = priceshape_connector.fetch_competitor_prices(db=db)
-            counts["price_records"] = len(prices)
-            message = f"PriceShape sync voltooid: {len(prices)} prijzen opgehaald."
+            raw = priceshape_connector._get_raw_config(db=db)
+            if priceshape_connector._get_mode(raw) == "feed":
+                rows = priceshape_connector.fetch_feed_rows(db=db)
+                from routes.priceshape import persist_competitor_rows
+                res = persist_competitor_rows(
+                    db, rows, "updaten", current_user.username,
+                    filename="priceshape-feed-sync",
+                )
+                counts["opgehaald"] = len(rows)
+                counts["nieuw"] = res["created"]
+                counts["bijgewerkt"] = res["updated"]
+                counts["overgeslagen"] = res["skipped"]
+                message = (
+                    f"PriceShape feed-sync voltooid: {res['created']} nieuw, "
+                    f"{res['updated']} bijgewerkt, {res['skipped']} overgeslagen "
+                    f"({len(rows)} rijen opgehaald)."
+                )
+            else:
+                priceshape_connector._get_credentials(db=db)
+                prices = priceshape_connector.fetch_competitor_prices(db=db)
+                counts["price_records"] = len(prices)
+                message = f"PriceShape sync voltooid: {len(prices)} prijzen opgehaald."
 
         elif name == "drs":
             from connectors import drs_connector
@@ -483,6 +503,9 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
 # ── Connector-specifieke testfuncties ──────────────────────────────────────
 
 def _test_priceshape(creds: dict) -> dict:
+    if _resolve_mode(CONNECTOR_FIELDS["priceshape"], creds) == "feed":
+        return _test_priceshape_feed(creds)
+
     api_url = creds.get("api_url", "").rstrip("/")
     api_key = creds.get("api_key", "")
     account_id = creds.get("account_id", "")
@@ -518,6 +541,78 @@ def _test_priceshape(creds: dict) -> dict:
         return {"status": "error", "message": "httpx niet geïnstalleerd."}
     except Exception as exc:
         return {"status": "error", "message": str(exc)[:200]}
+
+
+def _test_priceshape_feed(creds: dict) -> dict:
+    """
+    Test de PriceShape output-feed: haal de URL op, detecteer het formaat
+    (CSV/JSON/XML), parse een sample en controleer of de vereiste kolommen
+    (SKU/EAN/OEM + concurrentprijs + concurrentnaam) herkend worden.
+    """
+    feed_url = (creds.get("feed_url") or "").strip()
+    if not feed_url:
+        return {"status": "not_configured", "message": "Feed-URL is verplicht."}
+
+    try:
+        _validate_external_url(feed_url)
+    except HTTPException as exc:
+        return {"status": "error", "message": str(exc.detail)}
+
+    from connectors import priceshape_connector
+    from connectors.priceshape_connector import ConnectorError
+    from routes.priceshape import (
+        get_alias, COMPETITOR_PRICE_ALIASES, COMPETITOR_NAME_ALIASES,
+        SKU_ALIASES, EAN_ALIASES, OEM_ALIASES,
+    )
+
+    declared = creds.get("feed_format") or "auto"
+    try:
+        content, content_type = priceshape_connector._fetch_feed(feed_url)
+        detected = priceshape_connector._detect_feed_format(content, content_type, declared)
+        rows = priceshape_connector._parse_feed_rows(content, content_type, detected)
+    except ConnectorError as exc:
+        return {"status": "unreachable", "message": str(exc)[:250]}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)[:250]}
+
+    if not rows:
+        return {"status": "error",
+                "message": f"Feed opgehaald (formaat: {detected}) maar geen rijen gevonden."}
+
+    sample = rows[0]
+    has_identifier = bool(
+        get_alias(sample, *SKU_ALIASES)
+        or get_alias(sample, *EAN_ALIASES)
+        or get_alias(sample, *OEM_ALIASES)
+    )
+    has_price = bool(get_alias(sample, *COMPETITOR_PRICE_ALIASES))
+    has_name = bool(get_alias(sample, *COMPETITOR_NAME_ALIASES))
+
+    if not (has_identifier and has_price):
+        missing = []
+        if not has_identifier:
+            missing.append("SKU/EAN/OEM-identifier")
+        if not has_price:
+            missing.append("concurrentprijs")
+        if not has_name:
+            missing.append("concurrentnaam")
+        cols = ", ".join(sorted(sample.keys())[:12])
+        return {
+            "status": "error",
+            "message": (
+                f"Feed opgehaald ({len(rows)} rijen, formaat: {detected}) maar vereiste "
+                f"kolommen ontbreken: {', '.join(missing)}. Gevonden kolommen: {cols}."
+            ),
+        }
+
+    name_note = "" if has_name else " (let op: concurrentnaam-kolom niet herkend)"
+    return {
+        "status": "ok",
+        "message": (
+            f"Feed geldig: {len(rows)} rijen, formaat {detected}. "
+            f"Vereiste kolommen herkend{name_note}."
+        ),
+    }
 
 
 def _test_drs(creds: dict) -> dict:
