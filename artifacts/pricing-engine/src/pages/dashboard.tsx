@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+import { Link } from "wouter";
 import { useGetDashboardSummary, useGetMarginByCategory, useGetRecsByStrategy, useGetConfidenceDistribution, useGetPriceChangeDistribution } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from "recharts";
@@ -5,6 +7,98 @@ import { ArrowUpRight, ArrowDownRight, AlertTriangle, CheckCircle2, ShieldAlert 
 import { Skeleton } from "@/components/ui/skeleton";
 import { InfoTooltip } from "@/components/InfoTooltip";
 import { WidgetError } from "@/components/WidgetError";
+import { getAuthHeaders } from "@/lib/auth";
+
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+type ConnStatus = "ok" | "not_configured" | "unreachable" | "auth_error" | "error";
+
+interface ConnectorStatus {
+  name: string;
+  label: string;
+  configured: boolean;
+  last_test_status: ConnStatus | null;
+}
+
+const CONN_STATUS_LABEL: Record<ConnStatus, string> = {
+  ok: "Verbonden",
+  not_configured: "Niet geconfigureerd",
+  unreachable: "Niet bereikbaar",
+  auth_error: "Authenticatiefout",
+  error: "Fout",
+};
+
+const CONN_STATUS_DOT: Record<ConnStatus, string> = {
+  ok: "bg-emerald-500",
+  not_configured: "bg-gray-400",
+  unreachable: "bg-red-500",
+  auth_error: "bg-amber-500",
+  error: "bg-red-500",
+};
+
+function DatabronnenStrip() {
+  const [connectors, setConnectors] = useState<ConnectorStatus[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const resp = await fetch(`${BASE}/api/connectors`, { headers: getAuthHeaders() });
+        if (!resp.ok) throw new Error("fetch failed");
+        const data: ConnectorStatus[] = await resp.json();
+        if (!active) return;
+        const ordered = ["priceshape", "drs", "ga4"]
+          .map((name) => data.find((c) => c.name === name))
+          .filter(Boolean) as ConnectorStatus[];
+        setConnectors(ordered);
+      } catch {
+        if (active) setError(true);
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, []);
+
+  if (loading) return <Skeleton className="h-[68px] w-full" />;
+  if (error || connectors.length === 0) return null;
+
+  const anyProblem = connectors.some(
+    (c) => c.configured && c.last_test_status && c.last_test_status !== "ok"
+  );
+
+  return (
+    <Card className={anyProblem ? "border-amber-200" : ""}>
+      <CardContent className="py-3">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <span className="text-sm font-medium text-muted-foreground">Databronnen</span>
+          {connectors.map((c) => {
+            const status: ConnStatus = c.configured
+              ? (c.last_test_status ?? "error")
+              : "not_configured";
+            const isOk = status === "ok";
+            return (
+              <Link
+                key={c.name}
+                href="/connectoren"
+                className="flex items-center gap-1.5 hover:opacity-80 transition-opacity"
+                title={`${c.label}: ${CONN_STATUS_LABEL[status]} — klik voor details`}
+              >
+                <span className={`w-2.5 h-2.5 rounded-full ${CONN_STATUS_DOT[status]}`} />
+                <span className="text-sm font-medium">{c.label}</span>
+                <span className={`text-xs ${isOk ? "text-emerald-600" : "text-muted-foreground"}`}>
+                  {CONN_STATUS_LABEL[status]}
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 const STRATEGIE_LABELS: Record<string, string> = {
   SUBSTITUTION_PORTFOLIO: "Substitutieportfolio",
@@ -39,6 +133,8 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <h1 className="text-3xl font-bold tracking-tight">Dagelijks overzicht</h1>
+
+      <DatabronnenStrip />
 
       {loadingSummary ? (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
