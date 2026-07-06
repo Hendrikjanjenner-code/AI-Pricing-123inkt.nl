@@ -3,6 +3,7 @@
 - [Traffic model fields](traffic-model-fields.md) — FactTrafficDaily uses entity_type/entity_id (not sku_id); entity_type="SKU" for per-SKU rows.
 - [Price index direction](price-index-direction.md) — price_index = own/competitor; <1.0 means we're cheaper (good), >1.0 means we're more expensive (bad).
 - [PriceShape feed shape](priceshape-feed-shape.md) — export feed = one product per row with gtin (not sku/ean) and competitors nested in vendors[]; must un-nest to N rows.
+- [Frontend global fetch timeout](frontend-global-fetch-timeout.md) — pricing-engine patches window.fetch with 15s abort; slow calls (connector test/sync) must pass their own signal or fail as false "Netwerkfout".
 - [SSRF validator ValueError trap](ssrf-valueerror-trap.md) — never raise UnsafeURLError inside an `except ValueError`; it subclasses ValueError and gets swallowed, disabling SSRF checks.
 - [Duplicate API Server workflow race](duplicate-workflow-race.md) — backend-down/login-500 is usually a bare "API Server" workflow duplicating the artifact one; remove the non-prefixed one.
 - [DRS daily import](drs-import.md) — no per-row queries/audit inserts (proxy timeout), truncate all strings to VARCHAR limits, rollback before failed-job commit.

@@ -27,3 +27,10 @@ each vendor, vendor keys winning. Aliases wired: `gtin`→EAN, `domain`→compet
 **Scale:** a single real feed = ~197 MB / ~38k products → ~438k expanded competitor
 rows across ~4.6k competitors. Download alone takes ~60s, so feed fetch uses a long
 read timeout (see `_FEED_TIMEOUT`); health-checks stream only the first bytes.
+
+**Server-side buffering:** the PriceShape export endpoint buffers the WHOLE feed
+before sending the first byte — so even a streamed 5 MB sample waits ~18s for the
+first byte. The connection *test* therefore streams only a bounded sample and parses
+it tolerantly (partial/truncated JSON) instead of downloading the full feed; the real
+sync still pulls everything. Don't expect a "test" to be instant — it's gated by
+their first-byte latency, not by transfer size.

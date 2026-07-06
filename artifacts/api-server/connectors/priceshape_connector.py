@@ -151,6 +151,116 @@ def _fetch_feed(feed_url: str) -> tuple[bytes, str]:
         raise ConnectorError(f"PriceShape feed niet bereikbaar: {exc}") from exc
 
 
+_FEED_SAMPLE_MAX_BYTES = 5_000_000  # ~5 MB is ruim genoeg om formaat + kolommen te valideren
+
+
+def _stream_feed_sample(feed_url: str, max_bytes: int = _FEED_SAMPLE_MAX_BYTES) -> tuple[bytes, str]:
+    """
+    Haal alleen het BEGIN van de feed op (streaming, tot max_bytes) om formaat en
+    kolommen te valideren zonder de volledige — mogelijk honderden MB's — feed te
+    downloaden. Zo blijft de 'test verbinding'-aanroep snel (enkele seconden) en
+    ruim binnen de client-time-out. Elke redirect-hop wordt SSRF-gevalideerd.
+    """
+    from connectors.net import safe_stream, UnsafeURLError
+
+    probe_timeout = httpx.Timeout(connect=15.0, read=90.0, write=15.0, pool=15.0)
+    try:
+        with safe_stream(feed_url, timeout=probe_timeout) as resp:
+            if resp.status_code in (401, 403):
+                raise ConnectorError(
+                    f"PriceShape feed weigerde toegang (HTTP {resp.status_code}). "
+                    "Controleer of de feed-URL (met token) nog geldig is."
+                )
+            resp.raise_for_status()
+            content_type = resp.headers.get("content-type", "")
+            buf = bytearray()
+            for chunk in resp.iter_bytes(65536):
+                buf.extend(chunk)
+                if len(buf) >= max_bytes:
+                    break
+            return bytes(buf), content_type
+    except UnsafeURLError as exc:
+        raise ConnectorError(str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        raise ConnectorError(
+            f"PriceShape feed ophalen mislukt: HTTP {exc.response.status_code}"
+        ) from exc
+    except httpx.RequestError as exc:
+        raise ConnectorError(f"PriceShape feed niet bereikbaar: {exc}") from exc
+
+
+def _json_sample_records(text: str, limit: int = 200) -> list:
+    """
+    Haal tot `limit` complete top-level objecten uit een (mogelijk afgekapte) JSON-
+    array-tekst, zonder het hele document te hoeven parsen. Nodig omdat een sample
+    van een grote JSON-feed vrijwel altijd midden in een record wordt afgekapt.
+    """
+    import json as _json
+
+    records: list = []
+    depth = 0
+    in_str = False
+    esc = False
+    start = -1
+    for i, ch in enumerate(text):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start >= 0:
+                    try:
+                        records.append(_json.loads(text[start:i + 1]))
+                    except _json.JSONDecodeError:
+                        pass
+                    start = -1
+                    if len(records) >= limit:
+                        break
+    return records
+
+
+def _parse_feed_sample(content: bytes, content_type: str, fmt: str) -> list[dict]:
+    """
+    Parse een (mogelijk afgekapte) feed-sample tolerant naar rij-dicts, met dezelfde
+    vorm als _parse_feed_rows. Gebruikt door de 'test verbinding'-flow, die maar een
+    handvol rijen nodig heeft om formaat + kolommen te valideren.
+    """
+    import json as _json
+
+    if fmt == "json":
+        text = content.decode("utf-8-sig", errors="ignore")
+        try:
+            records = _json_extract_rows(_json.loads(text))
+        except (ValueError, _json.JSONDecodeError):
+            records = _json_sample_records(text)
+        rows: list[dict] = []
+        for r in records:
+            if isinstance(r, dict):
+                rows.extend(_expand_json_record(r))
+        return rows
+
+    if fmt == "csv":
+        # Kap de laatste (mogelijk halve) regel af zodat de CSV-parser niet struikelt.
+        nl = content.rfind(b"\n")
+        trimmed = content[: nl + 1] if nl > 0 else content
+        return _parse_feed_rows(trimmed, content_type, "csv")
+
+    # XML: 5 MB omvat doorgaans het hele document, dus een directe parse volstaat.
+    return _parse_feed_rows(content, content_type, "xml")
+
+
 def _detect_feed_format(content: bytes, content_type: str, declared: str) -> str:
     """
     Bepaal het feed-formaat ('csv' | 'json' | 'xml'). Een expliciet gekozen

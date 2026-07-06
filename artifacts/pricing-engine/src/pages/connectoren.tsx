@@ -148,6 +148,9 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
         method: "POST",
         headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ credentials: buildPayload() }),
+        // Eigen time-out (60s) i.p.v. de globale 15s: een feed-test kan een
+        // externe URL moeten benaderen die traag het eerste antwoord geeft.
+        signal: AbortSignal.timeout(60_000),
       });
       const data = await resp.json();
       if (!resp.ok) {
@@ -210,6 +213,10 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
       const resp = await fetch(`${BASE}/api/connectors/${connector.name}/sync`, {
         method: "POST",
         headers: getAuthHeaders(),
+        // Ruime eigen time-out (5 min) i.p.v. de globale 15s: een volledige
+        // feed-sync downloadt de complete feed (kan honderden MB's zijn) en
+        // schrijft alle concurrentprijzen weg.
+        signal: AbortSignal.timeout(300_000),
       });
       const data = await resp.json();
       setSyncResult(data);

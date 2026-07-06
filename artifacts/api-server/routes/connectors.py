@@ -567,9 +567,12 @@ def _test_priceshape_feed(creds: dict) -> dict:
 
     declared = creds.get("feed_format") or "auto"
     try:
-        content, content_type = priceshape_connector._fetch_feed(feed_url)
+        # Alleen het begin van de feed ophalen (streaming, ~5 MB): genoeg om formaat
+        # en kolommen te valideren zonder de volledige — mogelijk honderden MB's —
+        # feed te downloaden. Zo blijft de test snel en binnen de client-time-out.
+        content, content_type = priceshape_connector._stream_feed_sample(feed_url)
         detected = priceshape_connector._detect_feed_format(content, content_type, declared)
-        rows = priceshape_connector._parse_feed_rows(content, content_type, detected)
+        rows = priceshape_connector._parse_feed_sample(content, content_type, detected)
     except ConnectorError as exc:
         return {"status": "unreachable", "message": str(exc)[:250]}
     except Exception as exc:
@@ -600,8 +603,8 @@ def _test_priceshape_feed(creds: dict) -> dict:
         return {
             "status": "error",
             "message": (
-                f"Feed opgehaald ({len(rows)} rijen, formaat: {detected}) maar vereiste "
-                f"kolommen ontbreken: {', '.join(missing)}. Gevonden kolommen: {cols}."
+                f"Feed opgehaald (formaat: {detected}) maar vereiste kolommen "
+                f"ontbreken: {', '.join(missing)}. Gevonden kolommen: {cols}."
             ),
         }
 
@@ -609,8 +612,8 @@ def _test_priceshape_feed(creds: dict) -> dict:
     return {
         "status": "ok",
         "message": (
-            f"Feed geldig: {len(rows)} rijen, formaat {detected}. "
-            f"Vereiste kolommen herkend{name_note}."
+            f"Feed geldig (formaat: {detected}). Vereiste kolommen herkend"
+            f"{name_note}."
         ),
     }
 
