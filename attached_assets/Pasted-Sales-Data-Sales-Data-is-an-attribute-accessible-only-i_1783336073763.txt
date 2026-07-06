@@ -1,0 +1,94 @@
+Sales Data
+Sales Data is an attribute accessible only if you integrate your sales data into PriceShape. Sales attributes provide insights into product performance and user behavior.
+
+Page Views Last Week: Number of times the product page was viewed in the past week.
+
+Items Sold Last Week: Number of units sold in the past week.
+
+Unique Sales Last Week: Number of unique sales transactions in the past week.
+
+Items Added to Cart Last Week: Number of times the product was added to a cart.
+
+Conversion Rate: Percentage of page visitors who made a purchase.
+
+Cart Conversion Rate: Percentage of cart additions that resulted in purchases.
+
+Days on Hand: Estimated number of days the current stock will last based on recent sales.
+
+Last Sale Time: Date and time of the most recent sale.
+
+ 
+
+Others
+The "Others" category contains additional product-related data fields.
+
+New Price Start Date: The date when a new price becomes active.
+
+Suggested New Price At: The date when a suggested new price was generated.
+
+Triggered Exception: shows which pricing rule exception, can't match, or no vendor, the new price was triggered by.
+
+New Price End Date: The date when the current price ends.
+
+Product Title: The product's title or name.
+
+Number of Matches: The number of vendor matches found for the product.
+
+VAT: The product's VAT percentage.
+
+Stock Quantity: The number of units available in stock.
+
+Shipping Price: The product's delivery or shipping cost.
+
+Inventory Values: The total inventory value for the product based on stock and cost.
+
+URL: The product's website or landing page link.
+
+Image URL: The image link used to display the product.
+
+Stock Status: Indicates whether the product is in stock or out of stock.
+
+PriceShape URL: Direct link to the product's page in PriceShape.
+
+Geotarget: The geographic region or market assigned to the product.
+
+Own Custom Attributes (Text or Dates): Any custom text or date-based attributes you have mapped from your input feed.
+
+Vendor attributes
+Vendor attributes are the data points PriceShape collects about your vendors.
+
+Domain: The vendor's website domain.
+
+Source: The source from which the product data is collected.
+
+Last Updated At: The date and time when the vendor data was last updated.
+
+Market Position: The vendor's current ranking position within the market.
+
+Name: The vendor's name as displayed in PriceShape.
+
+Previous Price: The vendor's most recent previous price before the latest change.
+
+Price: The vendor's current product price.
+
+Price Position: The vendor's ranking based on price among vendors.
+
+Price excl. VAT: The vendor's price excluding VAT.
+
+Price with Shipping: The total price including shipping costs, if shipping costs are available.
+
+Product Rating: The vendor's product rating or review score, if available.
+
+Price Difference (%): The percentage difference between your product price and the vendor's.
+
+Quantity: The available quantity or stock level from the vendor.
+
+Shipping Cost: The vendor's delivery or shipping fee, if available.
+
+Stock Status: The vendor's stock availability (in stock or out of stock).
+
+Last price update source: Shows where the latest price was updated, either on the product's URL or through Google, based on the most recent "last seen on" time.
+
+Product URL: A priceshape link that redirects to the vendor's product page.
+
+Marketplace "Buy button": Appears only if a marketplace feed is added to your account.
