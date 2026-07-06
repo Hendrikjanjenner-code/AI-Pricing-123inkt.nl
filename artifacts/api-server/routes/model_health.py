@@ -92,6 +92,12 @@ def trigger_model_run(
 
     try:
         processed, skipped = run_pricing_engine(db)
+        # Vernieuw de PCIS-concurrentiescores uit de actuele concurrentprijzen,
+        # zodat één modelrun zowel aanbevelingen als concurrentie-intelligentie oplevert.
+        # Een fout hier mag géén stille "completed" opleveren: laat 'm doorwerken
+        # naar de except-tak zodat de run als 'failed' met foutmelding wordt gemarkeerd.
+        import feed_ingest
+        feed_ingest.score_competition(db)
         run.status = "completed"
         run.completed_at = datetime.utcnow()
         run.skus_processed = processed

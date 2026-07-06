@@ -42,36 +42,52 @@ def run_pricing_engine(db: Session) -> tuple[int, int]:
     substitution_map = _load_substitutions(db)
     competitor_strategies = _load_competitor_strategies(db)
 
+    # Pre-group per SKU into dicts for O(1) lookup. With tens of thousands of
+    # products and hundreds of thousands of competitor rows, boolean-masking each
+    # DataFrame inside the loop is O(N·M) and far too slow; grouping once is O(N).
+    empty_sales, empty_price = sales_df.iloc[0:0], price_df.iloc[0:0]
+    empty_comp, empty_inv, empty_basket = comp_df.iloc[0:0], inventory_df.iloc[0:0], basket_df.iloc[0:0]
+    sales_by = {k: v for k, v in sales_df.groupby("sku_id")} if not sales_df.empty else {}
+    price_by = {k: v for k, v in price_df.groupby("sku_id")} if not price_df.empty else {}
+    comp_by = {k: v for k, v in comp_df.groupby("sku_id")} if not comp_df.empty else {}
+    inv_by = {k: v for k, v in inventory_df.groupby("sku_id")} if not inventory_df.empty else {}
+    basket_by = {k: v for k, v in basket_df.groupby("sku_id_a")} if not basket_df.empty else {}
+
+    # Verversingssemantiek: menselijke beslissingen (goedgekeurd/afgewezen) van
+    # vandaag blijven behouden; openstaande (pending) aanbevelingen worden
+    # opnieuw gegenereerd zodat een nieuwe modelrun na een feed-sync de laatste
+    # prijzen weerspiegelt (delete-then-insert, net als de fact-tabellen).
+    existing_today = db.query(
+        models.FactPricingRecommendationDaily.sku_id,
+        models.FactPricingRecommendationDaily.approval_status,
+    ).filter(models.FactPricingRecommendationDaily.date == today).all()
+    locked = {row[0] for row in existing_today if row[1] != "pending"}
+    db.query(models.FactPricingRecommendationDaily).filter(
+        models.FactPricingRecommendationDaily.date == today,
+        models.FactPricingRecommendationDaily.approval_status == "pending",
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    all_products = {p.sku_id: p for p in products}
+    rec_maps: list[dict] = []
     processed, skipped = 0, 0
 
     for product in products:
         try:
-            # Check if recommendation already exists for today
-            existing = db.query(models.FactPricingRecommendationDaily).filter(
-                models.FactPricingRecommendationDaily.sku_id == product.sku_id,
-                models.FactPricingRecommendationDaily.date == today,
-            ).first()
-            if existing:
-                processed += 1
+            if product.sku_id in locked:
+                skipped += 1
                 continue
 
-            # Gather per-SKU data slices
-            sku_sales = sales_df[sales_df["sku_id"] == product.sku_id]
-            sku_prices = price_df[price_df["sku_id"] == product.sku_id]
-            sku_comp = comp_df[comp_df["sku_id"] == product.sku_id]
-            sku_inv = inventory_df[inventory_df["sku_id"] == product.sku_id]
-            sku_basket = basket_df[basket_df["sku_id_a"] == product.sku_id]
-            subs = substitution_map.get(product.sku_id, [])
-
+            sku_inv = inv_by.get(product.sku_id, empty_inv)
             context = {
                 "product": product,
-                "sales": sku_sales,
-                "prices": sku_prices,
-                "competitors": sku_comp,
+                "sales": sales_by.get(product.sku_id, empty_sales),
+                "prices": price_by.get(product.sku_id, empty_price),
+                "competitors": comp_by.get(product.sku_id, empty_comp),
                 "inventory": sku_inv,
-                "basket": sku_basket,
-                "substitutions": subs,
-                "all_products": {p.sku_id: p for p in products},
+                "basket": basket_by.get(product.sku_id, empty_basket),
+                "substitutions": substitution_map.get(product.sku_id, []),
+                "all_products": all_products,
                 "competitor_strategies": competitor_strategies,
             }
 
@@ -86,32 +102,32 @@ def run_pricing_engine(db: Session) -> tuple[int, int]:
             # Apply safety rules
             result = apply_safety_rules(product, result, sku_inv)
 
-            # Persist
-            rec = models.FactPricingRecommendationDaily(
-                date=today,
-                sku_id=product.sku_id,
-                current_price=float(product.current_price) if product.current_price else None,
-                recommended_price=result["recommended_price"],
-                recommended_change_pct=result["change_pct"],
-                expected_units=result.get("expected_units"),
-                expected_revenue=result.get("expected_revenue"),
-                expected_margin=result.get("expected_margin"),
-                expected_margin_uplift=result.get("expected_margin_uplift"),
-                confidence_score=result["confidence"],
-                reason_code=result["reason_code"],
-                strategy_type=strategy,
-                competitor_strategy_signal=result.get("competitor_strategy_signal"),
-                safety_status=result.get("safety_status", "ok"),
-                approval_status="pending",
-                model_version=MODEL_VERSION,
-            )
-            db.add(rec)
+            rec_maps.append({
+                "date": today,
+                "sku_id": product.sku_id,
+                "current_price": float(product.current_price) if product.current_price else None,
+                "recommended_price": result["recommended_price"],
+                "recommended_change_pct": result["change_pct"],
+                "expected_units": result.get("expected_units"),
+                "expected_revenue": result.get("expected_revenue"),
+                "expected_margin": result.get("expected_margin"),
+                "expected_margin_uplift": result.get("expected_margin_uplift"),
+                "confidence_score": result["confidence"],
+                "reason_code": result["reason_code"],
+                "strategy_type": strategy,
+                "competitor_strategy_signal": result.get("competitor_strategy_signal"),
+                "safety_status": result.get("safety_status", "ok"),
+                "approval_status": "pending",
+                "model_version": MODEL_VERSION,
+            })
             processed += 1
 
         except Exception:
             skipped += 1
             continue
 
+    for i in range(0, len(rec_maps), 5_000):
+        db.bulk_insert_mappings(models.FactPricingRecommendationDaily, rec_maps[i:i + 5_000])
     db.commit()
     return processed, skipped
 

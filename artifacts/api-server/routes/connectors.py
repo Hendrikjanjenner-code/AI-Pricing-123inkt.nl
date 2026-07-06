@@ -428,20 +428,17 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
             from connectors import priceshape_connector
             raw = priceshape_connector._get_raw_config(db=db)
             if priceshape_connector._get_mode(raw) == "feed":
-                rows = priceshape_connector.fetch_feed_rows(db=db)
-                from routes.priceshape import persist_competitor_rows
-                res = persist_competitor_rows(
-                    db, rows, "updaten", current_user.username,
-                    filename="priceshape-feed-sync",
-                )
-                counts["opgehaald"] = len(rows)
-                counts["nieuw"] = res["created"]
-                counts["bijgewerkt"] = res["updated"]
-                counts["overgeslagen"] = res["skipped"]
+                import feed_ingest
+                res = feed_ingest.ingest_feed(db, source="priceshape")
+                counts["producten_nieuw"] = res["products_new"]
+                counts["producten_bijgewerkt"] = res["products_updated"]
+                counts["eigen_prijzen"] = res["own_prices"]
+                counts["concurrentprijzen"] = res["competitor_rows"]
                 message = (
-                    f"PriceShape feed-sync voltooid: {res['created']} nieuw, "
-                    f"{res['updated']} bijgewerkt, {res['skipped']} overgeslagen "
-                    f"({len(rows)} rijen opgehaald)."
+                    f"PriceShape feed-sync voltooid: {res['products_total']} producten "
+                    f"({res['products_new']} nieuw, {res['products_updated']} bijgewerkt), "
+                    f"{res['competitor_rows']} concurrentprijzen ingelezen. "
+                    "Draai een modelrun om aanbevelingen en concurrentie-scores te vernieuwen."
                 )
             else:
                 priceshape_connector._get_credentials(db=db)

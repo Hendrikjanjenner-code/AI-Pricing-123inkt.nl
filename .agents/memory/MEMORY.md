@@ -2,6 +2,8 @@
 - [Backend validate-first uploads](backend-validate-first.md) — POST /api/uploads/validate?upload_type=X validates CSV without saving; frontend calls it before import.
 - [Traffic model fields](traffic-model-fields.md) — FactTrafficDaily uses entity_type/entity_id (not sku_id); entity_type="SKU" for per-SKU rows.
 - [Price index direction](price-index-direction.md) — price_index = own/competitor; <1.0 means we're cheaper (good), >1.0 means we're more expensive (bad).
+- [Bash sandbox background](bash-sandbox-background.md) — nohup `&` jobs die after the tool call; `pgrep -f script.py` false-positives on its own command line. Download to disk, then process in phases.
+- [Feed ingest & refresh](feed-ingest-refresh.md) — feed is a full-catalog creator (DB starts empty); model reruns delete pending recs but preserve human decisions; scoring errors must not be swallowed.
 - [PriceShape feed shape](priceshape-feed-shape.md) — export feed = one product per row with gtin (not sku/ean) and competitors nested in vendors[]; must un-nest to N rows.
 - [Frontend global fetch timeout](frontend-global-fetch-timeout.md) — pricing-engine patches window.fetch with 15s abort; slow calls (connector test/sync) must pass their own signal or fail as false "Netwerkfout".
 - [SSRF validator ValueError trap](ssrf-valueerror-trap.md) — never raise UnsafeURLError inside an `except ValueError`; it subclasses ValueError and gets swallowed, disabling SSRF checks.
