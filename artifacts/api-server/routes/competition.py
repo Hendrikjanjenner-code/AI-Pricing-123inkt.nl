@@ -205,7 +205,7 @@ def get_price_index_by_category(
     category_data: dict = {}
     for score in scores:
         p = products.get(score.sku_id)
-        cat = p.category if p else "Unknown"
+        cat = (p.category if p else None) or "Unknown"
         category_data.setdefault(cat, []).append(float(score.price_index))
     return [
         {
