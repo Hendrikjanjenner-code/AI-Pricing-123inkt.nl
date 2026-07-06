@@ -1588,6 +1588,10 @@ class ConnectorConfig(Base):
     last_test_message = Column(Text)
     last_tested_at = Column(DateTime)
     last_synced_at = Column(DateTime)
+    # Laatste status waarover de gezondheidsmonitor een melding stuurde.
+    # Wordt gebruikt om alleen bij een statuswijziging te alarmeren (geen spam).
+    last_alerted_status = Column(String(50))
+    last_alerted_at = Column(DateTime)
     # Wie heeft de connector ingesteld/gewijzigd
     configured_by = Column(String(100))
     created_at = Column(DateTime, default=datetime.utcnow)

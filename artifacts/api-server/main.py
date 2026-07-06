@@ -120,6 +120,16 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("Startup: scrape scheduler disabled via DISABLE_SCRAPE_SCHEDULER.")
 
+        # 5b. Start de connector-gezondheidsmonitor die databronnen bewaakt en
+        # analisten per e-mail/webhook waarschuwt zodra een bron uitvalt.
+        health_monitor_task = None
+        if os.environ.get("DISABLE_HEALTH_MONITOR", "false").lower() not in ("1", "true", "yes"):
+            from services.connector_health_monitor import start_health_monitor
+            health_monitor_task = start_health_monitor()
+            logger.info("Startup: connector health monitor started.")
+        else:
+            logger.info("Startup: connector health monitor disabled via DISABLE_HEALTH_MONITOR.")
+
         startup_state["backend_status"] = "running"
         startup_state["started_at"] = datetime.now(timezone.utc).isoformat()
         logger.info("Startup: backend started successfully.")
@@ -134,18 +144,20 @@ async def lifespan(app: FastAPI):
             startup_state["database_status"] = "error"
         logger.error("Startup FAILED: %s\n%s", exc, traceback.format_exc())
         scheduler_task = None
+        health_monitor_task = None
         # Re-raise so the process doesn't silently pretend to be healthy —
         # but the error is now captured in startup_state for diagnostics.
         raise
     try:
         yield
     finally:
-        if scheduler_task is not None:
-            scheduler_task.cancel()
-            try:
-                await scheduler_task
-            except Exception:
-                pass
+        for _bg_task in (scheduler_task, health_monitor_task):
+            if _bg_task is not None:
+                _bg_task.cancel()
+                try:
+                    await _bg_task
+                except Exception:
+                    pass
 
 
 app = FastAPI(
