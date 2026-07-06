@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { useGetDashboardSummary, useGetMarginByCategory, useGetRecsByStrategy, useGetConfidenceDistribution, useGetPriceChangeDistribution } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,10 +40,14 @@ function DatabronnenStrip() {
   const [connectors, setConnectors] = useState<ConnectorStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const hasDataRef = useRef(false);
 
   useEffect(() => {
     let active = true;
-    (async () => {
+    let intervalId: ReturnType<typeof setInterval> | undefined;
+
+    const load = async () => {
+      if (document.hidden) return;
       try {
         const resp = await fetch(`${BASE}/api/connectors`, { headers: getAuthHeaders() });
         if (!resp.ok) throw new Error("fetch failed");
@@ -52,14 +56,31 @@ function DatabronnenStrip() {
         const ordered = ["priceshape", "drs", "ga4"]
           .map((name) => data.find((c) => c.name === name))
           .filter(Boolean) as ConnectorStatus[];
+        hasDataRef.current = true;
         setConnectors(ordered);
+        setError(false);
       } catch {
-        if (active) setError(true);
+        // Keep last-known status on refresh failures; only surface the error
+        // if we never managed to load any data at all.
+        if (active && !hasDataRef.current) setError(true);
       } finally {
         if (active) setLoading(false);
       }
-    })();
-    return () => { active = false; };
+    };
+
+    load();
+    intervalId = setInterval(load, 60000);
+
+    const onVisibilityChange = () => {
+      if (!document.hidden) load();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      active = false;
+      if (intervalId) clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, []);
 
   if (loading) return <Skeleton className="h-[68px] w-full" />;
