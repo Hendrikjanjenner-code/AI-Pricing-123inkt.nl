@@ -44,13 +44,13 @@ REPLACE_CONFIRM_PHRASE = "VERVANG ALLE PRICESHAPE DATA"
 # Kolomaliassen — SKU/EAN/OEM/MPN worden als matching-sleutels behandeld;
 # minstens één moet aanwezig zijn per rij om de rij aan een dim_product te koppelen.
 SKU_ALIASES = ["sku", "sku_id", "artikelnummer", "productcode"]
-EAN_ALIASES = ["ean", "ean_code", "barcode"]
+EAN_ALIASES = ["ean", "ean_code", "barcode", "gtin"]
 OEM_ALIASES = ["oem", "oem_code", "oem/mpn", "mpn"]
-COMPETITOR_NAME_ALIASES = ["competitor", "competitor_name", "concurrent", "concurrentnaam", "retailer"]
+COMPETITOR_NAME_ALIASES = ["competitor", "competitor_name", "concurrent", "concurrentnaam", "retailer", "domain"]
 COMPETITOR_PRICE_ALIASES = ["competitor_price", "concurrentprijs", "price", "prijs"]
 TIMESTAMP_ALIASES = ["timestamp", "datum", "date", "scraped_at", "gemeten_op"]
 IMPORT_SOURCE_ALIASES = ["import_source", "bron", "source"]
-URL_ALIASES = ["url", "product_url", "link"]
+URL_ALIASES = ["url", "product_url", "link", "producturl"]
 
 
 def _match_sku(row: dict, sku_by_ean: dict[str, str], sku_by_oem: dict[str, str],

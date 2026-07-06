@@ -204,6 +204,47 @@ def _json_extract_rows(data) -> list:
     return []
 
 
+_VENDOR_LIST_KEYS = ("vendors", "competitors", "offers", "merchants", "sellers", "listings")
+
+
+def _find_vendor_list(record: dict):
+    """Vind een geneste lijst met concurrent-/vendor-objecten in een productrecord."""
+    for key in _VENDOR_LIST_KEYS:
+        val = record.get(key)
+        if isinstance(val, list) and any(isinstance(v, dict) for v in val):
+            return val
+    return None
+
+
+def _expand_json_record(record: dict) -> list[dict]:
+    """
+    Splits een productrecord met geneste vendor-lijst uit naar één rij per vendor.
+
+    PriceShape-feeds leveren per product één object met een `vendors`-array; elke
+    vendor is een concurrent (domain + price + productUrl). Om deze met dezelfde
+    platte alias-/matchinglogica te matchen als CSV-uploads, wordt elk product
+    'ge-unnest' tot N concurrentrijen. Product-identifiers (gtin/ean/…) en eigen
+    prijzen blijven op elke rij; vendorvelden overschrijven bij sleutelbotsing,
+    zodat `price`/`domain`/`productUrl` naar de concurrent wijzen. Records zonder
+    geneste vendor-lijst worden platgeslagen tot één rij (ongewijzigd gedrag).
+    """
+    vendors = _find_vendor_list(record)
+    if not vendors:
+        return [{str(k).strip().lower(): _stringify(v) for k, v in record.items()}]
+
+    product_scalars = {
+        k: v for k, v in record.items()
+        if not (isinstance(v, list) and any(isinstance(x, dict) for x in v))
+    }
+    out: list[dict] = []
+    for vendor in vendors:
+        if not isinstance(vendor, dict):
+            continue
+        combined = {**product_scalars, **vendor}
+        out.append({str(k).strip().lower(): _stringify(v) for k, v in combined.items()})
+    return out
+
+
 def _localname(tag: str) -> str:
     """Strip XML-namespace uit een tag ('{ns}product' -> 'product')."""
     return tag.rsplit("}", 1)[-1] if "}" in tag else tag
@@ -255,7 +296,7 @@ def _parse_feed_rows(content: bytes, content_type: str, fmt: str) -> list[dict]:
         rows: list[dict] = []
         for r in _json_extract_rows(data):
             if isinstance(r, dict):
-                rows.append({str(k).strip().lower(): _stringify(v) for k, v in r.items()})
+                rows.extend(_expand_json_record(r))
         return rows
 
     if fmt == "xml":
