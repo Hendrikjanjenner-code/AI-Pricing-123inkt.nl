@@ -210,9 +210,21 @@ internal web-scraping and **no** Pilot Paper_Copy module.
 The PriceShape output feed refreshes automatically so the app always has fresh
 competitor data without manual intervention:
 
+- **Deployment requirement (always-on)**: the in-process scheduler only runs
+  while the server is alive. On **autoscale** the server suspends between
+  requests, so the scheduler never fires in production. To auto-sync you must
+  publish as **Reserved VM** ("always on") — selected in the Publishing UI at
+  publish time (`.replit` cannot be edited by the agent and `deployConfig` is not
+  available, so this is a manual UI choice). Alternative for staying on autoscale:
+  run `scheduled_sync.py` as a separate **Scheduled Deployment** (same full
+  refresh, cron-style). Both paths call the same `services/refresh.run_model_refresh`.
 - **Scheduler**: `services/feed_sync_scheduler.py` — an asyncio background task
   started in `main.py` lifespan (mirrors `connector_health_monitor`). Runs the
-  PriceShape sync every `FEED_SYNC_INTERVAL` seconds (default 21600 = 6h).
+  **full** PriceShape refresh every `FEED_SYNC_INTERVAL` seconds (default 21600 =
+  6h): feed ingest → pricing engine → competition scoring (PCIS / CI Dashboard) →
+  AI matches, via `services/refresh.run_model_refresh`. (Feed ingest alone would
+  refresh competitor prices but leave `sku_competition_score` / the CI Dashboard
+  empty — the model run is what fills it.)
 - **Retry/backoff**: each cycle retries up to `FEED_SYNC_MAX_RETRIES` (default 3)
   with exponential backoff (10s→20s→40s, capped 5m) to ride out transient
   network/server hiccups.

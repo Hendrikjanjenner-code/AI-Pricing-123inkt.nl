@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import logging
 import sys
-from datetime import datetime, timezone
 from types import SimpleNamespace
 
 logging.basicConfig(
@@ -79,33 +78,15 @@ def main() -> int:
             return 1
         logger.info("Feed ingelezen: %s", res.get("message", ""))
 
-        # last_synced_at atomisch bijwerken zodat de UI "laatste sync" toont,
-        # ook bij env-only configuratie (dan bestaat er nog geen config-rij).
+        logger.info("Stappen 2-4: modelrun (pricing engine, PCIS, AI-matches) ...")
+        from services.refresh import run_model_refresh
+        processed, skipped = run_model_refresh(db, model_version="scheduled-v1.0.0")
+        logger.info("Modelrun klaar: %d verwerkt, %d overgeslagen.", processed, skipped)
+
+        # Pas NA een geslaagde volledige refresh de "laatste sync"-tijd zetten,
+        # zodat de UI nooit een verse tijd toont terwijl de modelrun faalde.
+        # (Env-only config heeft geen config-rij; de upsert werkt dan alsnog.)
         touch_last_synced(db, "priceshape")
-
-        now = datetime.now(timezone.utc)
-        logger.info("Stap 2/4: pricing engine draaien ...")
-        from engine.pricing_engine import run_pricing_engine
-        processed, skipped = run_pricing_engine(db)
-        logger.info("Pricing engine klaar: %d verwerkt, %d overgeslagen.", processed, skipped)
-
-        import feed_ingest
-        logger.info("Stap 3/4: concurrentie-scores (PCIS) berekenen ...")
-        feed_ingest.score_competition(db)
-        logger.info("Stap 4/4: AI-matches opbouwen ...")
-        feed_ingest.build_ai_matches(db)
-
-        # Registreer een ModelRun zodat /model-health de geplande refresh toont.
-        run = models.ModelRun(
-            started_at=now,
-            completed_at=datetime.now(timezone.utc),
-            status="completed",
-            skus_processed=processed,
-            skus_skipped=skipped,
-            model_version="scheduled-v1.0.0",
-        )
-        db.add(run)
-        db.commit()
 
         logger.info("Geplande PriceShape-refresh volledig voltooid.")
         return 0

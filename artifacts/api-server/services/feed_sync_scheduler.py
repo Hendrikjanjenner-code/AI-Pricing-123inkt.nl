@@ -66,14 +66,31 @@ def _run_sync_once() -> dict | None:
     Geeft het sync-resultaat terug, of None als PriceShape niet is geconfigureerd.
     """
     from database import SessionLocal
-    from routes.connectors import _run_sync
+    from routes.connectors import _run_sync, touch_last_synced
 
     db = SessionLocal()
     try:
         if not _is_priceshape_configured(db):
             logger.debug("Feed-sync: PriceShape niet geconfigureerd — overgeslagen.")
             return None
-        return _run_sync("priceshape", db, _SYSTEM_USER)
+        result = _run_sync("priceshape", db, _SYSTEM_USER)
+        # Na een geslaagde ingest óók de volledige modelrun draaien, zodat niet
+        # alleen de concurrentprijzen maar ook de aanbevelingen én de
+        # concurrentie-scores (CI Dashboard, sku_competition_score) en AI-matches
+        # meevernieuwen. Zonder deze stap zou "altijd aan" wel verse feed-data
+        # ophalen maar het CI Dashboard leeg laten.
+        if result.get("status") == "ok":
+            from services.refresh import run_model_refresh
+            processed, skipped = run_model_refresh(db)
+            # Pas NA de geslaagde volledige modelrun de "laatste sync"-tijd zetten.
+            # Anders zou de UI een verse tijd tonen terwijl de modelrun faalde en
+            # het CI Dashboard leeg bleef — precies het symptoom dat we oplossen.
+            touch_last_synced(db, "priceshape")
+            logger.info(
+                "Feed-sync modelrun klaar: %d verwerkt, %d overgeslagen.",
+                processed, skipped,
+            )
+        return result
     finally:
         db.close()
 

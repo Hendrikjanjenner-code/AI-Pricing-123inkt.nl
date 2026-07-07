@@ -11,11 +11,21 @@ description: Why in-process schedulers don't work on autoscale, and how PriceSha
 started in the FastAPI lifespan never fire. A synchronous "manual sync" that
 ingests ~500k rows also times out inside a single HTTP request.
 
-**How to apply:** Run heavy periodic refreshes as a separate **Scheduled
-Deployment** (cron-style, runs to completion, not request-bound) via a standalone
-script (`artifacts/api-server/scheduled_sync.py`). Keep the web app on autoscale.
-The full refresh order mirrors the model-run endpoint: ingest feed →
-run_pricing_engine → feed_ingest.score_competition → feed_ingest.build_ai_matches.
+**How to apply — two valid paths:**
+1. **Reserved VM ("always on")**: publish as VM so the in-process
+   `feed_sync_scheduler` stays alive and fires every `FEED_SYNC_INTERVAL`. One
+   deployment, no extra script. The agent CANNOT set this: `.replit` edits are
+   blocked and `deployConfig` is not exposed in the sandbox — the user picks
+   "Reserved VM" in the Publishing UI.
+2. **Scheduled Deployment** (keep web app on autoscale): run standalone
+   `artifacts/api-server/scheduled_sync.py` cron-style as a separate deployment.
+
+**Critical:** both the scheduler and the standalone script must run the FULL
+refresh, not just the feed ingest. Feed ingest alone refreshes competitor prices
+but leaves `sku_competition_score` (CI Dashboard) empty. The full order lives in
+one shared helper `services/refresh.run_model_refresh`: ingest feed →
+run_pricing_engine → feed_ingest.score_competition → feed_ingest.build_ai_matches
+→ record ModelRun. Both paths call it so they stay identical.
 
 # "Last sync = never" for env-only connectors
 
