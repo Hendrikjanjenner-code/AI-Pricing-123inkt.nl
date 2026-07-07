@@ -189,6 +189,91 @@ def _stream_feed_sample(feed_url: str, max_bytes: int = _FEED_SAMPLE_MAX_BYTES) 
         raise ConnectorError(f"PriceShape feed niet bereikbaar: {exc}") from exc
 
 
+class NotStreamable(Exception):
+    """De feed is geen top-level JSON-array en kan niet streamend geparsed worden."""
+
+
+class _StreamReader:
+    """
+    File-achtige adapter rond een byte-iterator (httpx `iter_bytes`), zodat ijson
+    de feed in stukjes kan lezen zónder de volledige — mogelijk honderden MB's —
+    payload in het geheugen te houden. Ondersteunt `read(size)` en `prepend()`
+    (om vooruit-gelezen 'peek'-bytes terug te plaatsen).
+    """
+
+    def __init__(self, chunk_iter):
+        self._it = iter(chunk_iter)
+        self._buf = bytearray()
+        self._eof = False
+
+    def _fill(self, size: int) -> None:
+        while len(self._buf) < size and not self._eof:
+            try:
+                self._buf += next(self._it)
+            except StopIteration:
+                self._eof = True
+
+    def read(self, size: int = -1) -> bytes:
+        if size is None or size < 0:
+            for chunk in self._it:
+                self._buf += chunk
+            self._eof = True
+            out = bytes(self._buf)
+            self._buf = bytearray()
+            return out
+        self._fill(size)
+        out = bytes(self._buf[:size])
+        del self._buf[:size]
+        return out
+
+    def prepend(self, data: bytes) -> None:
+        self._buf[:0] = data
+
+
+def stream_json_records(feed_url: str):
+    """
+    Yield ruwe product-records uit een PriceShape JSON-feed via STREAMING parsing
+    (ijson), zodat het piekgeheugen laag blijft: nooit de volledige 206 MB-bytes
+    én de geparste ~1 GB Python-structuur tegelijk in het geheugen. Elke
+    (redirect-)hop wordt SSRF-gevalideerd.
+
+    Werkt alleen voor een top-level JSON-array (`[ {...}, {...} ]`) — de vorm van
+    de PriceShape output-feed. Bij een andere vorm (object-wrapper, CSV, XML)
+    wordt `NotStreamable` opgegooid zodat de aanroeper terugvalt op gebufferd lezen.
+    """
+    import ijson
+    from connectors.net import safe_stream, UnsafeURLError
+
+    try:
+        with safe_stream(feed_url, timeout=_FEED_TIMEOUT) as resp:
+            if resp.status_code in (401, 403):
+                raise ConnectorError(
+                    f"PriceShape feed weigerde toegang (HTTP {resp.status_code}). "
+                    "Controleer of de feed-URL (met token) nog geldig is."
+                )
+            resp.raise_for_status()
+
+            reader = _StreamReader(resp.iter_bytes(65536))
+            head = reader.read(65536)
+            first = head.lstrip(b"\xef\xbb\xbf").lstrip()[:1]
+            reader.prepend(head)
+            if first != b"[":
+                raise NotStreamable(
+                    "Feed is geen top-level JSON-array — gebufferd lezen vereist."
+                )
+
+            for record in ijson.items(reader, "item"):
+                yield record
+    except UnsafeURLError as exc:
+        raise ConnectorError(str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        raise ConnectorError(
+            f"PriceShape feed ophalen mislukt: HTTP {exc.response.status_code}"
+        ) from exc
+    except httpx.RequestError as exc:
+        raise ConnectorError(f"PriceShape feed niet bereikbaar: {exc}") from exc
+
+
 def _json_sample_records(text: str, limit: int = 200) -> list:
     """
     Haal tot `limit` complete top-level objecten uit een (mogelijk afgekapte) JSON-

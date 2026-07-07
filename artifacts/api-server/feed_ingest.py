@@ -77,8 +77,8 @@ def _chunks(seq: list, size: int = _CHUNK):
 
 
 # ── feed → genormaliseerde catalogus + concurrentrijen ──────────────────────
-def _normalize(records: list[dict]) -> tuple[list[dict], list[dict]]:
-    """Zet ruwe JSON-productrecords om naar (catalogus, concurrentrijen)."""
+def _normalize(records) -> tuple[list[dict], list[dict]]:
+    """Zet ruwe JSON-productrecords (lijst of iterator) om naar (catalogus, concurrentrijen)."""
     catalog: dict[str, dict] = {}
     comp_rows: list[dict] = []
 
@@ -143,8 +143,35 @@ def _parse_content(content: bytes, content_type: str, fmt: str) -> tuple[list[di
 def _read_feed(db: Session, content: bytes | None = None,
                content_type: str = "") -> tuple[list[dict], list[dict]]:
     cfg = pc._get_feed_config(db=db)
-    if content is None:
-        content, content_type = pc._fetch_feed(cfg["feed_url"])
+
+    # Vooraf opgehaalde body (bijv. bulk-load van schijf): parse gebufferd.
+    if content is not None:
+        fmt = pc._detect_feed_format(content, content_type, cfg["feed_format"])
+        return _parse_content(content, content_type, fmt)
+
+    # Geen body meegegeven: probeer STREAMING JSON-parsing (ijson) om het
+    # piekgeheugen laag te houden — de PriceShape-feed is ~200 MB en zou als
+    # één json.loads-structuur enkele GB's kosten en de VM OOM-killen.
+    #
+    # BELANGRIJK: val ALLEEN terug op gebufferd lezen bij `NotStreamable` (een
+    # niet-array-formaat zoals CSV/XML/object-wrapper). Andere fouten — netwerk,
+    # kapotte JSON, MemoryError — worden bewust NIET opgevangen: gebufferd
+    # opnieuw proberen zou de 206 MB alsnog in het geheugen trekken en de
+    # OOM-bescherming ondermijnen. Laat die fouten doorlopen; de scheduler
+    # probeert de cyclus later opnieuw (retry/backoff) en de bestaande data
+    # blijft intact (empty-feed-guard in ingest_feed).
+    if (cfg.get("feed_format") or "auto") in ("auto", "json"):
+        try:
+            logger.info("Feed-parse: streaming JSON (ijson).")
+            return _normalize(pc.stream_json_records(cfg["feed_url"]))
+        except pc.NotStreamable:
+            logger.info(
+                "Feed is geen top-level JSON-array — val terug op gebufferd lezen."
+            )
+
+    # Fallback: volledige download + gebufferde parse (CSV/XML of object-wrapper).
+    logger.info("Feed-parse: gebufferd lezen (niet-streambaar formaat).")
+    content, content_type = pc._fetch_feed(cfg["feed_url"])
     fmt = pc._detect_feed_format(content, content_type, cfg["feed_format"])
     return _parse_content(content, content_type, fmt)
 

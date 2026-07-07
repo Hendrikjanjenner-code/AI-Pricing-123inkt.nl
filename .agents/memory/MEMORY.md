@@ -3,7 +3,7 @@
 - [Traffic model fields](traffic-model-fields.md) — FactTrafficDaily uses entity_type/entity_id (not sku_id); entity_type="SKU" for per-SKU rows.
 - [Price index direction](price-index-direction.md) — price_index = own/competitor; <1.0 means we're cheaper (good), >1.0 means we're more expensive (bad).
 - [Replit deploy base-path healthcheck](replit-deploy-healthcheck-base-path.md) — platform probes the service BASE path (/api), not /healthz; must return 2xx there or app shows "isn't live yet".
-- [Autoscale + scheduled sync](autoscale-scheduled-sync.md) — 206MB feed json.loads OOM-kills the web VM (silent SIGKILL, app flaps); keep DISABLE_FEED_SYNC=true, run refresh as Scheduled Deployment; autoscale can't run in-process schedulers; env-only connectors need last_synced_at upsert; advisory-locked ingest.
+- [Autoscale + scheduled sync](autoscale-scheduled-sync.md) — in-app sync re-enabled & memory-safe via ijson streaming (fits 2GB Reserved VM); old 206MB json.loads OOM is fixed; autoscale still can't run in-process schedulers (use Scheduled Deployment); env-only connectors need last_synced_at upsert; advisory-locked ingest.
 - [Feed ingest last-known-good](feed-ingest-last-known-good.md) — never delete a day's fact rows unless there are replacement rows to insert; empty/partial feed must not wipe data.
 - [Bash sandbox background](bash-sandbox-background.md) — nohup `&` jobs die after the tool call; `pgrep -f script.py` false-positives on its own command line. Download to disk, then process in phases.
 - [Feed ingest & refresh](feed-ingest-refresh.md) — feed is a full-catalog creator (DB starts empty); model reruns delete pending recs but preserve human decisions; scoring errors must not be swallowed.
@@ -18,3 +18,4 @@
 - [Bounded "full" history lists](bounded-history-lists.md) — when a spec says "volledige"/full history but the API caps `limit`, add incremental load-more instead of silently truncating; code review flags fixed low caps as not-full.
 - [configureWorkflow does not expand $PORT](workflow-port-env.md) — literal `$PORT` in artifact.toml dev commands isn't shell-expanded via configureWorkflow; hardcode the artifact's localPort explicitly.
 - [Duplicate legacy workflows cause DB race 500s](duplicate-workflow-db-race.md) — manual .replit workflows left alongside auto-generated artifact workflows can double-start a service and race on create_all, crashing the backend.
+- [Bulk refresh DB pitfalls](bulk-refresh-db-pitfalls.md) — numpy 2.x scalars leak as `np.float64(...)` into SQL (schema "np" error); bulk sync needs a separate long-timeout BackgroundSessionLocal, not the 4s request session.

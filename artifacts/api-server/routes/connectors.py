@@ -425,14 +425,25 @@ def sync_connector(
     if not cfg and not env_configured:
         raise HTTPException(status_code=400, detail="Connector is niet geconfigureerd.")
 
-    result = _run_sync(name, db, current_user)
+    # De sync verwerkt honderdduizenden rijen per DELETE/INSERT en overschrijdt
+    # daarmee de strakke 4s request-timeout. Draai de zware ingest daarom op een
+    # aparte sessie met ruime statement-timeout (zie database.py), niet op de
+    # request-sessie.
+    from database import BackgroundSessionLocal
 
-    # Bijwerken van last_synced_at zodat de UI de laatste sync toont — óók wanneer
-    # de connector alleen via omgevingsvariabelen is geconfigureerd. Zonder dit
-    # bestaat er geen config-rij en zou "laatste sync" altijd "nooit" blijven,
-    # hoe vaak de sync ook succesvol draait. Atomische upsert voorkomt races.
-    if result.get("status") == "ok":
-        touch_last_synced(db, name)
+    sync_db = BackgroundSessionLocal()
+    try:
+        result = _run_sync(name, sync_db, current_user)
+
+        # Bijwerken van last_synced_at zodat de UI de laatste sync toont — óók
+        # wanneer de connector alleen via omgevingsvariabelen is geconfigureerd.
+        # Zonder dit bestaat er geen config-rij en zou "laatste sync" altijd
+        # "nooit" blijven, hoe vaak de sync ook succesvol draait. Atomische
+        # upsert voorkomt races.
+        if result.get("status") == "ok":
+            touch_last_synced(sync_db, name)
+    finally:
+        sync_db.close()
 
     return result
 

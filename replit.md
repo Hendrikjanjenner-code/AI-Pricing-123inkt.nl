@@ -207,15 +207,18 @@ internal web-scraping and **no** Pilot Paper_Copy module.
 
 ## PriceShape feed resilience (auto-sync — "never break")
 
-> **IMPORTANT (current production setup):** the in-app auto-sync is **disabled**
-> via `DISABLE_FEED_SYNC=true` (shared env). The PriceShape feed is ~206 MB of
-> JSON; parsing it in-process (`_fetch_feed` → `json.loads`) balloons to several
-> GB of RAM and OOM-kills the web VM ~45 s after boot (silent SIGKILL, app flaps
-> "not live yet", login fails only because the app is offline). The refresh now
-> runs **out-of-process** as a **Scheduled Deployment** (`scheduled_sync.py`) on a
-> machine with enough RAM (≈4–8 GB). Keep the web VM small; do not re-enable
-> in-app sync unless the ingest is made memory-safe (streaming/ijson + chunked
-> bulk insert). See `.agents/memory/autoscale-scheduled-sync.md`.
+> **IMPORTANT (current production setup):** the in-app auto-sync is **enabled**
+> (`DISABLE_FEED_SYNC=false`, shared env) and runs in-process on the Reserved VM.
+> It was previously disabled because parsing the ~206 MB PriceShape JSON feed
+> in-process (`_fetch_feed` → `json.loads`) ballooned to several GB of RAM and
+> OOM-killed the web VM. That is fixed: the JSON is now parsed **streaming** with
+> `ijson` (`connectors.priceshape_connector.stream_json_records` → normalized
+> one record at a time → chunked bulk insert). Measured peak for the full refresh
+> dropped from ~1.5–2.5 GB to ~1.1 GB (feed parse alone ~0.3 GB), which fits a
+> 2 GB VM; a 4 GB VM leaves comfortable headroom. The feed-format fallback path
+> (`_fetch_feed` + `_parse_content`) is unchanged and used only for non-array /
+> CSV / XML feeds (via `NotStreamable`). See
+> `.agents/memory/autoscale-scheduled-sync.md`.
 
 The PriceShape output feed refreshes automatically so the app always has fresh
 competitor data without manual intervention:
@@ -257,3 +260,5 @@ competitor data without manual intervention:
 - `PORT` — Service port (set by Replit workflow system)
 - `PRICESHAPE_FEED_URL` — PriceShape output-feed URL (Replit secret; enables feed mode)
 - `FEED_SYNC_INTERVAL` / `FEED_SYNC_MAX_RETRIES` / `FEED_SYNC_STARTUP_DELAY` / `DISABLE_FEED_SYNC` — auto-sync tuning (see above)
+- `DB_STATEMENT_TIMEOUT_MS` — per-statement timeout for **request** sessions (default 4000 = 4s, guards user requests)
+- `DB_BACKGROUND_STATEMENT_TIMEOUT_MS` — per-statement timeout for **background** sessions (default 600000 = 10 min). The feed-sync/model-run use a separate `BackgroundSessionLocal` (its own engine/pool) so their bulk DELETE/INSERT of hundreds of thousands of rows don't hit the 4s request guard, and the long timeout never leaks to request connections.

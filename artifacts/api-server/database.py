@@ -24,6 +24,16 @@ DB_CONNECT_TIMEOUT_SECONDS = int(os.environ.get("DB_CONNECT_TIMEOUT_SECONDS", "3
 # this pool.
 DB_STATEMENT_TIMEOUT_MS = int(os.environ.get("DB_STATEMENT_TIMEOUT_MS", "4000"))
 
+# Achtergrondtaken (feed-sync, modelrun) verwerken tienduizenden rijen per
+# DELETE/INSERT. De strakke request-timeout van 4s is daarvoor veel te kort en
+# breekt de sync (zie feed_ingest: per-dag delete van honderdduizenden
+# concurrentprijzen). Deze sessies krijgen daarom een ruime timeout via een
+# APARTE engine/pool, zodat de 4s-bescherming op gebruikersverzoeken intact
+# blijft en de lange timeout NOOIT via een pool-verbinding naar een request lekt.
+DB_BACKGROUND_STATEMENT_TIMEOUT_MS = int(
+    os.environ.get("DB_BACKGROUND_STATEMENT_TIMEOUT_MS", "600000")  # 10 min
+)
+
 # SQLAlchemy uses psycopg2 dialect
 engine = create_engine(
     DATABASE_URL,
@@ -34,7 +44,26 @@ engine = create_engine(
     },
 )
 
+# Aparte engine met ruime statement-timeout, uitsluitend voor achtergrondtaken.
+# Kleine pool: er draait maar één sync tegelijk.
+background_engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=1,
+    max_overflow=2,
+    connect_args={
+        "connect_timeout": DB_CONNECT_TIMEOUT_SECONDS,
+        "options": f"-c statement_timeout={DB_BACKGROUND_STATEMENT_TIMEOUT_MS}",
+    },
+)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Sessiefabriek voor achtergrondtaken (feed-sync/modelrun). Gebruik deze i.p.v.
+# SessionLocal voor bulk-verwerking, zie DB_BACKGROUND_STATEMENT_TIMEOUT_MS.
+BackgroundSessionLocal = sessionmaker(
+    autocommit=False, autoflush=False, bind=background_engine
+)
 
 Base = declarative_base()
 

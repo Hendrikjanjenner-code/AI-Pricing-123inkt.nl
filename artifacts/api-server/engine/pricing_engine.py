@@ -18,6 +18,15 @@ from engine.competitor_strategy_engine import analyseer_alle_concurrenten
 
 MODEL_VERSION = "v1.0.0"
 
+
+def _py(v):
+    """Zet numpy-scalars (numpy 2.x: repr = 'np.float64(...)') om naar native
+    Python-getallen. psycopg2 kent numpy-typen niet en zou ze anders als
+    letterlijke tekst in de SQL zetten ('np.float64(6.49)' → schema-fout)."""
+    if isinstance(v, np.generic):
+        return v.item()
+    return v
+
 # Aantal dagen prijshistorie dat wordt gebruikt om concurrentstrategieën te
 # classificeren voordat de COMPETITOR_INDEX-strategie wordt gedraaid.
 STRATEGY_LOOKBACK_DAYS = 30
@@ -106,13 +115,13 @@ def run_pricing_engine(db: Session) -> tuple[int, int]:
                 "date": today,
                 "sku_id": product.sku_id,
                 "current_price": float(product.current_price) if product.current_price else None,
-                "recommended_price": result["recommended_price"],
-                "recommended_change_pct": result["change_pct"],
-                "expected_units": result.get("expected_units"),
-                "expected_revenue": result.get("expected_revenue"),
-                "expected_margin": result.get("expected_margin"),
-                "expected_margin_uplift": result.get("expected_margin_uplift"),
-                "confidence_score": result["confidence"],
+                "recommended_price": _py(result["recommended_price"]),
+                "recommended_change_pct": _py(result["change_pct"]),
+                "expected_units": _py(result.get("expected_units")),
+                "expected_revenue": _py(result.get("expected_revenue")),
+                "expected_margin": _py(result.get("expected_margin")),
+                "expected_margin_uplift": _py(result.get("expected_margin_uplift")),
+                "confidence_score": _py(result["confidence"]),
                 "reason_code": result["reason_code"],
                 "strategy_type": strategy,
                 "competitor_strategy_signal": result.get("competitor_strategy_signal"),

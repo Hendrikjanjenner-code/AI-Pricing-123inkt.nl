@@ -65,10 +65,12 @@ def _run_sync_once() -> dict | None:
     Voer één PriceShape-sync uit (blokkerend — bedoeld voor asyncio.to_thread).
     Geeft het sync-resultaat terug, of None als PriceShape niet is geconfigureerd.
     """
-    from database import SessionLocal
+    from database import BackgroundSessionLocal
     from routes.connectors import _run_sync, touch_last_synced
 
-    db = SessionLocal()
+    # Ruime statement-timeout: de sync verwerkt honderdduizenden rijen per
+    # DELETE/INSERT, wat de 4s request-timeout ver overschrijdt.
+    db = BackgroundSessionLocal()
     try:
         if not _is_priceshape_configured(db):
             logger.debug("Feed-sync: PriceShape niet geconfigureerd — overgeslagen.")
