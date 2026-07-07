@@ -43,8 +43,6 @@ import CompetitionDiscoveryLog from "@/pages/competition-discovery-log";
 import CompetitionSettings from "@/pages/competition-settings";
 
 // Nieuwe module-pagina's
-import ScrapingConfiguratie from "@/pages/scraping-configuratie";
-import ProductMatching from "@/pages/product-matching";
 import ConcurrentieMonitoring from "@/pages/concurrentie-monitoring";
 import Uitvoering from "@/pages/uitvoering";
 import AuditLogPage from "@/pages/audit-log";
@@ -84,12 +82,9 @@ import ModelDocumentatie from "@/pages/modeldocumentatie";
 
 import Connectoren from "@/pages/connectoren";
 
-// Pilot Paper_Copy
-import PilotPaperCopy from "@/pages/pilot-paper-copy";
-import PaperCopyImport from "@/pages/paper-copy-import";
+// Externe databronnen (DRS / GA4)
 import DrsIntegratie from "@/pages/drs-integratie";
 import Ga4Integratie from "@/pages/ga4-integratie";
-import KostenoverzichtPilot from "@/pages/kostenoverzicht-pilot";
 import PrijsstrategieHerkenning from "@/pages/prijsstrategie-herkenning";
 // Cost Change & Break-even Intelligence Engine
 import KostprijswijzigingDashboard from "@/pages/kostprijswijziging";
@@ -161,6 +156,9 @@ function Router() {
       <Route path="/competition/strategies">
         <ProtectedRoute><CompetitionStrategies /></ProtectedRoute>
       </Route>
+      <Route path="/competition/strategie-herkenning">
+        <ProtectedRoute><PrijsstrategieHerkenning /></ProtectedRoute>
+      </Route>
       <Route path="/competition/management">
         <ProtectedRoute><CompetitionManagement /></ProtectedRoute>
       </Route>
@@ -195,12 +193,6 @@ function Router() {
       </Route>
 
       {/* Nieuwe modules */}
-      <Route path="/scraping">
-        <ProtectedRoute><ScrapingConfiguratie /></ProtectedRoute>
-      </Route>
-      <Route path="/product-matching">
-        <ProtectedRoute><ProductMatching /></ProtectedRoute>
-      </Route>
       <Route path="/monitoring">
         <ProtectedRoute><ConcurrentieMonitoring /></ProtectedRoute>
       </Route>
@@ -385,24 +377,12 @@ function Router() {
         <ProtectedRoute><ModelDocumentatie /></ProtectedRoute>
       </Route>
 
-      {/* Pilot Paper_Copy */}
-      <Route path="/pilot-paper-copy">
-        <ProtectedRoute><PilotPaperCopy /></ProtectedRoute>
-      </Route>
-      <Route path="/paper-copy-import">
-        <ProtectedRoute><PaperCopyImport /></ProtectedRoute>
-      </Route>
+      {/* Externe databronnen (DRS / GA4) */}
       <Route path="/drs-integratie">
         <ProtectedRoute><DrsIntegratie /></ProtectedRoute>
       </Route>
       <Route path="/ga4-integratie">
         <ProtectedRoute><Ga4Integratie /></ProtectedRoute>
-      </Route>
-      <Route path="/kostenoverzicht-pilot">
-        <ProtectedRoute><KostenoverzichtPilot /></ProtectedRoute>
-      </Route>
-      <Route path="/prijsstrategie-herkenning">
-        <ProtectedRoute><PrijsstrategieHerkenning /></ProtectedRoute>
       </Route>
 
       <Route component={NotFound} />

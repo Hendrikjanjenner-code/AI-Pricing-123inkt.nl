@@ -1,110 +1,31 @@
 """
 Competitor Discovery Engine.
 
-Gegeven een lijst DRS-categorieën zoekt deze module potentiële concurrenten
-op basis van bekende webshop-patronen, merk-/categorie-zoekwoorden en
-OEM-codes. Output: lijst {domain, competitor_name, discovery_reason,
-discovery_method, categories, confidence} met status PROPOSED.
+Ontdekt concurrenten uit de PriceShape-feed: elke vendor-domein dat in
+`fact_competitor_price_daily` voorkomt is een echte concurrent die op minstens
+één van onze SKU's een prijs voert. Per domein worden berekend:
 
-In productie zou dit worden aangevuld met externe zoek-API's (Bing/Google
-Shopping). In de pilotomgeving werkt de engine op basis van een curated
-kennisbank van bekende B2B/kantoorartikelen-webshops.
+- op hoeveel eigen SKU's de concurrent een aanbod heeft (SKU-overlap),
+- in welke categorieën die overlap zit (categoriedekking),
+- de gemiddelde prijsindex (onze prijs / concurrentprijs).
+
+Er wordt GEEN vaste kennisbank meer gebruikt; alle kandidaten komen uit de
+echte feed-data. Nieuwe domeinen worden als PROPOSED in
+`competitor_discovery_queue` gezet zodat een analist ze kan goedkeuren.
 """
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, date
+from datetime import datetime
 from typing import Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 import models
 
 
-# ── Kennisbank: bekende concurrenten per categorie ────────────────────────────
-# Dit wordt in productie vervangen door een AI-gestuurd discovery-mechanisme.
-
-KENNISBANK: list[dict] = [
-    {
-        "domain": "staples.nl",
-        "competitor_name": "Staples",
-        "categories": ["Ink & Toner", "Paper", "Office Supplies", "Printers"],
-        "discovery_method": "PATTERN",
-        "confidence": 0.95,
-        "discovery_reason": "Grote kantoorartikelen-retailer met brede SKU-overlap in inkt, papier en kantoorartikelen.",
-    },
-    {
-        "domain": "bol.com",
-        "competitor_name": "Bol.com",
-        "categories": ["Ink & Toner", "Paper", "Office Supplies", "Electronics", "Printers"],
-        "discovery_method": "KEYWORD",
-        "confidence": 0.90,
-        "discovery_reason": "Grootste Nederlandse marketplace met uitgebreid kantoorartikelen-assortiment.",
-    },
-    {
-        "domain": "viking.nl",
-        "competitor_name": "Viking Direct",
-        "categories": ["Ink & Toner", "Paper", "Office Supplies", "Furniture", "Cleaning"],
-        "discovery_method": "CATEGORY",
-        "confidence": 0.92,
-        "discovery_reason": "B2B kantoorartikelen-specialist met directe overlap in ink/toner en kantoorbenodigdheden.",
-    },
-    {
-        "domain": "papierlandschaft.de",
-        "competitor_name": "Papierlandschaft",
-        "categories": ["Paper", "Office Supplies"],
-        "discovery_method": "KEYWORD",
-        "confidence": 0.72,
-        "discovery_reason": "Gespecialiseerde papier-retailer actief in Benelux-grensregio.",
-    },
-    {
-        "domain": "bechtle.com",
-        "competitor_name": "Bechtle",
-        "categories": ["Printers", "Electronics", "Ink & Toner"],
-        "discovery_method": "OEM",
-        "confidence": 0.78,
-        "discovery_reason": "IT-retailer met sterk assortiment printers en OEM-cartridges.",
-    },
-    {
-        "domain": "tonerdump.nl",
-        "competitor_name": "TonerDump",
-        "categories": ["Ink & Toner"],
-        "discovery_method": "OEM",
-        "confidence": 0.88,
-        "discovery_reason": "Gespecialiseerde inkt/toner-retailer met compatible en OEM-assortiment.",
-    },
-    {
-        "domain": "quantore.nl",
-        "competitor_name": "Quantore",
-        "categories": ["Paper", "Office Supplies", "Cleaning"],
-        "discovery_method": "PATTERN",
-        "confidence": 0.85,
-        "discovery_reason": "Groothandel kantoorartikelen — directe concurrent in papier en kantoorbenodigdheden.",
-    },
-    {
-        "domain": "amazon.nl",
-        "competitor_name": "Amazon NL",
-        "categories": ["Ink & Toner", "Paper", "Electronics", "Printers"],
-        "discovery_method": "PATTERN",
-        "confidence": 0.87,
-        "discovery_reason": "Groeiende presence van Amazon in NL markt voor kantooartikelen.",
-    },
-    {
-        "domain": "coolblue.nl",
-        "competitor_name": "Coolblue",
-        "categories": ["Printers", "Electronics"],
-        "discovery_method": "KEYWORD",
-        "confidence": 0.82,
-        "discovery_reason": "Sterk in printers en randapparatuur — directe concurrent in elektronica-segment.",
-    },
-    {
-        "domain": "office1.nl",
-        "competitor_name": "Office1",
-        "categories": ["Ink & Toner", "Paper", "Office Supplies", "Furniture"],
-        "discovery_method": "CATEGORY",
-        "confidence": 0.80,
-        "discovery_reason": "Mid-size kantoorartikelen-webshop met vergelijkbaar productgamma.",
-    },
-]
+def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
+    return max(lo, min(hi, x))
 
 
 def run_discovery(
@@ -113,7 +34,8 @@ def run_discovery(
     min_confidence: float = 0.60,
 ) -> dict:
     """
-    Voer een discovery-run uit en sla resultaten op in competitor_discovery_queue.
+    Voer een discovery-run uit op basis van de PriceShape-feed en sla nieuwe
+    concurrenten op in competitor_discovery_queue.
 
     Returns:
         dict met run_id, candidates_found, candidates_new
@@ -124,25 +46,86 @@ def run_discovery(
         started_at=datetime.utcnow(),
         status="running",
         categories_searched=categories or [],
-        parameters={"min_confidence": min_confidence},
+        parameters={"min_confidence": min_confidence, "source": "priceshape_feed"},
     )
     db.add(run)
     db.flush()
 
-    # Filter kennisbank op gewenste categorieën (of alle)
-    candidates = KENNISBANK if not categories else [
-        c for c in KENNISBANK
-        if any(cat in c["categories"] for cat in categories)
-    ]
+    # Gebruik de meest recente feed-datum als momentopname van het landschap.
+    latest = db.query(func.max(models.FactCompetitorPriceDaily.date)).scalar()
+
+    candidates: list[dict] = []
+    if latest is not None:
+        # Eigen catalogus: categorie + huidige prijs per SKU.
+        products = {
+            p.sku_id: (p.category, float(p.current_price) if p.current_price else None)
+            for p in db.query(
+                models.DimProduct.sku_id,
+                models.DimProduct.category,
+                models.DimProduct.current_price,
+            ).all()
+        }
+        total_skus = max(len(products), 1)
+
+        rows = db.query(
+            models.FactCompetitorPriceDaily.competitor_name,
+            models.FactCompetitorPriceDaily.sku_id,
+            models.FactCompetitorPriceDaily.price,
+        ).filter(models.FactCompetitorPriceDaily.date == latest).all()
+
+        # Aggregeer per concurrent-domein.
+        agg: dict[str, dict] = {}
+        for naam, sku_id, price in rows:
+            if not naam or price is None:
+                continue
+            cat, own_price = products.get(sku_id, (None, None))
+            entry = agg.setdefault(naam, {"skus": set(), "cats": {}, "indices": []})
+            entry["skus"].add(sku_id)
+            if cat:
+                entry["cats"][cat] = entry["cats"].get(cat, 0) + 1
+            if own_price and float(price) > 0:
+                entry["indices"].append(own_price / float(price))
+
+        for naam, entry in agg.items():
+            cats = sorted(entry["cats"], key=lambda c: entry["cats"][c], reverse=True)
+            if categories and not any(c in cats for c in categories):
+                continue
+            sku_count = len(entry["skus"])
+            coverage_ratio = sku_count / total_skus
+            # Volledige zekerheid bij ≥50% catalogusdekking; lineair daaronder.
+            confidence = round(_clamp(coverage_ratio / 0.5), 2)
+            avg_index = (
+                round(sum(entry["indices"]) / len(entry["indices"]), 3)
+                if entry["indices"] else None
+            )
+            positie = ""
+            if avg_index is not None:
+                positie = (
+                    f" gem. prijsindex {avg_index} "
+                    f"({'wij goedkoper' if avg_index < 1 else 'wij duurder'})"
+                )
+            reason = (
+                f"Uit PriceShape-feed: concurreert op {sku_count} SKU's "
+                f"in {len(cats)} categorie(ën).{positie}"
+            )
+            candidates.append({
+                "domain": naam,
+                "competitor_name": naam,
+                "categories": cats,
+                "discovery_method": "FEED",
+                "confidence": confidence,
+                "discovery_reason": reason,
+            })
+
     candidates = [c for c in candidates if c["confidence"] >= min_confidence]
 
-    # Haal bestaande domains op om duplicaten te vermijden
+    # Dedupliceer tegen reeds bekende domeinen in de queue.
     bestaande = {
         q.domain
         for q in db.query(models.CompetitorDiscoveryQueue).filter(
             models.CompetitorDiscoveryQueue.domain.in_([c["domain"] for c in candidates])
         ).all()
-    }
+    } if candidates else set()
 
     nieuw = 0
     for candidate in candidates:

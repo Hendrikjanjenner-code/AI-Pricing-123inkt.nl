@@ -332,3 +332,73 @@ def score_competition(db: Session) -> int:
         db.bulk_insert_mappings(models.SkuCompetitionScore, chunk)
     db.commit()
     return len(score_maps)
+
+
+def build_ai_matches(db: Session) -> int:
+    """
+    Bouw AI-matchresultaten uit de PriceShape-feed van vandaag.
+
+    In de feed is elke concurrent-regel al gekoppeld aan onze SKU via de GTIN
+    (sku_id == GTIN). Dat is per definitie een exacte EAN-match, dus elk
+    vendor-aanbod levert één AiMatchResult van het type "Exact" met
+    confidence 1.0. Bestaande rijen van vandaag worden vervangen zodat de
+    matching de actuele feed weerspiegelt.
+    """
+    today = date.today()
+
+    products = {
+        p.sku_id: p for p in db.query(
+            models.DimProduct.sku_id,
+            models.DimProduct.current_price,
+            models.DimProduct.ean,
+        ).all()
+    }
+
+    rows = db.query(
+        models.FactCompetitorPriceDaily.sku_id,
+        models.FactCompetitorPriceDaily.competitor_name,
+        models.FactCompetitorPriceDaily.price,
+        models.FactCompetitorPriceDaily.url,
+    ).filter(models.FactCompetitorPriceDaily.date == today).all()
+
+    db.query(models.AiMatchResult).filter(
+        models.AiMatchResult.run_date == today
+    ).delete(synchronize_session=False)
+
+    matches: list[dict] = []
+    for sku_id, naam, price, url in rows:
+        if not naam or price is None:
+            continue
+        prod = products.get(sku_id)
+        own = float(prod.current_price) if prod and prod.current_price else None
+        comp = float(price)
+        diff_pct = round((own - comp) / comp * 100, 2) if own and comp > 0 else None
+        ean = prod.ean if prod else None
+        matches.append({
+            "own_sku_id": sku_id,
+            "competitor_name": naam,
+            "competitor_sku": ean,
+            "competitor_url": url,
+            "match_type": "Exact",
+            "confidence": 1.0,
+            "explanation_nl": (
+                f"Exacte GTIN-match uit de PriceShape-feed: aanbod van {naam} "
+                f"is gekoppeld op EAN {ean or sku_id}."
+            ),
+            "ean_match": True,
+            "mpn_match": False,
+            "oem_match": False,
+            "brand_match": False,
+            "product_type_match": True,
+            "price_segment_match": True,
+            "competitor_price": comp,
+            "own_price": own,
+            "price_diff_pct": diff_pct,
+            "status": "PENDING",
+            "run_date": today,
+        })
+
+    for chunk in _chunks(matches):
+        db.bulk_insert_mappings(models.AiMatchResult, chunk)
+    db.commit()
+    return len(matches)

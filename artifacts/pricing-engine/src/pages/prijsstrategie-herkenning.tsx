@@ -107,6 +107,18 @@ export default function PrijsstrategieHerkenning() {
         </Card>
       )}
 
+      {!laden && data?.low_history && (
+        <Card className="border-amber-200 bg-amber-50/60">
+          <CardContent className="pt-6 flex items-start gap-2 text-amber-700">
+            <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+            <span className="text-sm">
+              {data.history_notice ||
+                "Beperkte prijshistorie beschikbaar — de herkende strategieën zijn indicatief en worden betrouwbaarder naarmate meer concurrentprijs-historie is opgebouwd."}
+            </span>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>Concurrentenclassificatie</CardTitle>

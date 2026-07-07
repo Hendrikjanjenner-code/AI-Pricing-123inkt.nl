@@ -342,7 +342,7 @@ def trigger_discovery_run(
     categories: Optional[list[str]] = None,
     min_confidence: float = Query(0.60, ge=0.0, le=1.0),
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth_utils.get_current_user),
+    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
     """Start een nieuwe discovery-run (synchronous voor de pilot)."""
     from engine.competitor_discovery import run_discovery
@@ -354,7 +354,7 @@ def trigger_discovery_run(
 def approve_discovery_item(
     item_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth_utils.get_current_user),
+    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
     item = db.query(models.CompetitorDiscoveryQueue).filter(
         models.CompetitorDiscoveryQueue.id == item_id
@@ -373,7 +373,7 @@ def approve_discovery_item(
 def reject_discovery_item(
     item_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth_utils.get_current_user),
+    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
     item = db.query(models.CompetitorDiscoveryQueue).filter(
         models.CompetitorDiscoveryQueue.id == item_id
@@ -567,7 +567,7 @@ def list_ai_matches(
 def approve_match(
     match_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth_utils.get_current_user),
+    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
     match = db.query(models.AiMatchResult).filter(models.AiMatchResult.id == match_id).first()
     if not match:
@@ -584,7 +584,7 @@ def approve_match(
 def reject_match(
     match_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth_utils.get_current_user),
+    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
     match = db.query(models.AiMatchResult).filter(models.AiMatchResult.id == match_id).first()
     if not match:
@@ -635,35 +635,11 @@ def get_competitor_strategies(
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     """
-    Retourneert de meest recente strategie per concurrent uit de database
-    (backfill of live run). Valt terug op real-time berekening als er geen data is.
+    Herkent per concurrent de prijsstrategie uit de ECHTE concurrentprijs-
+    historie in de PriceShape-feed (fact_competitor_price_daily). Betrouwbare
+    herkenning vereist meerdere dagen historie; bij te weinig historie wordt een
+    waarschuwing meegegeven (`low_history`).
     """
-    # Probeer eerst de opgeslagen resultaten
-    stored = (
-        db.query(models.CompetitorStrategyResult)
-        .order_by(
-            models.CompetitorStrategyResult.competitor_name,
-            models.CompetitorStrategyResult.run_date.desc(),
-        )
-        .all()
-    )
-
-    # Deduplicate — één per competitor
-    seen: dict = {}
-    for s in stored:
-        if s.competitor_name not in seen:
-            seen[s.competitor_name] = _strategy_out(s)
-
-    if seen:
-        return {
-            "strategieen": list(seen.values()),
-            "periode": f"Opgeslagen data (meest recente per concurrent)",
-            "lookback_days": lookback_days,
-            "totaal_concurrenten": len(seen),
-            "source": "stored",
-        }
-
-    # Fallback: live berekening
     from engine.competitor_strategy_engine import analyseer_alle_concurrenten
     since = date.today() - timedelta(days=lookback_days)
     rijen = (
@@ -683,16 +659,43 @@ def get_competitor_strategies(
         prijsdata.setdefault(naam, []).append((r.date, float(r.price)))
 
     if not prijsdata:
-        return {"strategieen": [], "periode": "Geen data", "lookback_days": lookback_days}
+        return {
+            "strategieen": [],
+            "periode": "Geen concurrentprijs-historie",
+            "lookback_days": lookback_days,
+            "totaal_concurrenten": 0,
+            "source": "feed",
+            "low_history": True,
+            "history_notice": (
+                "Er is nog geen concurrentprijs-historie uit de PriceShape-feed. "
+                "Synchroniseer de feed en draai een modelrun om strategie-herkenning "
+                "op te bouwen."
+            ),
+        }
+
+    # Historiediepte = grootste aantal unieke datums over alle concurrenten.
+    max_dagen = max(len({d for d, _ in reeks}) for reeks in prijsdata.values())
+    # Betrouwbare classificatie vereist minstens ~5 datapunten (zie engine).
+    MIN_DAGEN = 5
+    low_history = max_dagen < MIN_DAGEN
 
     resultaten = analyseer_alle_concurrenten(prijsdata)
-    return {
+    out = {
         "strategieen": resultaten,
         "periode": f"{since.isoformat()} – {date.today().isoformat()}",
         "lookback_days": lookback_days,
         "totaal_concurrenten": len(resultaten),
-        "source": "live",
+        "source": "feed",
+        "history_days": max_dagen,
+        "low_history": low_history,
     }
+    if low_history:
+        out["history_notice"] = (
+            f"Beperkte historie: slechts {max_dagen} dag(en) concurrentprijs-data "
+            f"beschikbaar (aanbevolen ≥ {MIN_DAGEN}). De herkende strategieën zijn "
+            "indicatief en worden betrouwbaarder naarmate de feed langer draait."
+        )
+    return out
 
 
 # ── NIEUW: Management Intelligence ────────────────────────────────────────────

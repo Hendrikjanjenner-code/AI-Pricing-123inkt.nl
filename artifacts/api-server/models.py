@@ -425,10 +425,12 @@ class InternalCompetitionScore(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
-# ─── Module 1: Scraping ─────────────────────────────────────────────────────
+# ─── Concurrentenregister ────────────────────────────────────────────────────
+# PriceShape is de externe prijsbron; interne scraping is verwijderd. Het
+# concurrentenregister blijft bestaan voor competition-intelligence.
 
 class DimCompetitor(Base):
-    """Geconfigureerde concurrenten voor de scraping engine."""
+    """Concurrentenregister (gevoed vanuit de PriceShape-feed / handmatig)."""
     __tablename__ = "dim_competitor"
 
     competitor_id = Column(Integer, primary_key=True, index=True)
@@ -437,69 +439,8 @@ class DimCompetitor(Base):
     competitor_type = Column(String(50), default="online")
     default_relevance_score = Column(Float, default=0.5)
     channel_relevance = Column(JSON)
-    scraping_enabled = Column(Boolean, default=True)
     active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-
-
-class ScrapeSchedule(Base):
-    """Dagelijkse scrape-tijdsloten (standaard 3× per dag: 08:00, 13:00, 18:00)."""
-    __tablename__ = "scrape_schedule"
-
-    id = Column(Integer, primary_key=True, index=True)
-    time_slot = Column(String(5), nullable=False, unique=True)  # HH:MM
-    label = Column(String(100))
-    active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-
-class CompetitorScrapeConfig(Base):
-    """CSS-selector configuratie voor een concurrent-pagina."""
-    __tablename__ = "competitor_scrape_config"
-
-    config_id = Column(Integer, primary_key=True, index=True)
-    competitor_id = Column(Integer, ForeignKey("dim_competitor.competitor_id"), nullable=False)
-    page_type = Column(String(50), default="product")
-    url_pattern = Column(Text)
-    title_selector = Column(String(500))
-    price_selector = Column(String(500))
-    stock_selector = Column(String(500))
-    delivery_selector = Column(String(500))
-    ean_selector = Column(String(500))
-    mpn_selector = Column(String(500))
-    pack_size_selector = Column(String(500))
-    scrape_method = Column(String(50), default="requests")
-    requests_per_minute = Column(Integer, default=10)
-    active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-
-class FactScrapeResult(Base):
-    """Ruwe scrape-uitkomst per product-URL."""
-    __tablename__ = "fact_scrape_result"
-
-    scrape_id = Column(Integer, primary_key=True, index=True)
-    competitor_id = Column(Integer, ForeignKey("dim_competitor.competitor_id"), nullable=False, index=True)
-    product_url = Column(Text)
-    scraped_at = Column(DateTime, default=datetime.utcnow, index=True)
-    scrape_status = Column(String(50))
-    product_title = Column(String(1000))
-    brand = Column(String(255))
-    ean = Column(String(50))
-    mpn = Column(String(100))
-    price_inc_vat = Column(Numeric(10, 4))
-    shipping_cost = Column(Numeric(10, 4))
-    total_price_inc_vat = Column(Numeric(10, 4))
-    stock_status = Column(String(100))
-    delivery_text = Column(String(500))
-    delivery_days = Column(Integer)
-    pack_size = Column(String(100))
-    unit_quantity = Column(Float)
-    seller_name = Column(String(255))
-    raw_html_hash = Column(String(64))
-    error_message = Column(Text)
-    triggered_by = Column(String(20), default="manual", index=True)  # manual | scheduled
 
 
 class FactCompetitorOfferDaily(Base):

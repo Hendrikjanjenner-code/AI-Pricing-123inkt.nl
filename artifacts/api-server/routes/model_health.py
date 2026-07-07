@@ -98,6 +98,7 @@ def trigger_model_run(
         # naar de except-tak zodat de run als 'failed' met foutmelding wordt gemarkeerd.
         import feed_ingest
         feed_ingest.score_competition(db)
+        feed_ingest.build_ai_matches(db)
         run.status = "completed"
         run.completed_at = datetime.utcnow()
         run.skus_processed = processed

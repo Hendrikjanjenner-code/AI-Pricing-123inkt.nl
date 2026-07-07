@@ -28,22 +28,21 @@ from routes import (
     traffic, search_demand,
     cost, procurement, economic, reporting, bcg_transitions,
     category_hierarchy, break_even, ecosystem, explainability,
-    admin, pilot, connectors,
+    admin, connectors,
 )
 
-# Optional modules (DRS import, PriceShape import, competitor scraping, AI
-# product matching, XLS/XLSX import) are imported individually, each in its
-# own try/except. An import-time failure in one of them (e.g. a missing
-# optional dependency) only disables that module — it can never crash the
-# whole backend process and therefore can never block login/dashboard
-# startup. This is intentionally done at import time (before router
-# registration) since a bad top-level `from routes import (...)` for any of
-# these names would otherwise abort the entire module load.
+# Optional modules (DRS import, PriceShape feed import) are imported
+# individually, each in its own try/except. An import-time failure in one of
+# them (e.g. a missing optional dependency) only disables that module — it can
+# never crash the whole backend process and therefore can never block
+# login/dashboard startup. This is intentionally done at import time (before
+# router registration) since a bad top-level `from routes import (...)` for any
+# of these names would otherwise abort the entire module load.
 import importlib
 
 disabled_optional_routers: set[str] = set()
 _optional_router_modules: dict[str, object] = {}
-for _mod_name in ("scraping", "matching", "drs", "paper_copy", "priceshape"):
+for _mod_name in ("drs", "priceshape"):
     try:
         _optional_router_modules[_mod_name] = importlib.import_module(f"routes.{_mod_name}")
     except Exception as exc:
@@ -94,16 +93,6 @@ async def lifespan(app: FastAPI):
         from auth import create_default_admin_if_missing
         create_default_admin_if_missing()
 
-        # 3b. Controleer scraping-dependencies en log een duidelijke waarschuwing
-        from services.scraping_engine import check_scraping_dependencies
-        _scrape_deps = check_scraping_dependencies()
-        if not _scrape_deps["ok"]:
-            logger.warning(
-                "Scraping-dependencies ontbreken: %s", _scrape_deps["message"]
-            )
-        else:
-            logger.info("Startup: scraping dependencies present.")
-
         # 4. Only seed demo product/price/sales data when explicitly requested
         if os.environ.get("SEED_DEMO_DATA", "false").lower() in ("1", "true", "yes"):
             seed_database()
@@ -111,16 +100,7 @@ async def lifespan(app: FastAPI):
 
         logger.info("Startup: routes loaded (%d routers registered).", len(app.routes))
 
-        # 5. Start de achtergrond-scheduler die scrapes automatisch volgens rooster draait
-        scheduler_task = None
-        if os.environ.get("DISABLE_SCRAPE_SCHEDULER", "false").lower() not in ("1", "true", "yes"):
-            from services.scrape_scheduler import start_scheduler
-            scheduler_task = start_scheduler()
-            logger.info("Startup: scrape scheduler started.")
-        else:
-            logger.info("Startup: scrape scheduler disabled via DISABLE_SCRAPE_SCHEDULER.")
-
-        # 5b. Start de connector-gezondheidsmonitor die databronnen bewaakt en
+        # 5. Start de connector-gezondheidsmonitor die databronnen bewaakt en
         # analisten per e-mail/webhook waarschuwt zodra een bron uitvalt.
         health_monitor_task = None
         if os.environ.get("DISABLE_HEALTH_MONITOR", "false").lower() not in ("1", "true", "yes"):
@@ -143,7 +123,6 @@ async def lifespan(app: FastAPI):
         if startup_state["database_status"] == "unknown":
             startup_state["database_status"] = "error"
         logger.error("Startup FAILED: %s\n%s", exc, traceback.format_exc())
-        scheduler_task = None
         health_monitor_task = None
         # Re-raise so the process doesn't silently pretend to be healthy —
         # but the error is now captured in startup_state for diagnostics.
@@ -151,7 +130,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        for _bg_task in (scheduler_task, health_monitor_task):
+        for _bg_task in (health_monitor_task,):
             if _bg_task is not None:
                 _bg_task.cancel()
                 try:
@@ -242,15 +221,8 @@ def _build_health_payload() -> dict:
     # overall status. Each check is isolated so one broken optional module
     # can't take down /api/health itself.
     optional_modules: dict = {}
-    try:
-        from services.scraping_engine import check_scraping_dependencies
-        optional_modules["scraping"] = check_scraping_dependencies()
-    except Exception as exc:
-        optional_modules["scraping"] = {"ok": False, "message": str(exc)}
     optional_modules["drs"] = {"ok": "drs" not in disabled_optional_routers}
     optional_modules["priceshape"] = {"ok": "priceshape" not in disabled_optional_routers}
-    optional_modules["ai_matching"] = {"ok": "matching" not in disabled_optional_routers}
-    optional_modules["xls_import"] = {"ok": "paper_copy" not in disabled_optional_routers}
 
     return {
         "status": "ok" if startup_state["backend_status"] == "running" and database_status == "connected" else "degraded",
@@ -313,7 +285,6 @@ app.include_router(break_even.router)
 app.include_router(ecosystem.router)
 app.include_router(explainability.router)
 app.include_router(admin.router)
-app.include_router(pilot.router)
 app.include_router(connectors.router)
 
 # Register whichever optional modules imported successfully above. Modules

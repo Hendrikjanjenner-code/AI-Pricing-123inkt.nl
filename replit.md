@@ -149,7 +149,7 @@ Run the single bundled command to populate all demo data tables in the correct o
 python artifacts/api-server/backfill_all.py
 ```
 
-This runs all 8 backfill scripts sequentially, each idempotent (already-filled tables are skipped):
+This runs the backfill scripts sequentially, each idempotent (already-filled tables are skipped):
 
 | # | Script | Data |
 |---|--------|------|
@@ -157,12 +157,35 @@ This runs all 8 backfill scripts sequentially, each idempotent (already-filled t
 | 2 | `backfill_category_hierarchy` | Categorieënhiërarchie |
 | 3 | `backfill_bcg` | BCG-classificaties |
 | 4 | `backfill_traffic` | Traffic & zoekvolume |
-| 5 | `backfill_modules` | Concurrenten, scrape-config, uitvoerbatches |
-| 6 | `backfill_intelligence` | Kosten, marketing, OCS, inkoop, economie, BCG-transities |
-| 7 | `backfill_break_even` | Kostprijswijziging & break-even analyse |
-| 8 | `backfill_ecosystem` | Traffic driver & mandjeintelligentie |
+| 5 | `backfill_intelligence` | Kosten, marketing, OCS, inkoop, economie, BCG-transities |
+| 6 | `backfill_break_even` | Kostprijswijziging & break-even analyse |
+| 7 | `backfill_ecosystem` | Traffic driver & mandjeintelligentie |
 
 The individual scripts can still be run standalone if you only need to refresh one table group.
+`backfill_modules` (scraping/pilot config) was removed in the PriceShape-only refactor.
+
+## PriceShape-only refactor (no internal scraping)
+
+The platform relies exclusively on the PriceShape competitor feed — there is **no**
+internal web-scraping and **no** Pilot Paper_Copy module.
+
+- Removed backend: all scraping routes/services, pilot & paper-copy routes/services,
+  the standalone AI-matching engine, `backfill_modules.py`, and the
+  `ScrapeSchedule` / `CompetitorScrapeConfig` / `FactScrapeResult` models.
+- **Concurrent Discovery** (`engine/competitor_discovery.py`) derives competitors
+  from real `FactCompetitorPriceDaily` feed rows (SKU overlap, category coverage,
+  avg price_index), `discovery_method="FEED"`. No KENNISBANK seed list.
+- **AI Matching** is populated from the real feed by GTIN/EAN
+  (`feed_ingest.build_ai_matches`), wired into the model run after competition scoring.
+- **Prijsstrategie-herkenning** now lives under Competition at
+  `/competition/strategie-herkenning`, computed live from competitor price history
+  (`GET /api/competition/strategies`) with a `low_history` flag + `history_notice`
+  when < 5 days of history exist.
+- **Honest empty states**: Traffic, Basket/Mandje, Economic, and (sales-based)
+  Elasticity pages render `components/ExterneDatabronVereist` — they show **no**
+  synthetic data and instead point to DRS/GA4 integration. The old synthetic
+  backfills for these tables may still run, but these pages never present them.
+  DRS/GA4 integration pages live under the "Externe databronnen" sidebar group.
 
 ## Gotchas
 
@@ -170,6 +193,7 @@ The individual scripts can still be run standalone if you only need to refresh o
   Run `python artifacts/api-server/backfill_all.py` to initialise all demo data at once.
   Add new backfill scripts to the `STEPS` list in `backfill_all.py` to keep it complete.
 - New pages (competition, ab-tests) use direct `fetch()` with Bearer token, not generated hooks.
+- Login endpoint is `POST /api/auth/login` and returns `{ user, token }` (field is `token`, not `access_token`).
 
 ## Environment Variables
 

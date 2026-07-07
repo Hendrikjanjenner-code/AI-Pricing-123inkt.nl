@@ -160,7 +160,7 @@ def send_connector_alert(
         f"Vorige status : {prev}\n"
         f"Details       : {message}\n\n"
         f"Deze melding is automatisch gegenereerd door de "
-        f"connector-gezondheidsmonitor. Log in op het Pilot-dashboard om de "
+        f"connector-gezondheidsmonitor. Log in op het dashboard om de "
         f"connector te controleren.\n"
     )
     payload = {

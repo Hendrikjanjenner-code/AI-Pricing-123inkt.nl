@@ -13,10 +13,9 @@ Volgorde (op basis van data-afhankelijkheden):
   2. backfill_category_hierarchy — categorieënhiërarchie (vereist dim_product)
   3. backfill_bcg               — BCG-classificaties (vereist dim_product)
   4. backfill_traffic           — traffic & zoekvolume
-  5. backfill_modules           — concurrenten, scrape-config, uitvoerbatches
-  6. backfill_intelligence      — kosten, marketing, OCS, inkoop, economie, BCG-transities
-  7. backfill_break_even        — kostprijswijziging & break-even (PPFS leest BCG-data)
-  8. backfill_ecosystem         — traffic driver & mandjeintelligentie
+  5. backfill_intelligence      — kosten, marketing, OCS, inkoop, economie, BCG-transities
+  6. backfill_break_even        — kostprijswijziging & break-even (PPFS leest BCG-data)
+  7. backfill_ecosystem         — traffic driver & mandjeintelligentie
 """
 import subprocess
 import sys
@@ -30,12 +29,10 @@ STEPS = [
     ("backfill_category_hierarchy", "Categorieënhiërarchie"),
     ("backfill_bcg",                "BCG-classificaties"),
     ("backfill_traffic",            "Traffic & zoekvolume"),
-    ("backfill_modules",            "Concurrenten, scrape-config, uitvoerbatches"),
     ("backfill_intelligence",       "Kosten, marketing, OCS, inkoop, economie, BCG-transities"),
     ("backfill_break_even",         "Kostprijswijziging & break-even analyse"),
     ("backfill_ecosystem",          "Traffic driver & mandjeintelligentie"),
-    ("backfill_paper_copy",         "Paper_Copy pilot SKU's, concurrentieprijzen & KPI-data"),
-    ("backfill_competition_engine", "Competition Intelligence Engine 2.0 — discovery, profielen, categoryscores, matching, strategieën"),
+    ("backfill_competition_engine", "Competition Intelligence Engine 2.0 — profielen, categoryscores, strategieën"),
 ]
 
 

@@ -75,6 +75,7 @@ const navGroepen = [
       { href: "/competition/ai-matching",    label: "AI Matching",           icon: BrainCircuit },
       { href: "/competition/assortment-gap", label: "Assortiment Gap",       icon: PackageSearch },
       { href: "/competition/strategies",     label: "Strategie Analyse",     icon: Radar },
+      { href: "/competition/strategie-herkenning", label: "Prijsstrategie-herkenning", icon: Target },
       { href: "/competition/management",     label: "Management Intel",      icon: Puzzle },
       { href: "/competition/discovery-log",  label: "Discovery Log",         icon: GitMerge },
       { href: "/competition/settings",       label: "CI Instellingen",       icon: Settings },
@@ -92,8 +93,6 @@ const navGroepen = [
   {
     label: "Dataverzameling",
     items: [
-      { href: "/scraping",         label: "Scraping Configuratie",  icon: Globe },
-      { href: "/product-matching", label: "Product Matching",        icon: Link2 },
       { href: "/monitoring",       label: "Concurrentie Monitoring", icon: Bell },
     ],
   },
@@ -195,15 +194,10 @@ const navGroepen = [
     ],
   },
   {
-    label: "Pilot Paper_Copy",
+    label: "Externe databronnen",
     items: [
-      { href: "/pilot-paper-copy",          label: "Pilot Dashboard",          icon: FlaskConical },
-      { href: "/paper-copy-import",         label: "DRS Product Import",        icon: FileText },
-      { href: "/scraping",                  label: "Scraping Configuratie",     icon: Globe },
       { href: "/drs-integratie",            label: "DRS Integratie",            icon: Database },
       { href: "/ga4-integratie",            label: "GA4 Integratie",            icon: TrendingUp },
-      { href: "/prijsstrategie-herkenning", label: "Prijsstrategie-herkenning", icon: Target },
-      { href: "/kostenoverzicht-pilot",     label: "Kostenoverzicht Pilot",     icon: Calculator },
     ],
   },
 ];
