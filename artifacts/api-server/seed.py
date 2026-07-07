@@ -148,6 +148,10 @@ def ensure_owner_admin():
         db.commit()
     except Exception:
         db.rollback()
+        import logging
+        logging.getLogger("uvicorn.error").exception(
+            "ensure_owner_admin: failed to create/update owner admin account"
+        )
     finally:
         db.close()
 
