@@ -4,6 +4,7 @@ Creates a realistic dataset of products, categories, sales, prices,
 competitor prices, inventory, substitutions, and pricing recommendations.
 Only runs if the database is empty.
 """
+import os
 import random
 from datetime import date, timedelta, datetime
 from sqlalchemy.orm import Session
@@ -98,6 +99,52 @@ def seed_users_only():
                         hashed_password=auth_utils.hash_password("viewer123"), role="viewer", is_active=True),
         ]
         db.add_all(users)
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+def ensure_owner_admin():
+    """
+    Idempotently create/update a real admin account from environment config.
+
+    Reads OWNER_ADMIN_EMAIL (plain env) and OWNER_ADMIN_PASSWORD (secret).
+    Runs on every startup so the account exists in whatever environment has the
+    config set (dev and production). Secrets are global, so the same password is
+    available in production after a redeploy. The plaintext password is never
+    stored in source. No-op when either value is missing. Never deletes data.
+    Login is by username, so username is set to the email address.
+    """
+    email = os.environ.get("OWNER_ADMIN_EMAIL", "").strip()
+    password = os.environ.get("OWNER_ADMIN_PASSWORD", "")
+    if not email or not password:
+        return
+    db = SessionLocal()
+    try:
+        user = (
+            db.query(models.User)
+            .filter((models.User.username == email) | (models.User.email == email))
+            .first()
+        )
+        if user is not None:
+            user.username = email
+            user.email = email
+            user.hashed_password = auth_utils.hash_password(password)
+            user.role = "admin"
+            user.is_active = True
+        else:
+            db.add(
+                models.User(
+                    username=email,
+                    email=email,
+                    full_name=email.split("@")[0],
+                    hashed_password=auth_utils.hash_password(password),
+                    role="admin",
+                    is_active=True,
+                )
+            )
         db.commit()
     except Exception:
         db.rollback()

@@ -57,3 +57,8 @@ externalPort = 3000
 [[ports]]
 localPort = 25459
 externalPort = 5173
+
+[userenv]
+
+[userenv.shared]
+OWNER_ADMIN_EMAIL = "hjenner@123inkt.nl"

@@ -93,6 +93,13 @@ async def lifespan(app: FastAPI):
         from auth import create_default_admin_if_missing
         create_default_admin_if_missing()
 
+        # 3b. Idempotently ensure the configured real owner admin account exists
+        # (OWNER_ADMIN_EMAIL + OWNER_ADMIN_PASSWORD). No-op when unset; runs in
+        # dev and production so the same login works on the published app.
+        from seed import ensure_owner_admin
+        ensure_owner_admin()
+        logger.info("Startup: owner admin account ensured (if configured).")
+
         # 4. Only seed demo product/price/sales data when explicitly requested
         if os.environ.get("SEED_DEMO_DATA", "false").lower() in ("1", "true", "yes"):
             seed_database()
