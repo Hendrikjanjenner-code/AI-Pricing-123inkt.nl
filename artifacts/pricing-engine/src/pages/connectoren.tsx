@@ -109,6 +109,11 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
 
   const displayStatus: ConnStatus | null = connector.live_status ?? connector.last_test_status;
 
+  // De backend kan fields_filled als null teruggeven (bijv. een env-geconfigureerde
+  // connector waarvan de config-rij geen opgeslagen credentials heeft). Normaliseer
+  // altijd naar een array zodat .includes()/.map()/.length nooit crashen.
+  const fieldsFilled = connector.fields_filled ?? [];
+
   const handleInput = (key: string, value: string) => {
     setFormValues((v) => ({ ...v, [key]: value }));
     setTestResult(null);
@@ -117,9 +122,9 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
   // Modus-ondersteuning: connectors met een "mode"-veld tonen een keuze en
   // filteren hun velden op de gekozen modus.
   const modeField = connector.fields.find((f) => f.key === "mode");
-  const storedMode = connector.fields_filled.includes("feed_url")
+  const storedMode = fieldsFilled.includes("feed_url")
     ? "feed"
-    : connector.fields_filled.includes("api_url") || connector.fields_filled.includes("api_key")
+    : fieldsFilled.includes("api_url") || fieldsFilled.includes("api_key")
     ? "rest"
     : modeField?.default ?? "rest";
   const currentMode = formValues.mode ?? storedMode;
@@ -136,7 +141,7 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
     .every(
       (f) =>
         (formValues[f.key] ?? "").trim() !== "" ||
-        connector.fields_filled.includes(f.key)
+        fieldsFilled.includes(f.key)
     );
 
   const handleTest = async () => {
@@ -279,10 +284,10 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
                 {connector.configured_by}
               </div>
             )}
-            {connector.fields_filled.length > 0 && (
+            {fieldsFilled.length > 0 && (
               <div>
                 <span className="font-medium">Velden:</span>{" "}
-                {connector.fields_filled.map((k) => (
+                {fieldsFilled.map((k) => (
                   <span key={k} className="inline-flex items-center gap-1 mr-1">
                     <span className="font-mono bg-muted px-1 rounded">
                       {k}
@@ -414,7 +419,7 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
                         id={`${connector.name}-${field.key}`}
                         type={field.secret && !showSecrets[field.key] ? "password" : "text"}
                         placeholder={
-                          isConfigured && connector.fields_filled.includes(field.key)
+                          isConfigured && fieldsFilled.includes(field.key)
                             ? "••••• geconfigureerd (leeg laten om te behouden)"
                             : field.placeholder
                         }
