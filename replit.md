@@ -121,7 +121,7 @@ pnpm run typecheck
 - `sku_competition_score` — 26 PCIS scores (backfilled via backfill_new_tables.py)
 - `ab_tests`, `ab_test_results` — 1 test · 26 SKU results (13 AI / 13 CONTROL)
 - `model_runs`, `import_jobs`, `audit_log`
-- `schema_migrations` — audit trail of columns auto-added by `migrate.py` (change_key, table, column, ddl, applied_at)
+- `schema_migrations` — audit trail of schema changes applied by `migrate.py`: columns auto-added (`change_type="add_column"`) and deliberate manual drops (`change_type="drop_column"`, e.g. the removed `dim_competitor.scraping_enabled`)
 
 ## Frontend Pages (15)
 
@@ -172,6 +172,14 @@ internal web-scraping and **no** Pilot Paper_Copy module.
 - Removed backend: all scraping routes/services, pilot & paper-copy routes/services,
   the standalone AI-matching engine, `backfill_modules.py`, and the
   `ScrapeSchedule` / `CompetitorScrapeConfig` / `FactScrapeResult` models.
+- The orphan `dim_competitor.scraping_enabled` column (left behind by the refactor)
+  is dropped by a deliberate manual migration listed in `migrate.py`
+  (`MANUAL_COLUMN_DROPS`), recorded in `schema_migrations` with
+  `change_type="drop_column"`. Add future data-discarding drops to that list.
+- `FactCompetitorOfferDaily` and `ProductMatch` are **kept** (see KEEP comments in
+  `models.py`): `FactCompetitorOfferDaily` is still read by the monitoring routes;
+  `ProductMatch` is the AI-match approval table reserved for the bulk-approve
+  workflow. Neither is scraping-specific despite the removal of scraping.
 - **Concurrent Discovery** (`engine/competitor_discovery.py`) derives competitors
   from real `FactCompetitorPriceDaily` feed rows (SKU overlap, category coverage,
   avg price_index), `discovery_method="FEED"`. No KENNISBANK seed list.

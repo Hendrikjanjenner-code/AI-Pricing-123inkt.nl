@@ -40,6 +40,23 @@ from sqlalchemy.dialects import postgresql as pg_dialect
 logger = logging.getLogger("uvicorn.error")
 
 
+# Deliberate, data-DISCARDING column drops. The additive-only migrator never
+# removes columns on its own (see module docstring), so a column removed from
+# models.py lingers in the live DB as an "orphan" and triggers a startup
+# WARNING on every boot. Listing that (table, column) here performs the drop
+# exactly once, idempotently (DROP COLUMN IF EXISTS), and records it in
+# schema_migrations so the deliberate data loss is captured in the audit trail.
+#
+# Only add a column here when its data is genuinely disposable. To PRESERVE
+# data across a rename, use ALTER TABLE ... RENAME COLUMN instead — never list
+# it here.
+MANUAL_COLUMN_DROPS = [
+    # Removed with the PriceShape-only refactor (no internal web-scraping):
+    # the competitor register is no longer scraped, so this flag is obsolete.
+    ("dim_competitor", "scraping_enabled"),
+]
+
+
 def _pg_type(column) -> str:
     """Return the PostgreSQL DDL type string for a SQLAlchemy column."""
     try:
@@ -112,10 +129,12 @@ def _load_applied_keys(engine) -> set:
         return set()
 
 
-def _record_migration(conn, change_key, table_name, column_name, ddl) -> None:
+def _record_migration(
+    conn, change_key, table_name, column_name, ddl, change_type="add_column"
+) -> None:
     """
-    Insert one audit-trail row into schema_migrations for a column that was just
-    added. Uses ON CONFLICT DO NOTHING so a re-run never duplicates a change.
+    Insert one audit-trail row into schema_migrations for a change that was just
+    applied. Uses ON CONFLICT DO NOTHING so a re-run never duplicates a change.
     Recording failures are logged but never abort the migration itself.
     """
     try:
@@ -128,7 +147,7 @@ def _record_migration(conn, change_key, table_name, column_name, ddl) -> None:
             ),
             {
                 "change_key": change_key,
-                "change_type": "add_column",
+                "change_type": change_type,
                 "table_name": table_name,
                 "column_name": column_name,
                 "ddl": ddl,
@@ -144,6 +163,73 @@ def _record_migration(conn, change_key, table_name, column_name, ddl) -> None:
         )
 
 
+def _apply_manual_column_drops(engine, applied_keys) -> int:
+    """
+    Apply the deliberate, data-discarding column drops declared in
+    MANUAL_COLUMN_DROPS. Each drop runs at most once (guarded by its
+    schema_migrations change_key) and uses DROP COLUMN IF EXISTS so it is safe
+    on a fresh DB where the column never existed. Recorded in schema_migrations
+    with change_type="drop_column".
+
+    Returns the number of columns actually dropped this run.
+    """
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    dropped = 0
+
+    with engine.connect() as conn:
+        for table_name, column_name in MANUAL_COLUMN_DROPS:
+            change_key = f"drop:{table_name}.{column_name}"
+            if change_key in applied_keys:
+                continue
+            if table_name not in existing_tables:
+                # Table not created yet — nothing to drop, and create_all() will
+                # build it fresh (without the removed column) anyway.
+                continue
+
+            live_cols = {c["name"] for c in inspector.get_columns(table_name)}
+            ddl = (
+                f'ALTER TABLE "{table_name}" '
+                f'DROP COLUMN IF EXISTS "{column_name}"'
+            )
+
+            if column_name not in live_cols:
+                # Fresh DB (or already dropped out-of-band): record the change so
+                # the audit trail is complete, but skip the no-op DDL.
+                _record_migration(
+                    conn, change_key, table_name, column_name, ddl,
+                    change_type="drop_column",
+                )
+                applied_keys.add(change_key)
+                continue
+
+            try:
+                conn.execute(text(ddl))
+                conn.commit()
+                _record_migration(
+                    conn, change_key, table_name, column_name, ddl,
+                    change_type="drop_column",
+                )
+                applied_keys.add(change_key)
+                logger.info(
+                    "Migration: dropped orphan column '%s.%s' "
+                    "(deliberate manual drop, data discarded).",
+                    table_name,
+                    column_name,
+                )
+                dropped += 1
+            except Exception as exc:
+                conn.rollback()
+                logger.warning(
+                    "Migration: could not drop column '%s.%s': %s",
+                    table_name,
+                    column_name,
+                    exc,
+                )
+
+    return dropped
+
+
 def run_migrations(engine, metadata) -> None:
     """
     For every table registered in *metadata*, compare the live DB schema
@@ -156,8 +242,6 @@ def run_migrations(engine, metadata) -> None:
 
     New tables (not yet created) are skipped here — create_all() handles them.
     """
-    inspector = inspect(engine)
-    existing_tables = set(inspector.get_table_names())
     columns_added = 0
     columns_skipped = 0
     orphan_columns = 0
@@ -165,6 +249,14 @@ def run_migrations(engine, metadata) -> None:
     # Load the change_keys already recorded in the history table so we can
     # distinguish "newly applied" from "already applied" on every startup.
     applied_keys = _load_applied_keys(engine)
+
+    # Apply deliberate column drops BEFORE inspecting for the add/orphan pass so
+    # a just-dropped column is no longer flagged as an orphan on this same run.
+    columns_dropped = _apply_manual_column_drops(engine, applied_keys)
+
+    # Re-inspect after the drops so live_cols reflects the post-drop schema.
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
 
     with engine.connect() as conn:
         for table_name, table in metadata.tables.items():
@@ -234,12 +326,13 @@ def run_migrations(engine, metadata) -> None:
                     )
                     columns_skipped += 1
 
-    if columns_added or columns_skipped or orphan_columns:
+    if columns_added or columns_skipped or orphan_columns or columns_dropped:
         logger.info(
-            "Migration complete: %d column(s) added, %d skipped, "
+            "Migration complete: %d column(s) added, %d dropped, %d skipped, "
             "%d orphan column(s) detected (see warnings above). "
             "%d change(s) tracked in schema_migrations.",
             columns_added,
+            columns_dropped,
             columns_skipped,
             orphan_columns,
             len(applied_keys),

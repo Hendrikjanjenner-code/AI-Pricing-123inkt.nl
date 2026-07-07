@@ -443,6 +443,9 @@ class DimCompetitor(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+# KEEP — al bevat dit model geen scraping meer, het wordt nog actief gelezen
+# door de monitoring-routes (routes/monitoring.py: /run en /sku/{id}) voor de
+# concurrent-prijshistorie en alertgeneratie. Niet verwijderen.
 class FactCompetitorOfferDaily(Base):
     """Dagelijks gematcht concurrent-aanbod per eigen SKU."""
     __tablename__ = "fact_competitor_offer_daily"
@@ -467,6 +470,11 @@ class FactCompetitorOfferDaily(Base):
 
 # ─── Module 2: Product Matching ──────────────────────────────────────────────
 
+# KEEP — momenteel nog niet aangeroepen in code, maar bewust behouden: dit is de
+# AI-match-goedkeuringstabel (own SKU ↔ concurrent, met approved_by/approved_at/
+# manual_override) die de bulk-goedkeuring van AI-matches moet gaan voeden. De
+# tabel bestaat al in de DB; verwijderen zou die workflow blokkeren. Niet weghalen
+# zonder die feature mee te migreren.
 class ProductMatch(Base):
     """Koppeling eigen SKU ↔ concurrent aanbod."""
     __tablename__ = "product_match"
