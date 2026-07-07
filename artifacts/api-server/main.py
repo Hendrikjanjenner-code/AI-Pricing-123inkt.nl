@@ -257,6 +257,21 @@ def _build_health_payload() -> dict:
     }
 
 
+@health_router.get("")
+@health_router.get("/")
+def api_root():
+    """Lightweight liveness response on the bare service path.
+
+    The deployment router health-checks the service at its registered base path
+    (`/api`), NOT `/api/healthz`. Without a route here the app returned 404 (and
+    503/500 while still booting), so the platform never considered the service
+    healthy and the deployment would fail to stay live ("This app isn't live
+    yet"). Returning a plain 200 here gives the health check a valid response
+    the moment uvicorn is serving.
+    """
+    return {"status": "ok", "service": "api-server", "version": APP_VERSION}
+
+
 @health_router.get("/healthz")
 def health_check():
     return _build_health_payload()
