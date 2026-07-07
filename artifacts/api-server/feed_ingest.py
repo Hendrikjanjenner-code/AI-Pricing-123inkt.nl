@@ -17,6 +17,7 @@ concurrentprijzen, zodat de /competition-pagina's gevuld zijn.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date
 from statistics import mean, pstdev
 
@@ -25,6 +26,8 @@ from sqlalchemy.orm import Session
 import models
 from connectors import priceshape_connector as pc
 from engine import competition_engine as ce
+
+logger = logging.getLogger("uvicorn.error")
 
 SOURCE_NAME = "priceshape"
 _CHUNK = 5_000
@@ -188,6 +191,16 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
     today = date.today()
     catalog, comp_rows = _read_feed(db, content=content, content_type=content_type)
 
+    # Veiligheidsklep: een lege feed (netwerkhik, verlopen token, kapotte export)
+    # mag NOOIT de bestaande dagdata wissen. Zonder producten én zonder
+    # concurrentprijzen breken we af vóór welke delete dan ook, zodat de app
+    # blijft draaien op de laatst-goede data ("never break").
+    if not catalog and not comp_rows:
+        raise ValueError(
+            "PriceShape feed leverde 0 producten en 0 concurrentprijzen op — "
+            "sync afgebroken om bestaande data te beschermen (laatst-goede data blijft staan)."
+        )
+
     # 1. Producten: splits in nieuw vs bestaand.
     existing_ids = {row[0] for row in db.query(models.DimProduct.sku_id).all()}
     to_insert = [p for p in catalog if p["sku_id"] not in existing_ids]
@@ -220,29 +233,46 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
     db.commit()
 
     # 3. Eigen dagprijs (fact_price_daily) — vervang die van vandaag.
-    db.query(models.FactPriceDaily).filter(models.FactPriceDaily.date == today).delete(
-        synchronize_session=False)
+    # Alleen wissen als er vervangende prijzen zijn: een lege set mag de
+    # bestaande dagprijzen niet weggooien (laatst-goede data blijft staan).
     price_maps = [{
         "date": today, "sku_id": p["sku_id"], "price": p["current_price"],
         "cost_price": p["cost_price"],
     } for p in catalog if p["current_price"] is not None]
-    for chunk in _chunks(price_maps):
-        db.bulk_insert_mappings(models.FactPriceDaily, chunk)
-    db.commit()
+    if price_maps:
+        db.query(models.FactPriceDaily).filter(models.FactPriceDaily.date == today).delete(
+            synchronize_session=False)
+        for chunk in _chunks(price_maps):
+            db.bulk_insert_mappings(models.FactPriceDaily, chunk)
+        db.commit()
+    else:
+        logger.warning(
+            "Feed-sync: 0 eigen dagprijzen ontvangen — bestaande dagprijzen "
+            "van vandaag blijven behouden (niet gewist)."
+        )
 
     # 4. Concurrentprijzen — vervang die van deze bron voor vandaag.
-    db.query(models.FactCompetitorPriceDaily).filter(
-        models.FactCompetitorPriceDaily.date == today,
-        models.FactCompetitorPriceDaily.source == source,
-    ).delete(synchronize_session=False)
+    # Zelfde bescherming: zonder vervangende concurrentprijzen NIET wissen, zodat
+    # een gedeeltelijke feed-uitval (wel producten, geen concurrenten) de
+    # bestaande concurrent-snapshot van vandaag niet vernietigt.
     known = {p["sku_id"] for p in catalog} | existing_ids
     comp_maps = [{
         "date": today, "sku_id": r["sku_id"], "competitor_name": r["competitor_name"],
         "price": r["price"], "url": r["url"], "source": source,
     } for r in comp_rows if r["sku_id"] in known]
-    for chunk in _chunks(comp_maps):
-        db.bulk_insert_mappings(models.FactCompetitorPriceDaily, chunk)
-    db.commit()
+    if comp_maps:
+        db.query(models.FactCompetitorPriceDaily).filter(
+            models.FactCompetitorPriceDaily.date == today,
+            models.FactCompetitorPriceDaily.source == source,
+        ).delete(synchronize_session=False)
+        for chunk in _chunks(comp_maps):
+            db.bulk_insert_mappings(models.FactCompetitorPriceDaily, chunk)
+        db.commit()
+    else:
+        logger.warning(
+            "Feed-sync: 0 concurrentprijzen ontvangen — bestaande concurrent-"
+            "snapshot van vandaag blijft behouden (niet gewist)."
+        )
 
     return {
         "products_new": len(to_insert),

@@ -205,8 +205,33 @@ internal web-scraping and **no** Pilot Paper_Copy module.
 - New pages (competition, ab-tests) use direct `fetch()` with Bearer token, not generated hooks.
 - Login endpoint is `POST /api/auth/login` and returns `{ user, token }` (field is `token`, not `access_token`).
 
+## PriceShape feed resilience (auto-sync — "never break")
+
+The PriceShape output feed refreshes automatically so the app always has fresh
+competitor data without manual intervention:
+
+- **Scheduler**: `services/feed_sync_scheduler.py` — an asyncio background task
+  started in `main.py` lifespan (mirrors `connector_health_monitor`). Runs the
+  PriceShape sync every `FEED_SYNC_INTERVAL` seconds (default 21600 = 6h).
+- **Retry/backoff**: each cycle retries up to `FEED_SYNC_MAX_RETRIES` (default 3)
+  with exponential backoff (10s→20s→40s, capped 5m) to ride out transient
+  network/server hiccups.
+- **Last-known-good protection**: `feed_ingest.ingest_feed` fetches the feed
+  *before* any delete, and aborts (raises) if the feed returns 0 products **and**
+  0 competitor prices — so a failed/empty feed can NEVER wipe existing data. The
+  per-day deletes are scoped to `date == today` + `source`, leaving history intact.
+- **Never crashes**: the loop catches all exceptions and simply retries at the
+  next interval; a failed cycle logs an error and keeps the last-good data live.
+- **Audit**: every auto-sync writes an `ImportJob` (`uploaded_by="system-autosync"`,
+  `upload_type="api_sync_priceshape"`), visible in the import history.
+- **Env toggles**: `DISABLE_FEED_SYNC`, `FEED_SYNC_INTERVAL`,
+  `FEED_SYNC_MAX_RETRIES`, `FEED_SYNC_STARTUP_DELAY` (default 45s).
+- **Manual sync** still available: `POST /api/connectors/priceshape/sync`.
+
 ## Environment Variables
 
 - `DATABASE_URL` — Replit-managed PostgreSQL (auto-set)
 - `SESSION_SECRET` — JWT signing secret (Replit secret)
 - `PORT` — Service port (set by Replit workflow system)
+- `PRICESHAPE_FEED_URL` — PriceShape output-feed URL (Replit secret; enables feed mode)
+- `FEED_SYNC_INTERVAL` / `FEED_SYNC_MAX_RETRIES` / `FEED_SYNC_STARTUP_DELAY` / `DISABLE_FEED_SYNC` — auto-sync tuning (see above)

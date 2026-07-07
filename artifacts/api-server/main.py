@@ -110,6 +110,17 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("Startup: connector health monitor disabled via DISABLE_HEALTH_MONITOR.")
 
+        # 5a. Start de PriceShape feed-sync scheduler zodat de app onafgebroken
+        # verse concurrentdata inleest (met retries + bescherming van laatst-goede
+        # data). Uit te schakelen via DISABLE_FEED_SYNC.
+        feed_sync_task = None
+        if os.environ.get("DISABLE_FEED_SYNC", "false").lower() not in ("1", "true", "yes"):
+            from services.feed_sync_scheduler import start_feed_sync_scheduler
+            feed_sync_task = start_feed_sync_scheduler()
+            logger.info("Startup: PriceShape feed-sync scheduler started.")
+        else:
+            logger.info("Startup: PriceShape feed-sync scheduler disabled via DISABLE_FEED_SYNC.")
+
         startup_state["backend_status"] = "running"
         startup_state["started_at"] = datetime.now(timezone.utc).isoformat()
         logger.info("Startup: backend started successfully.")
@@ -124,13 +135,14 @@ async def lifespan(app: FastAPI):
             startup_state["database_status"] = "error"
         logger.error("Startup FAILED: %s\n%s", exc, traceback.format_exc())
         health_monitor_task = None
+        feed_sync_task = None
         # Re-raise so the process doesn't silently pretend to be healthy —
         # but the error is now captured in startup_state for diagnostics.
         raise
     try:
         yield
     finally:
-        for _bg_task in (health_monitor_task,):
+        for _bg_task in (health_monitor_task, feed_sync_task):
             if _bg_task is not None:
                 _bg_task.cancel()
                 try:

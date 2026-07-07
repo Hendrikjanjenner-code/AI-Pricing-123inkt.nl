@@ -2,6 +2,7 @@
 - [Backend validate-first uploads](backend-validate-first.md) — POST /api/uploads/validate?upload_type=X validates CSV without saving; frontend calls it before import.
 - [Traffic model fields](traffic-model-fields.md) — FactTrafficDaily uses entity_type/entity_id (not sku_id); entity_type="SKU" for per-SKU rows.
 - [Price index direction](price-index-direction.md) — price_index = own/competitor; <1.0 means we're cheaper (good), >1.0 means we're more expensive (bad).
+- [Feed ingest last-known-good](feed-ingest-last-known-good.md) — never delete a day's fact rows unless there are replacement rows to insert; empty/partial feed must not wipe data.
 - [Bash sandbox background](bash-sandbox-background.md) — nohup `&` jobs die after the tool call; `pgrep -f script.py` false-positives on its own command line. Download to disk, then process in phases.
 - [Feed ingest & refresh](feed-ingest-refresh.md) — feed is a full-catalog creator (DB starts empty); model reruns delete pending recs but preserve human decisions; scoring errors must not be swallowed.
 - [PriceShape feed shape](priceshape-feed-shape.md) — export feed = one product per row with gtin (not sku/ean) and competitors nested in vendors[]; must un-nest to N rows.
