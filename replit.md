@@ -207,6 +207,16 @@ internal web-scraping and **no** Pilot Paper_Copy module.
 
 ## PriceShape feed resilience (auto-sync — "never break")
 
+> **IMPORTANT (current production setup):** the in-app auto-sync is **disabled**
+> via `DISABLE_FEED_SYNC=true` (shared env). The PriceShape feed is ~206 MB of
+> JSON; parsing it in-process (`_fetch_feed` → `json.loads`) balloons to several
+> GB of RAM and OOM-kills the web VM ~45 s after boot (silent SIGKILL, app flaps
+> "not live yet", login fails only because the app is offline). The refresh now
+> runs **out-of-process** as a **Scheduled Deployment** (`scheduled_sync.py`) on a
+> machine with enough RAM (≈4–8 GB). Keep the web VM small; do not re-enable
+> in-app sync unless the ingest is made memory-safe (streaming/ijson + chunked
+> bulk insert). See `.agents/memory/autoscale-scheduled-sync.md`.
+
 The PriceShape output feed refreshes automatically so the app always has fresh
 competitor data without manual intervention:
 

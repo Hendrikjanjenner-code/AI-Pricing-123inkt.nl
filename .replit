@@ -62,3 +62,4 @@ externalPort = 5173
 
 [userenv.shared]
 OWNER_ADMIN_EMAIL = "hjenner@123inkt.nl"
+DISABLE_FEED_SYNC = "true"
