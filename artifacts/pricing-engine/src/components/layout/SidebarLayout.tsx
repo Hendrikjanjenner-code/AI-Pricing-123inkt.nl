@@ -174,30 +174,25 @@ const navGroepen = [
       { href: "/categorieen",             label: "Categorieregels",      icon: Layers },
       { href: "/categorieen/hierarchie",  label: "Categorieënhiërarchie", icon: FolderTree },
       { href: "/modelgezondheid",         label: "Modelgezondheid",      icon: Activity },
+      { href: "/instellingen",            label: "Instellingen",         icon: Settings },
     ],
   },
   {
-    label: "Gegevens",
+    label: "Data & Integraties",
     items: [
-      { href: "/datakwaliteit",      label: "Datakwaliteit",    icon: Database },
-      { href: "/gegevensintegratie", label: "Gegevensintegratie", icon: Upload },
-      { href: "/data-integratie",    label: "Data Integratie",  icon: GitMerge },
-      { href: "/connectoren",        label: "Connectoren",       icon: Server },
-      { href: "/export",             label: "Prijsexport",       icon: Download },
-      { href: "/instellingen",       label: "Instellingen",      icon: Settings },
+      { href: "/data-integratie",    label: "Data-integratie (overzicht)", icon: GitMerge },
+      { href: "/connectoren",        label: "Connectoren",                 icon: Server },
+      { href: "/drs-integratie",     label: "DRS Integratie",              icon: Database },
+      { href: "/ga4-integratie",     label: "GA4 Integratie",              icon: TrendingUp },
+      { href: "/gegevensintegratie", label: "Handmatige upload",           icon: Upload },
+      { href: "/datakwaliteit",      label: "Datakwaliteit",               icon: Database },
+      { href: "/export",             label: "Prijsexport",                 icon: Download },
     ],
   },
   {
     label: "Kennisplatform",
     items: [
       { href: "/modeldocumentatie", label: "Modeldocumentatie", icon: BookOpen },
-    ],
-  },
-  {
-    label: "Externe databronnen",
-    items: [
-      { href: "/drs-integratie",            label: "DRS Integratie",            icon: Database },
-      { href: "/ga4-integratie",            label: "GA4 Integratie",            icon: TrendingUp },
     ],
   },
 ];

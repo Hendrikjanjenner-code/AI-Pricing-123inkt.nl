@@ -82,7 +82,7 @@ import ModelDocumentatie from "@/pages/modeldocumentatie";
 
 import Connectoren from "@/pages/connectoren";
 
-// Externe databronnen (DRS / GA4)
+// Data & Integraties: DRS / GA4
 import DrsIntegratie from "@/pages/drs-integratie";
 import Ga4Integratie from "@/pages/ga4-integratie";
 import PrijsstrategieHerkenning from "@/pages/prijsstrategie-herkenning";
@@ -377,7 +377,7 @@ function Router() {
         <ProtectedRoute><ModelDocumentatie /></ProtectedRoute>
       </Route>
 
-      {/* Externe databronnen (DRS / GA4) */}
+      {/* Data & Integraties: DRS / GA4 */}
       <Route path="/drs-integratie">
         <ProtectedRoute><DrsIntegratie /></ProtectedRoute>
       </Route>

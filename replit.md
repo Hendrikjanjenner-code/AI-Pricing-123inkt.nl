@@ -193,7 +193,9 @@ internal web-scraping and **no** Pilot Paper_Copy module.
   Elasticity pages render `components/ExterneDatabronVereist` — they show **no**
   synthetic data and instead point to DRS/GA4 integration. The old synthetic
   backfills for these tables may still run, but these pages never present them.
-  DRS/GA4 integration pages live under the "Externe databronnen" sidebar group.
+  DRS/GA4 integration pages live under the "Data & Integraties" sidebar group,
+  which consolidates all data-source, connector, upload, quality and export pages
+  (the old separate "Gegevens" and "Externe databronnen" groups were merged).
 
 ## Gotchas
 
