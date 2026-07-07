@@ -27,6 +27,76 @@ import models
 import auth as auth_utils
 from connectors.crypto import encrypt_credentials, decrypt_credentials
 
+import hashlib
+import logging
+from contextlib import contextmanager
+from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import insert as _pg_insert
+
+_log = logging.getLogger(__name__)
+
+
+def _advisory_key(name: str) -> int:
+    """Stabiele 31-bits sleutel per connector voor een PostgreSQL advisory lock."""
+    digest = hashlib.sha256(f"connector_sync:{name}".encode()).hexdigest()
+    return int(digest[:15], 16) % 2147483647
+
+
+@contextmanager
+def _sync_lock(name: str):
+    """Advisory lock zodat er nooit twee syncs voor dezelfde connector tegelijk
+    draaien (de geplande job én de in-process autosync roepen allebei
+    ``_run_sync`` aan; ``feed_ingest.ingest_feed`` doet delete-then-insert en zou
+    bij overlap dubbele dagrijen kunnen opleveren).
+
+    De lock draait op een **eigen** verbinding (niet de ORM-sessie die de ingest
+    uitvoert), zodat een afgebroken ingest-transactie de unlock niet kan
+    vergiftigen. Mislukt de unlock toch, dan wordt de fysieke verbinding
+    geïnvalideerd; PostgreSQL geeft sessie-locks dan bij disconnect alsnog vrij —
+    een lock kan dus nooit permanent blijven hangen en toekomstige syncs blokkeren.
+
+    Levert True als de lock is verkregen, anders False (sync al bezig)."""
+    from database import engine
+    key = _advisory_key(name)
+    conn = engine.connect()
+    got = False
+    try:
+        got = bool(conn.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": key}).scalar())
+        yield got
+    finally:
+        try:
+            if got:
+                conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})
+                conn.commit()
+        except Exception:
+            _log.warning(
+                "Advisory-unlock voor connector %s mislukt; verbinding wordt geïnvalideerd.",
+                name, exc_info=True,
+            )
+            try:
+                conn.invalidate()
+            except Exception:
+                pass
+        finally:
+            conn.close()
+
+
+def touch_last_synced(db: Session, name: str) -> None:
+    """Werk ``last_synced_at`` atomisch bij (ook voor env-only connectors zonder
+    bestaande config-rij). Gebruikt INSERT ... ON CONFLICT zodat gelijktijdige
+    syncs niet racen op de unieke ``connector_name``-sleutel."""
+    now = datetime.now(timezone.utc)
+    stmt = (
+        _pg_insert(models.ConnectorConfig)
+        .values(connector_name=name, last_synced_at=now, created_at=now, updated_at=now)
+        .on_conflict_do_update(
+            index_elements=["connector_name"],
+            set_={"last_synced_at": now, "updated_at": now},
+        )
+    )
+    db.execute(stmt)
+    db.commit()
+
 
 # ── SSRF guard ─────────────────────────────────────────────────────────────
 
@@ -357,13 +427,12 @@ def sync_connector(
 
     result = _run_sync(name, db, current_user)
 
-    # Bijwerken van last_synced_at
-    if cfg and result.get("status") in ("ok",):
-        cfg.last_synced_at = datetime.now(timezone.utc)
-        db.commit()
-    elif result.get("status") in ("ok",):
-        # Env-only configured — maak een config-rij aan voor de sync-tijdstempel
-        pass
+    # Bijwerken van last_synced_at zodat de UI de laatste sync toont — óók wanneer
+    # de connector alleen via omgevingsvariabelen is geconfigureerd. Zonder dit
+    # bestaat er geen config-rij en zou "laatste sync" altijd "nooit" blijven,
+    # hoe vaak de sync ook succesvol draait. Atomische upsert voorkomt races.
+    if result.get("status") == "ok":
+        touch_last_synced(db, name)
 
     return result
 
@@ -413,7 +482,12 @@ def _run_live_check(name: str, db: Session) -> dict:
 
 
 def _run_sync(name: str, db: Session, current_user) -> dict:
-    """Trigger de bijbehorende sync-logica en persisteer een ImportJob."""
+    """Trigger de bijbehorende sync-logica en persisteer een ImportJob.
+
+    Beschermd met een advisory lock: draait er al een sync voor deze connector
+    (bijv. de geplande job én de in-process autosync tegelijk), dan wordt deze
+    aanroep netjes overgeslagen in plaats van de delete-then-insert ingest te
+    laten overlappen."""
     from datetime import date, timedelta
     today = date.today().isoformat()
     date_30d = (date.today() - timedelta(days=30)).isoformat()
@@ -423,78 +497,86 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
     counts: dict[str, int] = {}
     errors: list[str] = []
 
-    try:
-        if name == "priceshape":
-            from connectors import priceshape_connector
-            raw = priceshape_connector._get_raw_config(db=db)
-            if priceshape_connector._get_mode(raw) == "feed":
-                import feed_ingest
-                res = feed_ingest.ingest_feed(db, source="priceshape")
-                counts["producten_nieuw"] = res["products_new"]
-                counts["producten_bijgewerkt"] = res["products_updated"]
-                counts["eigen_prijzen"] = res["own_prices"]
-                counts["concurrentprijzen"] = res["competitor_rows"]
-                message = (
-                    f"PriceShape feed-sync voltooid: {res['products_total']} producten "
-                    f"({res['products_new']} nieuw, {res['products_updated']} bijgewerkt), "
-                    f"{res['competitor_rows']} concurrentprijzen ingelezen. "
-                    "Draai een modelrun om aanbevelingen en concurrentie-scores te vernieuwen."
-                )
-            else:
-                priceshape_connector._get_credentials(db=db)
-                prices = priceshape_connector.fetch_competitor_prices(db=db)
-                counts["price_records"] = len(prices)
-                message = f"PriceShape sync voltooid: {len(prices)} prijzen opgehaald."
+    with _sync_lock(name) as got_lock:
+        if not got_lock:
+            return {
+                "status": "skipped",
+                "message": f"Er draait al een synchronisatie voor {name}; deze is overgeslagen.",
+                "counts": {},
+            }
 
-        elif name == "drs":
-            from connectors import drs_connector
-            drs_connector._get_credentials(db=db)
-            products = drs_connector.fetch_product_catalog(db=db)
-            counts["products"] = len(products)
-            sales = drs_connector.fetch_sales_history(date_from=date_30d, date_to=today, db=db)
-            counts["sales_records"] = len(sales)
-            stock = drs_connector.fetch_stock_levels(db=db)
-            counts["stock_records"] = len(stock)
-            message = "DRS sync voltooid."
-
-        elif name == "ga4":
-            from connectors import ga4_connector
-            ga4_connector._get_credentials(db=db)
-            traffic = ga4_connector.fetch_traffic_data(date_from=date_30d, date_to=today, db=db)
-            counts["traffic_records"] = len(traffic)
-            conversions = ga4_connector.fetch_conversion_data(date_from=date_30d, date_to=today, db=db)
-            counts["conversion_records"] = len(conversions)
-            message = "GA4 sync voltooid."
-
-    except Exception as exc:
-        status = "error" if "ConnectorError" not in type(exc).__name__ else "not_configured"
-        message = str(exc)[:300]
-
-    # Persisteer een ImportJob zodat de sync zichtbaar is in de importgeschiedenis
-    try:
-        from database import SessionLocal
-        db_local = SessionLocal()
         try:
-            job_status = "geimporteerd" if status == "ok" else ("fout" if status == "error" else "nieuw")
-            db_local.add(models.ImportJob(
-                upload_type=f"api_sync_{name}",
-                filename=f"handmatige-sync-{name}",
-                source="API-Sync",
-                status=job_status,
-                rows_processed=sum(counts.values()),
-                rows_failed=0,
-                error_message=message if status != "ok" else None,
-                uploaded_by=current_user.username,
-                created_at=datetime.now(timezone.utc),
-                completed_at=datetime.now(timezone.utc),
-            ))
-            db_local.commit()
-        finally:
-            db_local.close()
-    except Exception:
-        pass
+            if name == "priceshape":
+                from connectors import priceshape_connector
+                raw = priceshape_connector._get_raw_config(db=db)
+                if priceshape_connector._get_mode(raw) == "feed":
+                    import feed_ingest
+                    res = feed_ingest.ingest_feed(db, source="priceshape")
+                    counts["producten_nieuw"] = res["products_new"]
+                    counts["producten_bijgewerkt"] = res["products_updated"]
+                    counts["eigen_prijzen"] = res["own_prices"]
+                    counts["concurrentprijzen"] = res["competitor_rows"]
+                    message = (
+                        f"PriceShape feed-sync voltooid: {res['products_total']} producten "
+                        f"({res['products_new']} nieuw, {res['products_updated']} bijgewerkt), "
+                        f"{res['competitor_rows']} concurrentprijzen ingelezen. "
+                        "Draai een modelrun om aanbevelingen en concurrentie-scores te vernieuwen."
+                    )
+                else:
+                    priceshape_connector._get_credentials(db=db)
+                    prices = priceshape_connector.fetch_competitor_prices(db=db)
+                    counts["price_records"] = len(prices)
+                    message = f"PriceShape sync voltooid: {len(prices)} prijzen opgehaald."
 
-    return {"status": status, "message": message, "counts": counts}
+            elif name == "drs":
+                from connectors import drs_connector
+                drs_connector._get_credentials(db=db)
+                products = drs_connector.fetch_product_catalog(db=db)
+                counts["products"] = len(products)
+                sales = drs_connector.fetch_sales_history(date_from=date_30d, date_to=today, db=db)
+                counts["sales_records"] = len(sales)
+                stock = drs_connector.fetch_stock_levels(db=db)
+                counts["stock_records"] = len(stock)
+                message = "DRS sync voltooid."
+
+            elif name == "ga4":
+                from connectors import ga4_connector
+                ga4_connector._get_credentials(db=db)
+                traffic = ga4_connector.fetch_traffic_data(date_from=date_30d, date_to=today, db=db)
+                counts["traffic_records"] = len(traffic)
+                conversions = ga4_connector.fetch_conversion_data(date_from=date_30d, date_to=today, db=db)
+                counts["conversion_records"] = len(conversions)
+                message = "GA4 sync voltooid."
+
+        except Exception as exc:
+            status = "error" if "ConnectorError" not in type(exc).__name__ else "not_configured"
+            message = str(exc)[:300]
+
+        # Persisteer een ImportJob zodat de sync zichtbaar is in de importgeschiedenis
+        try:
+            from database import SessionLocal
+            db_local = SessionLocal()
+            try:
+                job_status = "geimporteerd" if status == "ok" else ("fout" if status == "error" else "nieuw")
+                db_local.add(models.ImportJob(
+                    upload_type=f"api_sync_{name}",
+                    filename=f"handmatige-sync-{name}",
+                    source="API-Sync",
+                    status=job_status,
+                    rows_processed=sum(counts.values()),
+                    rows_failed=0,
+                    error_message=message if status != "ok" else None,
+                    uploaded_by=current_user.username,
+                    created_at=datetime.now(timezone.utc),
+                    completed_at=datetime.now(timezone.utc),
+                ))
+                db_local.commit()
+            finally:
+                db_local.close()
+        except Exception:
+            pass
+
+        return {"status": status, "message": message, "counts": counts}
 
 
 # ── Connector-specifieke testfuncties ──────────────────────────────────────
