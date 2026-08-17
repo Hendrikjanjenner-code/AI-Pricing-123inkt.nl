@@ -1,0 +1,2723 @@
+# ULTIMATE MASTER SOLUTION PROMPT
+
+## AI Commercial Intelligence Platform – volledige geïntegreerde totaaloplossing
+
+# OPDRACHT AAN REPLIT PLAN
+
+Gebruik deze opdracht eerst in PLAN MODE.
+
+Ga NIET onmiddellijk willekeurig functionaliteit bouwen.
+
+Je eerste taak is om deze volledige opdracht kritisch te beoordelen alsof je tegelijkertijd optreedt als:
+
+* Principal Software Architect;
+* Senior Data Architect;
+* Senior Data Engineer;
+* AI/ML Architect;
+* Security Engineer;
+* Privacy-by-Design Architect;
+* DevOps Engineer;
+* QA Lead;
+* Product Owner;
+* Commercial Intelligence Specialist;
+* FinOps / Cost Analyst.
+
+Analyseer:
+
+1. wat er al werkelijk in de bestaande applicatie zit;
+2. wat gedeeltelijk aanwezig is;
+3. wat alleen UI of demo is;
+4. wat ontbreekt;
+5. welke architectuurproblemen bestaan;
+6. welke integraties ontbreken;
+7. welke veiligheidsrisico's bestaan;
+8. welke onderdelen van onderstaande specificatie technisch moeten worden verbeterd;
+9. welke functionaliteiten wij mogelijk nog over het hoofd hebben gezien.
+
+VUL DEZE MASTERPROMPT AAN wanneer noodzakelijke onderdelen ontbreken.
+
+VEREENVOUDIG waar onderdelen dubbel zijn.
+
+VERBETER de architectuur waar nodig.
+
+BEHOUD de businessdoelstellingen.
+
+Presenteer daarna één compleet implementatieplan.
+
+Het uiteindelijke doel is NIET:
+
+“zoveel mogelijk losse modules maken”.
+
+Het uiteindelijke doel is:
+
+# ÉÉN COMPLEET WERKEND EN GEÏNTEGREERD
+
+# AI COMMERCIAL INTELLIGENCE PLATFORM
+
+Alle belangrijke onderdelen moeten:
+
+* werken;
+* persistent zijn;
+* dezelfde databronnen gebruiken;
+* dezelfde definities hanteren;
+* gegevens met elkaar kunnen delen;
+* door één gebruikers- en autorisatiemodel worden beveiligd;
+* door één auditmodel worden gecontroleerd;
+* via één Commercial Decision Engine kunnen samenwerken;
+* via één Commercial AI Copilot bevraagd kunnen worden.
+
+==================================================
+
+1. DEFINITIE VAN SUCCES
+   ==================================================
+
+Aan het einde van de ontwikkel- en testperiode moet aantoonbaar duidelijk zijn:
+
+A. FUNCTIONALITEIT
+
+Het platform werkt technisch als één geïntegreerde applicatie.
+
+B. DATA
+
+De belangrijkste databronnen kunnen betrouwbaar worden ingelezen, gevalideerd en gebruikt.
+
+C. INTELLIGENCE
+
+De verschillende Intelligence Engines maken reproduceerbare en uitlegbare analyses.
+
+D. INTEGRATIE
+
+Outputs van verschillende Intelligence Engines kunnen door andere modules worden gebruikt.
+
+E. DECISION SUPPORT
+
+De Commercial Decision & Impact Engine kan meerdere commerciële scenario's vergelijken.
+
+F. AI COPILOT
+
+Een medewerker kan in gewone taal vragen stellen over verschillende modules.
+
+G. HUMAN CONTROL
+
+AI voert geen ongecontroleerde commerciële beslissingen uit.
+
+H. SECURITY
+
+Er is aantoonbaar onderzocht en getest hoe bedrijfs- en klantdata worden beschermd.
+
+I. AUDITABILITY
+
+Belangrijke wijzigingen, AI-analyses, approvals en commerciële aanbevelingen zijn traceerbaar.
+
+J. KOSTEN
+
+Het werkelijke technische gebruik wordt gemeten zodat productiekosten kunnen worden geraamd.
+
+K. COST PER SHOP
+
+Er kan een onderbouwde inschatting worden gemaakt van centrale kosten en extra kosten per aangesloten shop.
+
+L. BUSINESS VALUE
+
+Het platform meet waar mogelijk:
+
+* tijdsbesparing;
+* efficiency;
+* commerciële opportunities;
+* potentiële omzetimpact;
+* potentiële marge-impact;
+* risicoreductie.
+
+M. PRODUCTIEGEREEDHEID
+
+Per module is duidelijk wat nog nodig is voordat deze naar productie kan.
+
+==================================================
+2. GEEN VERZAMELING LOSSE APPS
+==============================
+
+Zeer belangrijk.
+
+Bouw NIET:
+
+* een losse Competition-app;
+* een losse Pricing-app;
+* een losse Loyalty-app;
+* een losse Switching-app;
+* een losse Copilot-app.
+
+Alles moet onderdeel zijn van dezelfde architectuur.
+
+Gebruik waar mogelijk:
+
+één:
+
+* authentication layer;
+* RBAC model;
+* audit model;
+* data integration layer;
+* canonical data model;
+* semantic layer;
+* AI Gateway;
+* notification framework;
+* approval framework;
+* configuration framework;
+* monitoring framework;
+* import framework;
+* cost metering framework.
+
+Voorkom dubbele services en dubbele databases.
+
+==================================================
+3. SYSTEEMARCHITECTUUR
+======================
+
+Gebruik als doelarchitectuur:
+
+INTERNAL SOURCES
+
+* DRS
+* orderhistorie
+* sales
+* margin
+* stock
+* suppliers
+* customers/accounts
+* promotions
+
+EXTERNAL SOURCES
+
+* PriceShape
+* GA4
+* Search Console
+* Google Ads
+* Microsoft Ads
+* supplier feeds
+* market information
+* public competitor information
+* economic indicators
+* FX
+* commodity data
+
+  ```
+    ↓
+  ```
+
+DATA INTEGRATION LAYER
+
+```
+    ↓
+```
+
+DATA QUALITY & VALIDATION
+
+```
+    ↓
+```
+
+CANONICAL COMMERCIAL DATA MODEL
+
+```
+    ↓
+```
+
+POSTGRESQL
+operationele applicatiedata
+
+*
+
+BIGQUERY
+historische/analytische data
+
+```
+    ↓
+```
+
+COMMERCIAL SEMANTIC LAYER
+
+```
+    ↓
+```
+
+INTELLIGENCE ENGINES
+
+```
+    ↓
+```
+
+COMMERCIAL SIGNAL LAYER
+
+```
+    ↓
+```
+
+COMMERCIAL DECISION & IMPACT ENGINE
+
+```
+    ↓
+```
+
+COMMERCIAL AI COPILOT
++
+DASHBOARDS
++
+MANAGEMENT INTELLIGENCE
+
+```
+    ↓
+```
+
+HUMAN REVIEW & APPROVAL
+
+```
+    ↓
+```
+
+DRS / SHOPS / OTHER OPERATIONAL SYSTEMS
+
+==================================================
+4. SYSTEEM OF RECORD / DATA OWNERSHIP
+=====================================
+
+Maak expliciet per gegeven welk systeem eigenaar is.
+
+Gebruik hiervoor een:
+
+# DATA OWNERSHIP MATRIX
+
+DRS blijft in principe de operationele bron voor:
+
+* SKU;
+* EAN;
+* OEM;
+* productstatus;
+* producthiërarchie;
+* leverancier;
+* inkoopprijs;
+* verkoopprijs;
+* voorraad;
+* omzet;
+* afzet;
+* marge;
+* klanten/accounts;
+* orders;
+* orderregels;
+* retouren;
+* credits.
+
+PIM, indien gekoppeld, wordt primair voor:
+
+* productcontent;
+* uitgebreide kenmerken;
+* assets;
+* vertalingen;
+* channel content.
+
+PostgreSQL wordt gebruikt voor:
+
+* gebruikers;
+* rollen;
+* configuraties;
+* workflows;
+* approvals;
+* actieve aanbevelingen;
+* instellingen;
+* auditmetadata;
+* application state.
+
+BigQuery wordt gebruikt voor:
+
+* historische sales;
+* historische margin;
+* historical stock;
+* historische prices;
+* competitor history;
+* traffic history;
+* customer switching;
+* promotion results;
+* forecasts;
+* model results;
+* AI recommendations;
+* management snapshots.
+
+AI is NOOIT system of record.
+
+==================================================
+5. CANONICAL COMMERCIAL DATA MODEL
+==================================
+
+Dit is essentieel.
+
+Voorkom dat iedere module zijn eigen definitie maakt van:
+
+* product;
+* categorie;
+* klant;
+* omzet;
+* marge;
+* volume;
+* prijs;
+* concurrent;
+* merk;
+* leverancier.
+
+Maak één canonical commercial model.
+
+Minimaal entiteiten:
+
+* Shop
+* Country
+* LegalEntity
+* Product
+* ProductVariant
+* Category
+* Brand
+* Supplier
+* Customer
+* BusinessAccount
+* Order
+* OrderLine
+* Price
+* PriceHistory
+* Stock
+* StockHistory
+* Promotion
+* Competitor
+* CompetitorProduct
+* CompetitorPriceObservation
+* ProductMatch
+* Campaign
+* LoyaltyMember
+* LoyaltyTransaction
+* IntelligenceSignal
+* Recommendation
+* Scenario
+* Approval
+* AIModelRun
+* AuditEvent
+* DataSource
+* ImportBatch
+* CostUsageRecord
+
+Definieer centrale metrics.
+
+Bijvoorbeeld:
+
+Revenue
+
+Net Revenue
+
+Gross Margin
+
+Gross Margin %
+
+Units
+
+Normalized Volume
+
+Average Selling Price
+
+Purchase Cost
+
+Stock
+
+Conversion
+
+Traffic
+
+Customer Value
+
+Iedere module gebruikt dezelfde definities.
+
+==================================================
+6. COMMERCIAL SEMANTIC LAYER
+============================
+
+Bouw een centrale semantic layer.
+
+Doel:
+
+de Intelligence Engines en AI Copilot mogen niet allemaal willekeurige databasestructuren interpreteren.
+
+Maak goedgekeurde commerciële functies.
+
+Voorbeelden:
+
+get_product_performance()
+
+get_category_performance()
+
+get_margin_trend()
+
+get_sales_history()
+
+get_stock_history()
+
+get_competitor_ranking()
+
+get_competitor_prices()
+
+get_product_matches()
+
+get_customer_switching()
+
+get_brand_performance()
+
+get_basket_associations()
+
+get_promotion_performance()
+
+get_supplier_risk()
+
+get_forecast()
+
+get_loyalty_summary()
+
+get_customer_value()
+
+get_commercial_opportunities()
+
+get_commercial_risks()
+
+get_decision_scenarios()
+
+Iedere functie respecteert:
+
+* RBAC;
+* shop;
+* land;
+* legal entity;
+* data permissions.
+
+==================================================
+7. COMMERCIAL SIGNAL STANDARD
+=============================
+
+Iedere Intelligence Engine moet resultaten kunnen publiceren in één standaardvorm.
+
+Maak bijvoorbeeld:
+
+IntelligenceSignal
+
+Met minimaal:
+
+* id;
+* engine;
+* signal_type;
+* entity_type;
+* entity_id;
+* shop_id;
+* category_id;
+* severity;
+* direction;
+* metric;
+* current_value;
+* previous_value;
+* expected_value;
+* expected_impact;
+* confidence;
+* explanation;
+* evidence;
+* sources;
+* observed_at;
+* valid_until;
+* model_version.
+
+Voorbeelden:
+
+Competition:
+
+“Competitive pressure increased”
+
+Supplier:
+
+“Expected purchase cost +4%”
+
+Traffic:
+
+“Product traffic -18%”
+
+Switching:
+
+“Cannibalisation risk 42%”
+
+Basket:
+
+“High cross-sell opportunity”
+
+Pricing:
+
+“Price increase opportunity”
+
+Hierdoor kan de Decision Engine dezelfde output van alle modules verwerken.
+
+==================================================
+8. INTELLIGENCE ENGINES
+=======================
+
+Het complete platform bevat minimaal:
+
+1. Competition Intelligence
+2. Pricing Intelligence
+3. Brand Intelligence
+4. BCG Intelligence
+5. Traffic & Demand Intelligence
+6. Supplier Intelligence
+7. Promotion Intelligence
+8. Category Intelligence
+9. Basket Intelligence
+10. Forecast Intelligence
+11. Risk Intelligence
+12. Opportunity Intelligence
+13. Loyalty & Customer Value Intelligence
+14. Customer Switching & Cannibalisation Intelligence
+15. PIM Integration & Product Content Intelligence
+16. Management Intelligence
+17. Commercial Decision & Impact Intelligence
+18. Commercial AI Copilot
+
+Controleer tijdens planning welke hiervan al bestaan.
+
+Bouw NIET opnieuw wat aantoonbaar bestaat.
+
+Verbeter, consolideer en integreer.
+
+==================================================
+9. COMPETITION INTELLIGENCE
+===========================
+
+Competition Intelligence moet kunnen bepalen:
+
+Wie is werkelijk concurrent?
+
+Waarom?
+
+Binnen welke categorie?
+
+Hoe betrouwbaar is de concurrent voor prijsvergelijking?
+
+Hoeveel invloed heeft deze partij?
+
+Gebruik minimaal drie aparte scores:
+
+Competition Relevance Score
+
+Price Relevance Score
+
+Influence Score
+
+Gebruik voor Competition Relevance minimaal:
+
+1. Assortiment
+2. Doelgroep
+3. Pricing
+4. Merk/private label
+5. Traffic/vindbaarheid
+6. Marktpositie/bedrijfssterkte
+7. Service/loyaliteit
+8. Kanalen/geografisch bereik
+9. Voorraad/fulfilment
+10. Inkoop/leveranciersmacht
+11. Eigendomsstructuur
+12. Contract/accountmodel
+13. Strategische relevantie
+
+Analyseer onder andere:
+
+* online/offline;
+* lokaal/nationaal/internationaal;
+* bestaansduur;
+* werknemers;
+* omzetindicatie;
+* financiële sterkte indien betrouwbaar;
+* B2B/B2C;
+* small/medium/large/enterprise;
+* marketplace;
+* eigen voorraad;
+* dropship;
+* inkooporganisatie;
+* wholesaler;
+* supplier overlap;
+* OEM;
+* private label;
+* merkherkenning;
+* service;
+* loyalty;
+* moederbedrijf;
+* contract stationer.
+
+Maak onderscheid tussen:
+
+* bevestigd feit;
+* betrouwbare schatting;
+* AI inference;
+* hypothese.
+
+Toon altijd:
+
+* source;
+* date;
+* confidence.
+
+==================================================
+10. COMPETITION DNA
+===================
+
+Ondersteun minimaal:
+
+* Category Specialist
+* Office Specialist
+* Marketplace
+* OEM Specialist
+* Private Label Leader
+* Price Fighter
+* Premium Retailer
+* Convenience Player
+* Traffic Competitor
+* Innovation Leader
+* Contract Stationer
+* Contract Supplier
+* Enterprise Account Specialist
+* Buying Group Member
+* Wholesaler-backed Retailer
+* Stockholding Retailer
+* Dropship Retailer
+* Omnichannel Retailer
+* International Group
+* Regional Specialist
+* Loyalty-led Competitor
+
+Meerdere DNA-types per concurrent zijn toegestaan.
+
+==================================================
+11. COMPETITION RANKINGS
+========================
+
+Maak:
+
+* Overall Ranking
+* Price Ranking
+* Assortment Ranking
+* Traffic Ranking
+* Strategic Ranking
+* Influence Ranking
+* Future Threat Ranking
+* Service & Loyalty Ranking
+* Procurement Power Ranking
+
+Iedere ranking bevat:
+
+* current rank;
+* previous rank;
+* score;
+* trend;
+* main reasons;
+* evidence;
+* confidence;
+* data completeness;
+* approval status.
+
+==================================================
+12. AI PRODUCT MATCHING
+=======================
+
+Ondersteun:
+
+EXACT MATCH
+
+* EAN;
+* GTIN;
+* OEM;
+* MPN;
+* manufacturer article number.
+
+STRONG MATCH
+
+* merk;
+* type;
+* formaat;
+* inhoud;
+* gewicht;
+* kleur;
+* materiaal;
+* verpakking;
+* technische kenmerken.
+
+FUNCTIONAL ALTERNATIVE
+
+* toepassing;
+* functionele overeenkomst;
+* kwaliteit;
+* segment;
+* substitueerbaarheid.
+
+Iedere match krijgt:
+
+* match_type;
+* match_score;
+* confidence;
+* matched_attributes;
+* conflicting_attributes;
+* explanation;
+* source;
+* validation_status;
+* reviewer.
+
+Functional alternative mag nooit als exact worden gepresenteerd.
+
+==================================================
+13. PRICING INTELLIGENCE
+========================
+
+Combineer minimaal:
+
+* verkoopprijs;
+* inkoopprijs;
+* marge;
+* historische prijs;
+* sales;
+* units;
+* voorraad;
+* competitor pricing;
+* price gap;
+* promotion;
+* brand;
+* supplier costs;
+* forecast;
+* switching;
+* basket;
+* traffic;
+* loyalty.
+
+Maak scenario's:
+
+* price increase;
+* price decrease;
+* hold;
+* promotion;
+* loyalty incentive;
+* bundle;
+* house-brand action;
+* no action.
+
+Toon:
+
+* expected volume;
+* expected revenue;
+* expected margin;
+* stock impact;
+* customer impact;
+* confidence;
+* risks.
+
+Prijswijzigingen vereisen human approval.
+
+==================================================
+14. BRAND INTELLIGENCE
+======================
+
+Analyseer:
+
+* internal brand strength;
+* external brand strength;
+* market relevance;
+* OEM;
+* private label;
+* brand share;
+* category share;
+* margin;
+* switching;
+* price gap;
+* substitution;
+* house-brand potential.
+
+Belangrijke vraag:
+
+Wanneer is huismerk strategisch belangrijker dan maximalisatie van korte-termijnmarge?
+
+==================================================
+15. SWITCHING & CANNIBALISATION
+===============================
+
+Maak dit generiek voor ieder product/merk.
+
+Concrete validatiecase:
+
+Huismerk koffie 1 kg
+
+vs.
+
+Lazzaro koffie 1 kg.
+
+Bepaal:
+
+* complete switchers;
+* partial switchers;
+* additional purchasers;
+* new category buyers;
+* completely new customers;
+* switchers from other brands;
+* retained house-brand buyers;
+* category churn;
+* total churn;
+* unknown.
+
+Bereken:
+
+* customer count;
+* volume;
+* normalized volume;
+* revenue;
+* margin;
+* order frequency;
+* basket impact.
+
+Bereken:
+
+OBSERVED SWITCHING
+
+en
+
+ESTIMATED CANNIBALISATION.
+
+Baseline:
+
+## expected house-brand volume without Lazzaro
+
+# actual house-brand volume
+
+estimated lost house-brand volume.
+
+Vergelijk met Lazzaro-volume.
+
+Toon:
+
+* estimate;
+* lower bound;
+* upper bound;
+* confidence;
+* unexplained share.
+
+Corrigeer/waarschuw voor:
+
+* stockouts;
+* promotions;
+* pricing changes;
+* seasonality;
+* packaging changes;
+* large customers;
+* campaigns;
+* assortment changes.
+
+==================================================
+16. BASKET INTELLIGENCE
+=======================
+
+Analyseer:
+
+* product associations;
+* frequently bought together;
+* cross-sell;
+* upsell;
+* basket fillers;
+* traffic drivers;
+* margin drivers;
+* bundles;
+* average basket;
+* margin per basket;
+* category combinations.
+
+Gebruik resultaten ook in:
+
+* Pricing;
+* Loyalty;
+* Promotion;
+* Brand;
+* Decision Engine.
+
+==================================================
+17. TRAFFIC & DEMAND
+====================
+
+Koppel waar beschikbaar:
+
+* GA4;
+* Search Console;
+* onsite search;
+* Google Ads;
+* Microsoft Ads.
+
+Analyseer:
+
+* sessions;
+* product views;
+* category views;
+* conversion;
+* search volume;
+* query demand;
+* traffic drivers;
+* low conversion opportunities;
+* market demand.
+
+Combineer commerciële prestaties met traffic.
+
+==================================================
+18. SUPPLIER INTELLIGENCE
+=========================
+
+Analyseer:
+
+* supplier prices;
+* purchase cost changes;
+* lead time;
+* availability;
+* reliability;
+* dependency;
+* alternative suppliers;
+* supplier overlap;
+* purchasing power;
+* procurement risk.
+
+Ondersteun later:
+
+* FX;
+* commodities;
+* energy;
+* transportation;
+* macroeconomics.
+
+==================================================
+19. PROMOTION INTELLIGENCE
+==========================
+
+Analyseer:
+
+* existing promotions;
+* historical promotions;
+* uplift;
+* revenue;
+* margin;
+* units;
+* promotion cost;
+* break-even;
+* cannibalisation;
+* halo;
+* basket impact;
+* repeat purchases.
+
+Gebruik waar mogelijk:
+
+control groups.
+
+Bereken:
+
+* incremental revenue;
+* incremental margin.
+
+==================================================
+20. FORECAST & RISK
+===================
+
+Ondersteun:
+
+* unit forecast;
+* revenue forecast;
+* margin forecast;
+* stock requirement;
+* seasonality.
+
+Risico's:
+
+* competitor;
+* supplier;
+* stock;
+* margin;
+* traffic;
+* churn;
+* demand;
+* economic.
+
+Iedere forecast:
+
+* value;
+* horizon;
+* confidence;
+* factors;
+* model version.
+
+==================================================
+21. BCG INTELLIGENCE
+====================
+
+Ondersteun:
+
+* Star;
+* Cash Cow;
+* Question Mark;
+* Dog.
+
+Internal BCG.
+
+External BCG.
+
+Niveaus:
+
+* SKU;
+* brand;
+* category.
+
+Bewaar historie.
+
+==================================================
+22. LOYALTY & CUSTOMER VALUE
+============================
+
+Ondersteun:
+
+* loyalty membership;
+* wallets;
+* ledger;
+* earn;
+* redemption;
+* rewards;
+* vouchers;
+* tiers;
+* campaigns;
+* control groups;
+* referrals;
+* financial liability;
+* fraud signals.
+
+Customer Intelligence:
+
+* customer value;
+* CLV;
+* churn;
+* retention;
+* Next Best Action.
+
+Decision Engine kan loyalty vergelijken met algemene prijsverlaging.
+
+==================================================
+23. PIM INTEGRATION & PRODUCT CONTENT
+=====================================
+
+Bouw primair een vendor-neutrale:
+
+PIM Integration & Product Content Intelligence Layer.
+
+Niet onnodig een volledig enterprise PIM nabouwen wanneer een extern PIM kan worden gekoppeld.
+
+Ondersteun:
+
+* DRS Product Master integration;
+* families;
+* attributes;
+* variants;
+* completeness;
+* data quality;
+* source ownership;
+* AI attribute suggestions;
+* AI content suggestions;
+* product relationships;
+* channel readiness;
+* supplier content import.
+
+Gebruik productdata ook voor:
+
+* Competition Matching;
+* Search;
+* Basket;
+* Brand.
+
+==================================================
+24. OPPORTUNITY INTELLIGENCE
+============================
+
+Maak één centrale Opportunity Engine.
+
+Combineer opportunities uit alle engines.
+
+Bijvoorbeeld:
+
+* price increase;
+* price decrease;
+* house-brand conversion;
+* new competitor;
+* promotion;
+* cross-sell;
+* traffic;
+* supplier saving;
+* churn prevention;
+* assortment gap.
+
+Iedere opportunity bevat:
+
+* expected value;
+* expected revenue;
+* expected margin;
+* confidence;
+* urgency;
+* effort;
+* risk;
+* supporting engines.
+
+==================================================
+25. COMMERCIAL DECISION & IMPACT ENGINE
+=======================================
+
+Dit is de verbindende intelligentielaag.
+
+De engine ontvangt Intelligence Signals uit alle specialistische engines.
+
+Voorbeeld:
+
+Competition
+Pressure = HIGH
+
+Pricing
+Suggested price = X
+
+Supplier
+Expected purchase cost = +4%
+
+Forecast
+Demand = +7%
+
+Brand
+House-brand importance = HIGH
+
+Switching
+Cannibalisation risk = 38%
+
+Basket
+Cross-sell value = HIGH
+
+Loyalty
+Targeted retention possible
+
+De Decision Engine maakt scenario's.
+
+Bijvoorbeeld:
+
+A. Price decrease
+
+B. Hold price
+
+C. Promotion
+
+D. Loyalty
+
+E. House-brand campaign
+
+F. Bundle
+
+G. No action
+
+Per scenario:
+
+* expected units;
+* revenue;
+* margin;
+* customer impact;
+* basket impact;
+* stock impact;
+* strategic impact;
+* risk;
+* confidence.
+
+Geef:
+
+RECOMMENDED SCENARIO
+
+plus:
+
+WHY
+
+plus:
+
+ALTERNATIVES.
+
+Human approval blijft verplicht.
+
+==================================================
+26. COMMERCIAL AI COPILOT
+=========================
+
+Maak één Copilot voor het hele platform.
+
+De Copilot moet vragen kunnen beantwoorden over meerdere modules.
+
+Voorbeelden:
+
+“Welke concurrent vraagt vandaag aandacht?”
+
+“Waarom?”
+
+“Welke SKU's verliezen marge?”
+
+“Waar ligt huismerkpotentie?”
+
+“Hoeveel Lazzaro-volume komt van voormalige huismerkkopers?”
+
+“Welke promotie werkte het beste?”
+
+“Waar zien we hoge traffic maar lage conversie?”
+
+“Welke supplier vormt risico?”
+
+“Wat zijn vandaag onze grootste commerciële opportunities?”
+
+“Wat gebeurt er als we prijs X met 3% verhogen?”
+
+“Welke actie geeft waarschijnlijk de beste marge?”
+
+Gebruik:
+
+* intent detection;
+* authorization;
+* semantic functions;
+* approved tools.
+
+GEEN onbeperkte database SQL vanuit AI.
+
+Ieder antwoord toont:
+
+* conclusion;
+* period;
+* sources;
+* data freshness;
+* records;
+* confidence;
+* limitations;
+* warnings;
+* suggested action.
+
+==================================================
+27. MANAGEMENT INTELLIGENCE
+===========================
+
+Maak één centraal:
+
+COMMERCIAL COMMAND CENTER.
+
+Management ziet:
+
+TODAY
+
+* opportunities;
+* risks;
+* competitor changes;
+* margin issues;
+* supplier warnings;
+* traffic changes.
+
+THIS WEEK
+
+* best opportunities;
+* pricing actions;
+* promotion opportunities;
+* house-brand opportunities;
+* customer risks.
+
+FINANCIAL
+
+* sales;
+* margin;
+* margin change;
+* forecast.
+
+AI
+
+* recommendations;
+* approvals pending;
+* confidence.
+
+Van iedere KPI moet kunnen worden doorgedrild:
+
+management
+→ category
+→ brand
+→ SKU.
+
+==================================================
+28. WORKFLOW & APPROVAL
+=======================
+
+Gebruik één centraal approval framework.
+
+Status:
+
+* Draft
+* Proposed by AI
+* Needs Review
+* Approved
+* Rejected
+* Executed
+* Expired
+* Cancelled
+
+Bewaar:
+
+* proposer;
+* AI model;
+* reviewer;
+* timestamp;
+* reason;
+* previous value;
+* proposed value;
+* approved value.
+
+==================================================
+29. DATA INTEGRATION CENTER
+===========================
+
+Maak één centrale integratieomgeving.
+
+Ondersteun:
+
+* API;
+* webhook;
+* CSV;
+* XLS;
+* XLSX;
+* database;
+* batch;
+* incremental sync.
+
+Per bron:
+
+* connection status;
+* last sync;
+* next sync;
+* records;
+* warnings;
+* errors;
+* freshness;
+* data quality.
+
+Importprocessen krijgen:
+
+* batch ID;
+* source;
+* received;
+* accepted;
+* rejected;
+* warnings;
+* duplicate count;
+* error log.
+
+Imports verwijderen nooit stilzwijgend valide gegevens.
+
+==================================================
+30. DATA QUALITY CENTER
+=======================
+
+Maak één centraal dashboard.
+
+Detecteer:
+
+* missing IDs;
+* duplicate IDs;
+* missing EAN;
+* duplicate EAN;
+* missing prices;
+* missing cost;
+* missing customer IDs;
+* stale data;
+* unit issues;
+* pack-size mismatches;
+* failed imports;
+* missing stock;
+* low-confidence matches;
+* stale AI models.
+
+Per issue:
+
+* severity;
+* source;
+* module;
+* affected records;
+* business impact;
+* suggested action;
+* owner;
+* status.
+
+==================================================
+31. DATA SECURITY – FUNDAMENTEEL
+================================
+
+Dataveiligheid is een harde acceptance criterion.
+
+Aan het einde van de testperiode mag niet alleen worden gezegd:
+
+“het is veilig”.
+
+Er moet EVIDENCE beschikbaar zijn.
+
+Gebruik:
+
+* least privilege;
+* RBAC;
+* data minimisation;
+* pseudonymisation;
+* encrypted transport;
+* secure storage;
+* secrets management;
+* controlled AI Gateway;
+* logging;
+* audit trail.
+
+Persoonsgegevens zijn voor de meeste commerciële analyses niet nodig.
+
+Gebruik bijvoorbeeld:
+
+pseudonymous_customer_id.
+
+Stuur geen:
+
+* namen;
+* persoonlijke e-mails;
+* telefoonnummers;
+* adressen;
+* payment information
+
+naar een extern AI-model tenzij expliciet noodzakelijk en goedgekeurd.
+
+==================================================
+32. AI DATA SECURITY
+====================
+
+AI mag niet rechtstreeks willekeurige tabellen uitlezen.
+
+Gebruik:
+
+User
+↓
+Authorization
+↓
+Intent
+↓
+AI Gateway
+↓
+Approved Functions
+↓
+Semantic Layer
+↓
+Database
+↓
+Aggregated result
+↓
+AI
+
+Log per AI-call:
+
+* user;
+* model;
+* function;
+* datasource;
+* timestamp;
+* purpose;
+* result metadata;
+* token usage indien beschikbaar.
+
+Controleer providerconfiguraties.
+
+Documenteer:
+
+* welke data de provider ontvangt;
+* retentionconfiguratie;
+* training policy;
+* contract/config assumptions.
+
+Maak geen onbewezen securityclaims.
+
+==================================================
+33. SECURITY TESTING
+====================
+
+Voer minimaal uit:
+
+* dependency vulnerability scan;
+* secrets scan;
+* access-control tests;
+* authorization tests;
+* API authentication tests;
+* IDOR checks;
+* injection tests;
+* input validation tests;
+* file upload validation;
+* rate limiting tests;
+* audit tests;
+* session tests;
+* privilege escalation tests;
+* PII exposure review.
+
+Gebruik OWASP-principes.
+
+Rapporteer:
+
+* Critical;
+* High;
+* Medium;
+* Low.
+
+Een Critical security finding blokkeert Production Ready.
+
+==================================================
+34. SECURITY & DATA PROTECTION EVIDENCE PACK
+============================================
+
+Maak aan het eind een apart rapport:
+
+SECURITY & DATA PROTECTION EVIDENCE PACK.
+
+Bevat:
+
+1. Architecture diagram
+2. Data Flow Diagram
+3. Data Ownership Matrix
+4. Data Classification
+5. RBAC Matrix
+6. Secrets architecture
+7. AI data flow
+8. External providers
+9. Security test results
+10. Open vulnerabilities
+11. Audit logging
+12. Backup strategy
+13. Restore strategy
+14. Data retention
+15. Deletion procedures
+16. Production recommendations
+
+Geen juridische certificering claimen.
+
+Markeer onderdelen die formele security/privacy review vereisen.
+
+==================================================
+35. AUDIT TRAIL
+===============
+
+Log belangrijke acties:
+
+* login;
+* config changes;
+* imports;
+* AI runs;
+* recommendations;
+* approvals;
+* rejections;
+* price proposals;
+* product matches;
+* competitor approvals;
+* loyalty changes;
+* model changes.
+
+Auditlog is niet door gewone gebruikers verwijderbaar.
+
+==================================================
+36. SHOP ARCHITECTURE
+=====================
+
+Bouw multi-shop vanaf de architectuur.
+
+Gebruik:
+
+shop_id
+
+country
+
+currency
+
+legal_entity
+
+channel
+
+als centrale dimensies.
+
+Configuratie moet per shop mogelijk zijn.
+
+Maar voorkom dat iedere shop een aparte codebase krijgt.
+
+Doel:
+
+ONE PLATFORM
+
+MULTIPLE SHOPS.
+
+==================================================
+37. COST METERING VANAF NU
+==========================
+
+Meet het werkelijke gebruik.
+
+Per:
+
+* module;
+* shop;
+* user;
+* job.
+
+AI:
+
+* calls;
+* tokens;
+* model;
+* estimated cost.
+
+Database:
+
+* storage;
+* queries;
+* growth;
+* BigQuery scans.
+
+Compute:
+
+* execution;
+* job duration;
+* background jobs.
+
+Integration:
+
+* API requests;
+* imports.
+
+External services:
+
+* data provider usage.
+
+==================================================
+38. COST & SCALABILITY DASHBOARD
+================================
+
+Toon:
+
+CENTRAL COST
+
+* platform;
+* compute;
+* database;
+* AI;
+* security;
+* monitoring;
+* development;
+* maintenance.
+
+VARIABLE COST / SHOP
+
+* products;
+* categories;
+* competitors;
+* observations;
+* AI;
+* storage;
+* integrations;
+* external data.
+
+Bereken scenario's:
+
+* huidige setup;
+* 1 shop;
+* 5 shops;
+* 10 shops;
+* larger international rollout.
+
+Gebruik:
+
+LOW
+
+EXPECTED
+
+HIGH
+
+cost scenario.
+
+==================================================
+39. BUSINESS VALUE MEASUREMENT
+==============================
+
+Maak een baseline.
+
+Meet bijvoorbeeld:
+
+* huidige analysetijd;
+* huidige Excelhandelingen;
+* current manual checks;
+* time-to-insight;
+* time per category review;
+* time per pricing review.
+
+Tijdens platformgebruik meet:
+
+* time saved;
+* analyses completed;
+* competitors evaluated;
+* matches validated;
+* opportunities found;
+* risks detected;
+* decisions supported.
+
+Commerciële impact:
+
+* margin opportunity;
+* revenue opportunity;
+* avoided margin loss;
+* promotion uplift;
+* customer retention;
+* house-brand opportunity.
+
+Maak onderscheid:
+
+REALIZED
+
+MEASURED
+
+ESTIMATED
+
+SIMULATED.
+
+==================================================
+40. BUSINESSCASE PER SHOP
+=========================
+
+Per shop:
+
+Usage
+
+Cost
+
+Value
+
+ROI.
+
+Toon:
+
+* setup cost;
+* monthly cost;
+* annual cost;
+* expected savings;
+* expected margin impact;
+* expected revenue impact;
+* estimated ROI;
+* estimated payback.
+
+Scenario's:
+
+* Conservative
+* Expected
+* Ambitious
+
+==================================================
+41. PLATFORM HEALTH
+===================
+
+Maak:
+
+PLATFORM HEALTH CENTER.
+
+Toon:
+
+* application;
+* database;
+* BigQuery;
+* AI;
+* APIs;
+* jobs;
+* queues;
+* integrations;
+* imports;
+* errors;
+* response times;
+* failed jobs.
+
+==================================================
+42. OBSERVABILITY
+=================
+
+Gebruik centrale logging.
+
+Voeg:
+
+* structured logs;
+* correlation IDs;
+* error tracking;
+* job tracking;
+* API metrics;
+* AI metrics.
+
+Maak technische fouten reproduceerbaar.
+
+==================================================
+43. TESTFRAMEWORK
+=================
+
+Iedere module heeft:
+
+* unit tests;
+* integration tests;
+* API tests;
+* calculation tests;
+* permission tests.
+
+Belangrijke flows hebben:
+
+END-TO-END TESTS.
+
+==================================================
+44. PLATFORM END-TO-END ACCEPTANCE TESTS
+========================================
+
+Voer minimaal deze geïntegreerde testen uit.
+
+TEST 1
+
+DRS Product
+→ Competition Matching
+→ Competitor Price
+→ Pricing Intelligence
+→ Decision Engine
+→ Human Approval.
+
+TEST 2
+
+Office Food
+→ Competition Analysis
+→ Ranking
+→ Match validation
+→ Pricing signal.
+
+TEST 3
+
+Huismerk koffie
+→ Lazzaro
+→ Customer Switching
+→ Brand impact
+→ Basket impact
+→ Margin impact
+→ Decision Engine.
+
+TEST 4
+
+Supplier cost increase
+→ Supplier Intelligence
+→ Forecast
+→ Pricing
+→ Decision Engine.
+
+TEST 5
+
+Promotion
+→ Promotion Intelligence
+→ Incremental margin
+→ Cannibalisation
+→ Decision recommendation.
+
+TEST 6
+
+Customer churn
+→ Loyalty
+→ Next Best Action
+→ Decision Engine.
+
+TEST 7
+
+Copilot vraag
+→ authorization
+→ semantic function
+→ multiple engines
+→ evidence
+→ answer.
+
+TEST 8
+
+Management dashboard
+→ Opportunity
+→ Category
+→ SKU
+→ Evidence.
+
+==================================================
+45. VALIDATIECATEGORIEËN
+========================
+
+Gebruik echte cases om de geïntegreerde engines te testen.
+
+Competition:
+
+1. Office Food
+2. Office Notes
+3. Markers
+
+Switching:
+
+Huismerk koffie 1 kg
+vs.
+Lazzaro koffie 1 kg.
+
+Deze cases zijn TESTCASES.
+
+Zij zijn NIET de enige focus van het platform.
+
+==================================================
+46. PRODUCTION READINESS
+========================
+
+Per module berekenen:
+
+* functionality;
+* integration;
+* data quality;
+* tests;
+* security;
+* performance;
+* auditability;
+* monitoring;
+* documentation;
+* human control.
+
+Labels:
+
+Concept
+
+Prototype
+
+Integrated Prototype
+
+POC Ready
+
+Pilot Ready
+
+Production Candidate
+
+Production Ready
+
+Production Ready vereist expliciete menselijke goedkeuring.
+
+==================================================
+47. DEFINITION OF DONE PER MODULE
+=================================
+
+Een module is pas “gebouwd” wanneer:
+
+* database bestaat;
+* migrations werken;
+* backend werkt;
+* API werkt;
+* frontend werkt;
+* echte of valide testdata werkt;
+* calculations getest zijn;
+* permissions werken;
+* audit werkt;
+* error handling werkt;
+* module geïntegreerd is;
+* documentatie aanwezig is.
+
+Alleen UI = NIET gebouwd.
+
+Alleen backend = NIET volledig gebouwd.
+
+Mockdata = NIET productiegeschikt.
+
+==================================================
+48. DEVELOPMENT BACKLOG
+=======================
+
+Maak één centrale:
+
+Development Backlog & Prompt Library.
+
+Per module:
+
+* status;
+* priority;
+* owner;
+* missing functionality;
+* bugs;
+* dependencies;
+* data sources;
+* tests;
+* production readiness;
+* business value.
+
+Behoud promptversies.
+
+==================================================
+49. AUTOMATISCHE GAP ANALYSIS
+=============================
+
+Laat het systeem kunnen tonen:
+
+Expected feature
+
+vs.
+
+Current implementation
+
+vs.
+
+Gap
+
+vs.
+
+Priority.
+
+Maak hiervoor:
+
+PLATFORM GAP DASHBOARD.
+
+==================================================
+50. MANAGEMENT DASHBOARD
+========================
+
+Maak één hoofddashboard voor management.
+
+Toon:
+
+COMMERCIAL
+
+* Sales
+* Margin
+* Opportunities
+* Risks
+
+COMPETITION
+
+* Main competitors
+* Changes
+* Threats
+
+PRICING
+
+* Recommended actions
+* Margin opportunities
+
+CUSTOMERS
+
+* Value
+* Churn
+* Switching
+
+OPERATIONS
+
+* Supplier risks
+* Stock risks
+
+AI
+
+* Recommendations
+* Confidence
+* Pending approvals
+
+PLATFORM
+
+* Data quality
+* Integrations
+* Security status
+
+BUSINESSCASE
+
+* Cost
+* Cost per shop
+* Measured value
+* ROI.
+
+==================================================
+51. COMMERCIAL AI EXPLAINABILITY
+================================
+
+Iedere belangrijke AI-aanbeveling moet kunnen beantwoorden:
+
+WHY?
+
+Toon:
+
+* factors;
+* sources;
+* period;
+* calculations;
+* assumptions;
+* confidence;
+* limitations;
+* model version.
+
+Geen black-box aanbevelingen zonder verklaring.
+
+==================================================
+52. CONFIGURATION
+=================
+
+Maak commerciële instellingen configureerbaar.
+
+Bijvoorbeeld:
+
+* score weights;
+* thresholds;
+* confidence thresholds;
+* price guardrails;
+* match thresholds;
+* approval rules;
+* freshness rules;
+* cost thresholds;
+* loyalty rules.
+
+Wijzigingen krijgen:
+
+* version;
+* user;
+* date;
+* reason.
+
+==================================================
+53. HISTORICAL VERSIONING
+=========================
+
+Bewaar historie van:
+
+* competitor scores;
+* prices;
+* matches;
+* BCG;
+* forecasts;
+* recommendations;
+* approvals;
+* AI models;
+* configuration.
+
+Zo kunnen beslissingen later worden gereconstrueerd.
+
+==================================================
+54. MODEL GOVERNANCE
+====================
+
+Per AI/statistical model:
+
+* model name;
+* version;
+* purpose;
+* training data;
+* validation data;
+* metrics;
+* deployment date;
+* owner;
+* status.
+
+Ondersteun rollback naar vorige versie.
+
+==================================================
+55. BACKUP & RESTORE
+====================
+
+Maak een backupstrategie.
+
+Documenteer:
+
+* database backups;
+* frequency;
+* retention;
+* restore procedure;
+* recovery test.
+
+Voer waar technisch mogelijk een restore-test uit op testdata.
+
+==================================================
+56. FAILURE HANDLING
+====================
+
+Het platform moet veilig falen.
+
+Wanneer bijvoorbeeld PriceShape niet beschikbaar is:
+
+Pricing Engine mag niet crashen.
+
+Toon:
+
+“Competitor data unavailable”.
+
+Wanneer AI faalt:
+
+de applicatie moet blijven werken.
+
+Wanneer BigQuery faalt:
+
+toon duidelijke foutstatus.
+
+Gebruik:
+
+retry;
+
+timeouts;
+
+circuit breaking waar relevant.
+
+==================================================
+57. DEMONSTRATIEVIDEO
+=====================
+
+Wanneer het platform voldoende stabiel is:
+
+maak een demonstratievideo.
+
+Laat het echte geïntegreerde platform zien.
+
+Niet alleen Competition.
+
+Laat zien:
+
+Data
+→ Engines
+→ Intelligence
+→ Decision
+→ Copilot
+→ Human Approval.
+
+Maak:
+
+* managementversie;
+* volledige demonstratie.
+
+Markeer demo-data.
+
+==================================================
+58. DOCUMENTATIE
+================
+
+Maak één centrale documentatieomgeving.
+
+Bevat:
+
+* Architecture
+* Data Model
+* Data Ownership
+* Integrations
+* Intelligence Engines
+* Semantic Layer
+* Decision Engine
+* Copilot
+* Security
+* AI Governance
+* Testing
+* Cost
+* Business Value
+* Deployment
+* Operations
+* Roadmap.
+
+Documentatie moet met de applicatie meegroeien.
+
+==================================================
+59. FINAL PLATFORM EVALUATION
+=============================
+
+Aan het einde moet automatisch een rapport worden gemaakt:
+
+# AI COMMERCIAL INTELLIGENCE PLATFORM
+
+# FINAL TECHNICAL & BUSINESS EVALUATION
+
+Bevat:
+
+1. Wat bestond bij start?
+2. Wat is gebouwd?
+3. Wat is verbeterd?
+4. Welke modules werken?
+5. Welke integraties werken?
+6. Welke echte databronnen zijn gebruikt?
+7. Welke onderdelen gebruiken testdata?
+8. Welke tests zijn uitgevoerd?
+9. Wat zijn open bugs?
+10. Wat ontbreekt?
+11. Security findings.
+12. Data protection findings.
+13. Production readiness.
+14. Platform usage.
+15. Estimated production cost.
+16. Cost per shop.
+17. Measured time savings.
+18. Estimated business impact.
+19. ROI scenarios.
+20. Recommended production roadmap.
+
+==================================================
+60. HARDE ACCEPTANCE GATES
+==========================
+
+Het totaalplatform is pas succesvol wanneer:
+
+GATE 1
+
+Geen Critical security issues openstaan.
+
+GATE 2
+
+RBAC is aantoonbaar getest.
+
+GATE 3
+
+Sensitive data gaat niet ongecontroleerd naar AI.
+
+GATE 4
+
+Belangrijke berekeningen hebben tests.
+
+GATE 5
+
+Modules gebruiken hetzelfde canonical data model.
+
+GATE 6
+
+Minimaal meerdere engines leveren gestandaardiseerde Intelligence Signals aan de Decision Engine.
+
+GATE 7
+
+Commercial Copilot kan gecontroleerd data uit meerdere modules combineren.
+
+GATE 8
+
+Human approval werkt.
+
+GATE 9
+
+Audittrail werkt.
+
+GATE 10
+
+Data Quality zichtbaar is.
+
+GATE 11
+
+Platform Health zichtbaar is.
+
+GATE 12
+
+Kosten worden gemeten.
+
+GATE 13
+
+Cost-per-shop kan worden geraamd.
+
+GATE 14
+
+Business Value kan worden geëvalueerd.
+
+GATE 15
+
+De geïntegreerde end-to-end businesscases werken.
+
+==================================================
+61. AANPAK VOOR PLAN MODE
+=========================
+
+Voer NU eerst alleen onderstaande PLAN-fase uit.
+
+STAP 1
+
+Inspecteer de volledige bestaande codebase.
+
+STAP 2
+
+Maak een Architecture Assessment.
+
+STAP 3
+
+Maak Module Inventory.
+
+STAP 4
+
+Maak Data Source Inventory.
+
+STAP 5
+
+Maak Security Assessment.
+
+STAP 6
+
+Maak Database/Data Model Assessment.
+
+STAP 7
+
+Maak Integration Assessment.
+
+STAP 8
+
+Maak Test Assessment.
+
+STAP 9
+
+Maak Gap Analysis tegenover deze master specification.
+
+STAP 10
+
+Identificeer onderdelen die in deze specificatie nog ontbreken.
+
+STAP 11
+
+Voeg noodzakelijke verbeteringen toe.
+
+STAP 12
+
+Elimineer overlap en dubbele functionaliteit.
+
+STAP 13
+
+Maak één geprioriteerd integrated implementation plan.
+
+==================================================
+62. PLAN MOET DAARNA TONEN
+==========================
+
+Geef voor iedere workstream:
+
+* Current state
+* Desired state
+* Gap
+* Dependencies
+* Files/components affected
+* Database migrations
+* APIs
+* Tests
+* Security considerations
+* Estimated complexity
+* Execution order
+* Acceptance criteria.
+
+Maak daarnaast:
+
+# Critical Path
+
+Welke onderdelen moeten eerst bestaan voordat de rest betrouwbaar kan worden gebouwd?
+
+Waarschijnlijk:
+
+1. Canonical Data Model
+2. Data Integration
+3. Semantic Layer
+4. Security/RBAC
+5. Intelligence Signal Standard
+6. Intelligence Engines
+7. Decision Engine
+8. Copilot
+9. Management
+10. Cost & Business Value.
+
+Pas deze volgorde aan wanneer de bestaande applicatie al verder is.
+
+==================================================
+63. BOUWFASE NA PLAN
+====================
+
+Na goedkeuring van het plan:
+
+WERK DOOR TOT HET PLATFORM ZOVEEL MOGELIJK VOLDOET AAN DEZE SPECIFICATIE.
+
+Vraag niet na iedere kleine stap toestemming.
+
+Werk iteratief.
+
+Na iedere belangrijke wijziging:
+
+* run tests;
+* run regression tests;
+* check migrations;
+* check security;
+* update docs;
+* update backlog.
+
+Prioriteer:
+
+WORKING
+
+boven:
+
+PRETTY.
+
+Prioriteer:
+
+INTEGRATED
+
+boven:
+
+MORE FEATURES.
+
+Prioriteer:
+
+TESTED
+
+boven:
+
+DEMO.
+
+Prioriteer:
+
+SECURE
+
+boven:
+
+FAST SHORTCUTS.
+
+==================================================
+64. BELANGRIJKSTE PRINCIPES
+===========================
+
+1. Geen bestaande data verwijderen.
+
+2. Geen functionaliteit herschrijven wanneer dit niet nodig is.
+
+3. Geen tweede implementatie maken van hetzelfde domein.
+
+4. Geen hardcoded commerciële resultaten.
+
+5. Geen demo-data als echte data presenteren.
+
+6. Geen onbeperkte SQL voor AI.
+
+7. Geen autonome commerciële uitvoering.
+
+8. Geen gevoelige gegevens onnodig naar AI.
+
+9. Geen score zonder uitleg.
+
+10. Geen recommendation zonder confidence.
+
+11. Geen financial impact zonder aannames te tonen.
+
+12. Geen Production Ready-label zonder tests en menselijke goedkeuring.
+
+==================================================
+65. EINDEDOEL
+=============
+
+Aan het eind willen wij GEEN verzameling experimenten.
+
+Wij willen één platform waarin bijvoorbeeld deze keten daadwerkelijk kan werken:
+
+DRS
+↓
+Product / Sales / Margin / Stock
+↓
+Competition Intelligence
+↓
+Brand Intelligence
+↓
+Customer Switching
+↓
+Basket Intelligence
+↓
+Pricing Intelligence
+↓
+Forecast / Supplier / Promotion
+↓
+Commercial Decision & Impact Engine
+↓
+Commercial AI Copilot
+↓
+Human Review
+↓
+Approved Commercial Action
+
+En tegelijkertijd:
+
+Data Integration
++
+Data Quality
++
+Security
++
+Audit
++
+Monitoring
++
+Cost Measurement
++
+Business Value
+
+onder dezelfde architectuur.
+
+==================================================
+66. VRAAG DIE HET EINDRESULTAAT MOET BEANTWOORDEN
+=================================================
+
+Na afloop moeten we met bewijs kunnen antwoorden:
+
+### WAT HEBBEN WE?
+
+Een geïntegreerd AI Commercial Intelligence Platform.
+
+### WERKT HET?
+
+Aangetoond door end-to-end tests en echte businesscases.
+
+### IS DE DATA BETROUWBAAR?
+
+Aangetoond via Data Quality.
+
+### IS DE DATA VOLDOENDE BESCHERMD?
+
+Onderbouwd met Security & Data Protection Evidence.
+
+### KUNNEN MEERDERE MODULES SAMENWERKEN?
+
+Aangetoond via Intelligence Signals, Decision Engine en Copilot.
+
+### WAT KOST HET?
+
+Gemeten tijdens werkelijk gebruik.
+
+### WAT KOST EEN EXTRA SHOP?
+
+Onderbouwd vanuit centrale en variabele kosten.
+
+### WAT KAN HET OPLEVEREN?
+
+Onderbouwd vanuit tijd, omzet, marge, retentie en risicoreductie.
+
+### KAN HET WORDEN OPGESCHAALD?
+
+Onderbouwd vanuit multi-shop architectuur en production readiness.
+
+==================================================
+67. START PLAN MODE NU
+======================
+
+Analyseer nu de bestaande applicatie tegen deze volledige specificatie.
+
+Wees kritisch.
+
+Vul ontbrekende noodzakelijke onderdelen aan.
+
+Verminder dubbele of onnodige complexiteit.
+
+Behoud de commerciële visie.
+
+Optimaliseer voor:
+
+* één geïntegreerd platform;
+* schaalbaarheid;
+* security;
+* betrouwbaarheid;
+* uitlegbaarheid;
+* onderhoudbaarheid;
+* businesswaarde.
+
+Lever daarna:
+
+1. Executive Architecture Summary
+2. Current State Assessment
+3. Module Status Matrix
+4. Gap Analysis
+5. Security Assessment
+6. Data Architecture Assessment
+7. Integration Map
+8. Critical Path
+9. Prioritized Build Plan
+10. Test Plan
+11. Security Validation Plan
+12. Cost Measurement Plan
+13. Business Value Measurement Plan
+14. Production Readiness Framework
+15. Final Definition of Done
+
+Pas daarna starten we de daadwerkelijke uitvoering.
+
+HET EINDDOEL IS ÉÉN COMPLEET, WERKEND, GEÏNTEGREERD EN CONTROLEERBAAR AI COMMERCIAL INTELLIGENCE PLATFORM.
