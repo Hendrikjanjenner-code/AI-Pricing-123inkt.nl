@@ -43,7 +43,7 @@ import importlib
 
 disabled_optional_routers: set[str] = set()
 _optional_router_modules: dict[str, object] = {}
-for _mod_name in ("drs", "priceshape"):
+for _mod_name in ("drs", "priceshape", "bigquery"):
     try:
         _optional_router_modules[_mod_name] = importlib.import_module(f"routes.{_mod_name}")
     except Exception as exc:
@@ -76,6 +76,14 @@ async def lifespan(app: FastAPI):
         # 2. Add missing columns to existing tables (idempotent)
         run_migrations(engine, Base.metadata)
         logger.info("Startup: migrations applied.")
+
+        # 2a. BigQuery kostenmeting-tabel aanmaken (idempotent, faalveilig)
+        try:
+            from bigquery.cost_tracker import ensure_cost_table
+            ensure_cost_table(engine)
+            logger.info("Startup: BigQuery kostenmeting-tabel ensured.")
+        except Exception as _bq_exc:
+            logger.warning("Startup: BigQuery kostenmeting-tabel aanmaken mislukt (niet kritiek): %s", _bq_exc)
 
         # 2b. Confirm the database is actually reachable (not just configured)
         with engine.connect() as conn:
@@ -248,6 +256,20 @@ def _build_health_payload() -> dict:
     optional_modules: dict = {}
     optional_modules["drs"] = {"ok": "drs" not in disabled_optional_routers}
     optional_modules["priceshape"] = {"ok": "priceshape" not in disabled_optional_routers}
+
+    # BigQuery analytische laag — faalveilig: storing hier crasht /api/health nooit
+    bq_module_status: dict = {"ok": "bigquery" not in disabled_optional_routers}
+    try:
+        from bigquery.client import bq_status as _bq_status
+        _bs = _bq_status()
+        bq_module_status["available"] = _bs.get("available", False)
+        bq_module_status["project"] = _bs.get("project", "")
+        if _bs.get("error"):
+            bq_module_status["error"] = _bs["error"]
+    except Exception as _bq_err:
+        bq_module_status["available"] = False
+        bq_module_status["error"] = str(_bq_err)
+    optional_modules["bigquery"] = bq_module_status
 
     return {
         "status": "ok" if startup_state["backend_status"] == "running" and database_status == "connected" else "degraded",
