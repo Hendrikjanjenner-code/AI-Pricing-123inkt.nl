@@ -57,6 +57,10 @@ DEFAULTS = {
     "elasticity_lookback_days": 90,
     # Dekking: match-statussen die meetellen (REJECTED nooit)
     "coverage_min_confidence": 0.0,
+    # Verdachte matches: |prijsverschil| boven deze drempel (%) is verdacht
+    "suspicious_match_price_diff_pct": 40.0,
+    # Verdachte matches: minimaal aantal verdachte matches voor een signaal
+    "suspicious_match_min_count": 5,
 }
 
 
@@ -647,6 +651,78 @@ def run_elasticity(db: Session, run_date: Optional[date] = None) -> int:
     logger.info("Elasticiteit: %d SKU's berekend (methode per SKU: regressie waar mogelijk).", n)
     return n
 
+def warn_suspicious_matches(db: Session, run_date: Optional[date] = None) -> int:
+    """Publiceer een waarschuwingssignaal per shop als het aantal verdachte
+    AI-matches (|price_diff_pct| > drempel bij status PENDING) boven de
+    configureerbare min_count drempel uitkomt.
+
+    Idempotent bij reruns: een tweede aanroep op dezelfde run_date maakt géén
+    extra signaal aan zolang het vorige nog actief is.
+    Linkt naar de AI Matching-pagina zodat analisten direct kunnen reviewen.
+    """
+    from sqlalchemy import func as _f
+
+    rd = run_date or date.today()
+    cfg = _cfg(db)
+    price_diff_threshold = float(cfg["suspicious_match_price_diff_pct"])
+    min_count = int(cfg["suspicious_match_min_count"])
+
+    # Tel verdachte PENDING-matches per shop
+    rows = (
+        db.query(
+            models.DimProduct.shop_id,
+            _f.count(models.AiMatchResult.id).label("cnt"),
+        )
+        .join(models.AiMatchResult,
+              models.AiMatchResult.own_sku_id == models.DimProduct.sku_id)
+        .filter(
+            models.AiMatchResult.status == "PENDING",
+            models.AiMatchResult.price_diff_pct.isnot(None),
+            (models.AiMatchResult.price_diff_pct > price_diff_threshold)
+            | (models.AiMatchResult.price_diff_pct < -price_diff_threshold),
+        )
+        .group_by(models.DimProduct.shop_id)
+        .all()
+    )
+
+    n_signals = 0
+    for shop_id, cnt in rows:
+        if cnt < min_count:
+            continue
+        sid = shop_id or 1
+        # Idempotentie: één signaal per shop per run_date
+        if _already_signaled(db, "suspicious_ai_matches", "ai-matching", sid,
+                             "run_date", str(rd)):
+            continue
+        publish_signal(
+            db, engine="competition", signal_type="suspicious_ai_matches",
+            entity_type="system", entity_id="ai-matching",
+            entity_name="AI Matching",
+            severity="high", direction="negative",
+            metric="suspicious_match_count", current_value=float(cnt),
+            confidence=0.95,
+            explanation=(
+                f"Er zijn {cnt} verdachte AI-matches met een |prijsverschil| "
+                f"> {price_diff_threshold:.0f}% bij status PENDING. "
+                f"Foute matches vervuilen dekking, prijsindex en elasticiteit. "
+                f"Beoordeel de AI Matching-pagina en keur matches goed of af."),
+            evidence={
+                "suspicious_count": cnt,
+                "price_diff_threshold_pct": price_diff_threshold,
+                "min_count_threshold": min_count,
+                "run_date": str(rd),
+                "link": "/competition/ai-matching",
+            },
+            sources=["ai_match_result"],
+            suggested_action=(
+                "Open de AI Matching-pagina en keur verdachte matches goed of af"),
+            model_version=MODEL_VERSION, shop_id=sid,
+        )
+        n_signals += 1
+
+    db.commit()
+    return n_signals
+
 
 # ── Orchestratie ─────────────────────────────────────────────────────────────
 
@@ -662,7 +738,15 @@ def run_all(db: Session, run_date: Optional[date] = None) -> dict:
         "promo_events": detect_promo_events(db, rd),
         "availability_competitors": update_availability(db, rd),
         "elasticity_skus": run_elasticity(db, rd),
-        "profiles": len(competitor_profiling.build_all_profiles(db)),
+        "strategy_results": run_strategies(db, rd),
+        # Profielen per shop: elke shop met producten krijgt zijn eigen,
+        # niet-vermengde concurrentprofielen.
+        "profiles": sum(
+            len(competitor_profiling.build_all_profiles(db, shop_id=sid))
+            for (sid,) in db.query(models.DimProduct.shop_id).distinct().all()
+            if sid is not None
+        ),
+        "suspicious_match_signals": warn_suspicious_matches(db, rd),
         "model_version": MODEL_VERSION,
     }
     logger.info("Competition intelligence run: %s", result)

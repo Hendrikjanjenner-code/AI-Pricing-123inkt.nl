@@ -414,3 +414,226 @@ def test_viewer_cannot_run_engines(client, seed):
         pytest.skip("geen viewer-account beschikbaar")
     h = {"Authorization": f"Bearer {resp.json()['token']}"}
     assert client.post("/api/competition/intelligence/run", headers=h).status_code == 403
+
+@pytest.fixture(scope="module")
+def suspicious_seed():
+    """Seed: 6 PENDING AI-matches met |price_diff_pct| > 40 zodat de drempel
+    (standaard 5) gehaald wordt, plus 1 match met klein verschil als controle."""
+    db = SessionLocal()
+    today = date.today()
+    sid = None
+    skus = []
+    try:
+        shop = models.DimShop(shop_code=f"{WM_PFX}", name=f"{WM_PFX}-shop",
+                              active=True)
+        db.add(shop)
+        db.flush()
+        sid = shop.id
+
+        for i in range(7):
+            sku_id = f"{WM_SKU}-{i}"
+            db.add(models.DimProduct(
+                sku_id=sku_id, product_name=f"WM Product {i}",
+                current_price=10.0, shop_id=sid))
+            skus.append(sku_id)
+        db.flush()
+
+        # 6 verdachte matches (|price_diff_pct| > 40)
+        for i in range(6):
+            db.add(models.AiMatchResult(
+                own_sku_id=skus[i], competitor_name=WM_COMP,
+                match_type="Exact", confidence=0.9,
+                explanation_nl="test", status="PENDING",
+                run_date=today, own_price=10.0,
+                competitor_price=17.0, price_diff_pct=70.0,
+            ))
+        # 1 match met klein verschil — telt NIET mee
+        db.add(models.AiMatchResult(
+            own_sku_id=skus[6], competitor_name=WM_COMP,
+            match_type="Exact", confidence=0.9,
+            explanation_nl="test", status="PENDING",
+            run_date=today, own_price=10.0,
+            competitor_price=10.5, price_diff_pct=5.0,
+        ))
+        db.commit()
+        yield sid, skus
+    finally:
+        if sid is not None:
+            db.query(models.IntelligenceSignal).filter(
+                models.IntelligenceSignal.entity_id == "ai-matching",
+                models.IntelligenceSignal.signal_type == "suspicious_ai_matches",
+                models.IntelligenceSignal.shop_id == sid,
+            ).delete(synchronize_session=False)
+        if skus:
+            for sku_id in skus:
+                db.query(models.AiMatchResult).filter(
+                    models.AiMatchResult.own_sku_id == sku_id,
+                ).delete(synchronize_session=False)
+            db.query(models.DimProduct).filter(
+                models.DimProduct.sku_id.in_(skus),
+            ).delete(synchronize_session=False)
+        if sid is not None:
+            for model, col in [
+                (models.IntelligenceSignal, models.IntelligenceSignal.shop_id),
+                (models.CompetitorCoverageResult, models.CompetitorCoverageResult.shop_id),
+                (models.CompetitorAvailabilityDaily, models.CompetitorAvailabilityDaily.shop_id),
+                (models.CompetitorStrategyResult, models.CompetitorStrategyResult.shop_id),
+                (models.CompetitorProfile, models.CompetitorProfile.shop_id),
+                (models.CategoryCompetitorRelevance, models.CategoryCompetitorRelevance.shop_id),
+                (models.CompetitorRanking, models.CompetitorRanking.shop_id),
+                (models.FactCompetitorPriceDaily, models.FactCompetitorPriceDaily.shop_id),
+                (models.CostUsageRecord, models.CostUsageRecord.shop_id),
+            ]:
+                db.query(model).filter(col == sid).delete(synchronize_session=False)
+        if skus:
+            for sku_id in skus:
+                db.query(models.AiMatchResult).filter(
+                    models.AiMatchResult.own_sku_id == sku_id,
+                ).delete(synchronize_session=False)
+                db.query(models.CompetitorPriceEvent).filter(
+                    models.CompetitorPriceEvent.sku_id == sku_id,
+                ).delete(synchronize_session=False)
+                db.query(models.SkuElasticity).filter(
+                    models.SkuElasticity.sku_id == sku_id,
+                ).delete(synchronize_session=False)
+            db.query(models.DimProduct).filter(
+                models.DimProduct.sku_id.in_(skus),
+            ).delete(synchronize_session=False)
+        if sid is not None:
+            db.query(models.DimShop).filter(
+                models.DimShop.id == sid,
+            ).delete(synchronize_session=False)
+        db.commit()
+        db.close()
+
+def test_warn_suspicious_matches_idempotent(suspicious_seed):
+    """Tweede aanroep op dezelfde run_date mag geen extra signaal aanmaken."""
+    from engine.competition_intelligence import warn_suspicious_matches
+    sid, _skus = suspicious_seed
+    db = SessionLocal()
+    try:
+        rd = date.today()
+        # Eerste aanroep is al gedaan in test_warn_suspicious_matches_publishes_signal;
+        # een tweede aanroep mag het signaal niet verdubbelen.
+        n = warn_suspicious_matches(db, rd)
+        assert n == 0, f"Idempotentie geschonden: {n} extra signalen aangemaakt"
+        count = db.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.signal_type == "suspicious_ai_matches",
+            models.IntelligenceSignal.entity_id == "ai-matching",
+            models.IntelligenceSignal.shop_id == sid,
+            models.IntelligenceSignal.status == "active",
+        ).count()
+        assert count == 1, f"Verwacht 1 actief signaal, kreeg {count}"
+    finally:
+        db.close()
+
+def test_warn_suspicious_matches_publishes_signal(suspicious_seed):
+    """Als het aantal verdachte matches >= drempel, moet er een signaal worden gepubliceerd."""
+    from engine.competition_intelligence import warn_suspicious_matches
+    sid, _skus = suspicious_seed
+    db = SessionLocal()
+    try:
+        n = warn_suspicious_matches(db, date.today())
+        assert n >= 1, "Verwacht minstens 1 signaal boven de drempel"
+        sig = db.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.signal_type == "suspicious_ai_matches",
+            models.IntelligenceSignal.entity_id == "ai-matching",
+            models.IntelligenceSignal.shop_id == sid,
+            models.IntelligenceSignal.status == "active",
+        ).first()
+        assert sig is not None, "Geen actief signaal gevonden"
+        assert sig.explanation and "verdachte" in sig.explanation.lower()
+        ev = sig.evidence or {}
+        assert ev.get("suspicious_count") >= 6
+        assert ev.get("link") == "/competition/ai-matching"
+        assert sig.sources and "ai_match_result" in sig.sources
+    finally:
+        db.close()
+
+def test_warn_suspicious_matches_below_threshold():
+    """Als het aantal verdachte matches voor een shop kleiner is dan de drempel,
+    mag er geen signaal worden gepubliceerd voor die shop."""
+    from engine.competition_intelligence import warn_suspicious_matches
+    db = SessionLocal()
+    pfx = f"WMLOW{uuid.uuid4().hex[:6]}"
+    sid = None
+    skus: list[str] = []
+    try:
+        shop = models.DimShop(shop_code=pfx, name=f"{pfx}-shop", active=True)
+        db.add(shop)
+        db.flush()
+        sid = shop.id
+        # 4 verdachte matches — onder de standaard drempel van 5
+        for i in range(4):
+            sku_id = f"{pfx}-SKU-{i}"
+            db.add(models.DimProduct(
+                sku_id=sku_id, product_name=f"Low {i}",
+                current_price=10.0, shop_id=sid))
+            skus.append(sku_id)
+        db.flush()
+        for sku_id in skus:
+            db.add(models.AiMatchResult(
+                own_sku_id=sku_id, competitor_name=f"{pfx}-comp",
+                match_type="Exact", confidence=0.9,
+                explanation_nl="test", status="PENDING",
+                run_date=date.today(), own_price=10.0,
+                competitor_price=17.0, price_diff_pct=70.0,
+            ))
+        db.commit()
+
+        warn_suspicious_matches(db, date.today())
+
+        # Onze specifieke shop heeft te weinig verdachte matches → geen signaal
+        sig = db.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.signal_type == "suspicious_ai_matches",
+            models.IntelligenceSignal.entity_id == "ai-matching",
+            models.IntelligenceSignal.shop_id == sid,
+        ).first()
+        assert sig is None, (
+            f"Onverwacht signaal voor shop met slechts {len(skus)} verdachte matches "
+            f"(drempel = 5)")
+    finally:
+        if skus:
+            for sku_id in skus:
+                db.query(models.AiMatchResult).filter(
+                    models.AiMatchResult.own_sku_id == sku_id,
+                ).delete(synchronize_session=False)
+            db.query(models.DimProduct).filter(
+                models.DimProduct.sku_id.in_(skus),
+            ).delete(synchronize_session=False)
+        if sid is not None:
+            db.query(models.IntelligenceSignal).filter(
+                models.IntelligenceSignal.shop_id == sid,
+            ).delete(synchronize_session=False)
+            db.query(models.CostUsageRecord).filter(
+                models.CostUsageRecord.shop_id == sid,
+            ).delete(synchronize_session=False)
+            db.query(models.DimShop).filter(
+                models.DimShop.id == sid,
+            ).delete(synchronize_session=False)
+        db.commit()
+        db.close()
+
+def test_run_all_includes_suspicious_match_signals(suspicious_seed):
+    """run_all retourneert suspicious_match_signals in de samenvatting."""
+    sid, _skus = suspicious_seed
+    # Ruim vorige signalen op zodat we een verse meting krijgen
+    db = SessionLocal()
+    try:
+        db.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.signal_type == "suspicious_ai_matches",
+            models.IntelligenceSignal.entity_id == "ai-matching",
+            models.IntelligenceSignal.shop_id == sid,
+        ).delete(synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
+
+    from engine.competition_intelligence import run_all
+    db2 = SessionLocal()
+    try:
+        result = run_all(db2, date.today())
+        assert "suspicious_match_signals" in result
+        assert isinstance(result["suspicious_match_signals"], int)
+    finally:
+        db2.close()
