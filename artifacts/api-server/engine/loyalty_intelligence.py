@@ -923,9 +923,20 @@ def publish_signals(db: Session, run_date: date | None = None) -> int:
 
     return published
 
-
+def _z_to_confidence(z: float) -> float:
+    """
+    Benadering van 1 - p_waarde (tweezijdig) via de normale verdeling.
+    Geen scipy-afhankelijkheid: nauwkeurig genoeg voor heuristische confidence.
+    """
+    import math
+    # Abramowitz & Stegun benadering van de complementaire fout-functie
+    t = 1.0 / (1.0 + 0.2316419 * abs(z))
+    poly = t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))))
+    p_one_tail = (1.0 / math.sqrt(2 * math.pi)) * math.exp(-0.5 * z * z) * poly
+    p_two_tail = 2 * p_one_tail
+    return round(max(0.0, min(1.0, 1.0 - p_two_tail)), 3)
 def run_loyalty_engine(db: Session) -> dict:
-    """Volledige run: verloop → tiers → customer value → fraude → signalen."""
+    """Volledige run: verloop → tiers → customer value → fraude → campaign uplift → signalen."""
     run_date = date.today()
     # Verloop als eerste stap: expired punten zijn dan niet meer in het saldo
     # voor de tier-herberekening en klantwaardescores.
@@ -940,13 +951,16 @@ def run_loyalty_engine(db: Session) -> dict:
     fraud = detect_fraud(db, run_date)
     db.flush()
     signals = publish_signals(db, run_date)
+    db.flush()
+    uplift_signals = publish_campaign_uplift_signals(db, run_date)
     db.commit()
     return {
         "run_date": run_date.isoformat(),
         "tiers_updated": tiers_updated,
         "members_scored": scored,
         "fraud_signals": fraud,
-        "intelligence_signals_published": signals,
+        "intelligence_signals_published": signals + uplift_signals,
+        "campaign_uplift_signals": uplift_signals,
         "model_version": MODEL_VERSION,
         "expiry": expiry,
     }
@@ -957,3 +971,214 @@ def ensure_default_tiers(db: Session) -> None:
         for t in DEFAULT_TIERS:
             db.add(models.LoyaltyTier(**t))
         db.commit()
+
+def compute_campaign_uplift(
+    db: Session,
+    campaign_id: int | None = None,
+) -> list[dict]:
+    """
+    Berekent uplift per campagne (treatment vs. control):
+    - besteding per lid (spend/member)
+    - aankoopfrequentie per lid (orders/member)
+    - retentie: aandeel leden met ≥1 aankoop in de campagneperiode
+    - uplift% + statistische confidence (z-score benadering, §22).
+
+    Alleen campagnes met ≥1 treatment- EN ≥1 control-lid worden geanalyseerd.
+    Geeft een lijst van uplift-dicts terug (één per campagne).
+    """
+    q = db.query(models.LoyaltyCampaign)
+    if campaign_id is not None:
+        q = q.filter(models.LoyaltyCampaign.id == campaign_id)
+    campaigns = q.all()
+
+    results = []
+    for c in campaigns:
+        memberships = db.query(models.LoyaltyCampaignMembership).filter(
+            models.LoyaltyCampaignMembership.campaign_id == c.id
+        ).all()
+        if not memberships:
+            continue
+
+        treatment_ids = [m.member_id for m in memberships if m.group_type == "treatment"]
+        control_ids = [m.member_id for m in memberships if m.group_type == "control"]
+        if not treatment_ids or not control_ids:
+            continue
+
+        # Bepaal meetperiode: campagneperiode, of 365 dagen als fallback
+        start = c.start_date or (date.today() - timedelta(days=365))
+        end = c.end_date or date.today()
+
+        def _group_stats(member_ids: list[int]) -> dict:
+            """Besteding, frequentie en retentie voor een groep in de campagneperiode."""
+            if not member_ids:
+                return {"n": 0, "spend_total": 0.0, "orders_total": 0,
+                        "members_with_purchase": 0, "spend_per_member": 0.0,
+                        "orders_per_member": 0.0, "retention_rate": 0.0}
+
+            # Earn-transacties in de meetperiode voor deze leden
+            rows = db.query(
+                models.LoyaltyTransaction.member_id,
+                func.count(models.LoyaltyTransaction.id),
+                func.coalesce(func.sum(models.LoyaltyTransaction.order_value), 0),
+            ).filter(
+                models.LoyaltyTransaction.member_id.in_(member_ids),
+                models.LoyaltyTransaction.txn_type == "earn",
+                models.LoyaltyTransaction.txn_date >= start,
+                models.LoyaltyTransaction.txn_date <= end,
+            ).group_by(models.LoyaltyTransaction.member_id).all()
+
+            n = len(member_ids)
+            members_with_purchase = len(rows)
+            orders_total = sum(int(r[1]) for r in rows)
+            spend_total = sum(float(r[2]) for r in rows)
+            return {
+                "n": n,
+                "spend_total": round(spend_total, 2),
+                "orders_total": orders_total,
+                "members_with_purchase": members_with_purchase,
+                "spend_per_member": round(spend_total / n, 2),
+                "orders_per_member": round(orders_total / n, 3),
+                "retention_rate": round(members_with_purchase / n, 3),
+            }
+
+        t = _group_stats(treatment_ids)
+        ctrl = _group_stats(control_ids)
+
+        # Uplift-berekeningen
+        def _uplift_pct(treatment_val: float, control_val: float) -> float | None:
+            if control_val == 0:
+                return None
+            return round((treatment_val - control_val) / control_val * 100, 1)
+
+        spend_uplift = _uplift_pct(t["spend_per_member"], ctrl["spend_per_member"])
+        freq_uplift = _uplift_pct(t["orders_per_member"], ctrl["orders_per_member"])
+        retention_uplift = _uplift_pct(t["retention_rate"], ctrl["retention_rate"])
+
+        # Statistische confidence via z-score voor retentie (proporties).
+        # Voor spend/frequentie geven we een heuristische confidence op basis
+        # van steekproefgroottes (geen SD beschikbaar zonder rij-level data).
+        import math
+        n_t, n_c = t["n"], ctrl["n"]
+        p_t = t["retention_rate"]
+        p_c = ctrl["retention_rate"]
+        p_pool = (t["members_with_purchase"] + ctrl["members_with_purchase"]) / (n_t + n_c) if (n_t + n_c) > 0 else 0.5
+        denom = math.sqrt(p_pool * (1 - p_pool) * (1 / max(n_t, 1) + 1 / max(n_c, 1)))
+        z_retention = (p_t - p_c) / denom if denom > 0 else 0.0
+        retention_confidence = _z_to_confidence(z_retention)
+
+        # Spend confidence: heuristic — schaalt met min(n_t, n_c) tot ~0.90
+        spend_confidence = round(min(0.90, 0.3 + 0.04 * min(n_t, n_c, 15)), 2)
+
+        # Gecombineerde confidence: gemiddelde van beide
+        combined_confidence = round((retention_confidence + spend_confidence) / 2, 3)
+
+        # Kwalificatie: positief/negatief/neutraal
+        direction: str
+        if spend_uplift is not None and spend_uplift > 5:
+            direction = "positive"
+        elif spend_uplift is not None and spend_uplift < -5:
+            direction = "negative"
+        else:
+            direction = "neutral"
+
+        explanation = (
+            f"Campagne '{c.name}' ({start} – {end}): "
+            f"treatment (n={n_t}) vs. control (n={n_c}). "
+            f"Besteding/lid: €{t['spend_per_member']:.2f} vs. €{ctrl['spend_per_member']:.2f} "
+            f"({'+' if (spend_uplift or 0) >= 0 else ''}{spend_uplift if spend_uplift is not None else '—'}%). "
+            f"Frequentie/lid: {t['orders_per_member']:.2f} vs. {ctrl['orders_per_member']:.2f} "
+            f"({'+' if (freq_uplift or 0) >= 0 else ''}{freq_uplift if freq_uplift is not None else '—'}%). "
+            f"Retentie: {t['retention_rate']:.0%} vs. {ctrl['retention_rate']:.0%} "
+            f"(z={z_retention:.2f}, confidence {retention_confidence:.0%}). "
+            f"Gecombineerde confidence: {combined_confidence:.0%}."
+        )
+
+        results.append({
+            "campaign_id": c.id,
+            "campaign_name": c.name,
+            "campaign_type": c.campaign_type,
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
+            "direction": direction,
+            "treatment": t,
+            "control": ctrl,
+            "uplift": {
+                "spend_per_member_pct": spend_uplift,
+                "orders_per_member_pct": freq_uplift,
+                "retention_rate_pct": retention_uplift,
+            },
+            "z_retention": round(z_retention, 3),
+            "retention_confidence": retention_confidence,
+            "spend_confidence": spend_confidence,
+            "combined_confidence": combined_confidence,
+            "direction": direction,
+            "explanation": explanation,
+        })
+
+    return results
+
+
+_UPLIFT_SIGNAL_TYPES = (
+    "campaign_uplift_positive",
+    "campaign_uplift_negative",
+    "campaign_uplift_neutral",
+)
+
+
+def publish_campaign_uplift_signals(db: Session, run_date: date | None = None) -> int:
+    """
+    Publiceert IntelligenceSignals voor campagne-uplift.
+
+    Vóór publicatie worden ALLE actieve campaign_uplift_* signalen voor
+    dezelfde campagne superseded (ongeacht de richting), zodat nooit een
+    positief en een negatief signaal tegelijk actief zijn voor dezelfde
+    campagne (reviewer-feedback: direction-reconciliation).
+    """
+    run_date = run_date or date.today()
+    uplift_list = compute_campaign_uplift(db)
+    published = 0
+    for u in uplift_list:
+        campaign_entity_id = str(u["campaign_id"])
+
+        # Supersede alle actieve uplift-signalen voor deze campagne,
+        # ongeacht de richting — zo blijft er altijd maar één actief.
+        db.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.engine == "loyalty",
+            models.IntelligenceSignal.signal_type.in_(_UPLIFT_SIGNAL_TYPES),
+            models.IntelligenceSignal.entity_type == "campaign",
+            models.IntelligenceSignal.entity_id == campaign_entity_id,
+            models.IntelligenceSignal.status == "active",
+        ).update({"status": "superseded"})
+
+        signal_type = f"campaign_uplift_{u['direction']}"
+        spend_uplift = u["uplift"]["spend_per_member_pct"]
+        dedupe_key = f"loyalty:{signal_type}:campaign:{campaign_entity_id}"
+        db.add(models.IntelligenceSignal(
+            shop_id=1,
+            engine="loyalty",
+            signal_type=signal_type,
+            severity="medium" if u["direction"] in ("positive", "negative") else "info",
+            direction=u["direction"],
+            entity_type="campaign",
+            entity_id=campaign_entity_id,
+            entity_name=u["campaign_name"],
+            current_value=spend_uplift if spend_uplift is not None else 0.0,
+            confidence=u["combined_confidence"],
+            explanation=u["explanation"],
+            evidence={
+                "treatment": u["treatment"],
+                "control": u["control"],
+                "uplift": u["uplift"],
+                "z_retention": u["z_retention"],
+                "retention_confidence": u["retention_confidence"],
+            },
+            sources=["loyalty_campaign_memberships", "loyalty_transactions"],
+            suggested_action=(
+                "scale_campaign" if u["direction"] == "positive"
+                else ("review_campaign" if u["direction"] == "negative" else "monitor_campaign")
+            ),
+            dedupe_key=dedupe_key,
+            model_version=MODEL_VERSION,
+        ))
+        published += 1
+    return published

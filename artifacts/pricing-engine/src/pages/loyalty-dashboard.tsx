@@ -9,7 +9,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import {
   Users, Coins, ShieldAlert, Wallet, PlayCircle, Upload, Search,
-  FlaskConical, Ticket, ChevronRight,
+  FlaskConical, Ticket, ChevronRight, TrendingUp, TrendingDown, Minus,
+  ChevronDown, ChevronUp,
 } from "lucide-react";
 
 function authHeaders(): Record<string, string> {
@@ -107,6 +108,165 @@ function UploadCard({ titel, omschrijving, uploadType, endpoint }: {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Uplift metric helper
+// ---------------------------------------------------------------------------
+function UpliftPill({ value }: { value: number | null | undefined }) {
+  if (value == null) return <span className="text-muted-foreground">—</span>;
+  const pos = value > 0;
+  const neu = Math.abs(value) < 1;
+  return (
+    <span className={`inline-flex items-center gap-0.5 font-medium ${neu ? "text-slate-500" : pos ? "text-emerald-600" : "text-red-600"}`}>
+      {neu ? <Minus className="h-3 w-3" /> : pos ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+      {pos && "+"}{value.toFixed(1)}%
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Campaign uplift detail card
+// ---------------------------------------------------------------------------
+function CampaignUpliftDetail({ campaignId }: { campaignId: number }) {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["campaign-uplift", campaignId],
+    queryFn: () => apiFetch(`/api/loyalty/campaigns/${campaignId}/uplift`),
+    staleTime: 60_000,
+  });
+
+  if (isLoading) return <div className="p-3"><Skeleton className="h-24 w-full" /></div>;
+  if (isError) return <div className="p-3 text-xs text-red-600">Uplift kon niet worden geladen.</div>;
+
+  const u = data?.uplift;
+  if (!u) {
+    return (
+      <div className="px-3 pb-3 text-xs text-muted-foreground italic">
+        {data?.message ?? "Geen uplift-data — voer eerst een Intelligence-run uit."}
+      </div>
+    );
+  }
+
+  const dirColor = u.direction === "positive"
+    ? "border-emerald-200 bg-emerald-50"
+    : u.direction === "negative"
+    ? "border-red-200 bg-red-50"
+    : "border-slate-200 bg-slate-50";
+
+  const confidencePct = Math.round((u.combined_confidence ?? 0) * 100);
+
+  return (
+    <div className="px-3 pb-3 space-y-3">
+      {/* Uplift metrics */}
+      <div className={`rounded-md border p-3 text-xs ${dirColor}`}>
+        <div className="font-semibold mb-2 text-sm">
+          Uplift-analyse · confidence {confidencePct}%
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: "Besteding/lid", key: "spend_per_member_pct" },
+            { label: "Frequentie/lid", key: "orders_per_member_pct" },
+            { label: "Retentie", key: "retention_rate_pct" },
+          ].map(({ label, key }) => (
+            <div key={key} className="text-center">
+              <div className="text-muted-foreground mb-0.5">{label}</div>
+              <div className="text-base font-bold">
+                <UpliftPill value={u.uplift[key]} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Treatment vs control tabel */}
+      <div className="rounded-md border overflow-hidden text-xs">
+        <table className="w-full">
+          <thead className="bg-muted/50">
+            <tr>
+              <th className="text-left px-2 py-1.5 font-medium">Groep</th>
+              <th className="text-right px-2 py-1.5 font-medium">Leden</th>
+              <th className="text-right px-2 py-1.5 font-medium">Besteding/lid</th>
+              <th className="text-right px-2 py-1.5 font-medium">Orders/lid</th>
+              <th className="text-right px-2 py-1.5 font-medium">Retentie</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {[
+              { label: "Treatment", group: u.treatment, highlight: true },
+              { label: "Control", group: u.control, highlight: false },
+            ].map(({ label, group, highlight }) => (
+              <tr key={label} className={highlight ? "bg-background" : "bg-muted/20"}>
+                <td className="px-2 py-1.5 font-medium">{label}</td>
+                <td className="text-right px-2 py-1.5 tabular-nums">{group.n}</td>
+                <td className="text-right px-2 py-1.5 tabular-nums">€{(group.spend_per_member ?? 0).toFixed(2)}</td>
+                <td className="text-right px-2 py-1.5 tabular-nums">{(group.orders_per_member ?? 0).toFixed(2)}</td>
+                <td className="text-right px-2 py-1.5 tabular-nums">{((group.retention_rate ?? 0) * 100).toFixed(0)}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Uitleg */}
+      <p className="text-xs text-muted-foreground leading-relaxed">{u.explanation}</p>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Campaign card with expandable uplift
+// ---------------------------------------------------------------------------
+function CampaignCard({ c }: { c: any }) {
+  const [open, setOpen] = useState(false);
+  const hasGroups = c.treatment_members > 0 && c.control_members > 0;
+
+  const directionBadge = (() => {
+    // We don't have direction here yet (only after uplift is loaded),
+    // so show a neutral indicator if groups exist
+    if (!hasGroups) return null;
+    return (
+      <Badge variant="outline" className="text-[10px] border-blue-200 text-blue-700 cursor-pointer" onClick={() => setOpen(v => !v)}>
+        Uplift bekijken
+      </Badge>
+    );
+  })();
+
+  return (
+    <div className="border rounded-md overflow-hidden">
+      <div className="p-2 space-y-1">
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-medium text-sm">{c.name}</span>
+          <div className="flex items-center gap-1.5">
+            {c.is_demo_data && <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700">DEMO</Badge>}
+            <Badge variant="outline" className="text-[10px]">{c.status}</Badge>
+          </div>
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {c.treatment_members} treatment · {c.control_members} control · {c.bonus_points_issued} bonuspunten · ×{c.bonus_multiplier}
+        </div>
+        {c.start_date && (
+          <div className="text-xs text-muted-foreground">
+            {c.start_date} – {c.end_date ?? "lopend"}
+          </div>
+        )}
+        {hasGroups && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 text-xs px-2 mt-1 w-full justify-between"
+            onClick={() => setOpen(v => !v)}
+          >
+            <span>{open ? "Verberg uplift-analyse" : "Toon uplift-analyse (treatment vs. control)"}</span>
+            {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </Button>
+        )}
+      </div>
+      {open && hasGroups && <CampaignUpliftDetail campaignId={c.id} />}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main dashboard
+// ---------------------------------------------------------------------------
 export default function LoyaltyDashboard() {
   const [zoek, setZoek] = useState("");
   const { toast } = useToast();
@@ -133,7 +293,10 @@ export default function LoyaltyDashboard() {
     mutationFn: () => fetch("/api/loyalty/run", { method: "POST", headers: authHeaders() })
       .then(async r => { const j = await r.json(); if (!r.ok) throw new Error(j?.detail); return j; }),
     onSuccess: (j) => {
-      toast({ title: "Intelligence-run voltooid", description: `${j.members_scored} leden gescoord, ${j.intelligence_signals_published} signalen gepubliceerd.` });
+      toast({
+        title: "Intelligence-run voltooid",
+        description: `${j.members_scored} leden gescoord, ${j.intelligence_signals_published} signalen gepubliceerd${j.campaign_uplift_signals ? ` (${j.campaign_uplift_signals} campagne-uplift)` : ""}.`,
+      });
       qc.invalidateQueries();
     },
     onError: (e: any) => toast({ title: "Run mislukt", description: String(e.message || e), variant: "destructive" }),
@@ -296,20 +459,21 @@ export default function LoyaltyDashboard() {
         </Card>
 
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Ticket className="h-4 w-4" /> Campagnes (met controlegroep)</CardTitle></CardHeader>
-          <CardContent className="space-y-2 text-xs">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Ticket className="h-4 w-4" /> Campagnes
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Klik op een campagne met controlegroep voor de uplift-analyse.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
             {(campagnes || []).map((c: any) => (
-              <div key={c.id} className="border rounded-md p-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">{c.name}</span>
-                  <Badge variant="outline">{c.status}</Badge>
-                </div>
-                <div className="text-muted-foreground mt-1">
-                  {c.treatment_members} treatment / {c.control_members} control · {c.bonus_points_issued} bonuspunten · ×{c.bonus_multiplier}
-                </div>
-              </div>
+              <CampaignCard key={c.id} c={c} />
             ))}
-            {(campagnes || []).length === 0 && <div className="text-muted-foreground py-4 text-center">Nog geen campagnes.</div>}
+            {(campagnes || []).length === 0 && (
+              <div className="text-xs text-muted-foreground py-4 text-center">Nog geen campagnes.</div>
+            )}
           </CardContent>
         </Card>
       </div>

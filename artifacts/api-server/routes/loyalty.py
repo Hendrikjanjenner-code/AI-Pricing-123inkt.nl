@@ -296,36 +296,63 @@ def fraud_signals(
         for f in rows
     ]
 
-
+def _campaign_dict(c: models.LoyaltyCampaign, db: Session) -> dict:
+    counts = dict(db.query(
+        models.LoyaltyCampaignMembership.group_type,
+        func.count(models.LoyaltyCampaignMembership.id),
+    ).filter(models.LoyaltyCampaignMembership.campaign_id == c.id)
+     .group_by(models.LoyaltyCampaignMembership.group_type).all())
+    bonus_pts = db.query(func.coalesce(
+        func.sum(models.LoyaltyTransaction.points_delta), 0)).filter(
+        models.LoyaltyTransaction.campaign_id == c.id).scalar() or 0
+    return {
+        "id": c.id, "name": c.name, "campaign_type": c.campaign_type,
+        "start_date": c.start_date.isoformat() if c.start_date else None,
+        "end_date": c.end_date.isoformat() if c.end_date else None,
+        "status": c.status, "bonus_multiplier": c.bonus_multiplier,
+        "control_group_pct": c.control_group_pct,
+        "target_segment": c.target_segment,
+        "treatment_members": int(counts.get("treatment", 0)),
+        "control_members": int(counts.get("control", 0)),
+        "bonus_points_issued": int(bonus_pts),
+        "is_demo_data": bool(c.is_demo_data),
+    }
 @router.get("/campaigns")
 def list_campaigns(db: Session = Depends(get_db),
                    current_user: models.User = Depends(get_current_user)):
-    out = []
-    for c in db.query(models.LoyaltyCampaign).order_by(
-            models.LoyaltyCampaign.created_at.desc()).all():
-        counts = dict(db.query(
-            models.LoyaltyCampaignMembership.group_type,
-            func.count(models.LoyaltyCampaignMembership.id),
-        ).filter(models.LoyaltyCampaignMembership.campaign_id == c.id)
-         .group_by(models.LoyaltyCampaignMembership.group_type).all())
-        bonus_pts = db.query(func.coalesce(
-            func.sum(models.LoyaltyTransaction.points_delta), 0)).filter(
-            models.LoyaltyTransaction.campaign_id == c.id).scalar() or 0
-        out.append({
-            "id": c.id, "name": c.name, "campaign_type": c.campaign_type,
-            "start_date": c.start_date.isoformat() if c.start_date else None,
-            "end_date": c.end_date.isoformat() if c.end_date else None,
-            "status": c.status, "bonus_multiplier": c.bonus_multiplier,
-            "control_group_pct": c.control_group_pct,
-            "target_segment": c.target_segment,
-            "treatment_members": int(counts.get("treatment", 0)),
-            "control_members": int(counts.get("control", 0)),
-            "bonus_points_issued": int(bonus_pts),
-            "is_demo_data": bool(c.is_demo_data),
-        })
-    return out
+    return [_campaign_dict(c, db) for c in db.query(models.LoyaltyCampaign).order_by(
+        models.LoyaltyCampaign.created_at.desc()).all()]
 
+@router.get("/campaigns/{campaign_id}/uplift")
+def campaign_uplift(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Uplift-analyse voor een specifieke campagne (§22): besteding, frequentie en
+    retentie van treatment vs. control in de campagneperiode, met significantie-
+    indicatie (z-score, confidence) en uitleg.
+    """
+    c = db.query(models.LoyaltyCampaign).filter(
+        models.LoyaltyCampaign.id == campaign_id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="Campagne niet gevonden")
 
+    uplift_list = li.compute_campaign_uplift(db, campaign_id=campaign_id)
+    if not uplift_list:
+        # Campagne bestaat maar heeft geen treatment én control leden
+        return {
+            **_campaign_dict(c, db),
+            "uplift": None,
+            "message": "Geen uplift-analyse beschikbaar — campagne heeft geen treatment- én control-leden.",
+        }
+
+    u = uplift_list[0]
+    return {
+        **_campaign_dict(c, db),
+        "uplift": u,
+    }
 @router.post("/run")
 def run_engine(
     db: Session = Depends(get_db),
