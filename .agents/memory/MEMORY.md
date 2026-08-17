@@ -20,3 +20,4 @@
 - [Duplicate legacy workflows cause DB race 500s](duplicate-workflow-db-race.md) — manual .replit workflows left alongside auto-generated artifact workflows can double-start a service and race on create_all, crashing the backend.
 - [Bulk refresh DB pitfalls](bulk-refresh-db-pitfalls.md) — numpy 2.x scalars leak as `np.float64(...)` into SQL (schema "np" error); bulk sync needs a separate long-timeout BackgroundSessionLocal, not the 4s request session.
 - [SessionLocal autoflush pitfall](session-autoflush.md) — sessions have autoflush=False; flush explicitly between write and read phases in engine pipelines, or queries see stale data.
+- [Engine shop-scoping](engine-shop-scoping.md) — engines, results, dashboards, signals and by-id endpoints must all be shop-scoped; foreign-shop ids return 404.

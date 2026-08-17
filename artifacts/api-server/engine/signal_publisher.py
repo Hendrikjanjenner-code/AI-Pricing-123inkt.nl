@@ -1,12 +1,15 @@
 """
-Signal-publicatie framework (masterprompt §7-§8).
+Signal Publisher — herbruikbare helper waarmee engines rechtstreeks een
+IntelligenceSignal publiceren (masterprompt §7-§8), met dezelfde
+dedupe/supersede-semantiek als de HTTP-route /api/signals.
 
-Herbruikbare publisher die elke engine aanroept aan het einde van een run.
 Garanties:
 - Geen signaal zonder explanation + evidence + sources (§64.9-10)
 - Dedupe via dedupe_key (engine:signal_type:entity_type:entity_id):
   een bestaand actief signaal met dezelfde sleutel wordt gesuperseded
-- valid_until standaard 7 dagen; verlopen signalen worden ge-expired
+- valid_until: expliciet meegeven of standaard 7 dagen (valid_days)
+
+De helper commit NIET zelf; de aanroepende engine-run beheert de transactie.
 """
 from __future__ import annotations
 
@@ -21,8 +24,6 @@ import models
 logger = logging.getLogger(__name__)
 
 VALID_SEVERITIES = ("info", "low", "medium", "high", "critical")
-VALID_DIRECTIONS = ("positive", "negative", "neutral", None)
-VALID_ENTITY_TYPES = ("sku", "category", "brand", "competitor", "shop", "supplier")
 
 DEFAULT_VALIDITY_DAYS = 7
 
@@ -30,6 +31,21 @@ DEFAULT_VALIDITY_DAYS = 7
 def _default_shop_id(db: Session) -> int:
     row = db.query(models.DimShop.id).filter(models.DimShop.is_default == True).first()  # noqa: E712
     return row[0] if row else 1
+
+
+def resolve_shop_id(db: Session, shop_id=None) -> int:
+    """Valideer een expliciete shop_id of val terug op de default shop.
+
+    Raises HTTPException(404) bij een onbekende shop, zodat engines/routes
+    nooit stilzwijgend data van een verkeerde scope mengen.
+    """
+    from fastapi import HTTPException
+    if shop_id is not None:
+        exists = db.query(models.DimShop.id).filter(models.DimShop.id == shop_id).first()
+        if not exists:
+            raise HTTPException(status_code=404, detail=f"Shop {shop_id} not found")
+        return int(shop_id)
+    return _default_shop_id(db)
 
 
 def expire_stale_signals(db: Session) -> int:
@@ -53,7 +69,6 @@ def publish_signal(
     explanation: str,
     evidence: dict,
     sources: list,
-    model_version: str,
     entity_name: Optional[str] = None,
     severity: str = "info",
     direction: Optional[str] = None,
@@ -64,13 +79,15 @@ def publish_signal(
     change_pct: Optional[float] = None,
     confidence: float = 0.5,
     suggested_action: Optional[str] = None,
+    valid_until: Optional[datetime] = None,
     valid_days: int = DEFAULT_VALIDITY_DAYS,
+    model_version: Optional[str] = None,
     shop_id: Optional[int] = None,
 ) -> models.IntelligenceSignal:
     """
     Publiceer één IntelligenceSignal. Superseded automatisch een bestaand
     actief signaal met dezelfde dedupe-sleutel. Commit gebeurt door de caller
-    (of gebruik publish_batch/commit aan het einde van de engine-run).
+    aan het einde van de engine-run.
     """
     if not explanation or not explanation.strip():
         raise ValueError(f"Signal {engine}:{signal_type} zonder explanation is niet toegestaan (§64.9)")
@@ -79,13 +96,8 @@ def publish_signal(
     if not sources:
         raise ValueError(f"Signal {engine}:{signal_type} zonder sources is niet toegestaan")
     if severity not in VALID_SEVERITIES:
-        raise ValueError(f"Ongeldige severity '{severity}'")
-    if direction not in VALID_DIRECTIONS:
-        raise ValueError(f"Ongeldige direction '{direction}'")
-    if entity_type not in VALID_ENTITY_TYPES:
-        raise ValueError(f"Ongeldig entity_type '{entity_type}'")
-    if not model_version:
-        raise ValueError("model_version is verplicht")
+        logger.warning("Ongeldige severity '%s' voor %s:%s; teruggevallen op 'info'", severity, engine, signal_type)
+        severity = "info"
 
     sid = shop_id if shop_id is not None else _default_shop_id(db)
     dedupe_key = f"{engine}:{signal_type}:{entity_type}:{entity_id}"
@@ -115,7 +127,7 @@ def publish_signal(
         evidence=evidence,
         sources=sources,
         suggested_action=suggested_action,
-        valid_until=datetime.utcnow() + timedelta(days=valid_days),
+        valid_until=valid_until if valid_until is not None else datetime.utcnow() + timedelta(days=valid_days),
         model_version=model_version,
         dedupe_key=dedupe_key,
     )

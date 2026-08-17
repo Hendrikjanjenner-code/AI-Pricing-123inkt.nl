@@ -54,6 +54,8 @@ import {
   Binoculars,
   Map,
   Server,
+  Lightbulb,
+  History,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConnectorHealthIndicator } from "@/components/layout/ConnectorHealthIndicator";
@@ -159,6 +161,7 @@ const navGroepen = [
   {
     label: "Forecasting & Procurement",
     items: [
+      { href: "/forecast-risk",label: "Forecast & Risk",         icon: TrendingUp },
       { href: "/procurement",  label: "Procurement Forecast",    icon: ShoppingCart },
       { href: "/economie",     label: "Economic Intelligence",   icon: Globe2 },
       { href: "/rapportages",  label: "Management Rapportages",  icon: FileText },
@@ -174,6 +177,8 @@ const navGroepen = [
   {
     label: "Intelligence",
     items: [
+      { href: "/opportunities", label: "Opportunity Engine",  icon: Lightbulb },
+      { href: "/promotion-intelligence", label: "Promotion Intelligence", icon: Megaphone },
       { href: "/ab-tests",   label: "A/B-testmonitor",    icon: FlaskConical },
       { href: "/substituties",label: "Substitutiemonitor", icon: LineChart },
     ],
@@ -193,6 +198,7 @@ const navGroepen = [
       { href: "/categorieen",             label: "Categorieregels",      icon: Layers },
       { href: "/categorieen/hierarchie",  label: "Categorieënhiërarchie", icon: FolderTree },
       { href: "/modelgezondheid",         label: "Modelgezondheid",      icon: Activity },
+      { href: "/modelregister",           label: "Modelregister",        icon: History },
       { href: "/instellingen",            label: "Instellingen",         icon: Settings },
     ],
   },

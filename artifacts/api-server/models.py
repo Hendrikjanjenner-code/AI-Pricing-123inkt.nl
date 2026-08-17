@@ -227,6 +227,7 @@ class FactBasketAffinity(Base):
     __tablename__ = "fact_basket_affinity"
 
     id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
     sku_id_a = Column(String(100), nullable=False, index=True)
     sku_id_b = Column(String(100), nullable=False)
     affinity_score = Column(Float)
@@ -1620,6 +1621,35 @@ class ConnectorConfig(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+class BasketAssociation(Base):
+    """
+    Product-associatieregel uit de winkelmandanalyse (§16).
+    antecedent → consequent met support/confidence/lift en relatie-type
+    (cross_sell / upsell / bundle / basket_filler). Gebruikt door Pricing,
+    Promotion en Decision Engine.
+    """
+    __tablename__ = "basket_associations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    run_date = Column(Date, nullable=False, index=True)
+    antecedent_sku = Column(String(100), nullable=False, index=True)
+    consequent_sku = Column(String(100), nullable=False, index=True)
+    antecedent_name = Column(String(500))
+    consequent_name = Column(String(500))
+
+    support = Column(Float, default=0.0)        # aandeel mandjes met beide
+    confidence = Column(Float, default=0.0)     # P(consequent | antecedent)
+    lift = Column(Float, default=0.0)           # confidence / P(consequent)
+    co_purchase_count = Column(Integer, default=0)
+
+    relation_type = Column(String(50))          # cross_sell / upsell / bundle / basket_filler
+    bundle_margin_eur = Column(Numeric(12, 4))  # verwachte marge per gecombineerd mandje
+    avg_basket_value = Column(Numeric(12, 4))
+    explanation_nl = Column(Text)
+    model_version = Column(String(50))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class LoyaltyTier(Base):
     """Loyaliteitsniveaus (bijv. Brons/Zilver/Goud) met drempels en multipliers."""
     __tablename__ = "loyalty_tiers"
@@ -1699,6 +1729,25 @@ class CompetitorRanking(Base):
     model_version = Column(String(50))
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class ModelRegistryEntry(Base):
+    """
+    Modelgovernance (§54): registratie van naam/versie/metrics/status per
+    model met rollback. Per model is precies één versie 'active'.
+    """
+    __tablename__ = "model_registry"
+
+    id = Column(Integer, primary_key=True, index=True)
+    model_name = Column(String(100), nullable=False, index=True)   # basket / promotion / forecast_risk / opportunity / pricing
+    version = Column(String(50), nullable=False)
+    status = Column(String(30), default="active")    # active / superseded / rolled_back / archived
+    metrics = Column(JSON)                           # laatste run-metrics
+    config = Column(JSON)                            # immutabele modelconfiguratie (parameters) van deze versie
+    description = Column(Text)
+    activated_at = Column(DateTime)
+    deactivated_at = Column(DateTime)
+    created_by = Column(String(100))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class LoyaltyMember(Base):
     """Pseudoniem loyaliteitslid (§31: geen PII, alleen pseudonymous_customer_id)."""
     __tablename__ = "loyalty_members"
@@ -1773,6 +1822,33 @@ class BusinessValueBaseline(Base):
     description = Column(Text)
     measured_at = Column(Date)
     created_by = Column(String(100))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class FactForecastDaily(Base):
+    """
+    Forecast & Risk (§20): unit/revenue/margin/stock forecasts per SKU met
+    horizon, betrouwbaarheidsinterval, factoren en modelversie.
+    """
+    __tablename__ = "fact_forecast_daily"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    run_date = Column(Date, nullable=False, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    sku_name = Column(String(500))
+    category = Column(String(255))
+
+    forecast_type = Column(String(20), nullable=False)   # units / revenue / margin / stock
+    horizon_days = Column(Integer, nullable=False)       # 30 / 90
+    forecast_value = Column(Float)                       # totaal over horizon (stock: eindstand)
+    lower_bound = Column(Float)
+    upper_bound = Column(Float)
+    confidence = Column(Float, default=0.0)              # 0..1
+
+    trend_pct = Column(Float)              # trend per 30 dagen
+    seasonality_factor = Column(Float)     # gewogen seizoenscorrectie
+    factors = Column(JSON)                 # {factor: bijdrage/uitleg}
+    model_version = Column(String(50))
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class CustomerValueScore(Base):
@@ -1931,3 +2007,86 @@ class LoyaltyWallet(Base):
     lifetime_redeemed = Column(Integer, default=0, nullable=False)
     lifetime_expired = Column(Integer, default=0, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class Opportunity(Base):
+    """
+    Centrale Opportunity Engine (§24): genormaliseerde kansen uit alle engines
+    met expected value, urgentie, effort, risico en ondersteunende engines.
+    """
+    __tablename__ = "opportunities"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    run_date = Column(Date, nullable=False, index=True)
+    source_engine = Column(String(100), nullable=False, index=True)
+    supporting_engines = Column(JSON)                # extra engines die dit onderbouwen
+    opportunity_type = Column(String(100), nullable=False)  # price_increase / bundle / promo_repeat / risk_mitigation / ...
+
+    entity_type = Column(String(50), default="sku")
+    entity_id = Column(String(255), nullable=False, index=True)
+    entity_name = Column(String(500))
+
+    title_nl = Column(String(500))
+    explanation_nl = Column(Text)
+
+    expected_value_eur = Column(Numeric(12, 4))      # verwachte netto waarde
+    expected_revenue_eur = Column(Numeric(12, 4))
+    expected_margin_eur = Column(Numeric(12, 4))
+    confidence = Column(Float, default=0.0)          # 0..1
+    urgency = Column(String(20), default="medium")   # low / medium / high / critical
+    effort = Column(String(20), default="medium")    # low / medium / high
+    risk = Column(String(20), default="medium")      # low / medium / high
+    priority_score = Column(Float, default=0.0, index=True)  # genormaliseerd 0..100
+
+    status = Column(String(30), default="open")      # open / in_progress / done / dismissed
+    evidence = Column(JSON)
+    model_version = Column(String(50))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class FactPromotionEffect(Base):
+    """
+    Promotion Intelligence (§19): gemeten effect per promotie — uplift,
+    incrementele omzet/marge, break-even, cannibalisatie en halo, met
+    controlegroep waar mogelijk.
+    """
+    __tablename__ = "fact_promotion_effect"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    promotion_id = Column(Integer, ForeignKey("promotions.id"), nullable=False, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    run_date = Column(Date, nullable=False, index=True)
+
+    period_start = Column(Date)
+    period_end = Column(Date)
+    baseline_start = Column(Date)
+    baseline_end = Column(Date)
+
+    # Baseline vs promo (per dag gemiddeld)
+    baseline_units_per_day = Column(Float)
+    promo_units_per_day = Column(Float)
+    baseline_revenue_per_day = Column(Numeric(12, 4))
+    promo_revenue_per_day = Column(Numeric(12, 4))
+    baseline_margin_per_day = Column(Numeric(12, 4))
+    promo_margin_per_day = Column(Numeric(12, 4))
+
+    uplift_pct = Column(Float)                     # units uplift %
+    incremental_revenue = Column(Numeric(12, 4))   # totaal over promo-periode
+    incremental_margin = Column(Numeric(12, 4))
+    break_even_extra_units = Column(Float)         # nodig om margeverlies te dekken
+    break_even_achieved = Column(Boolean)
+
+    cannibalization_pct = Column(Float)            # afzetdaling verwante SKU's
+    halo_pct = Column(Float)                       # afzetstijging basket-gerelateerde SKU's
+
+    control_group_used = Column(Boolean, default=False)
+    control_group_size = Column(Integer, default=0)
+    control_uplift_pct = Column(Float)             # uplift in controlegroep (markteffect)
+    net_uplift_pct = Column(Float)                 # promo-uplift minus controlegroep
+
+    verdict = Column(String(50))                   # EFFECTIEF / MARGINAAL / VERLIESGEVEND
+    confidence = Column(Float, default=0.0)
+    explanation_nl = Column(Text)
+    model_version = Column(String(50))
+    created_at = Column(DateTime, default=datetime.utcnow)

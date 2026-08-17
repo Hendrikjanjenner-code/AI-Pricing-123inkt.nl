@@ -100,6 +100,10 @@ import BusinessValue from "@/pages/business-value";
 import LoyaltyDashboard from "@/pages/loyalty-dashboard";
 import LoyaltyMemberDetail from "@/pages/loyalty-member-detail";
 import CustomerValue from "@/pages/customer-value";
+import PromotionIntelligence from "@/pages/promotion-intelligence";
+import ForecastRisk from "@/pages/forecast-risk";
+import Opportunities from "@/pages/opportunities";
+import ModelRegistry from "@/pages/model-registry";
 
 const queryClient = new QueryClient();
 
@@ -407,6 +411,19 @@ function Router() {
       </Route>
       <Route path="/platform/waarde">
         <ProtectedRoute><BusinessValue /></ProtectedRoute>
+      </Route>
+
+      <Route path="/promotion-intelligence">
+        <ProtectedRoute><PromotionIntelligence /></ProtectedRoute>
+      </Route>
+      <Route path="/forecast-risk">
+        <ProtectedRoute><ForecastRisk /></ProtectedRoute>
+      </Route>
+      <Route path="/opportunities">
+        <ProtectedRoute><Opportunities /></ProtectedRoute>
+      </Route>
+      <Route path="/modelregister">
+        <ProtectedRoute><ModelRegistry /></ProtectedRoute>
       </Route>
 
       <Route path="/modeldocumentatie">
