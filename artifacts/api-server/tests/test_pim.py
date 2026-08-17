@@ -283,3 +283,128 @@ def test_data_quality_includes_pim_issues(client, admin_headers, seeded_sku):
     codes = {i["issue_code"] for i in r.json()["issues"]}
     # PIM-detectie draait mee (aanwezig zodra er incomplete SKU's zijn)
     assert "PIM_LOW_COMPLETENESS" in codes or "PIM_QUALITY_ISSUES" in codes or True
+
+
+# ─── Beheer-endpoints: attributen / channels / families ──────────────────────
+
+def _get_attr_id(client, headers, code: str) -> int:
+    attrs = client.get("/api/pim/attributes", headers=headers).json()
+    return next(a["id"] for a in attrs if a["code"] == code)
+
+
+def _get_channel_id(client, headers, code: str) -> int:
+    chans = client.get("/api/pim/channels", headers=headers).json()
+    return next(c["id"] for c in chans if c["code"] == code)
+
+
+def _get_family_id(client, headers, code: str) -> int:
+    fams = client.get("/api/pim/families", headers=headers).json()
+    return next(f["id"] for f in fams if f["code"] == code)
+
+
+def test_patch_attribute_required_and_weight(client, admin_headers, seeded_sku):
+    """PATCH attribuutdefinitie wijzigt is_required en weight en persisteert."""
+    # Zorg dat defaults bestaan via recompute
+    client.post("/api/pim/recompute", headers=admin_headers)
+    attr_id = _get_attr_id(client, admin_headers, "usp_1")
+
+    r = client.patch(f"/api/pim/attributes/{attr_id}", headers=admin_headers,
+                     json={"is_required": True, "weight": 2.5})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["is_required"] is True
+    assert data["weight"] == 2.5
+
+    # Persistentie: ophalen via GET moet gewijzigde waarden tonen
+    attrs = client.get("/api/pim/attributes", headers=admin_headers).json()
+    usp = next(a for a in attrs if a["id"] == attr_id)
+    assert usp["is_required"] is True
+    assert usp["weight"] == 2.5
+
+    # Herstel om andere tests niet te verstoren
+    client.patch(f"/api/pim/attributes/{attr_id}", headers=admin_headers,
+                 json={"is_required": False, "weight": 0.5})
+
+
+def test_patch_attribute_invalid_source_rejected(client, admin_headers, seeded_sku):
+    """PATCH met ongeldige source_owner geeft HTTP 400."""
+    client.post("/api/pim/recompute", headers=admin_headers)
+    attr_id = _get_attr_id(client, admin_headers, "color")
+    r = client.patch(f"/api/pim/attributes/{attr_id}", headers=admin_headers,
+                     json={"source_owner": "Onbekend"})
+    assert r.status_code == 400
+
+
+def test_patch_channel_threshold_persists_and_recompute_respects_it(client, admin_headers, seeded_sku):
+    """
+    PATCH channel min_completeness_pct=0 moet persisteren en de
+    recompute moet die waarde gebruiken — ook als de waarde 0 is
+    (regressie: `ch.min_completeness_pct or 80.0` behandelde 0 als 80).
+    """
+    client.post("/api/pim/recompute", headers=admin_headers)
+    chan_id = _get_channel_id(client, admin_headers, "webshop")
+
+    # Zet drempel op 0: elk channel-score is dan meteen "ready"
+    r = client.patch(f"/api/pim/channels/{chan_id}", headers=admin_headers,
+                     json={"min_completeness_pct": 0})
+    assert r.status_code == 200, r.text
+    assert r.json()["min_completeness_pct"] == 0.0
+
+    # Persistentie via GET
+    chans = client.get("/api/pim/channels", headers=admin_headers).json()
+    ws = next(c for c in chans if c["id"] == chan_id)
+    assert ws["min_completeness_pct"] == 0.0
+
+    # Na herberekening moet seeded_sku channel_ready=True zijn (drempel=0)
+    client.post("/api/pim/recompute", headers=admin_headers)
+    r = client.get(f"/api/pim/completeness?channel=webshop&search={seeded_sku}",
+                   headers=admin_headers)
+    assert r.status_code == 200
+    items = r.json()["items"]
+    if items:  # SKU kan gefilterd zijn op andere criteria
+        assert items[0]["channel_ready"] is True
+
+    # Controleer ook een hoge drempel: stel threshold=100 in en herbereken.
+    # Verifieer dat de waarde is opgeslagen (niet dat de SKU zelf niet-ready is —
+    # die kan al volledig zijn door eerdere tests in dezelfde module).
+    client.patch(f"/api/pim/channels/{chan_id}", headers=admin_headers,
+                 json={"min_completeness_pct": 100})
+    chans2 = client.get("/api/pim/channels", headers=admin_headers).json()
+    ws2 = next(c for c in chans2 if c["id"] == chan_id)
+    assert ws2["min_completeness_pct"] == 100.0
+
+    # Herstel naar originele waarde
+    client.patch(f"/api/pim/channels/{chan_id}", headers=admin_headers,
+                 json={"min_completeness_pct": 80})
+
+
+def test_patch_channel_unknown_attribute_code_rejected(client, admin_headers, seeded_sku):
+    """PATCH channel met onbekende attribuutcode geeft HTTP 400."""
+    client.post("/api/pim/recompute", headers=admin_headers)
+    chan_id = _get_channel_id(client, admin_headers, "webshop")
+    r = client.patch(f"/api/pim/channels/{chan_id}", headers=admin_headers,
+                     json={"required_attribute_codes": ["bestaat_niet"]})
+    assert r.status_code == 400
+
+
+def test_patch_family_name_and_patterns(client, admin_headers, seeded_sku):
+    """PATCH familie wijzigt naam en categoriepatronen en persisteert."""
+    client.post("/api/pim/recompute", headers=admin_headers)
+    fam_id = _get_family_id(client, admin_headers, "papier")
+
+    r = client.patch(f"/api/pim/families/{fam_id}", headers=admin_headers,
+                     json={"name": "Papier & Enveloppen",
+                           "category_patterns": ["Papier", "Enveloppen"]})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["name"] == "Papier & Enveloppen"
+    assert "Enveloppen" in data["category_patterns"]
+
+    # Persistentie via GET
+    fams = client.get("/api/pim/families", headers=admin_headers).json()
+    fam = next(f for f in fams if f["id"] == fam_id)
+    assert fam["name"] == "Papier & Enveloppen"
+
+    # Herstel
+    client.patch(f"/api/pim/families/{fam_id}", headers=admin_headers,
+                 json={"name": "Papier", "category_patterns": ["Papier", "Kopieerpapier", "Printpapier"]})

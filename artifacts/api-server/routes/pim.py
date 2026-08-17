@@ -288,6 +288,141 @@ def list_channels(
     } for c in chans]
 
 
+# ─── Beheer: attribuutdefinities, channels, families ────────────────────────
+
+VALID_SOURCES = {"DRS", "Leverancier", "Handmatig", "AI"}
+ADMIN_ROLES = ("admin", "pricing_manager")
+
+
+class AttributePatch(BaseModel):
+    name: str | None = None
+    is_required: bool | None = None
+    weight: float | None = None
+    source_owner: str | None = None
+    active: bool | None = None
+
+
+@router.patch("/attributes/{attribute_id}")
+def patch_attribute(
+    attribute_id: int,
+    body: AttributePatch,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role(*ADMIN_ROLES)),
+):
+    """Pas is_required, weight, source_owner of active aan van een attribuutdefinitie."""
+    d = db.query(models.PimAttributeDefinition).filter(
+        models.PimAttributeDefinition.id == attribute_id).first()
+    if d is None:
+        raise HTTPException(status_code=404, detail="Attribuutdefinitie niet gevonden.")
+    if body.name is not None:
+        d.name = body.name.strip() or d.name
+    if body.is_required is not None:
+        d.is_required = body.is_required
+    if body.weight is not None:
+        if body.weight <= 0:
+            raise HTTPException(status_code=400, detail="Gewicht moet positief zijn.")
+        d.weight = body.weight
+    if body.source_owner is not None:
+        if body.source_owner not in VALID_SOURCES:
+            raise HTTPException(status_code=400,
+                                detail=f"Ongeldige eigenaar. Kies uit: {', '.join(sorted(VALID_SOURCES))}")
+        d.source_owner = body.source_owner
+    if body.active is not None:
+        d.active = body.active
+    db.add(models.AuditLog(
+        entity_type="pim_attribute_definition", entity_id=str(d.id),
+        action="attribute_updated", performed_by=current_user.username,
+        details=f"code={d.code}"))
+    db.commit()
+    return {
+        "id": d.id, "code": d.code, "name": d.name, "data_type": d.data_type,
+        "unit": d.unit, "source_owner": d.source_owner,
+        "is_required": d.is_required, "weight": d.weight,
+        "dim_product_field": d.dim_product_field, "active": d.active,
+    }
+
+
+class ChannelPatch(BaseModel):
+    name: str | None = None
+    required_attribute_codes: list[str] | None = None
+    min_completeness_pct: float | None = None
+    active: bool | None = None
+
+
+@router.patch("/channels/{channel_id}")
+def patch_channel(
+    channel_id: int,
+    body: ChannelPatch,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role(*ADMIN_ROLES)),
+):
+    """Pas required_attribute_codes, min_completeness_pct of active aan van een channel."""
+    c = db.query(models.PimChannel).filter(models.PimChannel.id == channel_id).first()
+    if c is None:
+        raise HTTPException(status_code=404, detail="Channel niet gevonden.")
+    if body.name is not None:
+        c.name = body.name.strip() or c.name
+    if body.required_attribute_codes is not None:
+        # Valideer dat de codes bestaan
+        existing_codes = {d.code for d in db.query(models.PimAttributeDefinition).all()}
+        unknown = [x for x in body.required_attribute_codes if x not in existing_codes]
+        if unknown:
+            raise HTTPException(status_code=400,
+                                detail=f"Onbekende attribuutcodes: {', '.join(unknown)}")
+        c.required_attribute_codes = body.required_attribute_codes
+    if body.min_completeness_pct is not None:
+        if not (0.0 <= body.min_completeness_pct <= 100.0):
+            raise HTTPException(status_code=400, detail="Drempel moet tussen 0 en 100 liggen.")
+        c.min_completeness_pct = body.min_completeness_pct
+    if body.active is not None:
+        c.active = body.active
+    db.add(models.AuditLog(
+        entity_type="pim_channel", entity_id=str(c.id),
+        action="channel_updated", performed_by=current_user.username,
+        details=f"code={c.code}"))
+    db.commit()
+    return {
+        "id": c.id, "code": c.code, "name": c.name,
+        "required_attribute_codes": c.required_attribute_codes or [],
+        "min_completeness_pct": c.min_completeness_pct, "active": c.active,
+    }
+
+
+class FamilyPatch(BaseModel):
+    name: str | None = None
+    category_patterns: list[str] | None = None
+    active: bool | None = None
+
+
+@router.patch("/families/{family_id}")
+def patch_family(
+    family_id: int,
+    body: FamilyPatch,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role(*ADMIN_ROLES)),
+):
+    """Pas name, category_patterns of active aan van een productfamilie."""
+    f = db.query(models.PimFamily).filter(models.PimFamily.id == family_id).first()
+    if f is None:
+        raise HTTPException(status_code=404, detail="Familie niet gevonden.")
+    if body.name is not None:
+        f.name = body.name.strip() or f.name
+    if body.category_patterns is not None:
+        f.category_patterns = [p.strip() for p in body.category_patterns if p.strip()]
+    if body.active is not None:
+        f.active = body.active
+    db.add(models.AuditLog(
+        entity_type="pim_family", entity_id=str(f.id),
+        action="family_updated", performed_by=current_user.username,
+        details=f"code={f.code}"))
+    db.commit()
+    return {
+        "id": f.id, "code": f.code, "name": f.name,
+        "category_patterns": f.category_patterns or [],
+        "active": f.active,
+    }
+
+
 # ─── Productrelaties ─────────────────────────────────────────────────────────
 
 VALID_RELATION_TYPES = {"variant_van", "accessoire", "vervangt", "alternatief"}

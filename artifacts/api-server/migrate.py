@@ -344,6 +344,13 @@ def run_migrations(engine, metadata) -> None:
             'ALTER TABLE competitor_profile '
             'DROP CONSTRAINT IF EXISTS competitor_profile_competitor_name_key',
         ),
+        # ORM-gegenereerde unieke index op alleen competitor_name (ix_…)
+        # werd aangemaakt toen het veld nog unique=True had. Nu shop-scoped,
+        # dus ook deze index weggooien zodat dezelfde naam in meerdere shops mag.
+        (
+            "drop_ix_competitor_profile_competitor_name",
+            'DROP INDEX IF EXISTS ix_competitor_profile_competitor_name',
+        ),
         (
             "drop_ix_competitor_profile_name_unique",
             'DROP INDEX IF EXISTS ix_competitor_profile_competitor_name',

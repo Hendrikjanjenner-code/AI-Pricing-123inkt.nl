@@ -267,7 +267,8 @@ def compute_completeness(db: Session, sku_ids: list[str] | None = None) -> int:
             ch_filled = [c for c in req if vals.get(c)]
             ch_missing = [c for c in req if not vals.get(c)]
             ch_pct = round(100.0 * len(ch_filled) / len(req), 1)
-            ready = ch_pct >= (ch.min_completeness_pct or 80.0) and not issues
+            threshold = ch.min_completeness_pct if ch.min_completeness_pct is not None else 80.0
+            ready = ch_pct >= threshold and not issues
             db.add(models.PimCompletenessScore(
                 sku_id=p.sku_id, channel_code=ch.code,
                 completeness_pct=ch_pct, quality_score=quality,
