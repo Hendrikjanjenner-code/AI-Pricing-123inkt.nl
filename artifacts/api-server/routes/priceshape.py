@@ -29,6 +29,7 @@ from engine.import_engine import (
     truncate as _trunc,
     get_alias,
     find_duplicates,
+    new_batch_id as _ps_new_batch_id,
     build_preview,
     IMPORT_MODES,
     DEFAULT_IMPORT_MODE,
@@ -152,6 +153,7 @@ def _run_validation(db: Session, rows: list[dict]) -> dict:
             "rijen_totaal": len(rows),
             "rijen_geldig": geldig,
             "rijen_ongeldig": ongeldig,
+            "rijen_dubbel": sum(len(rijen) - 1 for rijen in dubbele.values()),
             "unieke_concurrenten": len(competitors),
             "skus_niet_gevonden": len(skus_niet_gevonden),
         },
@@ -296,6 +298,7 @@ async def validate_priceshape(
     report["warnings"] = (file_warnings + report["warnings"])[:100]
 
     job = models.ImportJob(
+        batch_id=_ps_new_batch_id(),
         upload_type=UPLOAD_TYPE,
         filename=fname or "priceshape_upload",
         source=SOURCE_NAME,
@@ -303,6 +306,9 @@ async def validate_priceshape(
         status="gevalideerd" if report["kan_importeren"] else "fout",
         rows_processed=0,
         rows_failed=report["samenvatting"]["rijen_ongeldig"],
+        rows_duplicates=report["samenvatting"].get("rijen_dubbel", 0),
+        error_log=[{"rij": e.get("rij"), "veld": e.get("veld"), "bericht": e.get("bericht") or e.get("message")}
+                   for e in report["errors"][:100]],
         error_message=None if report["kan_importeren"] else f"{len(report['errors'])} validatiefout(en) gevonden",
         uploaded_by=current_user.username,
         created_at=datetime.utcnow(),
@@ -360,9 +366,13 @@ async def import_priceshape(
 
     if not report["kan_importeren"]:
         job = models.ImportJob(
+            batch_id=_ps_new_batch_id(),
             upload_type=UPLOAD_TYPE, filename=fname or "priceshape_upload",
             source=SOURCE_NAME, file_type=file_type,
             status="fout", rows_processed=0, rows_failed=report["samenvatting"]["rijen_ongeldig"],
+            rows_duplicates=report["samenvatting"].get("rijen_dubbel", 0),
+            error_log=[{"rij": e.get("rij"), "veld": e.get("veld"), "bericht": e.get("bericht") or e.get("message")}
+                       for e in report["errors"][:100]],
             error_message=f"Import geweigerd: {len(report['errors'])} validatiefout(en)",
             uploaded_by=current_user.username, import_mode=mode,
             created_at=datetime.utcnow(), completed_at=datetime.utcnow(),
@@ -373,6 +383,7 @@ async def import_priceshape(
         raise HTTPException(status_code=400, detail={"message": "Validatie mislukt, niets opgeslagen", "report": report})
 
     job = models.ImportJob(
+        batch_id=_ps_new_batch_id(),
         upload_type=UPLOAD_TYPE, filename=fname or "priceshape_upload",
         source=SOURCE_NAME, file_type=file_type,
         status="nieuw", uploaded_by=current_user.username, import_mode=mode,
@@ -392,9 +403,11 @@ async def import_priceshape(
         total = created + updated
         job.rows_processed = total
         job.rows_failed = 0
+        job.rows_duplicates = skipped or 0
         job.status = "bijgewerkt" if updated > 0 else "geimporteerd"
         job.completed_at = datetime.utcnow()
         job.warnings_json = report["warnings"][:50]
+        job.error_log = [{"rij": None, "bericht": w} for w in report["warnings"][:100]]
         db.commit()
 
         return {

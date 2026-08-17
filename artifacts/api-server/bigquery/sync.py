@@ -45,9 +45,10 @@ WATERMARK_COLUMN: dict[str, str] = {
     "intelligence_signals": "created_at",
 }
 
-# Primaire sleutel per PostgreSQL-tabel (voor BigQuery MERGE)
-PK_COLUMN: dict[str, str] = {
-    "dim_product": "sku_id",
+# Primaire sleutel per PostgreSQL-tabel (voor BigQuery MERGE). Een lijst
+# betekent een samengestelde MERGE-sleutel (bijv. shop-gescopeerde producten).
+PK_COLUMN: dict[str, str | list[str]] = {
+    "dim_product": ["shop_id", "sku_id"],
     "dim_category": "id",
     "dim_shop": "id",
     "dim_competitor": "competitor_id",
@@ -80,9 +81,19 @@ def _get_last_watermark(db: Session, pg_table: str) -> Optional[datetime]:
         .order_by(ImportJob.completed_at.desc())
         .first()
     )
-    if job and job.completed_at:
-        return job.completed_at
-    return None
+    if not job:
+        return None
+    # Voorkeur: het werkelijke maximum bron-watermerk van de vorige export
+    # (opgeslagen in warnings_json). Alleen als dat ontbreekt (oude jobs)
+    # vallen we terug op completed_at.
+    wj = job.warnings_json if isinstance(job.warnings_json, dict) else {}
+    wm = wj.get("watermark")
+    if wm:
+        try:
+            return datetime.fromisoformat(wm)
+        except ValueError:
+            pass
+    return job.completed_at
 
 
 def _save_import_job(
@@ -91,48 +102,76 @@ def _save_import_job(
     rows: int,
     status: str,
     error: Optional[str] = None,
+    watermark: Optional[datetime] = None,
+    import_mode: str = "incrementeel",
 ) -> ImportJob:
-    """Registreer een sync-batch als ImportJob."""
+    """Registreer een sync-batch als ImportJob, incl. het geëxporteerde max-watermerk."""
     job = ImportJob(
+        batch_id=str(uuid.uuid4()),
         upload_type=f"bq_sync:{pg_table}",
         filename=f"bigquery_sync_{pg_table}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}",
         status=status,
         rows_processed=rows,
         rows_failed=0,
+        rows_duplicates=0,
+        error_log=([{"rij": None, "veld": None, "bericht": error}] if error else []),
         error_message=error,
         source="bigquery",
-        import_mode="incrementeel",
+        import_mode=import_mode,
         completed_at=datetime.now(timezone.utc),
+        warnings_json={"watermark": watermark.isoformat()} if watermark else None,
     )
     db.add(job)
     db.commit()
     return job
 
 
-def _fetch_pg_rows(db: Session, pg_table: str, since: Optional[datetime]) -> list[dict]:
+def _fetch_pg_rows(
+    db: Session,
+    pg_table: str,
+    since: Optional[datetime],
+    last_key: Optional[tuple] = None,
+) -> list[dict]:
     """
-    Haal rijen op uit PostgreSQL, optioneel gefilterd op watermerk.
-    Geeft rijen terug als lijst van dicts.
+    Haal één pagina rijen op uit PostgreSQL, gesorteerd op (watermerk, pk) met
+    keyset-paginatie zodat de aanroeper kan doorlopen tot de bron is uitgeput.
+
+    - since: inclusief filter (>=) op het watermerk. Inclusief, zodat updates
+      met hetzelfde datum-watermerk niet worden gemist; de MERGE in BigQuery
+      maakt het opnieuw verwerken van rijen idempotent.
+    - last_key: (watermark, pk) van de laatste rij van de vorige pagina; alleen
+      rijen strikt ná deze sleutel worden opgehaald (deterministische
+      tie-breaker op pk).
     """
     wm_col = WATERMARK_COLUMN.get(pg_table)
-    if since and wm_col:
-        # Gebruik CAST om date-kolommen met datetime te vergelijken
-        sql = text(
-            f"SELECT * FROM {pg_table} "
-            f"WHERE CAST({wm_col} AS TIMESTAMP) > :since "
-            f"ORDER BY {wm_col} "
-            f"LIMIT :lim"
-        )
-        result = db.execute(sql, {"since": since, "lim": BATCH_SIZE})
+    pk = PK_COLUMN.get(pg_table, "id")
+    # Tie-break kolom: laatste element van een samengestelde sleutel
+    pk_col = pk[-1] if isinstance(pk, list) else pk
+    conds: list[str] = []
+    params: dict = {"lim": BATCH_SIZE}
+
+    if wm_col:
+        if since is not None:
+            conds.append(f"CAST({wm_col} AS TIMESTAMP) >= :since")
+            params["since"] = since
+        if last_key is not None:
+            conds.append(
+                f"(CAST({wm_col} AS TIMESTAMP), {pk_col}) > (:lk_wm, :lk_pk)"
+            )
+            params["lk_wm"], params["lk_pk"] = last_key
+        order = f"CAST({wm_col} AS TIMESTAMP), {pk_col}"
     else:
-        sql = text(f"SELECT * FROM {pg_table} LIMIT :lim")
-        result = db.execute(sql, {"lim": BATCH_SIZE})
+        if last_key is not None:
+            conds.append(f"{pk_col} > :lk_pk")
+            params["lk_pk"] = last_key[1]
+        order = pk_col
+
+    where = f"WHERE {' AND '.join(conds)} " if conds else ""
+    sql = text(f"SELECT * FROM {pg_table} {where}ORDER BY {order} LIMIT :lim")
+    result = db.execute(sql, params)
 
     cols = list(result.keys())
-    rows = []
-    for row in result.fetchall():
-        rows.append(dict(zip(cols, row)))
-    return rows
+    return [dict(zip(cols, row)) for row in result.fetchall()]
 
 
 def _cast_row(row: dict) -> dict:
@@ -220,44 +259,65 @@ def _upsert_rows(
     project: str,
     tdef: Any,
     rows: list[dict],
-    pk_col: str,
+    pk_col: str | list[str],
 ) -> tuple[int, Optional[str]]:
     """
-    Schrijf rijen naar BigQuery via streaming insert (voor kleine batches)
-    of load_table_from_json (voor grote batches).
-    Geeft (aantal_ingevoegd, error_of_None) terug.
+    Idempotente upsert: laad rijen in een tijdelijke stagingtabel
+    (WRITE_TRUNCATE) en MERGE ze op de primaire sleutel in de doeltabel.
+    Herhaalde runs en full refreshes dupliceren daardoor nooit rijen en
+    propageren updates correct. Geeft (aantal_verwerkt, error_of_None) terug.
     """
     if not rows:
         return 0, None
 
     full_table_id = f"{project}.{tdef.dataset_id}.{tdef.table_id}"
+    staging_table_id = f"{full_table_id}__staging_{uuid.uuid4().hex[:8]}"
     cast_rows = [_cast_row(r) for r in rows]
 
     try:
-        # Gebruik streaming insert voor batches ≤ 10k rijen; load job voor grotere
-        if len(cast_rows) <= 10_000:
-            errors = client.insert_rows_json(full_table_id, cast_rows)
-            if errors:
-                return 0, str(errors[:3])  # eerste 3 fouten
-            return len(cast_rows), None
-        else:
-            import io, json as _json
-            from google.cloud import bigquery
-            ndjson = "\n".join(_json.dumps(r, default=str) for r in cast_rows)
-            job_config = bigquery.LoadJobConfig(
-                source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
-                write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
-                autodetect=False,
-            )
-            job = client.load_table_from_file(
-                io.BytesIO(ndjson.encode()),
-                full_table_id,
-                job_config=job_config,
-            )
-            job.result()  # wacht op voltooiing
-            return len(cast_rows), None
+        import io, json as _json
+        from google.cloud import bigquery
+
+        # 1. Laad de batch in een verse stagingtabel met het doelschema
+        schema = [bigquery.SchemaField(c, t, mode="NULLABLE") for c, t in tdef.columns]
+        ndjson = "\n".join(_json.dumps(r, default=str) for r in cast_rows)
+        job_config = bigquery.LoadJobConfig(
+            source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
+            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+            schema=schema,
+            autodetect=False,
+            ignore_unknown_values=True,  # _bq_synced_at e.d. buiten het doelschema
+        )
+        load_job = client.load_table_from_file(
+            io.BytesIO(ndjson.encode()), staging_table_id, job_config=job_config)
+        load_job.result()
+
+        # 2. MERGE op (samengestelde) primaire sleutel: bijwerken of invoegen
+        pk_cols = pk_col if isinstance(pk_col, list) else [pk_col]
+        col_names = [c for c, _ in tdef.columns]
+        update_cols = [c for c in col_names if c not in pk_cols]
+        on_clause = " AND ".join(f"T.`{c}` = S.`{c}`" for c in pk_cols)
+        merge_sql = (
+            f"MERGE `{full_table_id}` T\n"
+            f"USING `{staging_table_id}` S\n"
+            f"ON {on_clause}\n"
+            + ("WHEN MATCHED THEN UPDATE SET "
+               + ", ".join(f"T.`{c}` = S.`{c}`" for c in update_cols) + "\n"
+               if update_cols else "")
+            + "WHEN NOT MATCHED THEN INSERT ("
+            + ", ".join(f"`{c}`" for c in col_names) + ") VALUES ("
+            + ", ".join(f"S.`{c}`" for c in col_names) + ")"
+        )
+        client.query(merge_sql).result()
+        return len(cast_rows), None
     except Exception as exc:
         return 0, str(exc)
+    finally:
+        # 3. Stagingtabel altijd opruimen
+        try:
+            client.delete_table(staging_table_id, not_found_ok=True)
+        except Exception:
+            pass
 
 
 def sync_table(pg_table: str, full_refresh: bool = False) -> dict:
@@ -309,35 +369,58 @@ def sync_table(pg_table: str, full_refresh: bool = False) -> dict:
 
         # 2. Watermerk ophalen
         since = None if full_refresh else _get_last_watermark(db, pg_table)
+        prev_watermark = since
 
-        # 3. PostgreSQL-rijen ophalen
-        rows = _fetch_pg_rows(db, pg_table, since)
-        if not rows:
-            _save_import_job(db, pg_table, 0, "geimporteerd")
-            return {
-                "pg_table": pg_table,
-                "bq_table": f"{tdef.dataset_id}.{tdef.table_id}",
-                "rows_exported": 0,
-                "status": "ok",
-                "error": None,
-            }
-
-        # 4. Naar BigQuery schrijven
+        # 3+4. Pagineer door de bron (keyset) en MERGE elke pagina naar BigQuery
+        #      tot de bron is uitgeput — geldt ook voor full refresh.
         pk_col = PK_COLUMN.get(pg_table, "id")
-        inserted, err = _upsert_rows(client, project, tdef, rows, pk_col)
-        if err:
-            error_msg = err
-            _save_import_job(db, pg_table, inserted, "fout", err)
-            return {
-                "pg_table": pg_table,
-                "bq_table": f"{tdef.dataset_id}.{tdef.table_id}",
-                "rows_exported": inserted,
-                "status": "error",
-                "error": err,
-            }
+        tie_col = pk_col[-1] if isinstance(pk_col, list) else pk_col
+        wm_col = WATERMARK_COLUMN.get(pg_table)
+        last_key: Optional[tuple] = None
+        max_watermark: Optional[datetime] = None
 
-        total_rows = inserted
-        _save_import_job(db, pg_table, total_rows, "geimporteerd")
+        while True:
+            rows = _fetch_pg_rows(db, pg_table, since, last_key=last_key)
+            if not rows:
+                break
+
+            inserted, err = _upsert_rows(client, project, tdef, rows, pk_col)
+            if err:
+                error_msg = err
+                # Bewaar het watermerk van wat wél succesvol is geëxporteerd,
+                # zodat een volgende run daar verder gaat (geen gaten).
+                _save_import_job(db, pg_table, total_rows, "fout", err,
+                                 watermark=max_watermark or prev_watermark)
+                return {
+                    "pg_table": pg_table,
+                    "bq_table": f"{tdef.dataset_id}.{tdef.table_id}",
+                    "rows_exported": total_rows,
+                    "status": "error",
+                    "error": err,
+                }
+
+            total_rows += inserted
+            last_row = rows[-1]
+            if wm_col:
+                wm_val = last_row.get(wm_col)
+                if wm_val is not None:
+                    if not isinstance(wm_val, datetime):
+                        wm_val = datetime.combine(wm_val, datetime.min.time())
+                    max_watermark = wm_val if (max_watermark is None or wm_val > max_watermark) else max_watermark
+                    last_key = (wm_val, last_row.get(tie_col))
+                else:
+                    last_key = (datetime.min, last_row.get(tie_col))
+            else:
+                last_key = (None, last_row.get(tie_col))
+
+            if len(rows) < BATCH_SIZE:
+                break
+
+        _save_import_job(
+            db, pg_table, total_rows, "geimporteerd",
+            watermark=max_watermark or prev_watermark,
+            import_mode="volledig" if full_refresh else "incrementeel",
+        )
         logger.info("BigQuery sync: %s → %s.%s (%d rijen)", pg_table, tdef.dataset_id, tdef.table_id, total_rows)
 
     except Exception as exc:
@@ -368,8 +451,10 @@ def sync_all_tables(full_refresh: bool = False) -> list[dict]:
 
     results = []
     for tdef in BQ_TABLE_DEFINITIONS:
-        # Sla meta-tabellen over die intern door BigQuery zelf worden gevuld
-        if tdef.pg_table.startswith("_"):
+        # Sla meta-tabellen over: interne BQ-tabellen (prefix "_") en
+        # bq_sync_batches (schema zonder generieke pk; de sync-audit staat
+        # in PostgreSQL ImportJob-rijen, zie get_sync_history()).
+        if tdef.pg_table.startswith("_") or tdef.table_id == "bq_sync_batches":
             continue
         result = sync_table(tdef.pg_table, full_refresh=full_refresh)
         results.append(result)

@@ -320,8 +320,39 @@ class ImportJob(Base):
     warnings_json = Column(JSON)           # lijst met waarschuwingen van deze import
     source = Column(String(50))            # PriceShape / DRS / Handmatig / Paper_Copy
     file_type = Column(String(10))         # csv / xlsx / xls
+    # Importbatch-verrijking (§29): elke import krijgt een uniek batch-ID en
+    # gestructureerde tellingen accepted/rejected/duplicates plus een error-log.
+    batch_id = Column(String(36), index=True)   # UUID per importbatch
+    rows_duplicates = Column(Integer, default=0)  # dubbele rijen binnen de batch
+    error_log = Column(JSON)               # gestructureerde foutregels [{rij, veld, bericht}]
 
+class DataQualityIssue(Base):
+    """
+    Persistente datakwaliteits-issues (§30) met workflow.
+    Elke detectie (issue_code) heeft één actuele rij die bij iedere
+    kwaliteitsscan wordt bijgewerkt (affected_count, last_detected_at) en
+    automatisch op 'opgelost' gaat zodra de detectie niets meer vindt.
+    Owner en status zijn door gebruikers te beheren.
+    """
+    __tablename__ = "data_quality_issue"
 
+    id = Column(Integer, primary_key=True, index=True)
+    issue_code = Column(String(100), unique=True, nullable=False, index=True)
+    title = Column(String(300), nullable=False)
+    message = Column(Text)
+    severity = Column(String(20), default="warning")   # error / warning / info
+    source = Column(String(100))          # PriceShape / DRS / GA4 / Handmatig / Systeem / AI
+    module = Column(String(100))          # Producten / Prijzen / Concurrentie / Imports / AI-modellen / ...
+    affected_count = Column(Integer, default=0)
+    business_impact = Column(Text)        # zakelijke impact in het Nederlands
+    suggested_action = Column(Text)       # aanbevolen vervolgactie
+    owner = Column(String(100))           # toegewezen eigenaar (gebruikersnaam)
+    status = Column(String(30), default="open")  # open / in_behandeling / genegeerd / opgelost
+    first_detected_at = Column(DateTime, default=datetime.utcnow)
+    last_detected_at = Column(DateTime, default=datetime.utcnow)
+    resolved_at = Column(DateTime)
+    updated_by = Column(String(100))
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 class AuditLog(Base):
     __tablename__ = "audit_log"
 

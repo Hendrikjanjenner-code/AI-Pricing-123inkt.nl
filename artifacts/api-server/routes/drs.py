@@ -363,6 +363,7 @@ async def import_drs(
     sales_rows, hier_rows, file_warnings = _load_drs_xlsx(content, fname)
     file_type = "xls" if fname.lower().endswith(".xls") else "xlsx"
 
+    from engine.import_engine import new_batch_id as _new_batch_id
     job = models.ImportJob(
         upload_type="drs",
         filename=file.filename or "drs.xlsx",
@@ -372,6 +373,7 @@ async def import_drs(
         status="nieuw",
         uploaded_by=current_user.username,
         created_at=datetime.utcnow(),
+        batch_id=_new_batch_id(),
     )
     db.add(job)
     db.commit()
@@ -602,7 +604,9 @@ async def import_drs(
         totaal = sku_created + sku_updated
         job.rows_processed = totaal
         job.rows_failed = 0
+        job.rows_duplicates = max(0, len(sales_rows) - len(seen_skus)) if sales_rows else 0
         job.warnings_json = warnings[:200]
+        job.error_log = [{"rij": None, "bericht": w} for w in warnings[:100]]
         job.status = "bijgewerkt" if mode in ("updaten", "vervangen") and sku_updated > 0 else "geimporteerd"
         job.completed_at = now
         db.commit()
@@ -638,6 +642,7 @@ async def import_drs(
         try:
             job.status = "fout"
             job.error_message = str(e)[:500]
+            job.error_log = [{"rij": None, "bericht": str(e)[:500]}]
             job.completed_at = datetime.utcnow()
             db.commit()
         except Exception:

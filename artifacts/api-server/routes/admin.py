@@ -246,12 +246,17 @@ def trigger_sync(
         from database import SessionLocal
         db_local = SessionLocal()
         try:
+            from engine.import_engine import new_batch_id as _new_batch_id
             sync_job = models.ImportJob(
+                batch_id=_new_batch_id(),
                 upload_type="api_sync",
                 filename="handmatige-api-sync",
                 status=job_status,
                 rows_processed=totaal_rijen,
                 rows_failed=0,
+                rows_duplicates=0,
+                error_log=([{"rij": None, "veld": None, "bericht": onderdelen_msg}]
+                           if heeft_fout else []),
                 error_message=onderdelen_msg if heeft_fout else None,
                 uploaded_by=current_user.username,
                 created_at=datetime.now(timezone.utc),

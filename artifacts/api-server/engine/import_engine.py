@@ -54,6 +54,12 @@ STATUS_LIFECYCLE = (
 PREVIEW_ROW_LIMIT = 25
 
 
+def new_batch_id() -> str:
+    """Uniek batch-ID (UUID4) voor elke importbatch, over alle importpaden heen."""
+    import uuid
+    return str(uuid.uuid4())
+
+
 # ── Bestandsdecodering ───────────────────────────────────────────────────────
 
 def decode_csv_bytes(content: bytes) -> str:

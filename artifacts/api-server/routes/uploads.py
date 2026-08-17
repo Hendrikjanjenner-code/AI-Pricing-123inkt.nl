@@ -18,6 +18,7 @@ from engine.import_engine import (
     safe_float as _safe_float,
     safe_int as _safe_int,
     validate_ean as _validate_ean,
+    new_batch_id as _new_batch_id,
     PREVIEW_ROW_LIMIT,
 )
 
@@ -42,6 +43,7 @@ async def _process_upload(
         created_at=datetime.utcnow(),
         source="Handmatig",
         file_type=file_ext,
+        batch_id=_new_batch_id(),
     )
     db.add(job)
     db.commit()
@@ -51,24 +53,31 @@ async def _process_upload(
         content = await file.read()
         file_warnings: list = []
         rows = _file_to_rows(content, fname, file_warnings)
+        duplicates = _count_duplicates(rows)
         processed, failed, warnings = processor(rows, db)
         warnings = file_warnings + warnings
         job.rows_processed = processed
         job.rows_failed = failed
+        job.rows_duplicates = duplicates
         job.status = "geimporteerd"
         job.completed_at = datetime.utcnow()
         job.warnings_json = warnings[:50]
+        job.error_log = [{"rij": None, "bericht": w} for w in warnings[:100]]
         db.commit()
         return {
             "job_id": job.id,
+            "batch_id": job.batch_id,
             "rows_processed": processed,
             "rows_failed": failed,
+            "rows_duplicates": duplicates,
             "warnings": warnings,
             "message": f"Uploaded {processed} rows successfully",
         }
     except Exception as e:
+        db.rollback()
         job.status = "fout"
         job.error_message = str(e)
+        job.error_log = [{"rij": None, "bericht": str(e)[:500]}]
         job.completed_at = datetime.utcnow()
         db.commit()
         raise HTTPException(status_code=400, detail=f"Upload failed: {str(e)}")
@@ -472,8 +481,11 @@ def list_uploads(
             "source": j.source,
             "file_type": j.file_type,
             "import_mode": j.import_mode,
+            "batch_id": j.batch_id,
             "rows_processed": j.rows_processed,
             "rows_failed": j.rows_failed,
+            "rows_duplicates": j.rows_duplicates or 0,
+            "error_log": j.error_log or [],
             "error_message": j.error_message,
             "warnings": j.warnings_json or [],
             "uploaded_by": j.uploaded_by,
@@ -928,6 +940,9 @@ async def upload_bulk(
             status="processing",
             uploaded_by=current_user.username,
             created_at=datetime.utcnow(),
+            source="Handmatig",
+            batch_id=_new_batch_id(),
+            rows_duplicates=_count_duplicates(rows),
         )
         db.add(job)
         db.commit()
@@ -1059,6 +1074,8 @@ async def upload_bulk(
             job.rows_failed = fail
             job.status = "completed"
             job.completed_at = datetime.utcnow()
+            job.warnings_json = (file_warns + warns)[:50]
+            job.error_log = [{"rij": None, "bericht": w} for w in (file_warns + warns)[:100]]
             db.commit()
 
             totaal_verwerkt += proc
@@ -1074,8 +1091,10 @@ async def upload_bulk(
             })
 
         except Exception as e:
+            db.rollback()
             job.status = "failed"
             job.error_message = str(e)
+            job.error_log = [{"rij": None, "bericht": str(e)[:500]}]
             job.completed_at = datetime.utcnow()
             db.commit()
             results.append({"bestand": csv_name, "type": upload_type, "status": "mislukt", "reden": str(e)})
@@ -1255,3 +1274,20 @@ async def upload_loyalty_transactions(
     current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
     return await _process_upload(file, "loyalty-transactions", db, current_user, _process_loyalty_transactions)
+
+def _count_duplicates(rows: list[dict]) -> int:
+    """Tel dubbele rijen binnen een batch op basis van SKU (+datum indien aanwezig)."""
+    seen: set[tuple] = set()
+    dups = 0
+    for row in rows:
+        norm = {k.lower().strip(): (v or "").strip() for k, v in row.items() if isinstance(k, str)}
+        sku = norm.get("own_sku_id") or norm.get("sku_id") or ""
+        if not sku:
+            continue
+        key = (sku, norm.get("date") or norm.get("datum") or "",
+               norm.get("competitor_name") or norm.get("concurrent_naam") or "")
+        if key in seen:
+            dups += 1
+        else:
+            seen.add(key)
+    return dups

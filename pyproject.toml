@@ -31,4 +31,5 @@ dependencies = [
     "xlrd>=2.0.2",
     "xlwt>=1.3.0",
     "ijson>=3.5.1",
+    "google-cloud-bigquery>=3.43.0",
 ]

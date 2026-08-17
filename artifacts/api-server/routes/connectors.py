@@ -160,12 +160,47 @@ CONNECTOR_FIELDS = {
         {"key": "service_account_key",  "label": "Service Account JSON", "required": True,  "secret": True,
          "placeholder": '{"type": "service_account", …}'},
     ],
+    "search_console": [
+        {"key": "site_url", "label": "Site-URL / property", "required": True, "secret": False,
+         "placeholder": "sc-domain:voorbeeld.nl of https://voorbeeld.nl/"},
+        {"key": "service_account_key", "label": "Service Account JSON", "required": True, "secret": True,
+         "placeholder": '{"type": "service_account", …}'},
+    ],
+    "google_ads": [
+        {"key": "developer_token", "label": "Developer token", "required": True, "secret": True,
+         "placeholder": "abc…"},
+        {"key": "customer_id", "label": "Customer ID", "required": True, "secret": False,
+         "placeholder": "1234567890 (zonder streepjes)"},
+        {"key": "client_id", "label": "OAuth Client ID", "required": True, "secret": False,
+         "placeholder": "….apps.googleusercontent.com"},
+        {"key": "client_secret", "label": "OAuth Client Secret", "required": True, "secret": True,
+         "placeholder": "GOCSPX-…"},
+        {"key": "refresh_token", "label": "OAuth Refresh Token", "required": True, "secret": True,
+         "placeholder": "1//…"},
+    ],
+    "microsoft_ads": [
+        {"key": "developer_token", "label": "Developer token", "required": True, "secret": True,
+         "placeholder": "1234ABCD…"},
+        {"key": "customer_id", "label": "Customer ID", "required": True, "secret": False,
+         "placeholder": "123456789"},
+        {"key": "account_id", "label": "Account ID", "required": True, "secret": False,
+         "placeholder": "987654321"},
+        {"key": "client_id", "label": "OAuth Client ID (app)", "required": True, "secret": False,
+         "placeholder": "00000000-0000-0000-0000-000000000000"},
+        {"key": "client_secret", "label": "OAuth Client Secret", "required": True, "secret": True,
+         "placeholder": "geheim…"},
+        {"key": "refresh_token", "label": "OAuth Refresh Token", "required": True, "secret": True,
+         "placeholder": "M.R3_BAY…"},
+    ],
 }
 
 CONNECTOR_LABELS = {
     "priceshape": "PriceShape",
     "drs": "DRS Datareport",
     "ga4": "Google Analytics 4",
+    "search_console": "Google Search Console",
+    "google_ads": "Google Ads",
+    "microsoft_ads": "Microsoft Ads",
 }
 
 VALID_CONNECTORS = set(CONNECTOR_FIELDS.keys())
@@ -242,6 +277,14 @@ def _check_env_configured(name: str) -> bool:
         return bool(os.environ.get("DRS_API_URL") and os.environ.get("DRS_API_KEY"))
     if name == "ga4":
         return bool(os.environ.get("GA4_PROPERTY_ID") and os.environ.get("GA4_SERVICE_ACCOUNT_KEY"))
+    if name == "search_console":
+        return bool(os.environ.get("GSC_SITE_URL") and os.environ.get("GSC_SERVICE_ACCOUNT_KEY"))
+    if name == "google_ads":
+        from connectors.google_ads_connector import ENV_KEYS as _GA_ENV
+        return all(os.environ.get(v) for v in _GA_ENV.values())
+    if name == "microsoft_ads":
+        from connectors.microsoft_ads_connector import ENV_KEYS as _MS_ENV
+        return all(os.environ.get(v) for v in _MS_ENV.values())
     return False
 
 
@@ -473,6 +516,12 @@ def _test_credentials(name: str, creds: dict) -> dict:
             return _test_drs(creds)
         if name == "ga4":
             return _test_ga4(creds)
+        if name == "search_console":
+            return _test_search_console(creds)
+        if name == "google_ads":
+            return _test_google_ads(creds)
+        if name == "microsoft_ads":
+            return _test_microsoft_ads(creds)
     except Exception as exc:
         return {"status": "error", "message": str(exc)[:300]}
     return {"status": "error", "message": "Onbekende connector."}
@@ -489,6 +538,15 @@ def _run_live_check(name: str, db: Session) -> dict:
     if name == "ga4":
         from connectors import ga4_connector
         return ga4_connector.check_connection(db=db)
+    if name == "search_console":
+        from connectors import search_console_connector
+        return search_console_connector.check_connection(db=db)
+    if name == "google_ads":
+        from connectors import google_ads_connector
+        return google_ads_connector.check_connection(db=db)
+    if name == "microsoft_ads":
+        from connectors import microsoft_ads_connector
+        return microsoft_ads_connector.check_connection(db=db)
     return {"status": "error", "message": "Onbekende connector."}
 
 
@@ -559,6 +617,27 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
                 counts["conversion_records"] = len(conversions)
                 message = "GA4 sync voltooid."
 
+            elif name == "search_console":
+                from connectors import search_console_connector
+                rows = search_console_connector.fetch_search_analytics(
+                    date_from=date_30d, date_to=today, db=db)
+                counts["zoekterm_records"] = len(rows)
+                message = f"Search Console sync voltooid: {len(rows)} zoekterm-rijen opgehaald."
+
+            elif name == "google_ads":
+                from connectors import google_ads_connector
+                rows = google_ads_connector.fetch_campaign_costs(
+                    date_from=date_30d, date_to=today, db=db)
+                counts["campagne_kostenrijen"] = len(rows)
+                message = f"Google Ads sync voltooid: {len(rows)} campagne-kostenrijen opgehaald."
+
+            elif name == "microsoft_ads":
+                from connectors import microsoft_ads_connector
+                rows = microsoft_ads_connector.fetch_campaign_costs(
+                    date_from=date_30d, date_to=today, db=db)
+                counts["campagne_kostenrijen"] = len(rows)
+                message = f"Microsoft Ads sync voltooid: {len(rows)} campagne-kostenrijen opgehaald."
+
         except Exception as exc:
             status = "error" if "ConnectorError" not in type(exc).__name__ else "not_configured"
             message = str(exc)[:300]
@@ -569,13 +648,18 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
             db_local = SessionLocal()
             try:
                 job_status = "geimporteerd" if status == "ok" else ("fout" if status == "error" else "nieuw")
+                from engine.import_engine import new_batch_id as _new_batch_id
                 db_local.add(models.ImportJob(
+                    batch_id=_new_batch_id(),
                     upload_type=f"api_sync_{name}",
                     filename=f"handmatige-sync-{name}",
                     source="API-Sync",
                     status=job_status,
                     rows_processed=sum(counts.values()),
                     rows_failed=0,
+                    rows_duplicates=0,
+                    error_log=([{"rij": None, "veld": None, "bericht": message}]
+                               if status != "ok" else []),
                     error_message=message if status != "ok" else None,
                     uploaded_by=current_user.username,
                     created_at=datetime.now(timezone.utc),
@@ -788,3 +872,72 @@ def _test_ga4(creds: dict) -> dict:
         if "404" in msg or "NOT_FOUND" in msg:
             return {"status": "error", "message": f"Property ID {property_id} niet gevonden."}
         return {"status": "error", "message": msg[:200]}
+
+
+def _test_search_console(creds: dict) -> dict:
+    site_url = (creds.get("site_url") or "").strip()
+    sa_key = (creds.get("service_account_key") or "").strip()
+    if not site_url or not sa_key:
+        return {"status": "not_configured", "message": "Site-URL en Service Account JSON zijn verplicht."}
+    from connectors import search_console_connector as gsc
+    try:
+        token = gsc._access_token(sa_key)
+    except gsc.ConnectorError as exc:
+        return {"status": "error", "message": str(exc)}
+    try:
+        import httpx
+        from urllib.parse import quote
+        with httpx.Client(timeout=15) as client:
+            resp = client.get(f"{gsc.API_BASE}/sites/{quote(site_url, safe='')}",
+                              headers={"Authorization": f"Bearer {token}"})
+        if resp.status_code == 200:
+            return {"status": "ok", "message": f"Verbonden met Search Console-property {site_url}."}
+        if resp.status_code in (401, 403):
+            return {"status": "auth_error",
+                    "message": f"Toegang geweigerd ({resp.status_code}). Voeg het service-account toe als "
+                               f"gebruiker (Volledig/Beperkt) op de property in Search Console."}
+        if resp.status_code == 404:
+            return {"status": "error", "message": f"Property '{site_url}' niet gevonden in Search Console."}
+        return {"status": "error", "message": f"Onverwachte respons: HTTP {resp.status_code}."}
+    except Exception as exc:
+        return {"status": "unreachable", "message": str(exc)[:200]}
+
+
+def _test_google_ads(creds: dict) -> dict:
+    from connectors import google_ads_connector as gads
+    missing = [k for k in gads.REQUIRED_KEYS if not (creds.get(k) or "").strip()]
+    if missing:
+        return {"status": "not_configured", "message": f"Vereiste velden ontbreken: {', '.join(missing)}."}
+    try:
+        gads._access_token(creds)
+        return {"status": "ok",
+                "message": f"OAuth-verbinding met Google Ads geslaagd (customer {creds['customer_id']})."}
+    except gads.ConnectorError as exc:
+        msg = str(exc)
+        if "invalid_grant" in msg or "invalid_client" in msg:
+            return {"status": "auth_error", "message": msg}
+        return {"status": "unreachable" if "bereikbaar" in msg else "error", "message": msg}
+
+
+def _test_microsoft_ads(creds: dict) -> dict:
+    from connectors import microsoft_ads_connector as msads
+    missing = [k for k in msads.REQUIRED_KEYS if not (creds.get(k) or "").strip()]
+    if missing:
+        return {"status": "not_configured", "message": f"Vereiste velden ontbreken: {', '.join(missing)}."}
+    try:
+        token = msads._access_token(creds)
+    except msads.ConnectorError as exc:
+        msg = str(exc)
+        if "invalid_grant" in msg or "invalid_client" in msg:
+            return {"status": "auth_error", "message": msg}
+        return {"status": "unreachable" if "bereikbaar" in msg else "error", "message": msg}
+    try:
+        code = msads._soap_get_user(token, creds["developer_token"])
+        if code == 200:
+            return {"status": "ok", "message": f"Verbonden met Microsoft Ads (customer {creds['customer_id']})."}
+        if code in (401, 403):
+            return {"status": "auth_error",
+                    "message": f"Toegang geweigerd ({code}). Controleer het developer token."}
+        return {"status": "error", "message": f"Microsoft Ads API antwoordde met HTTP {code}."}
+    except Exception as exc:
+        return {"status": "unreachable", "message": str(exc)[:200]}

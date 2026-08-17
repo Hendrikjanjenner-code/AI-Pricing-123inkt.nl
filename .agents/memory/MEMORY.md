@@ -18,6 +18,7 @@
 - [Bounded "full" history lists](bounded-history-lists.md) — when a spec says "volledige"/full history but the API caps `limit`, add incremental load-more instead of silently truncating; code review flags fixed low caps as not-full.
 - [configureWorkflow does not expand $PORT](workflow-port-env.md) — literal `$PORT` in artifact.toml dev commands isn't shell-expanded via configureWorkflow; hardcode the artifact's localPort explicitly.
 - [Duplicate legacy workflows cause DB race 500s](duplicate-workflow-db-race.md) — manual .replit workflows left alongside auto-generated artifact workflows can double-start a service and race on create_all, crashing the backend.
+- [Data quality issue registry](dq-issue-registry.md) — detections are stateless scans; owner/status live in a code-keyed registry upserted per scan (auto-resolve/reopen).
 - [Bulk refresh DB pitfalls](bulk-refresh-db-pitfalls.md) — numpy 2.x scalars leak as `np.float64(...)` into SQL (schema "np" error); bulk sync needs a separate long-timeout BackgroundSessionLocal, not the 4s request session.
 - [SessionLocal autoflush pitfall](session-autoflush.md) — sessions have autoflush=False; flush explicitly between write and read phases in engine pipelines, or queries see stale data.
 - [Engine shop-scoping](engine-shop-scoping.md) — engines, results, dashboards, signals and by-id endpoints must all be shop-scoped; foreign-shop ids return 404.

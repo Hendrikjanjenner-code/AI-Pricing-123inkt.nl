@@ -28,7 +28,7 @@ from routes import (
     traffic, search_demand,
     cost, procurement, economic, reporting, bcg_transitions,
     category_hierarchy, break_even, ecosystem, explainability,
-    admin, connectors,
+    admin, connectors, data_sources,
     signals, shops, platform, loyalty,
     basket, promotion_intelligence, forecast, opportunities, model_registry,
 )
@@ -409,6 +409,7 @@ app.include_router(ecosystem.router)
 app.include_router(explainability.router)
 app.include_router(admin.router)
 app.include_router(connectors.router)
+app.include_router(data_sources.router)
 app.include_router(signals.router)
 app.include_router(shops.router)
 app.include_router(platform.router)
