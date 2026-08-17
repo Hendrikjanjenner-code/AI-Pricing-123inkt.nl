@@ -2221,3 +2221,58 @@ class FactPromotionEffect(Base):
     explanation_nl = Column(Text)
     model_version = Column(String(50))
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─── AI Gateway & Commercial AI Copilot (§26, §32) ───────────────────────────
+
+class AiConversation(Base):
+    """Copilot-gesprek van één gebruiker (gespreksgeschiedenis §26)."""
+    __tablename__ = "ai_conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    title = Column(String(300), default="Nieuw gesprek")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AiMessage(Base):
+    """Eén bericht in een Copilot-gesprek. Assistant-berichten bevatten het
+    volledige gestructureerde antwoord (conclusion, sources, confidence, ...)
+    in answer_json."""
+    __tablename__ = "ai_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("ai_conversations.id"), nullable=False, index=True)
+    role = Column(String(20), nullable=False)      # user / assistant
+    content = Column(Text, nullable=False)         # vraag of conclusion-tekst
+    answer_json = Column(JSON)                     # gestructureerd antwoord (assistant)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AiModelCall(Base):
+    """
+    AI Gateway-logboek (§32): elke call naar het externe model wordt gelogd
+    met gebruiker, model, aangeroepen functies, databronnen, doel en
+    tokenverbruik. Basis voor audit en kostenbewaking.
+    """
+    __tablename__ = "ai_model_calls"
+
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    username = Column(String(100), index=True)
+    user_role = Column(String(50))
+    conversation_id = Column(Integer, index=True)
+    purpose = Column(String(255))                  # bv. copilot_question
+    provider = Column(String(100), default="replit_ai_openai")
+    model = Column(String(100))
+    functions_called = Column(JSON)                # [{name, arguments, records, duration_ms}]
+    datasources = Column(JSON)                     # gebruikte bronnen/tabellen
+    prompt_tokens = Column(Integer, default=0)
+    completion_tokens = Column(Integer, default=0)
+    total_tokens = Column(Integer, default=0)
+    llm_roundtrips = Column(Integer, default=0)
+    duration_ms = Column(Float)
+    status = Column(String(30), default="success")  # success / failed / unavailable
+    error_message = Column(Text)

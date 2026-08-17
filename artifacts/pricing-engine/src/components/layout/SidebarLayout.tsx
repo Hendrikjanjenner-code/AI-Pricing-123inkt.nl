@@ -56,6 +56,7 @@ import {
   Server,
   Lightbulb,
   History,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConnectorHealthIndicator } from "@/components/layout/ConnectorHealthIndicator";
@@ -65,6 +66,7 @@ const navGroepen = [
     label: "Operaties",
     items: [
       { href: "/", label: "Dashboard", icon: BarChart3 },
+      { href: "/copilot", label: "AI Copilot", icon: Sparkles },
       { href: "/signalen", label: "Intelligence Signals", icon: Bell },
       { href: "/beslissingen", label: "Beslissingen", icon: BrainCircuit },
       { href: "/prijsadviezen", label: "Prijsadviezen", icon: List },

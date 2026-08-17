@@ -504,6 +504,232 @@ def get_active_signals(db: Session, user: models.User, engine: Optional[str] = N
     }
 
 
+def get_margin_erosion(db: Session, user: models.User, days: int = 30,
+                       limit: int = 20, shop_id: Optional[int] = None) -> dict:
+    """Waar verliezen we marge: grootste margedalers t.o.v. de vorige periode."""
+    _check_access(user, ALL_ROLES)
+    sid = _shop_scope(db, shop_id)
+    today = date.today()
+    cur_since = today - timedelta(days=days)
+    prev_since = today - timedelta(days=days * 2)
+
+    def _margin_by_sku(start, end):
+        rows = db.query(
+            models.FactSalesDaily.sku_id,
+            func.coalesce(func.sum(models.FactSalesDaily.margin), 0).label("margin"),
+            func.coalesce(func.sum(models.FactSalesDaily.revenue), 0).label("revenue"),
+            func.count(models.FactSalesDaily.id).label("records"),
+        ).filter(
+            models.FactSalesDaily.shop_id == sid,
+            models.FactSalesDaily.date >= start,
+            models.FactSalesDaily.date < end,
+        ).group_by(models.FactSalesDaily.sku_id).all()
+        return {r.sku_id: r for r in rows}
+
+    cur = _margin_by_sku(cur_since, today + timedelta(days=1))
+    prev = _margin_by_sku(prev_since, cur_since)
+    records = sum(int(r.records) for r in cur.values())
+
+    losers = []
+    for sku, c in cur.items():
+        p = prev.get(sku)
+        prev_margin = float(p.margin) if p else 0.0
+        delta = float(c.margin) - prev_margin
+        if delta < 0:
+            losers.append({"sku_id": sku, "margin_current": round(float(c.margin), 2),
+                           "margin_previous": round(prev_margin, 2),
+                           "margin_delta": round(delta, 2),
+                           "revenue_current": round(float(c.revenue), 2)})
+    losers.sort(key=lambda x: x["margin_delta"])
+    losers = losers[:limit]
+    names = {p.sku_id: p.product_name for p in db.query(models.DimProduct).filter(
+        models.DimProduct.sku_id.in_([l["sku_id"] for l in losers])).all()} if losers else {}
+    for l in losers:
+        l["product_name"] = names.get(l["sku_id"])
+    return {
+        "shop_id": sid, "shop_scope_applied": True, "period_days": days,
+        "comparison": f"laatste {days} dagen vs. {days} dagen daarvoor",
+        "data_available": len(losers) > 0, "records": records,
+        "margin_losers": losers,
+    }
+
+
+def get_private_label_potential(db: Session, user: models.User, limit: int = 20,
+                                shop_id: Optional[int] = None) -> dict:
+    """Huismerkpotentie: top-SKU's op Private Label Value Score (PLSV)."""
+    _check_access(user, ALL_ROLES)
+    sid = _shop_scope(db, shop_id)
+    # FactPrivateLabelIntelligence heeft geen shop_id; scope via de SKU's
+    # van de shop (DimProduct) zodat geen cross-shop-data lekt.
+    shop_skus = db.query(models.DimProduct.sku_id).filter(
+        models.DimProduct.shop_id == sid)
+    latest = db.query(func.max(models.FactPrivateLabelIntelligence.run_date)).filter(
+        models.FactPrivateLabelIntelligence.sku_id.in_(shop_skus)).scalar()
+    if not latest:
+        return {"shop_id": sid, "shop_scope_applied": True, "data_available": False,
+                "records": 0, "items": []}
+    rows = db.query(models.FactPrivateLabelIntelligence).filter(
+        models.FactPrivateLabelIntelligence.run_date == latest,
+        models.FactPrivateLabelIntelligence.sku_id.in_(shop_skus),
+    ).order_by(desc(models.FactPrivateLabelIntelligence.private_label_value_score)).limit(limit).all()
+    return {
+        "shop_id": sid, "shop_scope_applied": True, "run_date": str(latest),
+        "data_available": len(rows) > 0, "records": len(rows),
+        "items": [{
+            "sku_id": r.sku_id,
+            "private_label_value_score": r.private_label_value_score,
+            "private_label_class": r.private_label_class,
+            "strategic_priority": r.strategic_priority,
+            "internal_substitution_score": r.internal_substitution_score,
+            "internal_margin_gap": r.internal_margin_gap,
+            "a_brand_sku": r.a_brand_sku,
+            "paired_sku_name": r.paired_sku_name,
+        } for r in rows],
+    }
+
+
+def get_promotion_effectiveness(db: Session, user: models.User, limit: int = 20,
+                                shop_id: Optional[int] = None) -> dict:
+    """Welke promotie werkte het best: gemeten promotie-effecten (§19)."""
+    _check_access(user, ALL_ROLES)
+    sid = _shop_scope(db, shop_id)
+    latest = db.query(func.max(models.FactPromotionEffect.run_date)).filter(
+        models.FactPromotionEffect.shop_id == sid).scalar()
+    if not latest:
+        return {"shop_id": sid, "shop_scope_applied": True, "data_available": False, "promotions": []}
+    rows = db.query(models.FactPromotionEffect).filter(
+        models.FactPromotionEffect.shop_id == sid,
+        models.FactPromotionEffect.run_date == latest,
+    ).order_by(desc(models.FactPromotionEffect.incremental_margin)).limit(limit).all()
+    return {
+        "shop_id": sid, "shop_scope_applied": True, "run_date": str(latest),
+        "data_available": len(rows) > 0, "records": len(rows),
+        "promotions": [{
+            "promotion_id": r.promotion_id, "sku_id": r.sku_id,
+            "period": f"{r.period_start} t/m {r.period_end}",
+            "uplift_pct": r.uplift_pct, "net_uplift_pct": r.net_uplift_pct,
+            "incremental_revenue": float(r.incremental_revenue) if r.incremental_revenue is not None else None,
+            "incremental_margin": float(r.incremental_margin) if r.incremental_margin is not None else None,
+            "cannibalization_pct": r.cannibalization_pct, "halo_pct": r.halo_pct,
+            "control_group_used": r.control_group_used,
+            "verdict": r.verdict, "confidence": r.confidence,
+            "explanation": r.explanation_nl,
+        } for r in rows],
+    }
+
+
+def get_supplier_risk(db: Session, user: models.User, limit: int = 20,
+                      shop_id: Optional[int] = None) -> dict:
+    """Supplier-/inkooprisico: procurement-forecast met margedrukscores."""
+    _check_access(user, ANALYST_UP)
+    sid = _shop_scope(db, shop_id)
+    # FactProcurementForecastDaily heeft geen shop_id; scope via de SKU's
+    # van de shop (DimProduct) zodat geen cross-shop-data lekt.
+    shop_skus = db.query(models.DimProduct.sku_id).filter(
+        models.DimProduct.shop_id == sid)
+    latest = db.query(func.max(models.FactProcurementForecastDaily.date)).filter(
+        models.FactProcurementForecastDaily.sku_id.in_(shop_skus)).scalar()
+    if not latest:
+        return {"shop_id": sid, "shop_scope_applied": True, "data_available": False,
+                "records": 0, "items": []}
+    rows = db.query(models.FactProcurementForecastDaily).filter(
+        models.FactProcurementForecastDaily.date == latest,
+        models.FactProcurementForecastDaily.sku_id.in_(shop_skus),
+    ).order_by(desc(models.FactProcurementForecastDaily.future_margin_risk_score)).limit(limit).all()
+    return {
+        "shop_id": sid, "shop_scope_applied": True, "run_date": str(latest),
+        "data_available": len(rows) > 0, "records": len(rows),
+        "items": [{
+            "sku_id": r.sku_id, "sku_name": r.sku_name, "category": r.category,
+            "future_margin_risk_score": r.future_margin_risk_score,
+            "procurement_opportunity_score": r.procurement_opportunity_score,
+            "price_change_pct_30d": r.price_change_pct_30d,
+            "price_change_pct_90d": r.price_change_pct_90d,
+            "lead_time_days": r.lead_time_days,
+            "current_stock_days": r.current_stock_days,
+            "signal_code": r.signal_code,
+            "recommended_action": r.recommended_action_nl,
+        } for r in rows],
+    }
+
+
+def get_opportunities(db: Session, user: models.User, limit: int = 20,
+                      shop_id: Optional[int] = None) -> dict:
+    """Top-opportunities uit de centrale Opportunity Engine (§24)."""
+    _check_access(user, ALL_ROLES)
+    sid = _shop_scope(db, shop_id)
+    rows = db.query(models.Opportunity).filter(
+        models.Opportunity.shop_id == sid,
+        models.Opportunity.status == "open",
+    ).order_by(desc(models.Opportunity.priority_score)).limit(limit).all()
+    return {
+        "shop_id": sid, "shop_scope_applied": True,
+        "data_available": len(rows) > 0, "records": len(rows),
+        "opportunities": [{
+            "id": r.id, "type": r.opportunity_type, "source_engine": r.source_engine,
+            "entity_id": r.entity_id, "entity_name": r.entity_name,
+            "title": r.title_nl, "explanation": r.explanation_nl,
+            "expected_value_eur": float(r.expected_value_eur) if r.expected_value_eur is not None else None,
+            "confidence": r.confidence, "urgency": r.urgency,
+            "effort": r.effort, "risk": r.risk,
+            "priority_score": r.priority_score,
+        } for r in rows],
+    }
+
+
+def simulate_price_change(db: Session, user: models.User, sku_id: str,
+                          change_pct: float, shop_id: Optional[int] = None) -> dict:
+    """
+    What-if: geschatte impact van een prijswijziging (bv. +3% = 0.03) op
+    units/omzet/marge via de Decision Engine-impactlogica en elasticiteit.
+    Alleen een simulatie — voert NOOIT een prijswijziging uit (§64.7).
+    """
+    _check_access(user, ANALYST_UP)
+    sid = _shop_scope(db, shop_id)
+    if change_pct is None or abs(change_pct) > 0.5:
+        raise HTTPException(status_code=400, detail="change_pct moet tussen -0.5 en 0.5 liggen")
+    product = db.query(models.DimProduct).filter(
+        models.DimProduct.sku_id == sku_id,
+        models.DimProduct.shop_id == sid,
+    ).first()
+    if not product:
+        raise HTTPException(status_code=404, detail=f"SKU {sku_id} not found in shop {sid}")
+
+    from engine.decision_engine import _build_context, _impact_for_price_change, IMPACT_HORIZON_DAYS
+    ctx, gaps = _build_context(db, sid, sku_id, [], product)
+    units, revenue, margin, calcs, assumptions = _impact_for_price_change(ctx, change_pct)
+
+    base_units = ctx.get("base_units")
+    base_revenue = ctx.get("base_revenue")
+    base_margin = ctx.get("base_margin")
+    return {
+        "sku_id": sku_id, "product_name": product.product_name,
+        "shop_id": sid, "shop_scope_applied": True,
+        "change_pct": change_pct,
+        "horizon_days": IMPACT_HORIZON_DAYS,
+        "data_available": units is not None,
+        "records": ctx.get("sales_days") or 0,
+        "current_price": ctx.get("current_price"),
+        "new_price": round(ctx["current_price"] * (1 + change_pct), 4) if ctx.get("current_price") else None,
+        "elasticity_used": ctx.get("elasticity"),
+        "baseline": {"units": base_units, "revenue": base_revenue, "margin": base_margin},
+        "simulated": {
+            "units": round(units, 1) if units is not None else None,
+            "revenue": round(revenue, 2) if revenue is not None else None,
+            "margin": round(margin, 2) if margin is not None else None,
+        },
+        "delta": {
+            "units": round(units - base_units, 1) if units is not None and base_units is not None else None,
+            "revenue": round(revenue - base_revenue, 2) if revenue is not None and base_revenue is not None else None,
+            "margin": round(margin - base_margin, 2) if margin is not None and base_margin is not None else None,
+        },
+        "calculations": calcs,
+        "assumptions": assumptions,
+        "data_gaps": gaps,
+        "note": "Simulatie — er wordt geen prijswijziging uitgevoerd of klaargezet.",
+    }
+
+
 def signal_to_dict(s: models.IntelligenceSignal) -> dict:
     return {
         "id": s.id,
@@ -564,5 +790,29 @@ SEMANTIC_FUNCTIONS: dict[str, SemanticFunction] = {
             "get_active_signals",
             "Actieve Intelligence Signals, gefilterd op engine/severity/entiteit.",
             ALL_ROLES, get_active_signals),
+        SemanticFunction(
+            "get_margin_erosion",
+            "Waar verliezen we marge: grootste margedalers t.o.v. de vorige periode.",
+            ALL_ROLES, get_margin_erosion),
+        SemanticFunction(
+            "get_private_label_potential",
+            "Huismerkpotentie per SKU (PLSV, klasse, strategische prioriteit).",
+            ALL_ROLES, get_private_label_potential),
+        SemanticFunction(
+            "get_promotion_effectiveness",
+            "Gemeten promotie-effecten: uplift, incrementele marge, verdict.",
+            ALL_ROLES, get_promotion_effectiveness),
+        SemanticFunction(
+            "get_supplier_risk",
+            "Supplier-/inkooprisico: margedruk en inkoopkansen per SKU.",
+            ANALYST_UP, get_supplier_risk),
+        SemanticFunction(
+            "get_opportunities",
+            "Top-opportunities uit de centrale Opportunity Engine.",
+            ALL_ROLES, get_opportunities),
+        SemanticFunction(
+            "simulate_price_change",
+            "What-if-simulatie: impact van een prijswijziging op units/omzet/marge.",
+            ANALYST_UP, simulate_price_change),
     ]
 }

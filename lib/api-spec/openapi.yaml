@@ -37,6 +37,8 @@ tags:
     description: Intelligence Signals (gestandaardiseerde engine-signalen)
   - name: shops
     description: Shop dimension (multi-shop)
+  - name: copilot
+    description: Commercial AI Copilot (AI Gateway)
 
 paths:
   /healthz:
@@ -1050,8 +1052,263 @@ paths:
               schema:
                 $ref: "#/components/schemas/Shop"
 
+  /copilot/status:
+    get:
+      operationId: getCopilotStatus
+      tags: [copilot]
+      summary: Copilot availability, example questions and approved functions
+      responses:
+        "200":
+          description: Copilot status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CopilotStatus"
+
+  /copilot/conversations:
+    get:
+      operationId: listCopilotConversations
+      tags: [copilot]
+      summary: List own copilot conversations
+      responses:
+        "200":
+          description: Conversation list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CopilotConversation"
+    post:
+      operationId: createCopilotConversation
+      tags: [copilot]
+      summary: Create a new conversation
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CopilotCreateConversationRequest"
+      responses:
+        "200":
+          description: Created conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CopilotConversation"
+
+  /copilot/conversations/{id}:
+    get:
+      operationId: getCopilotConversation
+      tags: [copilot]
+      summary: Get conversation with messages
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Conversation detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CopilotConversationDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteCopilotConversation
+      tags: [copilot]
+      summary: Delete a conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /copilot/conversations/{id}/messages:
+    post:
+      operationId: sendCopilotMessage
+      tags: [copilot]
+      summary: Ask the copilot a question (SSE stream response)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CopilotAskRequest"
+      responses:
+        "200":
+          description: SSE event stream (text/event-stream)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /copilot/model-calls:
+    get:
+      operationId: listCopilotModelCalls
+      tags: [copilot]
+      summary: AI Gateway call log (audit)
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: ["integer", "null"]
+      responses:
+        "200":
+          description: Model call log
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CopilotModelCall"
+
 components:
   schemas:
+    CopilotCreateConversationRequest:
+      type: object
+      properties:
+        title:
+          type: ["string", "null"]
+
+    CopilotAskRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+
+    CopilotStatus:
+      type: object
+      required: [ai_available, model, example_questions, approved_functions]
+      properties:
+        ai_available:
+          type: boolean
+        model:
+          type: string
+        example_questions:
+          type: array
+          items:
+            type: string
+        approved_functions:
+          type: array
+          items:
+            type: object
+            required: [name, description]
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+        data_freshness:
+          type: object
+          additionalProperties: true
+
+    CopilotConversation:
+      type: object
+      required: [id, title]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        created_at:
+          type: ["string", "null"]
+        updated_at:
+          type: ["string", "null"]
+
+    CopilotMessage:
+      type: object
+      required: [id, role, content]
+      properties:
+        id:
+          type: integer
+        role:
+          type: string
+        content:
+          type: string
+        answer:
+          type: ["object", "null"]
+          additionalProperties: true
+        created_at:
+          type: ["string", "null"]
+
+    CopilotConversationDetail:
+      allOf:
+        - $ref: "#/components/schemas/CopilotConversation"
+        - type: object
+          required: [messages]
+          properties:
+            messages:
+              type: array
+              items:
+                $ref: "#/components/schemas/CopilotMessage"
+
+    CopilotModelCall:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: integer
+        timestamp:
+          type: ["string", "null"]
+        username:
+          type: ["string", "null"]
+        user_role:
+          type: ["string", "null"]
+        conversation_id:
+          type: ["integer", "null"]
+        purpose:
+          type: ["string", "null"]
+        provider:
+          type: ["string", "null"]
+        model:
+          type: ["string", "null"]
+        functions_called:
+          type: ["array", "null"]
+          items:
+            type: object
+            additionalProperties: true
+        datasources:
+          type: ["array", "null"]
+          items:
+            type: string
+        prompt_tokens:
+          type: ["integer", "null"]
+        completion_tokens:
+          type: ["integer", "null"]
+        total_tokens:
+          type: ["integer", "null"]
+        llm_roundtrips:
+          type: ["integer", "null"]
+        duration_ms:
+          type: ["number", "null"]
+        status:
+          type: ["string", "null"]
+        error_message:
+          type: ["string", "null"]
+
     HealthStatus:
       type: object
       properties:

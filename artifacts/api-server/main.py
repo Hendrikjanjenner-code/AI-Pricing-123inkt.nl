@@ -21,7 +21,7 @@ logger = logging.getLogger("uvicorn.error")
 from routes import (
     auth, products, categories, recommendations,
     dashboard, uploads, data_quality, substitutions,
-    model_health, exports, users, skus, competition, ab_tests,
+    model_health, exports, users, skus, copilot, competition, ab_tests,
     concurrentie, elasticiteit, huismerk,
     monitoring, execution, audit_log,
     bcg,
@@ -420,6 +420,7 @@ app.include_router(forecast.router)
 app.include_router(opportunities.router)
 app.include_router(model_registry.router)
 app.include_router(decisions.router)
+app.include_router(copilot.router)
 
 # Register whichever optional modules imported successfully above. Modules
 # that failed to import were already recorded in disabled_optional_routers

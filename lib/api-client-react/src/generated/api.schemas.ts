@@ -5,6 +5,96 @@
  * AI Pricing Decision Engine API
  * OpenAPI spec version: 0.1.0
  */
+export interface CopilotCreateConversationRequest {
+  /** @nullable */
+  title?: string | null;
+}
+
+export interface CopilotAskRequest {
+  content: string;
+}
+
+export type CopilotStatusApprovedFunctionsItem = {
+  name: string;
+  description: string;
+};
+
+export type CopilotStatusDataFreshness = { [key: string]: unknown };
+
+export interface CopilotStatus {
+  ai_available: boolean;
+  model: string;
+  example_questions: string[];
+  approved_functions: CopilotStatusApprovedFunctionsItem[];
+  data_freshness?: CopilotStatusDataFreshness;
+}
+
+export interface CopilotConversation {
+  id: number;
+  title: string;
+  /** @nullable */
+  created_at?: string | null;
+  /** @nullable */
+  updated_at?: string | null;
+}
+
+/**
+ * @nullable
+ */
+export type CopilotMessageAnswer = { [key: string]: unknown } | null;
+
+export interface CopilotMessage {
+  id: number;
+  role: string;
+  content: string;
+  /** @nullable */
+  answer?: CopilotMessageAnswer;
+  /** @nullable */
+  created_at?: string | null;
+}
+
+export type CopilotConversationDetail = CopilotConversation & {
+  messages: CopilotMessage[];
+};
+
+export type CopilotModelCallFunctionsCalledItem = { [key: string]: unknown };
+
+export interface CopilotModelCall {
+  id: number;
+  /** @nullable */
+  timestamp?: string | null;
+  /** @nullable */
+  username?: string | null;
+  /** @nullable */
+  user_role?: string | null;
+  /** @nullable */
+  conversation_id?: number | null;
+  /** @nullable */
+  purpose?: string | null;
+  /** @nullable */
+  provider?: string | null;
+  /** @nullable */
+  model?: string | null;
+  /** @nullable */
+  functions_called?: CopilotModelCallFunctionsCalledItem[] | null;
+  /** @nullable */
+  datasources?: string[] | null;
+  /** @nullable */
+  prompt_tokens?: number | null;
+  /** @nullable */
+  completion_tokens?: number | null;
+  /** @nullable */
+  total_tokens?: number | null;
+  /** @nullable */
+  llm_roundtrips?: number | null;
+  /** @nullable */
+  duration_ms?: number | null;
+  /** @nullable */
+  status?: string | null;
+  /** @nullable */
+  error_message?: string | null;
+}
+
 export interface HealthStatus {
   status: string;
 }
@@ -839,4 +929,11 @@ export type ListSignalsParams = {
    * @nullable
    */
   page_size?: number | null;
+};
+
+export type ListCopilotModelCallsParams = {
+  /**
+   * @nullable
+   */
+  limit?: number | null;
 };

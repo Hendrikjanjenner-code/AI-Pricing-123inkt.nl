@@ -1315,3 +1315,128 @@ export const CreateShopBody = zod.object({
   legal_entity: zod.string().nullish(),
   channel: zod.string().optional(),
 });
+
+/**
+ * @summary Copilot availability, example questions and approved functions
+ */
+export const GetCopilotStatusResponse = zod.object({
+  ai_available: zod.boolean(),
+  model: zod.string(),
+  example_questions: zod.array(zod.string()),
+  approved_functions: zod.array(
+    zod.object({
+      name: zod.string(),
+      description: zod.string(),
+    }),
+  ),
+  data_freshness: zod.record(zod.string(), zod.unknown()).optional(),
+});
+
+/**
+ * @summary List own copilot conversations
+ */
+export const ListCopilotConversationsResponseItem = zod.object({
+  id: zod.number(),
+  title: zod.string(),
+  created_at: zod.string().nullish(),
+  updated_at: zod.string().nullish(),
+});
+export const ListCopilotConversationsResponse = zod.array(
+  ListCopilotConversationsResponseItem,
+);
+
+/**
+ * @summary Create a new conversation
+ */
+export const CreateCopilotConversationBody = zod.object({
+  title: zod.string().nullish(),
+});
+
+export const CreateCopilotConversationResponse = zod.object({
+  id: zod.number(),
+  title: zod.string(),
+  created_at: zod.string().nullish(),
+  updated_at: zod.string().nullish(),
+});
+
+/**
+ * @summary Get conversation with messages
+ */
+export const GetCopilotConversationParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetCopilotConversationResponse = zod
+  .object({
+    id: zod.number(),
+    title: zod.string(),
+    created_at: zod.string().nullish(),
+    updated_at: zod.string().nullish(),
+  })
+  .and(
+    zod.object({
+      messages: zod.array(
+        zod.object({
+          id: zod.number(),
+          role: zod.string(),
+          content: zod.string(),
+          answer: zod.record(zod.string(), zod.unknown()).nullish(),
+          created_at: zod.string().nullish(),
+        }),
+      ),
+    }),
+  );
+
+/**
+ * @summary Delete a conversation
+ */
+export const DeleteCopilotConversationParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const DeleteCopilotConversationResponse = zod.object({
+  message: zod.string(),
+});
+
+/**
+ * @summary Ask the copilot a question (SSE stream response)
+ */
+export const SendCopilotMessageParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const SendCopilotMessageBody = zod.object({
+  content: zod.string(),
+});
+
+/**
+ * @summary AI Gateway call log (audit)
+ */
+export const ListCopilotModelCallsQueryParams = zod.object({
+  limit: zod.coerce.number().nullish(),
+});
+
+export const ListCopilotModelCallsResponseItem = zod.object({
+  id: zod.number(),
+  timestamp: zod.string().nullish(),
+  username: zod.string().nullish(),
+  user_role: zod.string().nullish(),
+  conversation_id: zod.number().nullish(),
+  purpose: zod.string().nullish(),
+  provider: zod.string().nullish(),
+  model: zod.string().nullish(),
+  functions_called: zod
+    .array(zod.record(zod.string(), zod.unknown()))
+    .nullish(),
+  datasources: zod.array(zod.string()).nullish(),
+  prompt_tokens: zod.number().nullish(),
+  completion_tokens: zod.number().nullish(),
+  total_tokens: zod.number().nullish(),
+  llm_roundtrips: zod.number().nullish(),
+  duration_ms: zod.number().nullish(),
+  status: zod.string().nullish(),
+  error_message: zod.string().nullish(),
+});
+export const ListCopilotModelCallsResponse = zod.array(
+  ListCopilotModelCallsResponseItem,
+);

@@ -10,6 +10,7 @@ import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
 import Signalen from "@/pages/signalen";
+import Copilot from "@/pages/copilot";
 import Prijsadviezen from "@/pages/recommendations";
 import PrijsadviesDetail from "@/pages/recommendations/detail";
 import Producten from "@/pages/skus";
@@ -115,6 +116,11 @@ function Router() {
       <Route path="/login" component={Login} />
       <Route path="/">
         <ProtectedRoute><Dashboard /></ProtectedRoute>
+      </Route>
+
+      {/* Commercial AI Copilot */}
+      <Route path="/copilot">
+        <ProtectedRoute><Copilot /></ProtectedRoute>
       </Route>
 
       {/* Intelligence Signals */}
