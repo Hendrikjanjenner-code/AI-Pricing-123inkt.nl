@@ -48,7 +48,7 @@ export default function Modelgezondheid() {
           <h1 className="text-2xl font-bold tracking-tight">Modelgezondheid & Engine</h1>
           <p className="text-muted-foreground mt-1">Status en uitvoering van het centrale prijsalgoritme.</p>
         </div>
-        <Button onClick={handleActiveer} disabled={triggerMut.isPending || health?.status === 'running'}>
+        <Button onClick={handleActiveer} disabled={triggerMut.isPending || (health?.status as string | undefined) === 'running'}>
           <Play className="h-4 w-4 mr-2" />
           {triggerMut.isPending ? "Starten..." : "Model nu uitvoeren"}
         </Button>

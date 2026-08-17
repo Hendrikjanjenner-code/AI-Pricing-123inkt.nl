@@ -59,10 +59,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<any>(() => getCachedUser());
   const hasToken = !!getAuthToken();
 
+  // Orval levert zelf een default queryKey; alleen retry uitzetten.
   const { data, isLoading, isError, error } = useGetCurrentUser({
     query: {
       retry: false,
-    },
+    } as never,
   });
 
   useEffect(() => {

@@ -43,7 +43,7 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   if (isLoading && !timedOut) {
     return (
       <div className="min-h-screen w-full flex items-center justify-center bg-background">
-        <Spinner size="lg" />
+        <Spinner className="size-8" />
       </div>
     );
   }

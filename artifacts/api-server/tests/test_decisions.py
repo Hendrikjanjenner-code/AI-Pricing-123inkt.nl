@@ -78,6 +78,7 @@ def _cleanup(db, skus, extra_shop_id=None):
     db.query(models.FactSalesDaily).filter(models.FactSalesDaily.sku_id.in_(skus)).delete(synchronize_session=False)
     db.query(models.DimProduct).filter(models.DimProduct.sku_id.in_(skus)).delete(synchronize_session=False)
     if extra_shop_id:
+        db.query(models.CostUsageRecord).filter(models.CostUsageRecord.shop_id == extra_shop_id).delete(synchronize_session=False)
         db.query(models.DimShop).filter(models.DimShop.id == extra_shop_id).delete(synchronize_session=False)
     db.commit()
 

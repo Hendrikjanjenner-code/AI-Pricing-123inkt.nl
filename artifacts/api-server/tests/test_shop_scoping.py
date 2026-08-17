@@ -82,8 +82,13 @@ def two_shops(client, admin_headers):
                        (models.FactBasketAffinity, models.FactBasketAffinity.sku_id_a),
                        (models.DimProduct, models.DimProduct.sku_id)):
         db.query(model).filter(col.like(f"{PFX}%")).delete(synchronize_session=False)
-    db.query(models.DimShop).filter(models.DimShop.shop_code == f"{PFX}-b").delete(
-        synchronize_session=False)
+    shop_b = db.query(models.DimShop).filter(
+        models.DimShop.shop_code == f"{PFX}-b").first()
+    if shop_b:
+        db.query(models.CostUsageRecord).filter(
+            models.CostUsageRecord.shop_id == shop_b.id).delete(synchronize_session=False)
+        db.query(models.DimShop).filter(models.DimShop.id == shop_b.id).delete(
+            synchronize_session=False)
     db.commit()
     db.close()
 

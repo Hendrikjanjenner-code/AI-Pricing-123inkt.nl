@@ -53,6 +53,8 @@ def test_shop(client, admin_headers):
     try:
         db.query(models.IntelligenceSignal).filter(
             models.IntelligenceSignal.shop_id == shop["id"]).delete()
+        db.query(models.CostUsageRecord).filter(
+            models.CostUsageRecord.shop_id == shop["id"]).delete()
         db.query(models.DimShop).filter(models.DimShop.id == shop["id"]).delete()
         db.commit()
     finally:

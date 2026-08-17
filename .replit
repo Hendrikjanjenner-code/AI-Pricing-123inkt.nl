@@ -9,6 +9,42 @@ args = ["pnpm", "store", "prune"]
 env = { "CI" = "true" }
 
 [workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "apitests"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "typecheck"
+
+[[workflows.workflow]]
+name = "apitests"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash -c 'source /home/runner/workspace/.venv/bin/activate && cd /home/runner/workspace/artifacts/api-server && python -m pytest tests/ -q'"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "typecheck"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash -c 'cd /home/runner/workspace/artifacts/pricing-engine && pnpm exec tsc -p tsconfig.json --noEmit'"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [agent]
 stack = "PNPM_WORKSPACE"

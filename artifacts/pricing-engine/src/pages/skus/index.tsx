@@ -115,7 +115,7 @@ export default function Producten() {
 
     // Sub-subcategorie (field may be absent on older records)
     if (af.sub_subcategorie_naam) {
-      const skuSubSub = (sku as Record<string, unknown>).sub_subcategory as string | null | undefined;
+      const skuSubSub = (sku as unknown as Record<string, unknown>).sub_subcategory as string | null | undefined;
       if (skuSubSub !== af.sub_subcategorie_naam) return false;
     }
 
@@ -129,19 +129,19 @@ export default function Producten() {
 
     // BCG intern (field may be absent)
     if (af.bcg_intern) {
-      const skuBcgInt = (sku as Record<string, unknown>).bcg_intern as string | null | undefined;
+      const skuBcgInt = (sku as unknown as Record<string, unknown>).bcg_intern as string | null | undefined;
       if (skuBcgInt !== af.bcg_intern) return false;
     }
 
     // BCG extern (field may be absent)
     if (af.bcg_extern) {
-      const skuBcgExt = (sku as Record<string, unknown>).bcg_extern as string | null | undefined;
+      const skuBcgExt = (sku as unknown as Record<string, unknown>).bcg_extern as string | null | undefined;
       if (skuBcgExt !== af.bcg_extern) return false;
     }
 
     // Actie nodig (field may be absent)
     if (af.actie_nodig !== null) {
-      const skuActie = (sku as Record<string, unknown>).actie_nodig as boolean | null | undefined;
+      const skuActie = (sku as unknown as Record<string, unknown>).actie_nodig as boolean | null | undefined;
       if (Boolean(skuActie) !== af.actie_nodig) return false;
     }
 

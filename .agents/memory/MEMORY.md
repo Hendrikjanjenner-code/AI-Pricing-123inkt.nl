@@ -23,3 +23,4 @@
 - [SessionLocal autoflush pitfall](session-autoflush.md) — sessions have autoflush=False; flush explicitly between write and read phases in engine pipelines, or queries see stale data.
 - [Engine shop-scoping](engine-shop-scoping.md) — engines, results, dashboards, signals and by-id endpoints must all be shop-scoped; foreign-shop ids return 404.
 - [API curl paths in dev](api-curl-paths.md) — curl uvicorn's own port directly (`localhost:8080/api/...`); the port-80 preview proxy doubles the /api prefix and 404s.
+- [Test-shop teardown FK](test-suite-conventions.md) — request middleware writes cost-usage rows per shop; any teardown that deletes a shop must delete those rows first or FK-fails only in full-suite runs.

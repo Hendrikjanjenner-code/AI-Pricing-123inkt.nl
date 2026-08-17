@@ -38,7 +38,13 @@ def _ontdek_tabellen(db: Session, include_users: bool = False) -> list[str]:
         WHERE schemaname = 'public'
         ORDER BY tablename
     """)).fetchall()
-    return [r[0] for r in rows if r[0] not in beschermd]
+    # Hardening: alleen alfanumerieke tabelnamen uit het eigen schema toestaan,
+    # zodat namen nooit ongefilterd in SQL terechtkomen (SAST-mitigatie).
+    import re
+    return [
+        r[0] for r in rows
+        if r[0] not in beschermd and re.fullmatch(r"[a-zA-Z0-9_]+", r[0])
+    ]
 
 
 @router.delete("/clear-data")

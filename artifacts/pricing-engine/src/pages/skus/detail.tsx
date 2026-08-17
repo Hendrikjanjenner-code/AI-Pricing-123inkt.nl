@@ -12,8 +12,8 @@ export default function ProductDetail() {
   const [, params] = useRoute("/producten/:id");
   const id = params?.id as string;
 
-  const { data: product, isLoading: loadingProduct } = useGetProduct(id, { query: { enabled: !!id } });
-  const { data: history, isLoading: loadingHistory } = useGetSkuHistory(id, { query: { enabled: !!id } });
+  const { data: product, isLoading: loadingProduct } = useGetProduct(id, { query: { enabled: !!id } as never });
+  const { data: history, isLoading: loadingHistory } = useGetSkuHistory(id, { query: { enabled: !!id } as never });
 
   if (loadingProduct) return <div className="p-8"><Skeleton className="h-96 w-full" /></div>;
   if (!product) return <div>Product niet gevonden</div>;

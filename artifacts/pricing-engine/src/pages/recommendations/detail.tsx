@@ -46,7 +46,7 @@ const STRATEGIE_LABELS: Record<string, string> = {
 export default function PrijsadviesDetail() {
   const [, params] = useRoute("/prijsadviezen/:id");
   const id = Number(params?.id);
-  const { data, isLoading } = useGetRecommendation(id, { query: { enabled: !!id } });
+  const { data, isLoading } = useGetRecommendation(id, { query: { enabled: !!id } as never });
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
