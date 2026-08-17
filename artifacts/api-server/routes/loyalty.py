@@ -472,6 +472,109 @@ def seed_demo(
             "members_created": len(members), "engine_run": result}
 
 
+@router.get("/expiry-policy")
+def get_expiry_policy(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """Haal het huidige verloopbeleid voor punten op."""
+    policy = li._get_expiry_policy(db)
+    db.commit()
+    return {
+        "enabled": policy.enabled,
+        "expiry_months": policy.expiry_months,
+        "warn_days_before": policy.warn_days_before,
+        "description": (
+            f"Punten verlopen {policy.expiry_months} maanden na verdienen (FIFO). "
+            f"Leden worden {policy.warn_days_before} dagen van tevoren gewaarschuwd."
+            if policy.enabled else "Verloopbeleid is uitgeschakeld."
+        ),
+    }
+
+
+@router.put("/expiry-policy")
+def update_expiry_policy(
+    body: dict,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role("admin", "pricing_manager")),
+):
+    """
+    Pas het verloopbeleid aan.
+
+    Body: { "enabled": bool, "expiry_months": int (1-120), "warn_days_before": int (7-180) }
+    """
+    policy = li._get_expiry_policy(db)
+    if "enabled" in body:
+        policy.enabled = bool(body["enabled"])
+    if "expiry_months" in body:
+        v = int(body["expiry_months"])
+        if not 1 <= v <= 120:
+            raise HTTPException(status_code=422, detail="expiry_months moet tussen 1 en 120 liggen")
+        policy.expiry_months = v
+    if "warn_days_before" in body:
+        v = int(body["warn_days_before"])
+        if not 7 <= v <= 180:
+            raise HTTPException(status_code=422, detail="warn_days_before moet tussen 7 en 180 liggen")
+        policy.warn_days_before = v
+    db.add(models.AuditLog(
+        entity_type="loyalty_expiry_policy", entity_id="1",
+        action="update_expiry_policy", performed_by=current_user.username,
+        details=str(body),
+    ))
+    db.commit()
+    return {
+        "enabled": policy.enabled,
+        "expiry_months": policy.expiry_months,
+        "warn_days_before": policy.warn_days_before,
+    }
+
+
+@router.get("/expiring-soon")
+def expiring_soon(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Leden met punten die binnenkort verlopen op basis van het verloopbeleid.
+    Gesorteerd op urgentie (kortste vervaltijd eerst).
+    """
+    items = li.expiring_soon_members(db)
+    policy = li._get_expiry_policy(db)
+    db.commit()
+    return {
+        "policy": {
+            "enabled": policy.enabled,
+            "expiry_months": policy.expiry_months,
+            "warn_days_before": policy.warn_days_before,
+        },
+        "total": len(items),
+        "items": items,
+    }
+
+
+@router.post("/run-expiry")
+def run_expiry(
+    dry_run: bool = False,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role("admin", "pricing_manager")),
+):
+    """
+    Voer een expiry-run uit: genereer expire-ledger-entries voor alle leden
+    waarvan punten de vervalgrens hebben overschreden.
+
+    Met `?dry_run=true` worden geen mutaties geschreven — alleen een vooruitblik.
+    """
+    result = li.apply_expiry_run(db, dry_run=dry_run)
+    if not dry_run:
+        db.add(models.AuditLog(
+            entity_type="loyalty_expiry", entity_id="run",
+            action="expiry_run", performed_by=current_user.username,
+            details=str(result),
+        ))
+        db.commit()
+    return result
+
+
 @router.delete("/demo-data")
 def delete_demo_data(
     db: Session = Depends(get_db),

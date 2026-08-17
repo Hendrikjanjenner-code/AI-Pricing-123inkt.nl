@@ -2129,6 +2129,19 @@ class LoyaltyWallet(Base):
     lifetime_expired = Column(Integer, default=0, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+class LoyaltyExpiryPolicy(Base):
+    """
+    Configureerbaar verloopbeleid voor loyaliteitspunten.
+    Slechts één rij per shop (upsert-patroon).
+    """
+    __tablename__ = "loyalty_expiry_policies"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, unique=True, index=True)
+    enabled = Column(Boolean, default=True, nullable=False)
+    expiry_months = Column(Integer, default=12, nullable=False)   # punten verlopen N maanden na verdienen
+    warn_days_before = Column(Integer, default=30, nullable=False) # hoeveel dagen van tevoren waarschuwen
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 class DecisionEvent(Base):
     """
     Statushistorie per beslissing (§53): elke overgang wordt vastgelegd met
