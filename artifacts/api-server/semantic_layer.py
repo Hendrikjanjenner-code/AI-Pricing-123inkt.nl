@@ -730,6 +730,33 @@ def simulate_price_change(db: Session, user: models.User, sku_id: str,
     }
 
 
+def simulate_competitor_scenario(db: Session, user: models.User, sku_id: str,
+                                 change_pct: float,
+                                 assume_follow: Optional[list] = None,
+                                 assume_no_follow: Optional[list] = None,
+                                 shop_id: Optional[int] = None) -> dict:
+    """
+    Multi-concurrent what-if: eigen prijswijziging met per-concurrent volgkans
+    (op basis van herkende strategie), effect op prijsindex/afzet/marge.
+    Alleen simulatie — voert NOOIT een prijswijziging uit.
+    """
+    _check_access(user, ANALYST_UP)
+    sid = _shop_scope(db, shop_id)
+    product = db.query(models.DimProduct).filter(
+        models.DimProduct.sku_id == sku_id,
+        models.DimProduct.shop_id == sid,
+    ).first()
+    if not product:
+        raise HTTPException(status_code=404, detail=f"SKU {sku_id} not found in shop {sid}")
+    from engine.competition_simulation import simulate_competitor_scenario as _sim
+    out = _sim(db, sku_id, change_pct,
+               assume_follow=assume_follow, assume_no_follow=assume_no_follow,
+               shop_id=sid)
+    out["shop_id"] = sid
+    out["shop_scope_applied"] = True
+    return out
+
+
 def signal_to_dict(s: models.IntelligenceSignal) -> dict:
     return {
         "id": s.id,
@@ -814,5 +841,10 @@ SEMANTIC_FUNCTIONS: dict[str, SemanticFunction] = {
             "simulate_price_change",
             "What-if-simulatie: impact van een prijswijziging op units/omzet/marge.",
             ANALYST_UP, simulate_price_change),
+        SemanticFunction(
+            "simulate_competitor_scenario",
+            "Multi-concurrent what-if: prijswijziging met volgkans per concurrent "
+            "(op basis van strategie), effect op prijsindex, afzet en marge.",
+            ANALYST_UP, simulate_competitor_scenario),
     ]
 }

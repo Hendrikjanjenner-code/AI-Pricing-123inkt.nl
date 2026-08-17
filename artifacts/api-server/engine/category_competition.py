@@ -38,22 +38,31 @@ def _score_to_label(combined: float) -> tuple[str, str]:
         return "LOW", "red"
 
 
+def _default_shop_id(db: Session) -> int:
+    row = db.query(models.DimShop.id).order_by(models.DimShop.id).first()
+    return row[0] if row else 1
+
+
 def calculate_category_scores(
     db: Session,
     competitor_name: str,
     category: str,
     lookback_days: int = 30,
+    shop_id: Optional[int] = None,
 ) -> Optional[models.CategoryCompetitorRelevance]:
     """
-    Bereken en sla de 7 categoryscores op voor één concurrent–categorie-combinatie.
+    Bereken en sla de 7 categoryscores op voor één concurrent–categorie-combinatie,
+    shop-scoped: alleen producten én facts van de opgegeven shop tellen mee.
     """
     since = date.today() - timedelta(days=lookback_days)
+    sid = shop_id if shop_id is not None else _default_shop_id(db)
 
     # Hoeveel van onze SKU's heeft deze concurrent in deze categorie?
     our_sku_ids = [
         p.sku_id
         for p in db.query(models.DimProduct)
-        .filter(models.DimProduct.category == category)
+        .filter(models.DimProduct.category == category,
+                models.DimProduct.shop_id == sid)
         .all()
     ]
     if not our_sku_ids:
@@ -66,6 +75,7 @@ def calculate_category_scores(
             models.FactCompetitorPriceDaily.competitor_name == competitor_name,
             models.FactCompetitorPriceDaily.sku_id.in_(our_sku_ids),
             models.FactCompetitorPriceDaily.date >= since,
+            models.FactCompetitorPriceDaily.shop_id == sid,
         )
         .all()
     }
@@ -93,6 +103,7 @@ def calculate_category_scores(
             models.FactCompetitorPriceDaily.competitor_name == competitor_name,
             models.FactCompetitorPriceDaily.sku_id.in_(our_sku_ids),
             models.FactCompetitorPriceDaily.date >= since,
+            models.FactCompetitorPriceDaily.shop_id == sid,
         )
         .order_by(
             models.FactCompetitorPriceDaily.sku_id,
@@ -137,6 +148,7 @@ def calculate_category_scores(
         .filter(
             models.CategoryCompetitorRelevance.competitor_name == competitor_name,
             models.CategoryCompetitorRelevance.category == category,
+            models.CategoryCompetitorRelevance.shop_id == sid,
         )
         .first()
     )
@@ -144,6 +156,7 @@ def calculate_category_scores(
         rec = models.CategoryCompetitorRelevance(
             competitor_name=competitor_name,
             category=category,
+            shop_id=sid,
         )
         db.add(rec)
 
@@ -169,16 +182,29 @@ def calculate_category_scores(
 
 
 def calculate_all_category_scores(db: Session, lookback_days: int = 30) -> int:
-    """Bereken scores voor alle bekende concurrent–categorie-combinaties."""
-    competitors = [
-        r[0]
-        for r in db.query(models.FactCompetitorPriceDaily.competitor_name).distinct().all()
-    ]
-    categories = [c[0] for c in db.query(models.DimProduct.category).distinct().all() if c[0]]
+    """Bereken scores voor alle concurrent–categorie-combinaties, per shop.
+    Concurrenten en categorieën worden per shop ontdekt (eigenaar-shop-
+    validatie via de join op DimProduct), zodat shops elkaar niet vervuilen."""
+    shop_ids = [s for (s,) in db.query(models.DimProduct.shop_id).distinct().all()
+                if s is not None]
     count = 0
-    for comp in competitors:
-        for cat in categories:
-            result = calculate_category_scores(db, comp, cat, lookback_days)
-            if result:
-                count += 1
+    for sid in shop_ids:
+        competitors = [
+            r[0]
+            for r in db.query(models.FactCompetitorPriceDaily.competitor_name)
+            .join(models.DimProduct,
+                  models.DimProduct.sku_id == models.FactCompetitorPriceDaily.sku_id)
+            .filter(models.FactCompetitorPriceDaily.shop_id == sid,
+                    models.DimProduct.shop_id == sid)
+            .distinct().all()
+        ]
+        categories = [c[0] for c in db.query(models.DimProduct.category)
+                      .filter(models.DimProduct.shop_id == sid)
+                      .distinct().all() if c[0]]
+        for comp in competitors:
+            for cat in categories:
+                result = calculate_category_scores(db, comp, cat, lookback_days,
+                                                   shop_id=sid)
+                if result:
+                    count += 1
     return count

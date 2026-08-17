@@ -39,10 +39,28 @@ def run_competitor_rankings(db: Session, ref_date: date | None = None) -> int:
     Retourneert het aantal geschreven ranking-rijen.
     """
     today = ref_date or date.today()
+    shop_ids = [s for (s,) in db.query(models.DimProduct.shop_id).distinct().all()
+                if s is not None]
+    total = 0
+    for sid in shop_ids:
+        total += _run_for_shop(db, today, sid)
+    db.commit()
+    return total
 
-    profiles = {p.competitor_name: p for p in db.query(models.CompetitorProfile).all()}
-    cat_rows = db.query(models.CategoryCompetitorRelevance).all()
-    cis_rows = db.query(models.CompetitorInfluenceScore).all()
+
+def _run_for_shop(db: Session, today: date, sid: int) -> int:
+    """Rankings voor één shop: alle bronnen (profielen, categoriescores, CIS)
+    en de output zijn shop-scoped zodat shops elkaar niet vervuilen."""
+    profiles = {p.competitor_name: p for p in
+                db.query(models.CompetitorProfile)
+                .filter(models.CompetitorProfile.shop_id == sid).all()}
+    cat_rows = (db.query(models.CategoryCompetitorRelevance)
+                .filter(models.CategoryCompetitorRelevance.shop_id == sid).all())
+    # CIS is SKU-gekeyd: shop afleiden via de eigenaar van de SKU
+    cis_rows = (db.query(models.CompetitorInfluenceScore)
+                .join(models.DimProduct,
+                      models.DimProduct.sku_id == models.CompetitorInfluenceScore.sku_id)
+                .filter(models.DimProduct.shop_id == sid).all())
 
     if not profiles and not cat_rows and not cis_rows:
         return 0
@@ -63,20 +81,23 @@ def run_competitor_rankings(db: Session, ref_date: date | None = None) -> int:
     # Vorige rankings voor trendbepaling (meest recente run vóór vandaag)
     prev_date = (
         db.query(models.CompetitorRanking.run_date)
-        .filter(models.CompetitorRanking.run_date < today)
+        .filter(models.CompetitorRanking.run_date < today,
+                models.CompetitorRanking.shop_id == sid)
         .order_by(models.CompetitorRanking.run_date.desc())
         .first()
     )
     prev_ranks: dict[tuple[str, str], int] = {}
     if prev_date:
         for r in db.query(models.CompetitorRanking).filter(
-            models.CompetitorRanking.run_date == prev_date[0]
+            models.CompetitorRanking.run_date == prev_date[0],
+            models.CompetitorRanking.shop_id == sid,
         ).all():
             prev_ranks[(r.scope, r.competitor_name)] = r.rank
 
     # Verwijder eventuele rankings van vandaag (herrun = delete-then-insert)
     db.query(models.CompetitorRanking).filter(
-        models.CompetitorRanking.run_date == today
+        models.CompetitorRanking.run_date == today,
+        models.CompetitorRanking.shop_id == sid,
     ).delete(synchronize_session=False)
 
     written = 0
@@ -152,6 +173,7 @@ def run_competitor_rankings(db: Session, ref_date: date | None = None) -> int:
 
             db.add(models.CompetitorRanking(
                 run_date=today,
+                shop_id=sid,
                 scope=scope,
                 competitor_name=name,
                 competition_relevance_score=cr,
@@ -180,5 +202,4 @@ def run_competitor_rankings(db: Session, ref_date: date | None = None) -> int:
             r for r in cat_by_comp.get(n, []) if r.category == c
         ])
 
-    db.commit()
     return written

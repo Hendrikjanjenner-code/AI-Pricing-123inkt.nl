@@ -29,9 +29,16 @@ def main() -> None:
         print(f"     {scored} SKU's gescoord  ({time.time() - t1:.1f}s)", flush=True)
 
         t2 = time.time()
-        print("3/3  Prijs-engine draaien (aanbevelingen genereren)...", flush=True)
+        print("3/4  Prijs-engine draaien (aanbevelingen genereren)...", flush=True)
         processed, skipped = run_pricing_engine(db)
         print(f"     {processed} verwerkt, {skipped} overgeslagen  ({time.time() - t2:.1f}s)", flush=True)
+
+        t3 = time.time()
+        print("4/4  Competition intelligence (dekking, events, promo's, "
+              "beschikbaarheid, elasticiteit)...", flush=True)
+        from engine.competition_intelligence import run_all as run_ci
+        ci = run_ci(db)
+        print(f"     {ci}  ({time.time() - t3:.1f}s)", flush=True)
 
         print(f"KLAAR in {time.time() - t0:.1f}s totaal.", flush=True)
     finally:

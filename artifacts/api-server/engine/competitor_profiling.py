@@ -31,27 +31,47 @@ def _relevance_label(score: float) -> tuple[str, str]:
         return "LOW", "red"
 
 
+def _resolve_shop(db: Session, shop_id: Optional[int]) -> int:
+    if shop_id is not None:
+        return shop_id
+    from engine.signal_publisher import _default_shop_id
+    return _default_shop_id(db)
+
+
 def build_or_update_profile(
     db: Session,
     competitor_name: str,
     domain: Optional[str] = None,
     lookback_days: int = 30,
+    shop_id: Optional[int] = None,
 ) -> models.CompetitorProfile:
     """
     Bouw of update het profiel voor één concurrent.
-    Gebruikt bestaande prijs- en aanboddata uit de database.
+    Gebruikt bestaande prijs- en aanboddata uit de database,
+    shop-scoped (default: de default shop) zodat data van test-/andere
+    shops het profiel niet vervuilt.
     """
     since = date.today() - timedelta(days=lookback_days)
+    sid = _resolve_shop(db, shop_id)
 
-    # Haal alle prijs-rijen op voor deze concurrent
+    # Haal alle prijs-rijen op voor deze concurrent (binnen de shop-scope)
     price_rows = (
         db.query(models.FactCompetitorPriceDaily)
+        .join(models.DimProduct,
+              models.DimProduct.sku_id == models.FactCompetitorPriceDaily.sku_id)
         .filter(
             models.FactCompetitorPriceDaily.competitor_name == competitor_name,
             models.FactCompetitorPriceDaily.date >= since,
+            models.FactCompetitorPriceDaily.shop_id == sid,
+            models.DimProduct.shop_id == sid,  # eigenaar-shop-validatie
         )
         .all()
     )
+
+    # Afgekeurde matches uitsluiten uit alle profielstatistieken
+    from engine.competition_intelligence import rejected_pairs
+    rejected = rejected_pairs(db)
+    price_rows = [r for r in price_rows if (r.sku_id, competitor_name) not in rejected]
 
     # SKU's met bekende producten
     sku_ids = list({r.sku_id for r in price_rows})
@@ -112,8 +132,57 @@ def build_or_update_profile(
 
     last_price_change = dates_seen[-1] if dates_seen else None
 
-    # Functionele overlap (meer SKU's = hogere overlap)
-    overlap = min(1.0, assortment_size / 50)
+    # Functionele overlap: echt aandeel van ons assortiment dat deze
+    # concurrent (via niet-afgekeurde matches) ook voert.
+    own_total = db.query(models.DimProduct.sku_id).filter(
+        models.DimProduct.shop_id == sid).count()
+    overlap = round(len(sku_ids) / own_total, 3) if own_total else 0.0
+
+    # Gemiddelde prijsindex: eigen prijs / concurrentprijs per gematchte SKU
+    # (meest recente waarneming per SKU binnen het venster).
+    latest_price: dict[str, float] = {}
+    latest_date: dict[str, date] = {}
+    for r in price_rows:
+        if r.price is None:
+            continue
+        if r.sku_id not in latest_date or r.date > latest_date[r.sku_id]:
+            latest_date[r.sku_id] = r.date
+            latest_price[r.sku_id] = float(r.price)
+    indices = []
+    for sku_id, comp_price in latest_price.items():
+        p = products.get(sku_id)
+        if p is not None and p.current_price and comp_price > 0:
+            indices.append(float(p.current_price) / comp_price)
+    avg_price_index = round(sum(indices) / len(indices), 4) if indices else None
+
+    # Beschikbaarheid en levertijd uit het dagelijkse aanbod (offers)
+    competitor = (
+        db.query(models.DimCompetitor)
+        .filter(models.DimCompetitor.competitor_name == competitor_name)
+        .first()
+    )
+    in_stock_rate = None
+    avg_delivery_days = None
+    if competitor:
+        offers = (
+            db.query(models.FactCompetitorOfferDaily)
+            .filter(
+                models.FactCompetitorOfferDaily.competitor_id == competitor.competitor_id,
+                models.FactCompetitorOfferDaily.date >= since,
+            )
+            .all()
+        )
+        shop_skus = {s[0] for s in db.query(models.DimProduct.sku_id).filter(
+            models.DimProduct.shop_id == sid).all()}
+        offers = [o for o in offers
+                  if (o.own_sku_id, competitor_name) not in rejected
+                  and o.own_sku_id in shop_skus]
+        if offers:
+            in_stock_rate = round(
+                sum(1 for o in offers if o.in_stock) / len(offers), 4)
+            delivery = [float(o.delivery_days) for o in offers
+                        if o.delivery_days is not None]
+            avg_delivery_days = round(sum(delivery) / len(delivery), 2) if delivery else None
 
     # Gecombineerde relevantiescore
     coverage_score = min(1.0, assortment_size / 30) * 0.4
@@ -123,14 +192,16 @@ def build_or_update_profile(
 
     relevance_label, traffic_light = _relevance_label(combined)
 
-    # Upsert profiel
+    # Upsert profiel — per shop
     profile = (
         db.query(models.CompetitorProfile)
-        .filter(models.CompetitorProfile.competitor_name == competitor_name)
+        .filter(models.CompetitorProfile.competitor_name == competitor_name,
+                models.CompetitorProfile.shop_id == sid)
         .first()
     )
     if not profile:
-        profile = models.CompetitorProfile(competitor_name=competitor_name)
+        profile = models.CompetitorProfile(competitor_name=competitor_name,
+                                           shop_id=sid)
         db.add(profile)
 
     profile.domain = domain
@@ -141,11 +212,11 @@ def build_or_update_profile(
     profile.price_segment = price_segment
     profile.premium_share_pct = premium_share
     profile.budget_share_pct = budget_share
-    profile.avg_price_index = 1.0  # nader te bepalen met eigen prijzen
+    profile.avg_price_index = avg_price_index
     profile.price_change_frequency = round(changes_per_week, 2)
     profile.last_price_change_date = last_price_change
-    profile.avg_delivery_days = 2.5
-    profile.in_stock_rate = 0.90
+    profile.avg_delivery_days = avg_delivery_days
+    profile.in_stock_rate = in_stock_rate
     profile.functional_overlap_score = round(overlap, 3)
     profile.relevance_label = relevance_label
     profile.traffic_light = traffic_light
@@ -155,12 +226,20 @@ def build_or_update_profile(
     return profile
 
 
-def build_all_profiles(db: Session, lookback_days: int = 30) -> list[str]:
-    """Bouw/update profielen voor alle bekende concurrenten in de prijsdata."""
+def build_all_profiles(db: Session, lookback_days: int = 30,
+                       shop_id: Optional[int] = None) -> list[str]:
+    """Bouw/update profielen voor alle bekende concurrenten in de prijsdata
+    (shop-scoped; default de default shop)."""
+    sid = _resolve_shop(db, shop_id)
     namen = [
         r[0]
-        for r in db.query(models.FactCompetitorPriceDaily.competitor_name).distinct().all()
+        for r in db.query(models.FactCompetitorPriceDaily.competitor_name)
+        .join(models.DimProduct,
+              models.DimProduct.sku_id == models.FactCompetitorPriceDaily.sku_id)
+        .filter(models.FactCompetitorPriceDaily.shop_id == sid,
+                models.DimProduct.shop_id == sid)  # eigenaar-shop-validatie
+        .distinct().all()
     ]
     for naam in namen:
-        build_or_update_profile(db, naam, lookback_days=lookback_days)
+        build_or_update_profile(db, naam, lookback_days=lookback_days, shop_id=sid)
     return namen

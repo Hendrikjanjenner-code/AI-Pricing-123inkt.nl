@@ -336,6 +336,32 @@ def run_migrations(engine, metadata) -> None:
             'ON loyalty_transactions (member_id, external_ref) '
             'WHERE external_ref IS NOT NULL',
         ),
+        # Concurrentprofielen zijn shop-scoped geworden: de oude globale
+        # unique op competitor_name vervalt; uniek per (shop_id, naam).
+        # Backfill van bestaande rijen naar shop 1 gebeurt via de DEFAULT.
+        (
+            "drop_uq_competitor_profile_name",
+            'ALTER TABLE competitor_profile '
+            'DROP CONSTRAINT IF EXISTS competitor_profile_competitor_name_key',
+        ),
+        (
+            "drop_ix_competitor_profile_name_unique",
+            'DROP INDEX IF EXISTS ix_competitor_profile_competitor_name',
+        ),
+        (
+            "ix_competitor_profile_name",
+            'CREATE INDEX IF NOT EXISTS ix_competitor_profile_competitor_name '
+            'ON competitor_profile (competitor_name)',
+        ),
+        (
+            "backfill_competitor_profile_shop",
+            'UPDATE competitor_profile SET shop_id = 1 WHERE shop_id IS NULL',
+        ),
+        (
+            "uq_competitor_profile_shop_name",
+            'CREATE UNIQUE INDEX IF NOT EXISTS uq_competitor_profile_shop_name '
+            'ON competitor_profile (shop_id, competitor_name)',
+        ),
     ]
     with engine.connect() as conn:
         for _idx_name, _idx_sql in _MANUAL_INDEXES:

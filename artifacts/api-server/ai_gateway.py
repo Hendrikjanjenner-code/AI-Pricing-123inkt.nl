@@ -234,6 +234,25 @@ _TOOL_PARAMETERS: dict[str, dict] = {
         },
         "required": ["sku_id", "change_pct"],
     },
+    "simulate_competitor_scenario": {
+        "type": "object",
+        "properties": {
+            "sku_id": {"type": "string"},
+            "change_pct": {
+                "type": "number",
+                "description": "Eigen prijswijziging als fractie: +3% = 0.03, -5% = -0.05",
+            },
+            "assume_follow": {
+                "type": "array", "items": {"type": "string"},
+                "description": "Concurrenten die geforceerd volgen (volgkans 1.0)",
+            },
+            "assume_no_follow": {
+                "type": "array", "items": {"type": "string"},
+                "description": "Concurrenten die geforceerd NIET volgen (volgkans 0.0)",
+            },
+        },
+        "required": ["sku_id", "change_pct"],
+    },
 }
 
 

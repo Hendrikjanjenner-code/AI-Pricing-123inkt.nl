@@ -82,6 +82,7 @@ const navGroepen = [
       { href: "/competition/discovery",      label: "Concurrent Discovery",  icon: Binoculars },
       { href: "/competition/competitors",    label: "Concurrenten",          icon: Building2 },
       { href: "/competition/categories",     label: "Categorie Analyse",     icon: Map },
+      { href: "/competition/trends",         label: "Trends & Events",       icon: TrendingUp },
       { href: "/competition/ai-matching",    label: "AI Matching",           icon: BrainCircuit },
       { href: "/competition/assortment-gap", label: "Assortiment Gap",       icon: PackageSearch },
       { href: "/competition/strategies",     label: "Strategie Analyse",     icon: Radar },

@@ -71,6 +71,11 @@ export default function CompetitionAiMatching() {
       || m.own_sku_id?.toLowerCase().includes(zoekterm.toLowerCase())
   );
 
+  const { data: quality } = useQuery({
+    queryKey: ["competition-match-quality"],
+    queryFn: () => apiFetch("/api/competition/match-quality"),
+  });
+
   // Statistieken
   const allItems = data?.items || [];
   const stats = ["Exact", "Sterk", "Functioneel", "Categorie_Alternatief", "Geen_Match"].map(mt => ({
@@ -84,6 +89,40 @@ export default function CompetitionAiMatching() {
         <h1 className="text-2xl font-bold tracking-tight">AI Matching</h1>
         <p className="text-muted-foreground mt-1">Automatisch herkende productkoppelingen tussen eigen SKU's en concurrent-aanbod — beoordeel en keur goed.</p>
       </div>
+
+      {/* Kwaliteits-KPI's */}
+      {quality?.totals && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <CardContent className="py-3 px-4">
+              <p className="text-xs text-muted-foreground">Totaal matches</p>
+              <p className="text-xl font-bold tabular-nums">{quality.totals.total}</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-3 px-4">
+              <p className="text-xs text-muted-foreground">Beoordeeld</p>
+              <p className="text-xl font-bold tabular-nums">{quality.totals.review_rate_pct}%</p>
+              <p className="text-xs text-muted-foreground">{quality.totals.approved} goedgekeurd · {quality.totals.rejected} afgewezen</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-3 px-4">
+              <p className="text-xs text-muted-foreground">Goedkeuringsratio</p>
+              <p className="text-xl font-bold tabular-nums">
+                {quality.totals.approval_rate_pct != null ? `${quality.totals.approval_rate_pct}%` : "—"}
+              </p>
+            </CardContent>
+          </Card>
+          <Card className={quality.suspect_matches?.length ? "border-amber-300" : ""}>
+            <CardContent className="py-3 px-4">
+              <p className="text-xs text-muted-foreground">Verdachte matches</p>
+              <p className="text-xl font-bold tabular-nums">{quality.suspect_matches?.length ?? 0}</p>
+              <p className="text-xs text-muted-foreground">|prijsverschil| &gt; 40%, nog PENDING</p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Match-type statistieken */}
       <div className="flex flex-wrap gap-3">

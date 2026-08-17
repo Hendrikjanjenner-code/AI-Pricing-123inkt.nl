@@ -5,7 +5,7 @@ All tables match the spec: users, dim_product, dim_category, etc.
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Float, Boolean, DateTime, Text,
-    ForeignKey, Date, Numeric, JSON, Index, text
+    ForeignKey, Date, Numeric, JSON, Index, text, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 from database import Base
@@ -1437,9 +1437,14 @@ class CompetitorProfile(Base):
     op basis van scrape- en prijsdata.
     """
     __tablename__ = "competitor_profile"
+    __table_args__ = (
+        UniqueConstraint("shop_id", "competitor_name",
+                         name="uq_competitor_profile_shop_name"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    competitor_name = Column(String(255), nullable=False, unique=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    competitor_name = Column(String(255), nullable=False, index=True)
     domain = Column(String(500))
 
     # Assortiment
@@ -1480,6 +1485,7 @@ class CategoryCompetitorRelevance(Base):
     __tablename__ = "category_competitor_relevance"
 
     id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
     competitor_name = Column(String(255), nullable=False, index=True)
     category = Column(String(255), nullable=False, index=True)
 
@@ -1558,6 +1564,7 @@ class CompetitorStrategyResult(Base):
     __tablename__ = "competitor_strategy_result"
 
     id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
     competitor_name = Column(String(255), nullable=False, index=True)
     run_date = Column(Date, nullable=False, index=True)
 
@@ -1741,6 +1748,7 @@ class CompetitorRanking(Base):
     __tablename__ = "competitor_rankings"
 
     id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
     run_date = Column(Date, nullable=False, index=True)
     scope = Column(String(200), nullable=False, default="overall", index=True)  # "overall" of categorienaam
     competitor_name = Column(String(255), nullable=False, index=True)
@@ -2511,4 +2519,77 @@ class PromptVersion(Base):
     prompt_text = Column(Text, nullable=False)
     notes = Column(Text)
     created_by = Column(String(100))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ─── Competition Intelligence: events, beschikbaarheid, dekking ──────────────
+
+class CompetitorPriceEvent(Base):
+    """
+    Gedetecteerde concurrent-prijsgebeurtenis (prijswijziging of promotie).
+    event_type: PRICE_CHANGE / PROMO_START / PROMO_END.
+    Wordt idempotent per (shop, datum, sku, concurrent, type) vastgelegd.
+    """
+    __tablename__ = "competitor_price_event"
+    __table_args__ = (
+        UniqueConstraint("shop_id", "event_date", "sku_id", "competitor_name",
+                         "event_type", name="uq_comp_price_event"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    event_date = Column(Date, nullable=False, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    competitor_name = Column(String(255), nullable=False, index=True)
+    event_type = Column(String(30), nullable=False)   # PRICE_CHANGE / PROMO_START / PROMO_END
+    old_price = Column(Numeric(10, 4))
+    new_price = Column(Numeric(10, 4))
+    change_pct = Column(Float)                        # (new-old)/old * 100
+    direction = Column(String(10))                    # up / down
+    promo_depth_pct = Column(Float)                   # bij PROMO_*: dipdiepte vs referentie
+    promo_duration_days = Column(Integer)             # bij PROMO_END: duur van de dip
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CompetitorAvailabilityDaily(Base):
+    """
+    Dagelijkse beschikbaarheids-aggregatie per concurrent uit
+    fact_competitor_offer_daily (voorraadstatus + levertijd).
+    """
+    __tablename__ = "competitor_availability_daily"
+    __table_args__ = (
+        UniqueConstraint("shop_id", "date", "competitor_name",
+                         name="uq_comp_availability_daily"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    date = Column(Date, nullable=False, index=True)
+    competitor_name = Column(String(255), nullable=False, index=True)
+    offers_total = Column(Integer, default=0)
+    offers_in_stock = Column(Integer, default=0)
+    in_stock_rate = Column(Float)                     # 0–1
+    avg_delivery_days = Column(Float)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CompetitorCoverageResult(Base):
+    """
+    Assortimentsdekking per concurrent (per categorie en totaal, category=None)
+    op basis van niet-afgekeurde AI-matches vs. ons eigen assortiment.
+    """
+    __tablename__ = "competitor_coverage_result"
+    __table_args__ = (
+        UniqueConstraint("shop_id", "run_date", "competitor_name", "category",
+                         name="uq_comp_coverage_result"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    run_date = Column(Date, nullable=False, index=True)
+    competitor_name = Column(String(255), nullable=False, index=True)
+    category = Column(String(255), index=True)        # None = totaal assortiment
+    own_products = Column(Integer, default=0)         # eigen SKU's in scope
+    matched_products = Column(Integer, default=0)     # gematchte (niet-REJECTED) SKU's
+    coverage_pct = Column(Float)                      # matched/own * 100
     created_at = Column(DateTime, default=datetime.utcnow)

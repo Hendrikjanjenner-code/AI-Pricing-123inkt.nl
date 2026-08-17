@@ -45,6 +45,7 @@ import CompetitionStrategies from "@/pages/competition-strategies";
 import CompetitionManagement from "@/pages/competition-management";
 import CompetitionDiscoveryLog from "@/pages/competition-discovery-log";
 import CompetitionSettings from "@/pages/competition-settings";
+import CompetitionTrends from "@/pages/competition-trends";
 
 // Nieuwe module-pagina's
 import ConcurrentieMonitoring from "@/pages/concurrentie-monitoring";
@@ -207,6 +208,9 @@ function Router() {
       </Route>
       <Route path="/competition/settings">
         <ProtectedRoute><CompetitionSettings /></ProtectedRoute>
+      </Route>
+      <Route path="/competition/trends">
+        <ProtectedRoute><CompetitionTrends /></ProtectedRoute>
       </Route>
       {/* CI Dashboard — catches /competition exactly */}
       <Route path="/competition">

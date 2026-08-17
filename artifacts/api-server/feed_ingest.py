@@ -321,18 +321,29 @@ def score_competition(db: Session) -> int:
 
     products = {
         p.sku_id: p for p in db.query(
-            models.DimProduct.sku_id, models.DimProduct.current_price, models.DimProduct.category
+            models.DimProduct.sku_id, models.DimProduct.current_price,
+            models.DimProduct.category, models.DimProduct.shop_id,
         ).all()
     }
 
     # Concurrentprijzen van vandaag groeperen per SKU.
+    # Door analisten afgekeurde matches (REJECTED) tellen niet mee (§match-review).
+    from engine.competition_intelligence import rejected_pairs
+    rejected = rejected_pairs(db)
     by_sku: dict[str, list[float]] = {}
     rows = db.query(
         models.FactCompetitorPriceDaily.sku_id,
+        models.FactCompetitorPriceDaily.competitor_name,
         models.FactCompetitorPriceDaily.price,
+        models.FactCompetitorPriceDaily.shop_id,
     ).filter(models.FactCompetitorPriceDaily.date == today).all()
-    for sku_id, price in rows:
-        if price is None:
+    for sku_id, competitor_name, price, f_shop in rows:
+        if price is None or (sku_id, competitor_name) in rejected:
+            continue
+        prod = products.get(sku_id)
+        # Alleen factrijen waarvan de shop overeenkomt met de eigenaar-shop
+        # van het product (mis-scoped rijen negeren).
+        if prod is None or (f_shop or 1) != (prod.shop_id or 1):
             continue
         by_sku.setdefault(sku_id, []).append(float(price))
 
@@ -408,6 +419,7 @@ def build_ai_matches(db: Session) -> int:
             models.DimProduct.sku_id,
             models.DimProduct.current_price,
             models.DimProduct.ean,
+            models.DimProduct.shop_id,
         ).all()
     }
 
@@ -416,17 +428,33 @@ def build_ai_matches(db: Session) -> int:
         models.FactCompetitorPriceDaily.competitor_name,
         models.FactCompetitorPriceDaily.price,
         models.FactCompetitorPriceDaily.url,
+        models.FactCompetitorPriceDaily.shop_id,
     ).filter(models.FactCompetitorPriceDaily.date == today).all()
+
+    # Bewaar analistenbeoordelingen: een eerder goed-/afgekeurd paar behoudt
+    # zijn status ook wanneer de matches uit de verse feed worden herbouwd.
+    review_status: dict[tuple[str, str], str] = {
+        (r.own_sku_id, r.competitor_name): r.status
+        for r in db.query(
+            models.AiMatchResult.own_sku_id,
+            models.AiMatchResult.competitor_name,
+            models.AiMatchResult.status,
+        ).filter(models.AiMatchResult.status.in_(["APPROVED", "REJECTED"])).all()
+    }
 
     db.query(models.AiMatchResult).filter(
         models.AiMatchResult.run_date == today
     ).delete(synchronize_session=False)
 
     matches: list[dict] = []
-    for sku_id, naam, price, url in rows:
+    for sku_id, naam, price, url, f_shop in rows:
         if not naam or price is None:
             continue
         prod = products.get(sku_id)
+        # Eigenaar-shop-validatie: factrij moet bij de shop van het product
+        # horen, anders geen match (poison/mis-scoped rijen).
+        if prod is None or (f_shop or 1) != (prod.shop_id or 1):
+            continue
         own = float(prod.current_price) if prod and prod.current_price else None
         comp = float(price)
         diff_pct = round((own - comp) / comp * 100, 2) if own and comp > 0 else None
@@ -451,7 +479,7 @@ def build_ai_matches(db: Session) -> int:
             "competitor_price": comp,
             "own_price": own,
             "price_diff_pct": diff_pct,
-            "status": "PENDING",
+            "status": review_status.get((sku_id, naam), "PENDING"),
             "run_date": today,
         })
 

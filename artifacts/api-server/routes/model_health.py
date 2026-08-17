@@ -99,6 +99,10 @@ def trigger_model_run(
         import feed_ingest
         feed_ingest.score_competition(db)
         feed_ingest.build_ai_matches(db)
+        # Volledige competition-intelligence-laag: dekking, prijs/promo-events,
+        # beschikbaarheid, elasticiteit en profielen.
+        from engine.competition_intelligence import run_all as run_competition_intelligence
+        run_competition_intelligence(db)
         run.status = "completed"
         run.completed_at = datetime.utcnow()
         run.skus_processed = processed
