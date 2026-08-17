@@ -70,6 +70,11 @@ def _seed_signal(db, sku, shop_id=1):
 
 def _cleanup(db, skus, extra_shop_id=None):
     dids = [d.id for d in db.query(models.Decision).filter(models.Decision.entity_id.in_(skus)).all()]
+    # Als er een extra shop is, verwijder ook alle beslissingen voor die shop
+    # (inclusief categoriebeslissingen die door de engine zijn aangemaakt).
+    if extra_shop_id:
+        extra_dids = [d.id for d in db.query(models.Decision).filter(models.Decision.shop_id == extra_shop_id).all()]
+        dids = list(set(dids + extra_dids))
     if dids:
         db.query(models.DecisionScenario).filter(models.DecisionScenario.decision_id.in_(dids)).delete(synchronize_session=False)
         db.query(models.DecisionEvent).filter(models.DecisionEvent.decision_id.in_(dids)).delete(synchronize_session=False)
@@ -151,10 +156,12 @@ def test_shop_isolation_idor(client, admin_headers, db):
         _seed_signal(db, sku, shop_id=other.id)
         db.commit()
 
-        # Run voor de andere shop maakt daar een beslissing
+        # Run voor de andere shop maakt daar een beslissing (≥1: SKU + evt. categorie)
         r = client.post("/api/decisions/run", params={"shop_id": other.id}, headers=admin_headers)
-        assert r.status_code == 200 and r.json()["decisions_created"] == 1
-        d = db.query(models.Decision).filter(models.Decision.entity_id == sku).one()
+        assert r.status_code == 200 and r.json()["decisions_created"] >= 1
+        d = db.query(models.Decision).filter(
+            models.Decision.entity_id == sku, models.Decision.shop_id == other.id
+        ).one()
         assert d.shop_id == other.id
 
         # Default scope (shop 1): lijst toont hem niet, detail/history/transition zijn 404
@@ -170,6 +177,140 @@ def test_shop_isolation_idor(client, admin_headers, db):
                           headers=admin_headers).status_code == 200
     finally:
         _cleanup(db, [sku], extra_shop_id=other.id)
+
+
+def test_category_decisions_derived_from_sku_signals(client, admin_headers, db):
+    """Categoriebeslissingen worden afgeleid uit SKU-signalen via DimProduct.category."""
+    cat = f"TestCat-{uuid.uuid4().hex[:6]}"
+    sku1 = f"TDEC-C1-{uuid.uuid4().hex[:6]}"
+    sku2 = f"TDEC-C2-{uuid.uuid4().hex[:6]}"
+    try:
+        # Beide SKU's in dezelfde categorie
+        for sku in (sku1, sku2):
+            db.add(models.DimProduct(
+                sku_id=sku, product_name=f"Catproduct {sku}", category=cat,
+                current_price=15.0, cost_price=8.0, min_price=10.0, max_price=20.0,
+                stock_quantity=50, lifecycle_status="active", shop_id=1,
+            ))
+            for i in range(30):
+                db.add(models.FactSalesDaily(
+                    sku_id=sku, date=date.today() - timedelta(days=i), shop_id=1,
+                    units_sold=3, revenue=45.0, margin=21.0, margin_pct=46.7,
+                ))
+            _seed_signal(db, sku)
+        db.commit()
+
+        r = client.post("/api/decisions/run", headers=admin_headers)
+        assert r.status_code == 200, r.text
+        result = r.json()
+        assert result["decisions_created"] >= 3  # ≥2 SKU's + ≥1 categorie
+
+        # Categoriebeslissing is aangemaakt met entity_type="category"
+        items = client.get(
+            "/api/decisions", params={"entity_type": "category"}, headers=admin_headers
+        ).json()["items"]
+        cat_items = [d for d in items if d["entity_id"] == cat]
+        assert len(cat_items) == 1, f"Verwacht 1 categoriebeslissing voor '{cat}', kreeg: {[d['entity_id'] for d in items]}"
+
+        d = cat_items[0]
+        assert d["entity_type"] == "category"
+        assert d["entity_name"] == cat
+
+        # Detail: minstens promotie- en no_action-scenario
+        det = client.get(f"/api/decisions/{d['id']}", headers=admin_headers).json()
+        types = {s["scenario_type"] for s in det["scenarios"]}
+        assert "promotion" in types
+        assert "no_action" in types
+
+        # entity_type_counts in de lijstrespons
+        resp = client.get("/api/decisions", headers=admin_headers).json()
+        assert resp["entity_type_counts"].get("category", 0) >= 1
+        assert resp["entity_type_counts"].get("sku", 0) >= 1
+
+    finally:
+        # Ruim categoriebeslissingen op (entity_id = categorienaam)
+        cat_dids = [d.id for d in db.query(models.Decision).filter(models.Decision.entity_id == cat).all()]
+        if cat_dids:
+            db.query(models.DecisionScenario).filter(models.DecisionScenario.decision_id.in_(cat_dids)).delete(synchronize_session=False)
+            db.query(models.DecisionEvent).filter(models.DecisionEvent.decision_id.in_(cat_dids)).delete(synchronize_session=False)
+            db.query(models.Decision).filter(models.Decision.id.in_(cat_dids)).delete(synchronize_session=False)
+        _cleanup(db, [sku1, sku2])
+
+
+def test_category_decision_without_sales_has_data_gaps(client, admin_headers, db):
+    """Categorie zonder verkoophistorie levert een beslissing op met data_gaps, geen crash."""
+    cat = f"TestCat-NS-{uuid.uuid4().hex[:6]}"
+    sku = f"TDEC-NS-{uuid.uuid4().hex[:6]}"
+    try:
+        db.add(models.DimProduct(
+            sku_id=sku, product_name=f"Nosales {sku}", category=cat,
+            current_price=10.0, cost_price=5.0, min_price=7.0, max_price=14.0,
+            stock_quantity=20, lifecycle_status="active", shop_id=1,
+        ))
+        # Geen FactSalesDaily — simuleer ontbrekende verkoopdata
+        _seed_signal(db, sku)
+        db.commit()
+
+        r = client.post("/api/decisions/run", headers=admin_headers)
+        assert r.status_code == 200, r.text
+
+        items = client.get(
+            "/api/decisions", params={"entity_type": "category"}, headers=admin_headers
+        ).json()["items"]
+        cat_items = [d for d in items if d["entity_id"] == cat]
+        assert len(cat_items) == 1, "Categoriebeslissing moet aangemaakt worden ook zonder verkoop"
+
+        d = cat_items[0]
+        assert d["data_gaps"], "data_gaps moet gevuld zijn wanneer verkoophistorie ontbreekt"
+        assert any("data unavailable" in g for g in d["data_gaps"])
+
+        # Beslissing heeft aanbevolen scenario (geen crash)
+        det = client.get(f"/api/decisions/{d['id']}", headers=admin_headers).json()
+        assert det["recommended_scenario_id"] is not None
+    finally:
+        cat_dids = [d.id for d in db.query(models.Decision).filter(models.Decision.entity_id == cat).all()]
+        if cat_dids:
+            db.query(models.DecisionScenario).filter(models.DecisionScenario.decision_id.in_(cat_dids)).delete(synchronize_session=False)
+            db.query(models.DecisionEvent).filter(models.DecisionEvent.decision_id.in_(cat_dids)).delete(synchronize_session=False)
+            db.query(models.Decision).filter(models.Decision.id.in_(cat_dids)).delete(synchronize_session=False)
+        _cleanup(db, [sku])
+
+
+def test_entity_type_filter_isolates_sku_and_category(client, admin_headers, db):
+    """entity_type queryparameter filtert strikt op SKU of categorie."""
+    cat = f"TestCat-F-{uuid.uuid4().hex[:6]}"
+    sku = f"TDEC-F-{uuid.uuid4().hex[:6]}"
+    try:
+        db.add(models.DimProduct(
+            sku_id=sku, product_name=f"Filtertest {sku}", category=cat,
+            current_price=12.0, cost_price=6.0, min_price=9.0, max_price=16.0,
+            stock_quantity=30, lifecycle_status="active", shop_id=1,
+        ))
+        for i in range(15):
+            db.add(models.FactSalesDaily(
+                sku_id=sku, date=date.today() - timedelta(days=i), shop_id=1,
+                units_sold=2, revenue=24.0, margin=12.0, margin_pct=50.0,
+            ))
+        _seed_signal(db, sku)
+        db.commit()
+
+        client.post("/api/decisions/run", headers=admin_headers)
+
+        sku_items = client.get("/api/decisions", params={"entity_type": "sku", "entity_id": sku}, headers=admin_headers).json()["items"]
+        cat_items = client.get("/api/decisions", params={"entity_type": "category"}, headers=admin_headers).json()["items"]
+
+        assert all(d["entity_type"] == "sku" for d in sku_items)
+        assert all(d["entity_type"] == "category" for d in cat_items)
+        # SKU-beslissing mag NIET in categorie-filter zitten en vice versa
+        sku_ids_in_cat = [d["entity_id"] for d in cat_items if d["entity_id"] == sku]
+        assert sku_ids_in_cat == [], f"SKU {sku} mag niet in categorie-filter zitten"
+    finally:
+        cat_dids = [d.id for d in db.query(models.Decision).filter(models.Decision.entity_id == cat).all()]
+        if cat_dids:
+            db.query(models.DecisionScenario).filter(models.DecisionScenario.decision_id.in_(cat_dids)).delete(synchronize_session=False)
+            db.query(models.DecisionEvent).filter(models.DecisionEvent.decision_id.in_(cat_dids)).delete(synchronize_session=False)
+            db.query(models.Decision).filter(models.Decision.id.in_(cat_dids)).delete(synchronize_session=False)
+        _cleanup(db, [sku])
 
 
 def test_single_entity_failure_does_not_erase_prior_work(client, db, monkeypatch):

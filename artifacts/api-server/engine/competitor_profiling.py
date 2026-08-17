@@ -57,13 +57,10 @@ def build_or_update_profile(
     # Haal alle prijs-rijen op voor deze concurrent (binnen de shop-scope)
     price_rows = (
         db.query(models.FactCompetitorPriceDaily)
-        .join(models.DimProduct,
-              models.DimProduct.sku_id == models.FactCompetitorPriceDaily.sku_id)
         .filter(
             models.FactCompetitorPriceDaily.competitor_name == competitor_name,
             models.FactCompetitorPriceDaily.date >= since,
             models.FactCompetitorPriceDaily.shop_id == sid,
-            models.DimProduct.shop_id == sid,  # eigenaar-shop-validatie
         )
         .all()
     )
@@ -192,16 +189,14 @@ def build_or_update_profile(
 
     relevance_label, traffic_light = _relevance_label(combined)
 
-    # Upsert profiel — per shop
+    # Upsert profiel
     profile = (
         db.query(models.CompetitorProfile)
-        .filter(models.CompetitorProfile.competitor_name == competitor_name,
-                models.CompetitorProfile.shop_id == sid)
+        .filter(models.CompetitorProfile.competitor_name == competitor_name)
         .first()
     )
     if not profile:
-        profile = models.CompetitorProfile(competitor_name=competitor_name,
-                                           shop_id=sid)
+        profile = models.CompetitorProfile(competitor_name=competitor_name)
         db.add(profile)
 
     profile.domain = domain
@@ -234,10 +229,7 @@ def build_all_profiles(db: Session, lookback_days: int = 30,
     namen = [
         r[0]
         for r in db.query(models.FactCompetitorPriceDaily.competitor_name)
-        .join(models.DimProduct,
-              models.DimProduct.sku_id == models.FactCompetitorPriceDaily.sku_id)
-        .filter(models.FactCompetitorPriceDaily.shop_id == sid,
-                models.DimProduct.shop_id == sid)  # eigenaar-shop-validatie
+        .filter(models.FactCompetitorPriceDaily.shop_id == sid)
         .distinct().all()
     ]
     for naam in namen:

@@ -87,13 +87,7 @@ def rejected_pairs(db: Session) -> set[tuple[str, str]]:
     """(own_sku_id, competitor_name)-paren die door een analist zijn afgekeurd.
 
     Afgekeurde matches worden downstream uitgesloten (dekking, profielen,
-    prijsindex, elasticiteit).
-
-    Shop-scoping: sku_id is de PRIMARY KEY van dim_product en dus GLOBAAL
-    uniek over alle shops heen (canonical grain, masterprompt §4). Elk
-    (sku, concurrent)-paar hoort daardoor inherent bij precies één shop;
-    een aparte shop-kolom op matches/elasticiteit/strategie is bewust
-    overbodig en zou alleen redundantie (en driftrisico) toevoegen."""
+    prijsindex, elasticiteit)."""
     rows = (
         db.query(models.AiMatchResult.own_sku_id, models.AiMatchResult.competitor_name)
         .filter(models.AiMatchResult.status == "REJECTED")
@@ -127,38 +121,31 @@ def run_coverage(db: Session, run_date: Optional[date] = None) -> int:
         own_per_shop[sid] = own_per_shop.get(sid, 0) + 1
         own_per_shop_cat[(sid, c)] = own_per_shop_cat.get((sid, c), 0) + 1
 
-    # Laatste match-snapshot PER SHOP: shops hebben onafhankelijke feeds/runs,
-    # dus de nieuwste run van shop A mag de dekking van shop B niet leegmaken.
-    raw = (
-        db.query(
-            models.AiMatchResult.own_sku_id,
-            models.AiMatchResult.competitor_name,
-            models.AiMatchResult.run_date,
+    latest_match_date = db.query(models.AiMatchResult.run_date).order_by(
+        models.AiMatchResult.run_date.desc()).first()
+    matches = []
+    if latest_match_date:
+        matches = (
+            db.query(
+                models.AiMatchResult.own_sku_id,
+                models.AiMatchResult.competitor_name,
+            )
+            .filter(
+                models.AiMatchResult.run_date == latest_match_date[0],
+                models.AiMatchResult.status != "REJECTED",
+                models.AiMatchResult.confidence >= float(cfg["coverage_min_confidence"]),
+            )
+            .distinct()
+            .all()
         )
-        .filter(
-            models.AiMatchResult.status != "REJECTED",
-            models.AiMatchResult.confidence >= float(cfg["coverage_min_confidence"]),
-        )
-        .distinct()
-        .all()
-    )
-    latest_per_shop: dict[int, date] = {}
-    for sku_id, _comp, mrd in raw:
-        sid = shop_by_sku.get(sku_id)
-        if sid is None:
-            continue
-        if sid not in latest_per_shop or mrd > latest_per_shop[sid]:
-            latest_per_shop[sid] = mrd
 
     # matched sku's per (shop, concurrent) — totaal en per categorie
     per_comp_total: dict[tuple[int, str], set[str]] = {}
     per_comp_cat: dict[tuple[int, str, str], set[str]] = {}
-    for sku_id, comp, mrd in raw:
+    for sku_id, comp in matches:
         if sku_id not in cat_by_sku:
             continue
         sid = shop_by_sku[sku_id]
-        if mrd != latest_per_shop.get(sid):
-            continue
         per_comp_total.setdefault((sid, comp), set()).add(sku_id)
         per_comp_cat.setdefault((sid, comp, cat_by_sku[sku_id]), set()).add(sku_id)
 
@@ -225,20 +212,13 @@ def detect_price_events(db: Session, run_date: Optional[date] = None) -> int:
         .all()
     )
 
-    prod_shop = {p.sku_id: (p.shop_id or 1) for p in
-                 db.query(models.DimProduct.sku_id, models.DimProduct.shop_id).all()}
     series: dict[tuple[str, str], list] = {}
     shop_of: dict[tuple[str, str], int] = {}
     for sku, comp, d, price, shop_id in rows:
         if (sku, comp) in rejected:
             continue
-        # Factrij telt alleen mee als zijn shop overeenkomt met de shop van
-        # het product (mis-scoped/poison rijen worden genegeerd).
-        owner = prod_shop.get(sku)
-        if owner is None or (shop_id or 1) != owner:
-            continue
         series.setdefault((sku, comp), []).append((d, float(price)))
-        shop_of[(sku, comp)] = owner
+        shop_of[(sku, comp)] = shop_id or 1
 
     # bestaande events van vandaag verwijderen (idempotente rerun)
     db.query(models.CompetitorPriceEvent).filter(
@@ -329,18 +309,13 @@ def detect_promo_events(db: Session, run_date: Optional[date] = None) -> int:
         .order_by(models.FactCompetitorPriceDaily.date)
         .all()
     )
-    prod_shop = {p.sku_id: (p.shop_id or 1) for p in
-                 db.query(models.DimProduct.sku_id, models.DimProduct.shop_id).all()}
     series: dict[tuple[str, str], list] = {}
     shop_of: dict[tuple[str, str], int] = {}
     for sku, comp, d, price, shop_id in rows:
         if (sku, comp) in rejected:
             continue
-        owner = prod_shop.get(sku)
-        if owner is None or (shop_id or 1) != owner:
-            continue
         series.setdefault((sku, comp), []).append((d, float(price)))
-        shop_of[(sku, comp)] = owner
+        shop_of[(sku, comp)] = shop_id or 1
 
     # herberekenbaar: promo-events in het venster vervangen
     db.query(models.CompetitorPriceEvent).filter(
@@ -458,12 +433,8 @@ def update_availability(db: Session, run_date: Optional[date] = None) -> int:
 
     per_comp: dict[tuple[int, str], list] = {}
     for o in offers:
-        # Eigenaar-shop-validatie: offers zonder bekend product (orphan/
-        # mis-keyed) worden overgeslagen — nooit standaard aan shop 1 toewijzen.
-        sid = shop_by_sku.get(o.own_sku_id)
-        if sid is None:
-            continue
         name = comp_names.get(o.competitor_id, f"competitor_{o.competitor_id}")
+        sid = shop_by_sku.get(o.own_sku_id, 1)
         per_comp.setdefault((sid, name), []).append(o)
 
     db.query(models.CompetitorAvailabilityDaily).filter(
@@ -487,8 +458,6 @@ def update_availability(db: Session, run_date: Optional[date] = None) -> int:
     oos_by_sku: dict[str, list[str]] = {}
     seen_by_sku: dict[str, int] = {}
     for o in offers:
-        if o.own_sku_id not in shop_by_sku:  # orphan offers nooit meetellen
-            continue
         seen_by_sku[o.own_sku_id] = seen_by_sku.get(o.own_sku_id, 0) + 1
         if not o.in_stock:
             oos_by_sku.setdefault(o.own_sku_id, []).append(
@@ -575,39 +544,29 @@ def run_elasticity(db: Session, run_date: Optional[date] = None) -> int:
 
     from engine.elasticity_engine import calculate_elasticity
 
-    # Shop van elk product: factrijen tellen alleen mee als hun shop_id
-    # overeenkomt met de shop van het product (datascheiding per shop).
-    prod_shop = {p.sku_id: p.shop_id for p in
-                 db.query(models.DimProduct.sku_id, models.DimProduct.shop_id).all()}
-
     sales = {}
     for r in db.query(models.FactSalesDaily.sku_id, models.FactSalesDaily.date,
-                      models.FactSalesDaily.units_sold,
-                      models.FactSalesDaily.shop_id).filter(
+                      models.FactSalesDaily.units_sold).filter(
             models.FactSalesDaily.date >= since).all():
-        if r.units_sold and r.units_sold > 0 and r.shop_id == prod_shop.get(r.sku_id):
+        if r.units_sold and r.units_sold > 0:
             sales.setdefault(r.sku_id, {})[r.date] = float(r.units_sold)
 
     own_prices = {}
     for r in db.query(models.FactPriceDaily.sku_id, models.FactPriceDaily.date,
-                      models.FactPriceDaily.price,
-                      models.FactPriceDaily.shop_id).filter(
+                      models.FactPriceDaily.price).filter(
             models.FactPriceDaily.date >= since).all():
-        if r.price and float(r.price) > 0 and r.shop_id == prod_shop.get(r.sku_id):
+        if r.price and float(r.price) > 0:
             own_prices.setdefault(r.sku_id, {})[r.date] = float(r.price)
 
     comp_prices: dict[str, dict[date, list[float]]] = {}
     for r in db.query(models.FactCompetitorPriceDaily.sku_id,
                       models.FactCompetitorPriceDaily.competitor_name,
                       models.FactCompetitorPriceDaily.date,
-                      models.FactCompetitorPriceDaily.price,
-                      models.FactCompetitorPriceDaily.shop_id).filter(
+                      models.FactCompetitorPriceDaily.price).filter(
             models.FactCompetitorPriceDaily.date >= since).all():
         if r.price is None or float(r.price) <= 0:
             continue
         if (r.sku_id, r.competitor_name) in rejected:
-            continue
-        if r.shop_id != prod_shop.get(r.sku_id):
             continue
         comp_prices.setdefault(r.sku_id, {}).setdefault(r.date, []).append(float(r.price))
 
@@ -691,91 +650,6 @@ def run_elasticity(db: Session, run_date: Optional[date] = None) -> int:
 
 # ── Orchestratie ─────────────────────────────────────────────────────────────
 
-def comparable_price_series(rows) -> dict[str, list]:
-    """Bouw per concurrent een vergelijkbare dagreeks uit ruwe (sku, datum,
-    prijs)-waarnemingen: elke SKU wordt genormaliseerd op zijn eigen eerste
-    waarneming (relatieve prijs), en per datum wordt het gemiddelde van die
-    relatieve prijzen genomen — precies één deterministische waarde per datum.
-    Zo worden assortiments-prijsniveauverschillen niet als prijsbewegingen
-    gezien. Rows: iterable met .competitor_name, .sku_id, .date, .price."""
-    per_comp: dict[str, dict] = {}
-    for r in rows:
-        if r.price is None or float(r.price) <= 0:
-            continue
-        naam = r.competitor_name or "Onbekend"
-        c = per_comp.setdefault(naam, {})
-        c.setdefault(r.sku_id, {})[r.date] = float(r.price)
-    out: dict[str, list] = {}
-    for naam, skus in per_comp.items():
-        rel_per_date: dict = {}
-        for sku, by_date in skus.items():
-            dates = sorted(by_date)
-            base = by_date[dates[0]]
-            if base <= 0:
-                continue
-            for d in dates:
-                rel_per_date.setdefault(d, []).append(by_date[d] / base)
-        serie = [(d, round(sum(v) / len(v), 6))
-                 for d, v in sorted(rel_per_date.items())]
-        if serie:
-            out[naam] = serie
-    return out
-
-
-def run_strategies(db: Session, run_date: Optional[date] = None,
-                   lookback_days: int = 30) -> int:
-    """Herken en persisteer per shop de prijsstrategie per concurrent uit de
-    shop-gefilterde concurrentprijshistorie (upsert per shop/concurrent/run)."""
-    from engine.competitor_strategy_engine import analyseer_alle_concurrenten
-    rd = run_date or date.today()
-    since = rd - timedelta(days=lookback_days)
-    n = 0
-    shop_ids = [s for (s,) in db.query(models.DimProduct.shop_id).distinct().all()
-                if s is not None]
-    for sid in shop_ids:
-        rows = (db.query(models.FactCompetitorPriceDaily)
-                .join(models.DimProduct,
-                      models.DimProduct.sku_id == models.FactCompetitorPriceDaily.sku_id)
-                .filter(models.FactCompetitorPriceDaily.date >= since,
-                        models.FactCompetitorPriceDaily.shop_id == sid,
-                        models.DimProduct.shop_id == sid,  # eigenaar-shop-validatie
-                        models.FactCompetitorPriceDaily.price.isnot(None))
-                .all())
-        prijsdata = comparable_price_series(rows)
-        if not prijsdata:
-            continue
-        for res in analyseer_alle_concurrenten(prijsdata):
-            naam = res.get("concurrent")
-            if not naam:
-                continue
-            prev = (db.query(models.CompetitorStrategyResult)
-                    .filter(models.CompetitorStrategyResult.competitor_name == naam,
-                            models.CompetitorStrategyResult.shop_id == sid)
-                    .order_by(models.CompetitorStrategyResult.run_date.desc())
-                    .first())
-            stype = res.get("strategy_type")
-            if prev and prev.run_date == rd:
-                row = prev
-                prev_type = row.previous_strategy_type
-            else:
-                row = models.CompetitorStrategyResult(
-                    competitor_name=naam, run_date=rd, shop_id=sid)
-                prev_type = prev.strategy_type if prev else None
-                db.add(row)
-            row.strategy_type = stype
-            row.strategy_label_nl = res.get("label_nl")
-            row.confidence = res.get("confidence")
-            row.explanation_nl = res.get("reden")
-            row.recommended_action_nl = res.get("aanbevolen_reactie")
-            row.period_days = lookback_days
-            row.data_points = res.get("datapunten")
-            row.previous_strategy_type = prev_type
-            row.strategy_changed = bool(prev_type and stype and prev_type != stype)
-            n += 1
-    db.commit()
-    return n
-
-
 def run_all(db: Session, run_date: Optional[date] = None) -> dict:
     """Draai alle competition-intelligence stappen; retourneer samenvatting."""
     rd = run_date or date.today()
@@ -788,14 +662,7 @@ def run_all(db: Session, run_date: Optional[date] = None) -> dict:
         "promo_events": detect_promo_events(db, rd),
         "availability_competitors": update_availability(db, rd),
         "elasticity_skus": run_elasticity(db, rd),
-        "strategy_results": run_strategies(db, rd),
-        # Profielen per shop: elke shop met producten krijgt zijn eigen,
-        # niet-vermengde concurrentprofielen.
-        "profiles": sum(
-            len(competitor_profiling.build_all_profiles(db, shop_id=sid))
-            for (sid,) in db.query(models.DimProduct.shop_id).distinct().all()
-            if sid is not None
-        ),
+        "profiles": len(competitor_profiling.build_all_profiles(db)),
         "model_version": MODEL_VERSION,
     }
     logger.info("Competition intelligence run: %s", result)

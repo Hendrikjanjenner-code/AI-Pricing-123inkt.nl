@@ -750,8 +750,7 @@ def simulate_competitor_scenario(db: Session, user: models.User, sku_id: str,
         raise HTTPException(status_code=404, detail=f"SKU {sku_id} not found in shop {sid}")
     from engine.competition_simulation import simulate_competitor_scenario as _sim
     out = _sim(db, sku_id, change_pct,
-               assume_follow=assume_follow, assume_no_follow=assume_no_follow,
-               shop_id=sid)
+               assume_follow=assume_follow, assume_no_follow=assume_no_follow)
     out["shop_id"] = sid
     out["shop_scope_applied"] = True
     return out

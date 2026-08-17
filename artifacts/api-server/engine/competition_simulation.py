@@ -38,7 +38,6 @@ def simulate_competitor_scenario(
     change_pct: float,
     assume_follow: Optional[list[str]] = None,
     assume_no_follow: Optional[list[str]] = None,
-    shop_id: Optional[int] = None,
 ) -> dict:
     """
     Simuleer een eigen prijswijziging (fractie, bv. -0.05) met per-concurrent
@@ -48,13 +47,10 @@ def simulate_competitor_scenario(
     if change_pct is None or abs(change_pct) > 0.5:
         raise HTTPException(status_code=400, detail="change_pct moet tussen -0.5 en 0.5 liggen")
 
-    pq = db.query(models.DimProduct).filter(models.DimProduct.sku_id == sku_id)
-    if shop_id is not None:
-        pq = pq.filter(models.DimProduct.shop_id == shop_id)
-    product = pq.first()
+    product = db.query(models.DimProduct).filter(
+        models.DimProduct.sku_id == sku_id).first()
     if not product:
         raise HTTPException(status_code=404, detail=f"SKU {sku_id} niet gevonden")
-    sid = product.shop_id  # effectieve shop-scope voor alle factqueries
     own_price = float(product.current_price) if product.current_price else None
     if not own_price:
         raise HTTPException(status_code=400, detail=f"SKU {sku_id} heeft geen actuele prijs")
@@ -65,7 +61,6 @@ def simulate_competitor_scenario(
     rows = (
         db.query(models.FactCompetitorPriceDaily)
         .filter(models.FactCompetitorPriceDaily.sku_id == sku_id,
-                models.FactCompetitorPriceDaily.shop_id == sid,
                 models.FactCompetitorPriceDaily.date >= since,
                 models.FactCompetitorPriceDaily.price.isnot(None))
         .order_by(models.FactCompetitorPriceDaily.date)
@@ -87,8 +82,7 @@ def simulate_competitor_scenario(
     # Strategieën per concurrent (laatste run)
     strategies: dict[str, models.CompetitorStrategyResult] = {}
     for s in (db.query(models.CompetitorStrategyResult)
-              .filter(models.CompetitorStrategyResult.competitor_name.in_(list(latest)),
-                      models.CompetitorStrategyResult.shop_id == sid)
+              .filter(models.CompetitorStrategyResult.competitor_name.in_(list(latest)))
               .order_by(models.CompetitorStrategyResult.run_date)
               .all()):
         strategies[s.competitor_name] = s
@@ -150,7 +144,6 @@ def simulate_competitor_scenario(
     # Baseline: verkoop laatste 30 dagen
     sales = (db.query(models.FactSalesDaily)
              .filter(models.FactSalesDaily.sku_id == sku_id,
-                     models.FactSalesDaily.shop_id == sid,
                      models.FactSalesDaily.date >= date.today() - timedelta(days=30))
              .all())
     base_units = sum(float(s.units_sold or 0) for s in sales)

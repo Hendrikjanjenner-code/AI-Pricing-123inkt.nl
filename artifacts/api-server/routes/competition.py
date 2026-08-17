@@ -249,18 +249,14 @@ def get_sub_scores_by_class(
 @router.get("/dashboard")
 def get_competition_dashboard(
     category: Optional[str] = Query(None),
-    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     """
     Top-10 concurrenten per categorie met alle 7 scores, verkeerslicht,
-    strategie-label en laatste prijswijziging (shop-scoped).
+    strategie-label en laatste prijswijziging.
     """
-    from semantic_layer import _shop_scope
-    _sid = _shop_scope(db, shop_id)
-    q = db.query(models.CategoryCompetitorRelevance).filter(
-        models.CategoryCompetitorRelevance.shop_id == _sid)
+    q = db.query(models.CategoryCompetitorRelevance)
     if category:
         q = q.filter(models.CategoryCompetitorRelevance.category == category)
     rows = q.order_by(
@@ -275,13 +271,11 @@ def get_competition_dashboard(
         if len(cat_items) < 10:
             cat_items.append(_category_score_out(row))
 
-    # Haal profielen en strategieën op (zelfde shop-scope als de basisdata)
-    profielen = {p.competitor_name: p for p in db.query(models.CompetitorProfile)
-                 .filter(models.CompetitorProfile.shop_id == _sid).all()}
+    # Haal profielen en strategieën op
+    profielen = {p.competitor_name: p for p in db.query(models.CompetitorProfile).all()}
     strategieen = {
         s.competitor_name: s
         for s in db.query(models.CompetitorStrategyResult)
-        .filter(models.CompetitorStrategyResult.shop_id == _sid)
         .order_by(
             models.CompetitorStrategyResult.competitor_name,
             models.CompetitorStrategyResult.run_date.desc(),
@@ -401,14 +395,10 @@ def list_competitors(
     relevance_label: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
-    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    from semantic_layer import _shop_scope
-    sid = _shop_scope(db, shop_id)
-    q = db.query(models.CompetitorProfile).filter(
-        models.CompetitorProfile.shop_id == sid)
+    q = db.query(models.CompetitorProfile)
     if relevance_label:
         q = q.filter(models.CompetitorProfile.relevance_label == relevance_label)
     total = q.count()
@@ -427,16 +417,12 @@ def list_competitors(
 @router.get("/competitors/{competitor_name}")
 def get_competitor_profile(
     competitor_name: str,
-    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    from semantic_layer import _shop_scope
-    sid = _shop_scope(db, shop_id)
     profile = (
         db.query(models.CompetitorProfile)
-        .filter(models.CompetitorProfile.competitor_name == competitor_name,
-                models.CompetitorProfile.shop_id == sid)
+        .filter(models.CompetitorProfile.competitor_name == competitor_name)
         .first()
     )
     if not profile:
@@ -445,8 +431,7 @@ def get_competitor_profile(
     # Haal categoriescores op
     cat_scores = (
         db.query(models.CategoryCompetitorRelevance)
-        .filter(models.CategoryCompetitorRelevance.competitor_name == competitor_name,
-                models.CategoryCompetitorRelevance.shop_id == sid)
+        .filter(models.CategoryCompetitorRelevance.competitor_name == competitor_name)
         .order_by(models.CategoryCompetitorRelevance.combined_score.desc())
         .all()
     )
@@ -454,8 +439,7 @@ def get_competitor_profile(
     # Haal strategie op
     strategie = (
         db.query(models.CompetitorStrategyResult)
-        .filter(models.CompetitorStrategyResult.competitor_name == competitor_name,
-                models.CompetitorStrategyResult.shop_id == sid)
+        .filter(models.CompetitorStrategyResult.competitor_name == competitor_name)
         .order_by(models.CompetitorStrategyResult.run_date.desc())
         .first()
     )
@@ -473,15 +457,12 @@ def get_competitor_profile(
 def list_category_scores(
     category: Optional[str] = Query(None),
     relevance_label: Optional[str] = Query(None),
-    shop_id: Optional[int] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    from semantic_layer import _shop_scope
-    q = db.query(models.CategoryCompetitorRelevance).filter(
-        models.CategoryCompetitorRelevance.shop_id == _shop_scope(db, shop_id))
+    q = db.query(models.CategoryCompetitorRelevance)
     if category:
         q = q.filter(models.CategoryCompetitorRelevance.category == category)
     if relevance_label:
@@ -505,16 +486,12 @@ def list_category_scores(
 @router.get("/categories/{category_name}")
 def get_category_detail(
     category_name: str,
-    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    from semantic_layer import _shop_scope
-    _sid = _shop_scope(db, shop_id)
     rows = (
         db.query(models.CategoryCompetitorRelevance)
-        .filter(models.CategoryCompetitorRelevance.category == category_name,
-                models.CategoryCompetitorRelevance.shop_id == _sid)
+        .filter(models.CategoryCompetitorRelevance.category == category_name)
         .order_by(models.CategoryCompetitorRelevance.combined_score.desc())
         .all()
     )
@@ -552,15 +529,10 @@ def list_ai_matches(
     sku_id: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
-    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    sid = _scope(db, shop_id)
-    q = db.query(models.AiMatchResult).join(
-        models.DimProduct,
-        models.DimProduct.sku_id == models.AiMatchResult.own_sku_id,
-    ).filter(models.DimProduct.shop_id == sid)
+    q = db.query(models.AiMatchResult)
     if match_type:
         q = q.filter(models.AiMatchResult.match_type == match_type)
     if min_confidence > 0:
@@ -594,16 +566,10 @@ def list_ai_matches(
 @router.post("/ai-matching/{match_id}/approve")
 def approve_match(
     match_id: int,
-    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
-    sid = _scope(db, shop_id)
-    match = (db.query(models.AiMatchResult)
-             .join(models.DimProduct,
-                   models.DimProduct.sku_id == models.AiMatchResult.own_sku_id)
-             .filter(models.AiMatchResult.id == match_id,
-                     models.DimProduct.shop_id == sid).first())
+    match = db.query(models.AiMatchResult).filter(models.AiMatchResult.id == match_id).first()
     if not match:
         raise HTTPException(404, "Match niet gevonden")
     match.status = "APPROVED"
@@ -617,16 +583,10 @@ def approve_match(
 @router.post("/ai-matching/{match_id}/reject")
 def reject_match(
     match_id: int,
-    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
-    sid = _scope(db, shop_id)
-    match = (db.query(models.AiMatchResult)
-             .join(models.DimProduct,
-                   models.DimProduct.sku_id == models.AiMatchResult.own_sku_id)
-             .filter(models.AiMatchResult.id == match_id,
-                     models.DimProduct.shop_id == sid).first())
+    match = db.query(models.AiMatchResult).filter(models.AiMatchResult.id == match_id).first()
     if not match:
         raise HTTPException(404, "Match niet gevonden")
     match.status = "REJECTED"
@@ -671,7 +631,6 @@ def list_assortment_gaps(
 @router.get("/strategies")
 def get_competitor_strategies(
     lookback_days: int = Query(30, ge=7, le=180),
-    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -682,21 +641,22 @@ def get_competitor_strategies(
     waarschuwing meegegeven (`low_history`).
     """
     from engine.competitor_strategy_engine import analyseer_alle_concurrenten
-    from engine.competition_intelligence import comparable_price_series
-    sid = _scope(db, shop_id)
     since = date.today() - timedelta(days=lookback_days)
     rijen = (
         db.query(models.FactCompetitorPriceDaily)
-        .join(models.DimProduct,
-              models.DimProduct.sku_id == models.FactCompetitorPriceDaily.sku_id)
-        .filter(models.FactCompetitorPriceDaily.date >= since,
-                models.FactCompetitorPriceDaily.shop_id == sid,
-                models.DimProduct.shop_id == sid)  # eigenaar-shop-validatie
+        .filter(models.FactCompetitorPriceDaily.date >= since)
+        .order_by(
+            models.FactCompetitorPriceDaily.competitor_name,
+            models.FactCompetitorPriceDaily.date,
+        )
         .all()
     )
-    # Genormaliseerde dagreeks per concurrent (één waarde per datum), zodat
-    # prijsniveauverschillen tussen SKU's niet als bewegingen tellen.
-    prijsdata = comparable_price_series(rijen)
+    prijsdata: dict = {}
+    for r in rijen:
+        naam = r.competitor_name or "Onbekend"
+        if r.price is None:
+            continue
+        prijsdata.setdefault(naam, []).append((r.date, float(r.price)))
 
     if not prijsdata:
         return {
@@ -969,38 +929,32 @@ def _run_out(r: models.CompetitorDiscoveryRun) -> dict:
 @router.get("/rankings")
 def get_competitor_rankings(
     scope: str = Query("overall"),
-    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     """
     Concurrentrankings met de drie gestandaardiseerde scores (§9):
     Competition Relevance, Price Relevance en Influence — plus rank,
-    vorige rank en trend (§11). Shop-scoped.
+    vorige rank en trend (§11).
     """
     from sqlalchemy import func as _func
-    from semantic_layer import _shop_scope
-    _sid = _shop_scope(db, shop_id)
     latest = db.query(_func.max(models.CompetitorRanking.run_date)).filter(
-        models.CompetitorRanking.scope == scope,
-        models.CompetitorRanking.shop_id == _sid,
+        models.CompetitorRanking.scope == scope
     ).scalar()
     if not latest:
-        return {"scope": scope, "run_date": None, "rankings": [],
-                "scopes": _ranking_scopes(db, _sid)}
+        return {"scope": scope, "run_date": None, "rankings": [], "scopes": _ranking_scopes(db)}
 
     rows = (
         db.query(models.CompetitorRanking)
         .filter(models.CompetitorRanking.scope == scope,
-                models.CompetitorRanking.run_date == latest,
-                models.CompetitorRanking.shop_id == _sid)
+                models.CompetitorRanking.run_date == latest)
         .order_by(models.CompetitorRanking.rank)
         .all()
     )
     return {
         "scope": scope,
         "run_date": str(latest),
-        "scopes": _ranking_scopes(db, _sid),
+        "scopes": _ranking_scopes(db),
         "rankings": [
             {
                 "rank": r.rank,
@@ -1021,11 +975,8 @@ def get_competitor_rankings(
     }
 
 
-def _ranking_scopes(db: Session, sid: Optional[int] = None) -> list[str]:
-    q = db.query(models.CompetitorRanking.scope)
-    if sid is not None:
-        q = q.filter(models.CompetitorRanking.shop_id == sid)
-    scopes = [s[0] for s in q.distinct().all()]
+def _ranking_scopes(db: Session) -> list[str]:
+    scopes = [s[0] for s in db.query(models.CompetitorRanking.scope).distinct().all()]
     return sorted(scopes, key=lambda s: (s != "overall", s))
 
 
@@ -1093,7 +1044,6 @@ def get_price_index_trend(
         models.FactPriceDaily.price,
     ).filter(models.FactPriceDaily.date >= since,
              models.FactPriceDaily.price.isnot(None),
-             models.FactPriceDaily.shop_id == sid,
              models.FactPriceDaily.sku_id.in_(list(cats.keys()) or [""])).all():
         own_hist[(d, sku)] = float(price)
 

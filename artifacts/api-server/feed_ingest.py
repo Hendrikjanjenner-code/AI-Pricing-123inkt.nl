@@ -321,8 +321,7 @@ def score_competition(db: Session) -> int:
 
     products = {
         p.sku_id: p for p in db.query(
-            models.DimProduct.sku_id, models.DimProduct.current_price,
-            models.DimProduct.category, models.DimProduct.shop_id,
+            models.DimProduct.sku_id, models.DimProduct.current_price, models.DimProduct.category
         ).all()
     }
 
@@ -335,15 +334,9 @@ def score_competition(db: Session) -> int:
         models.FactCompetitorPriceDaily.sku_id,
         models.FactCompetitorPriceDaily.competitor_name,
         models.FactCompetitorPriceDaily.price,
-        models.FactCompetitorPriceDaily.shop_id,
     ).filter(models.FactCompetitorPriceDaily.date == today).all()
-    for sku_id, competitor_name, price, f_shop in rows:
+    for sku_id, competitor_name, price in rows:
         if price is None or (sku_id, competitor_name) in rejected:
-            continue
-        prod = products.get(sku_id)
-        # Alleen factrijen waarvan de shop overeenkomt met de eigenaar-shop
-        # van het product (mis-scoped rijen negeren).
-        if prod is None or (f_shop or 1) != (prod.shop_id or 1):
             continue
         by_sku.setdefault(sku_id, []).append(float(price))
 
@@ -419,7 +412,6 @@ def build_ai_matches(db: Session) -> int:
             models.DimProduct.sku_id,
             models.DimProduct.current_price,
             models.DimProduct.ean,
-            models.DimProduct.shop_id,
         ).all()
     }
 
@@ -428,7 +420,6 @@ def build_ai_matches(db: Session) -> int:
         models.FactCompetitorPriceDaily.competitor_name,
         models.FactCompetitorPriceDaily.price,
         models.FactCompetitorPriceDaily.url,
-        models.FactCompetitorPriceDaily.shop_id,
     ).filter(models.FactCompetitorPriceDaily.date == today).all()
 
     # Bewaar analistenbeoordelingen: een eerder goed-/afgekeurd paar behoudt
@@ -447,14 +438,10 @@ def build_ai_matches(db: Session) -> int:
     ).delete(synchronize_session=False)
 
     matches: list[dict] = []
-    for sku_id, naam, price, url, f_shop in rows:
+    for sku_id, naam, price, url in rows:
         if not naam or price is None:
             continue
         prod = products.get(sku_id)
-        # Eigenaar-shop-validatie: factrij moet bij de shop van het product
-        # horen, anders geen match (poison/mis-scoped rijen).
-        if prod is None or (f_shop or 1) != (prod.shop_id or 1):
-            continue
         own = float(prod.current_price) if prod and prod.current_price else None
         comp = float(price)
         diff_pct = round((own - comp) / comp * 100, 2) if own and comp > 0 else None

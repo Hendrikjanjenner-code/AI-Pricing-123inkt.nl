@@ -115,6 +115,7 @@ def run_engine(
 @router.get("")
 def list_decisions(
     status: Optional[str] = Query(None),
+    entity_type: Optional[str] = Query(None),
     entity_id: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
@@ -127,6 +128,8 @@ def list_decisions(
     q = db.query(models.Decision).filter(models.Decision.shop_id == sid)
     if status:
         q = q.filter(models.Decision.status == status)
+    if entity_type:
+        q = q.filter(models.Decision.entity_type == entity_type)
     if entity_id:
         q = q.filter(models.Decision.entity_id == entity_id)
     if search:
@@ -151,6 +154,16 @@ def list_decisions(
             models.Decision.shop_id == sid,
         ).count()
 
+    # Entiteitstype-tellingen
+    from sqlalchemy import func
+    type_rows = (
+        db.query(models.Decision.entity_type, func.count(models.Decision.id))
+        .filter(models.Decision.shop_id == sid)
+        .group_by(models.Decision.entity_type)
+        .all()
+    )
+    entity_type_counts = {et: cnt for et, cnt in type_rows}
+
     return {
         "items": [_decision_out(d) for d in items],
         "total": total,
@@ -158,6 +171,7 @@ def list_decisions(
         "page_size": page_size,
         "status_counts": counts,
         "statuses": [{"id": s, "label": STATUS_NL[s]} for s in ALL_STATUSES],
+        "entity_type_counts": entity_type_counts,
     }
 
 

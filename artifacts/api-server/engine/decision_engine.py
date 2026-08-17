@@ -44,10 +44,11 @@ def _f(v, default=None):
 
 def run_decision_engine(db: Session, shop_id: int | None = None) -> dict:
     """
-    Volledige run: verzamel actieve signalen, groepeer per SKU-entiteit,
-    genereer per entiteit een Decision met scenario's en een aanbeveling.
-    Bestaande draft/proposed beslissingen van vandaag voor dezelfde entiteit
-    worden vervangen; menselijk beoordeelde beslissingen blijven staan.
+    Volledige run: verzamel actieve signalen, groepeer per SKU- én per
+    category-entiteit, genereer per entiteit een Decision met scenario's en
+    een aanbeveling.  Bestaande draft/proposed beslissingen van vandaag voor
+    dezelfde entiteit worden vervangen; menselijk beoordeelde beslissingen
+    blijven staan.
 
     Shop-scoping: signalen, producten, verkoop, pricing-aanbevelingen en de
     beslissingen zelf zijn expliciet shop-scoped. Elasticiteit, basket-
@@ -70,11 +71,11 @@ def run_decision_engine(db: Session, shop_id: int | None = None) -> dict:
         .all()
     )
 
-    # Groepeer signalen per SKU-entiteit
-    per_entity: dict[str, list] = {}
+    # Groepeer signalen per entiteitstype + entiteitsid
+    per_sku: dict[str, list] = {}
     for s in signals:
         if s.entity_type == "sku":
-            per_entity.setdefault(s.entity_id, []).append(s)
+            per_sku.setdefault(s.entity_id, []).append(s)
 
     # Menselijk behandelde beslissingen van vandaag niet overschrijven
     existing = db.query(models.Decision).filter(
@@ -97,22 +98,26 @@ def run_decision_engine(db: Session, shop_id: int | None = None) -> dict:
     def entity_weight(sigs):
         return sum(sev_w.get(s.severity or "info", 1) for s in sigs)
 
-    ranked = sorted(per_entity.items(), key=lambda kv: entity_weight(kv[1]), reverse=True)
+    ranked_sku = sorted(per_sku.items(), key=lambda kv: entity_weight(kv[1]), reverse=True)
 
     created, skipped, gaps_total = 0, 0, 0
     products = {
         p.sku_id: p
         for p in db.query(models.DimProduct).filter(models.DimProduct.shop_id == sid).all()
     }
+    # Index producten per categorie voor aggregatie
+    products_by_category: dict[str, list] = {}
+    for p in products.values():
+        if p.category:
+            products_by_category.setdefault(p.category, []).append(p)
 
-    for entity_id, sigs in ranked[:MAX_DECISIONS_PER_RUN]:
+    # ── SKU-beslissingen ────────────────────────────────────────────────────
+    sku_budget = MAX_DECISIONS_PER_RUN
+    for entity_id, sigs in ranked_sku[:sku_budget]:
         if entity_id in locked_entities:
             skipped += 1
             continue
         try:
-            # Savepoint per entiteit (§56): één kapotte entiteit rolt alleen
-            # haar eigen werk terug, nooit eerder aangemaakte beslissingen of
-            # de opschoning van verouderde drafts.
             with db.begin_nested():
                 decision, n_gaps = _build_decision(db, today, sid, entity_id, sigs, products.get(entity_id))
             if decision is None:
@@ -121,13 +126,274 @@ def run_decision_engine(db: Session, shop_id: int | None = None) -> dict:
             created += 1
             gaps_total += n_gaps
         except Exception:
-            # §56: één kapotte entiteit mag de run niet stoppen; de savepoint
-            # heeft alleen deze entiteit teruggedraaid.
+            skipped += 1
+            continue
+
+    # ── Categorie-beslissingen ──────────────────────────────────────────────
+    # Leid categorie-beslissingen af uit de actieve SKU-signalen: groepeer de
+    # signalen van alle SKU's in dezelfde categorie (via DimProduct.category).
+    # Er zijn geen aparte category-type signals nodig.
+    per_category: dict[str, list] = {}
+    for sku_id, sigs in per_sku.items():
+        p = products.get(sku_id)
+        if p and p.category:
+            per_category.setdefault(p.category, []).extend(sigs)
+
+    ranked_cat = sorted(per_category.items(), key=lambda kv: entity_weight(kv[1]), reverse=True)
+    # Geef categorieën het resterende budget (minimaal 10 slots).
+    cat_budget = max(10, MAX_DECISIONS_PER_RUN - created)
+    for category_id, cat_sigs in ranked_cat[:cat_budget]:
+        if category_id in locked_entities:
+            skipped += 1
+            continue
+        try:
+            with db.begin_nested():
+                cat_products = products_by_category.get(category_id, [])
+                decision, n_gaps = _build_category_decision(
+                    db, today, sid, category_id, cat_sigs, cat_products
+                )
+            if decision is None:
+                skipped += 1
+                continue
+            created += 1
+            gaps_total += n_gaps
+        except Exception:
             skipped += 1
             continue
 
     db.commit()
     return {"decisions_created": created, "entities_skipped": skipped, "data_gaps_total": gaps_total}
+
+
+def _build_category_decision(
+    db: Session, today: date, sid: int, category_id: str, sigs: list, cat_products: list
+) -> tuple:
+    """
+    Bouw één Decision + scenario's voor een categorie-entiteit.
+    Impact wordt geaggregeerd over alle SKU's in de categorie.
+    Ontbrekende data → expliciete gap (§56).
+    Returns (decision, n_gaps).
+    """
+    gaps: list[str] = []
+
+    # Aggregeer verkoopdata over alle SKU's in de categorie
+    total_units = total_revenue = total_margin = 0.0
+    has_sales = False
+    private_label_skus = []
+    a_brand_skus = []
+
+    for p in cat_products:
+        if p.is_private_label:
+            private_label_skus.append(p.sku_id)
+        else:
+            a_brand_skus.append(p.sku_id)
+        sales = (
+            db.query(models.FactSalesDaily)
+            .filter(
+                models.FactSalesDaily.sku_id == p.sku_id,
+                models.FactSalesDaily.shop_id == sid,
+            )
+            .order_by(models.FactSalesDaily.date.desc())
+            .limit(IMPACT_HORIZON_DAYS)
+            .all()
+        )
+        if sales:
+            has_sales = True
+            total_units += sum(r.units_sold or 0 for r in sales)
+            total_revenue += sum(_f(r.revenue, 0.0) for r in sales)
+            total_margin += sum(_f(r.margin, 0.0) for r in sales)
+
+    if not cat_products:
+        gaps.append("data unavailable: geen producten gevonden in deze categorie")
+    if not has_sales:
+        gaps.append("data unavailable: geen verkoophistorie in deze categorie — impactcijfers niet berekenbaar")
+        total_units = total_revenue = total_margin = None  # type: ignore[assignment]
+
+    # Signaalindex per engine
+    by_engine: dict[str, list] = {}
+    for s in sigs:
+        by_engine.setdefault(s.engine, []).append(s)
+    all_factors = _signal_factors(sigs)
+    common_assumptions = list(gaps)
+
+    n_skus = len(cat_products)
+    n_pl = len(private_label_skus)
+    pl_ratio = n_pl / n_skus if n_skus else 0.0
+
+    # ── Scenario's ────────────────────────────────────────────────────────
+    scenarios: list[dict] = []
+
+    # 1. Categoriepromotie
+    promo_units = total_units * 1.18 if total_units is not None else None
+    promo_revenue = total_revenue * 1.10 if total_revenue is not None else None  # promo druk op marge
+    promo_margin = total_margin * 0.88 if total_margin is not None else None
+    scenarios.append({
+        "scenario_type": "promotion",
+        "description": f"Categoriepromotie: tijdelijke actiedruk over {n_skus} SKU's in '{category_id}'",
+        "expected_units": promo_units,
+        "expected_revenue": promo_revenue,
+        "expected_margin": promo_margin,
+        "customer_impact": "Positief: zichtbaarheid en traffic naar de categorie",
+        "basket_impact": "Categorie-traffic verhoogt kans op cross-categorie basket-groei",
+        "stock_impact": "Versnelde doorloop — voorraadtoereikendheid bewaken",
+        "strategic_impact": "Kortetermijn-volume; risico op promo-gewenning en margedruk",
+        "risk_level": "medium",
+        "risk_notes": "Structurele marge daalt tijdens actieperiode",
+        "confidence": _avg_conf(sigs),
+        "score": _score(promo_margin, {"base_margin": total_margin}, base_bias=0.05),
+        "why_factors": all_factors,
+        "why_sources": _why_sources(sigs, ["pricing", "competition", "traffic"]),
+        "why_assumptions": common_assumptions + [
+            f"Aanname: +18% volume, +10% omzet, −12% marge door promotie-mix over {n_skus} SKU's.",
+        ],
+        "why_calculations": [
+            {"stap": "volume", "formule": f"basis {total_units:.0f} stuks × 1,18" if total_units is not None else "basis onbekend × 1,18", "resultaat": f"{promo_units:.0f} stuks" if promo_units is not None else "data unavailable"},
+            {"stap": "marge", "formule": "basismarge × 0,88 (promotiedruk)", "resultaat": f"€{promo_margin:,.0f}" if promo_margin is not None else "data unavailable"},
+        ],
+        "parameters": {"scope": "category", "category": category_id, "n_skus": n_skus, "discount_pct": 0.10, "duration_days": 14},
+    })
+
+    # 2. Mix-shift naar huismerk
+    if n_pl > 0 and n_skus > n_pl:
+        # Huismerk heeft hogere marge; target 5%-punt meer huismerkaandeel
+        hb_margin = total_margin * 1.08 if total_margin is not None else None
+        hb_revenue = total_revenue * 0.98 if total_revenue is not None else None  # licht lagere ASP
+        scenarios.append({
+            "scenario_type": "house_brand_action",
+            "description": (
+                f"Mix-shift: vergroot huismerkaandeel in '{category_id}' "
+                f"({n_pl} van {n_skus} SKU's zijn huismerk, huidig aandeel {pl_ratio:.0%})"
+            ),
+            "expected_units": total_units,
+            "expected_revenue": hb_revenue,
+            "expected_margin": hb_margin,
+            "customer_impact": "Neutraal: equivalente producten beschikbaar; lagere prijs voor klant",
+            "basket_impact": "Licht hogere basketfrequentie door scherpere categorieprijzen",
+            "stock_impact": "Verschuiving doorloop van A-merk naar huismerk",
+            "strategic_impact": "Structureel hogere categorismarge; vermindert afhankelijkheid van A-merk",
+            "risk_level": "medium",
+            "risk_notes": "Merkleverancier-relatie en klantperceptie bewaken",
+            "confidence": _avg_conf(by_engine.get("switching", []) + by_engine.get("bcg", []), 0.4),
+            "score": _score(hb_margin, {"base_margin": total_margin}, base_bias=0.1),
+            "why_factors": all_factors + [
+                {"factor": "huismerkaandeel", "waarde": round(pl_ratio, 3), "richting": "positive"},
+            ],
+            "why_sources": _why_sources(sigs, ["switching", "bcg", "pricing"]),
+            "why_assumptions": common_assumptions + [
+                f"Aanname: +8% marge door mix-shift; {n_pl} huismerk-SKU's in de categorie.",
+            ],
+            "why_calculations": [
+                {"stap": "marge", "formule": "basismarge × 1,08 (mix-shift naar huismerk)", "resultaat": f"€{hb_margin:,.0f}" if hb_margin is not None else "data unavailable"},
+            ],
+            "parameters": {"scope": "category", "category": category_id, "private_label_skus": private_label_skus[:10], "pl_ratio_current": round(pl_ratio, 3)},
+        })
+    else:
+        gaps.append("data unavailable: geen huismerk-SKU's in categorie — mix-shift scenario niet van toepassing")
+
+    # 3. Assortimentsactie (rationaliseer langzaam-lopers)
+    slow_margin = total_margin * 1.05 if total_margin is not None else None  # margeverbetering door focus
+    scenarios.append({
+        "scenario_type": "no_action",
+        "description": f"Geen actie — signalen bewust negeren voor categorie '{category_id}'",
+        "expected_units": total_units,
+        "expected_revenue": total_revenue,
+        "expected_margin": total_margin,
+        "customer_impact": "Neutraal",
+        "basket_impact": "Neutraal",
+        "stock_impact": "Ongewijzigd",
+        "strategic_impact": f"Actieve categorie-signalen blijven onbeantwoord ({len(sigs)} signalen)",
+        "risk_level": "low" if not sigs else "medium",
+        "risk_notes": f"{len(sigs)} actieve signalen blijven onbehandeld" if sigs else None,
+        "confidence": 0.5,
+        "score": _score(total_margin, {"base_margin": total_margin}, base_bias=-0.2 if sigs else 0.0),
+        "why_factors": all_factors,
+        "why_sources": _why_sources(sigs),
+        "why_assumptions": common_assumptions + ["Baseline zonder interventie op categorieniveau."],
+        "why_calculations": [],
+        "parameters": {"scope": "category", "category": category_id},
+    })
+
+    if not scenarios:
+        return None, 0
+
+    best = max(scenarios, key=lambda s: s["score"])
+    cat_name = category_id  # gebruik category_id als leesbare naam
+
+    decision = models.Decision(
+        shop_id=sid,
+        run_date=today,
+        entity_type="category",
+        entity_id=category_id,
+        entity_name=cat_name,
+        title=f"Categoriebeslissing voor '{cat_name}'",
+        signal_ids=[s.id for s in sigs],
+        signal_snapshot=[_signal_snapshot(s) for s in sigs],
+        data_gaps=gaps,
+        status="proposed",
+        proposed_by=AI_PROPOSER,
+        ai_model_version=DECISION_MODEL_VERSION,
+        model_version=DECISION_MODEL_VERSION,
+    )
+    db.add(decision)
+    db.flush()
+
+    rows = []
+    for sc in scenarios:
+        row = models.DecisionScenario(
+            decision_id=decision.id,
+            scenario_type=sc["scenario_type"],
+            label=SCENARIO_LABELS.get(sc["scenario_type"], sc["scenario_type"]),
+            description=sc["description"],
+            expected_units=sc.get("expected_units"),
+            expected_revenue=sc.get("expected_revenue"),
+            expected_margin=sc.get("expected_margin"),
+            customer_impact=sc.get("customer_impact"),
+            basket_impact=sc.get("basket_impact"),
+            stock_impact=sc.get("stock_impact"),
+            strategic_impact=sc.get("strategic_impact"),
+            risk_level=sc.get("risk_level", "medium"),
+            risk_notes=sc.get("risk_notes"),
+            confidence=sc.get("confidence", 0.5),
+            score=sc["score"],
+            is_recommended=(sc is best),
+            why_factors=sc.get("why_factors", []),
+            why_sources=sc.get("why_sources", []),
+            why_assumptions=sc.get("why_assumptions", []),
+            why_calculations=sc.get("why_calculations", []),
+            parameters=sc.get("parameters", {}),
+        )
+        db.add(row)
+        rows.append(row)
+    db.flush()
+
+    rec_row = next(r for r in rows if r.is_recommended)
+    decision.recommended_scenario_id = rec_row.id
+    decision.confidence = rec_row.confidence
+    decision.summary = (
+        f"Categorie '{cat_name}' — Aanbevolen: {rec_row.label} — {rec_row.description} "
+        f"(confidence {rec_row.confidence:.0%}, {n_skus} SKU's, {len(rows)} scenario's vergeleken)."
+    )
+
+    db.add(models.DecisionEvent(
+        decision_id=decision.id,
+        from_status=None,
+        to_status="proposed",
+        actor=AI_PROPOSER,
+        actor_type="ai",
+        note=(
+            f"Automatisch voorgesteld op basis van {len(sigs)} categorie-signalen; "
+            f"{n_skus} SKU's geaggregeerd; aanbevolen scenario: {rec_row.label}."
+        ),
+        values_snapshot={
+            "recommended_scenario": rec_row.scenario_type,
+            "confidence": rec_row.confidence,
+            "expected_margin": rec_row.expected_margin,
+            "signal_count": len(sigs),
+            "n_skus": n_skus,
+            "data_gaps": len(gaps),
+        },
+    ))
+    return decision, len(gaps)
 
 
 def _build_decision(db: Session, today: date, sid: int, sku_id: str, sigs: list, product) -> tuple:
