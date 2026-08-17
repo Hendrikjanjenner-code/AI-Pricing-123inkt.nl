@@ -18,7 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Bot, Send, Plus, Trash2, Sparkles, AlertTriangle, Info,
-  Database, Clock, Link2, Loader2, ShieldCheck,
+  Database, Clock, Link2, Loader2, ShieldCheck, ThumbsUp, ThumbsDown,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -41,7 +41,86 @@ type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   answer?: CopilotAnswer | null;
+  dbId?: number | null;
 };
+
+function FeedbackButtons({ messageId }: { messageId: number }) {
+  const [given, setGiven] = useState<1 | -1 | null>(null);
+  const [showComment, setShowComment] = useState(false);
+  const [comment, setComment] = useState("");
+  const [sending, setSending] = useState(false);
+
+  const send = async (score: 1 | -1, withComment?: string) => {
+    setSending(true);
+    try {
+      const res = await fetch(`${BASE}/api/copilot/messages/${messageId}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({ score, comment: withComment || undefined }),
+      });
+      if (res.ok) {
+        setGiven(score);
+        if (score === 1) setShowComment(false);
+      }
+    } catch {
+      /* noop */
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="mt-2 border-t pt-2">
+      <div className="flex items-center gap-1.5">
+        <span className="text-[11px] text-muted-foreground">Was dit antwoord nuttig?</span>
+        <button
+          type="button"
+          aria-label="Duim omhoog"
+          disabled={sending}
+          className={`rounded p-1 hover:bg-muted ${given === 1 ? "text-green-600" : "text-muted-foreground"}`}
+          onClick={() => void send(1)}
+        >
+          <ThumbsUp className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          aria-label="Duim omlaag"
+          disabled={sending}
+          className={`rounded p-1 hover:bg-muted ${given === -1 ? "text-red-600" : "text-muted-foreground"}`}
+          onClick={() => {
+            setShowComment(true);
+            void send(-1, comment.trim() || undefined);
+          }}
+        >
+          <ThumbsDown className="h-3.5 w-3.5" />
+        </button>
+        {given != null && (
+          <span className="text-[11px] text-muted-foreground">Bedankt voor je feedback.</span>
+        )}
+      </div>
+      {showComment && (
+        <form
+          className="mt-1.5 flex items-center gap-1.5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void send(-1, comment.trim() || undefined);
+          }}
+        >
+          <input
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Optioneel: wat kon beter?"
+            className="h-7 flex-1 rounded-md border bg-background px-2 text-xs"
+            maxLength={2000}
+          />
+          <Button type="submit" size="sm" variant="outline" className="h-7 text-xs" disabled={sending}>
+            Verstuur
+          </Button>
+        </form>
+      )}
+    </div>
+  );
+}
 
 function ConfidenceBadge({ value }: { value: number | null | undefined }) {
   const v = typeof value === "number" ? value : 0;
@@ -169,6 +248,7 @@ export default function CopilotPage() {
           role: m.role as "user" | "assistant",
           content: m.content,
           answer: (m.answer as CopilotAnswer | null) ?? null,
+          dbId: typeof m.id === "number" ? m.id : Number(m.id) || null,
         })),
       );
     }
@@ -242,6 +322,18 @@ export default function CopilotPage() {
               ...prev,
               { id: `a-${Date.now()}`, role: "assistant", content: a.conclusion || "", answer: a },
             ]);
+          } else if (evt.type === "done" && evt.message_id) {
+            // Koppel het DB-id aan het laatste assistant-bericht (voor feedback)
+            setMessages((prev) => {
+              const next = [...prev];
+              for (let i = next.length - 1; i >= 0; i--) {
+                if (next[i].role === "assistant") {
+                  next[i] = { ...next[i], dbId: evt.message_id as number };
+                  break;
+                }
+              }
+              return next;
+            });
           }
         }
       }
@@ -382,6 +474,7 @@ export default function CopilotPage() {
                       ) : (
                         <p className="text-sm">{m.content}</p>
                       )}
+                      {m.dbId != null && <FeedbackButtons key={m.dbId} messageId={m.dbId} />}
                     </div>
                   </div>
                 ),

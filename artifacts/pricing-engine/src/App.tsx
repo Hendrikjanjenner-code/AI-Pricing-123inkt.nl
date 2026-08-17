@@ -115,6 +115,7 @@ import PlatformGap from "@/pages/platform-gap";
 import DocsCenter from "@/pages/docs-center";
 import DevBacklog from "@/pages/dev-backlog";
 import Eindevaluatie from "@/pages/eindevaluatie";
+import CopilotKwaliteit from "@/pages/copilot-kwaliteit";
 
 const queryClient = new QueryClient();
 
@@ -129,6 +130,9 @@ function Router() {
       {/* Commercial AI Copilot */}
       <Route path="/copilot">
         <ProtectedRoute><Copilot /></ProtectedRoute>
+      </Route>
+      <Route path="/copilot-kwaliteit">
+        <ProtectedRoute><CopilotKwaliteit /></ProtectedRoute>
       </Route>
 
       {/* Intelligence Signals */}

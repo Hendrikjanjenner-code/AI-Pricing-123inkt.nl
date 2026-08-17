@@ -2284,7 +2284,32 @@ class AiModelCall(Base):
     duration_ms = Column(Float)
     status = Column(String(30), default="success")  # success / failed / unavailable
     error_message = Column(Text)
+    prompt_version_id = Column(Integer, index=True)  # gebruikte PromptVersion (§48)
 
+class AiFeedback(Base):
+    """
+    Feedback op één Copilot-antwoord (leerloop): duim omhoog/omlaag met
+    optionele toelichting, gekoppeld aan vraag, antwoord, gebruikte tools en
+    promptversie. Basis voor het kwaliteitsdashboard en few-shot-hergebruik.
+    """
+    __tablename__ = "ai_feedback"
+    __table_args__ = (
+        UniqueConstraint("message_id", "user_id", name="uq_ai_feedback_msg_user"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(Integer, ForeignKey("ai_messages.id"), nullable=False, index=True)
+    conversation_id = Column(Integer, ForeignKey("ai_conversations.id"), index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    username = Column(String(100))
+    score = Column(Integer, nullable=False)        # +1 (duim omhoog) / -1 (duim omlaag)
+    comment = Column(Text)                         # optionele toelichting
+    question = Column(Text)                        # de vraag waarop dit antwoord kwam
+    answer_excerpt = Column(Text)                  # conclusion-tekst van het antwoord
+    tools_used = Column(JSON)                      # [functienamen] uit answer.sources
+    prompt_version_id = Column(Integer, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 class PlatformModule(Base):
     """
     Module-registry (§46/§49): per platformmodule de verwachte functionaliteit,
@@ -2593,3 +2618,34 @@ class CompetitorCoverageResult(Base):
     matched_products = Column(Integer, default=0)     # gematchte (niet-REJECTED) SKU's
     coverage_pct = Column(Float)                      # matched/own * 100
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class AiUserMemory(Base):
+    """
+    Duurzaam Copilot-geheugen (leerloop): voorkeuren en vaste context per
+    gebruiker (user_id gezet) of organisatie-breed (user_id NULL), geëxtraheerd
+    uit gesprekken en geïnjecteerd in nieuwe gesprekken.
+    """
+    __tablename__ = "ai_user_memory"
+    __table_args__ = (
+        UniqueConstraint("user_id", "key", name="uq_ai_memory_user_key"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)  # NULL = organisatie
+    key = Column(String(200), nullable=False)      # bv. favoriete_categorie
+    value = Column(Text, nullable=False)           # bv. "Dranken"
+    source_conversation_id = Column(Integer, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class AiConversationSummary(Base):
+    """Samenvatting van lange Copilot-gesprekken: oudere berichten worden
+    samengevat i.p.v. afgekapt (leerloop)."""
+    __tablename__ = "ai_conversation_summaries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("ai_conversations.id"),
+                             nullable=False, unique=True, index=True)
+    summary = Column(Text, nullable=False)
+    upto_message_id = Column(Integer)              # laatste bericht in de samenvatting
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

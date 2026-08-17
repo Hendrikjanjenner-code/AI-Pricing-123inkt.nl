@@ -63,3 +63,31 @@ Antwoord: conclusion · period · sources · data_freshness · records ·
 - **Fail-safe (§56):** zonder of met falende LLM-provider blijft de
   applicatie volledig werken; de Copilot geeft dan een gestructureerd
   foutantwoord met warning, nooit een 500.
+
+## Leerloop (feedback · geheugen · hergebruik · kwaliteit)
+
+- **Systeemprompt uit governance (§48):** de prompt komt uit `PromptVersion`
+  (module `ai_copilot`, hoogste versie; v1 wordt automatisch geseed vanuit de
+  ingebouwde prompt). De gebruikte versie wordt per call gelogd
+  (`ai_model_calls.prompt_version_id`) en per antwoord bewaard.
+- **Feedback:** `POST /api/copilot/messages/{id}/feedback` (score ±1 +
+  toelichting; één per gebruiker per antwoord, upsert) → `ai_feedback`,
+  gekoppeld aan vraag, antwoord, gebruikte tools en promptversie. Negatieve
+  feedback maakt automatisch een verbetersuggestie-item in de governance-
+  backlog (`copilot_quality_loop`; menselijke goedkeuring, geen automatisch
+  herschrijven van prompts).
+- **Duurzaam geheugen:** na elke `MEMORY_EXTRACT_EVERY` vragen extraheert een
+  aparte LLM-call duurzame voorkeuren (geen PII) → `ai_user_memory`
+  (per gebruiker of organisatie-breed, user_id NULL); deze worden als
+  systeemcontext geïnjecteerd in nieuwe gesprekken.
+- **Gesprekssamenvatting:** gesprekken langer dan 12 berichten worden
+  samengevat (`ai_conversation_summaries`) en de samenvatting gaat mee in
+  plaats van hard afkappen.
+- **Hergebruik (few-shot):** vergelijkbare, positief beoordeelde eerdere
+  vragen+antwoorden worden opgehaald (woordoverlap-similarity) en als
+  voorbeeldcontext meegegeven; "vaker gesteld" via `GET /api/copilot/faq`.
+- **Kwaliteitsdashboard:** `GET /api/copilot/quality` (analyst+): feedback-
+  score per week, per promptversie (versievergelijking) en per tool, plus
+  drill-down naar laag-scorende antwoorden. Frontend: `/copilot-kwaliteit`.
+- Alle extra LLM-calls (samenvatting, extractie) lopen door dezelfde
+  PII-scrub, logging (`ai_model_calls` + `cost_usage_records`) en fail-safe.

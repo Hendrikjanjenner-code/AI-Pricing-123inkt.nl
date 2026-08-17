@@ -9,7 +9,9 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from sqlalchemy import desc
+from datetime import timedelta
+
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 import ai_gateway
@@ -169,6 +171,9 @@ def send_message(
         conv.title = question[:300]
     db.commit()
 
+    # Lange gesprekken: samenvatting van oudere berichten meesturen (leerloop)
+    history_summary = ai_gateway.get_history_summary(db, conv.id)
+
     def event_stream():
         final_answer = None
         try:
@@ -177,6 +182,7 @@ def send_message(
                 conversation_id=conv.id,
                 # Shop-scope server-side uit het gesprek — nooit uit modeloutput
                 shop_id=conv.shop_id,
+                history_summary=history_summary,
             ):
                 if event.get("type") == "answer":
                     final_answer = event["answer"]
@@ -192,18 +198,28 @@ def send_message(
             }
             yield f"data: {json.dumps({'type': 'answer', 'answer': final_answer}, default=str)}\n\n"
         # Assistant-antwoord persisteren voor de gespreksgeschiedenis
+        assistant_message_id = None
         try:
             if final_answer:
-                db.add(models.AiMessage(
+                msg = models.AiMessage(
                     conversation_id=conv.id, role="assistant",
                     content=final_answer.get("conclusion") or "",
                     answer_json=final_answer,
-                ))
+                )
+                db.add(msg)
                 conv.updated_at = models.datetime.utcnow()
                 db.commit()
+                assistant_message_id = msg.id
         except Exception:
             db.rollback()
-        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'message_id': assistant_message_id})}\n\n"
+        # Leerloop (fail-safe, na het antwoord): samenvatting van lange
+        # gesprekken + extractie van duurzame voorkeuren (§ leerloop)
+        try:
+            ai_gateway.maybe_summarize_conversation(db, current_user, conv.id)
+            ai_gateway.maybe_extract_memory(db, current_user, conv.id)
+        except Exception:
+            pass
 
     return StreamingResponse(
         event_stream(),
@@ -234,3 +250,184 @@ def list_model_calls(
         "duration_ms": r.duration_ms, "status": r.status,
         "error_message": r.error_message,
     } for r in rows]
+
+
+# ─── Leerloop: feedback, FAQ en kwaliteitsdashboard ──────────────────────────
+
+@router.post("/messages/{message_id}/feedback")
+def give_feedback(
+    message_id: int,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """Beoordeel één Copilot-antwoord (duim omhoog/omlaag + toelichting).
+    Eén feedback per gebruiker per antwoord (upsert). Negatieve feedback
+    genereert automatisch een verbetersuggestie-item in de backlog."""
+    score = payload.get("score")
+    if score not in (1, -1):
+        raise HTTPException(status_code=400, detail="score moet 1 of -1 zijn")
+    comment = (payload.get("comment") or "").strip()[:2000] or None
+
+    msg = db.query(models.AiMessage).filter(models.AiMessage.id == message_id).first()
+    if not msg or msg.role != "assistant":
+        raise HTTPException(status_code=404, detail="Antwoord niet gevonden")
+    _own_conversation(db, current_user, msg.conversation_id)
+
+    # Context: de vraag vóór dit antwoord + gebruikte tools + promptversie
+    prev_q = db.query(models.AiMessage).filter(
+        models.AiMessage.conversation_id == msg.conversation_id,
+        models.AiMessage.role == "user",
+        models.AiMessage.id < msg.id,
+    ).order_by(desc(models.AiMessage.id)).first()
+    answer = msg.answer_json or {}
+    tools = [s.get("function") for s in (answer.get("sources") or [])
+             if isinstance(s, dict) and s.get("function")]
+
+    fb = db.query(models.AiFeedback).filter(
+        models.AiFeedback.message_id == msg.id,
+        models.AiFeedback.user_id == current_user.id,
+    ).first()
+    created = fb is None
+    if fb is None:
+        fb = models.AiFeedback(message_id=msg.id, user_id=current_user.id)
+        db.add(fb)
+    fb.conversation_id = msg.conversation_id
+    fb.username = current_user.username
+    fb.score = score
+    fb.comment = comment
+    fb.question = prev_q.content if prev_q else None
+    fb.answer_excerpt = msg.content
+    fb.tools_used = tools
+    fb.prompt_version_id = answer.get("prompt_version_id")
+    db.commit()
+    db.refresh(fb)
+
+    # Kwaliteitsloop: negatieve feedback → verbetersuggestie (menselijke
+    # goedkeuring via de governance-backlog, geen automatisch herschrijven)
+    if score == -1:
+        marker = f"[copilot-feedback #{fb.id}]"
+        exists = db.query(models.BacklogItem).filter(
+            models.BacklogItem.module_key == "ai_copilot",
+            models.BacklogItem.description.like(f"%{marker}%"),
+        ).first()
+        if not exists:
+            q_txt = (fb.question or "(onbekende vraag)")[:200]
+            db.add(models.BacklogItem(
+                module_key="ai_copilot",
+                title=f"Copilot-verbetersuggestie: negatief beoordeeld antwoord op '{q_txt}'"[:500],
+                description=(
+                    f"{marker} Automatisch aangemaakt door de Copilot-kwaliteitsloop.\n\n"
+                    f"Vraag: {fb.question or '-'}\n\n"
+                    f"Antwoord: {(fb.answer_excerpt or '-')[:1500]}\n\n"
+                    f"Toelichting gebruiker: {comment or '-'}\n"
+                    f"Gebruikte tools: {', '.join(tools) or '-'}\n"
+                    f"Promptversie-id: {fb.prompt_version_id or '-'}\n\n"
+                    "Beoordeel of de systeemprompt (PromptVersion ai_copilot) of de "
+                    "tooling moet worden aangepast; wijzigingen via governance."
+                ),
+                item_type="improvement", status="open", priority="medium",
+                created_by="copilot_quality_loop",
+            ))
+            db.commit()
+
+    return {"id": fb.id, "message_id": msg.id, "score": fb.score,
+            "comment": fb.comment, "created": created}
+
+
+@router.get("/faq")
+def frequently_asked(
+    limit: int = 10,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth_utils.get_current_user),
+):
+    """'Vaker gesteld'-overzicht: meest voorkomende vragen (organisatie-breed,
+    genormaliseerd op kleine letters)."""
+    limit = max(1, min(limit, 50))
+    norm = func.lower(func.trim(models.AiMessage.content))
+    rows = (db.query(norm.label("q"), func.count(models.AiMessage.id).label("n"),
+                     func.max(models.AiMessage.created_at).label("last"))
+            .filter(models.AiMessage.role == "user")
+            .group_by(norm).order_by(desc("n"), desc("last")).limit(limit).all())
+    return {"questions": [
+        {"question": r.q, "count": int(r.n),
+         "last_asked": r.last.isoformat() if r.last else None}
+        for r in rows if r.q
+    ]}
+
+
+@router.get("/quality")
+def quality_dashboard(
+    weeks: int = 12,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth_utils.require_role("admin", "pricing_manager", "analyst")),
+):
+    """Kwaliteitsdashboard (analyst+): feedbackscore per week, per promptversie
+    en per tool; laag-scorende antwoorden voor analyse (leerloop)."""
+    weeks = max(1, min(weeks, 52))
+    since = models.datetime.utcnow() - timedelta(weeks=weeks)
+    all_fb = db.query(models.AiFeedback).filter(
+        models.AiFeedback.created_at >= since).all()
+
+    def _agg(rows):
+        pos = sum(1 for r in rows if r.score > 0)
+        neg = sum(1 for r in rows if r.score < 0)
+        total = pos + neg
+        return {"positive": pos, "negative": neg, "total": total,
+                "score_pct": round(100.0 * pos / total, 1) if total else None}
+
+    # Per ISO-week
+    by_week: dict = {}
+    for r in all_fb:
+        iso = (r.created_at or models.datetime.utcnow()).isocalendar()
+        by_week.setdefault(f"{iso[0]}-W{iso[1]:02d}", []).append(r)
+    weekly = [{"week": w, **_agg(rows)} for w, rows in sorted(by_week.items())]
+
+    # Per promptversie (vergelijking van versies op feedbackscore)
+    versions = {p.id: p for p in db.query(models.PromptVersion).filter(
+        models.PromptVersion.module_key == ai_gateway.PROMPT_MODULE_KEY).all()}
+    by_version: dict = {}
+    for r in all_fb:
+        by_version.setdefault(r.prompt_version_id, []).append(r)
+    per_version = [{
+        "prompt_version_id": vid,
+        "version": versions[vid].version if vid in versions else None,
+        "title": versions[vid].title if vid in versions else None,
+        **_agg(rows),
+    } for vid, rows in sorted(by_version.items(), key=lambda t: (t[0] is None, t[0]))]
+
+    # Per tool
+    by_tool: dict = {}
+    for r in all_fb:
+        for t in (r.tools_used or []):
+            by_tool.setdefault(t, []).append(r)
+    per_tool = [{"tool": t, **_agg(rows)} for t, rows in sorted(by_tool.items())]
+
+    # Laag-scorende antwoorden (drill-down voor analyse)
+    low = (db.query(models.AiFeedback)
+           .filter(models.AiFeedback.score < 0)
+           .order_by(desc(models.AiFeedback.created_at)).limit(50).all())
+    low_out = [{
+        "feedback_id": r.id, "message_id": r.message_id,
+        "conversation_id": r.conversation_id, "username": r.username,
+        "question": r.question, "answer_excerpt": (r.answer_excerpt or "")[:500],
+        "comment": r.comment, "tools_used": r.tools_used,
+        "prompt_version_id": r.prompt_version_id,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    } for r in low]
+
+    suggestions_open = db.query(func.count(models.BacklogItem.id)).filter(
+        models.BacklogItem.module_key == "ai_copilot",
+        models.BacklogItem.created_by == "copilot_quality_loop",
+        models.BacklogItem.status == "open",
+    ).scalar() or 0
+
+    return {
+        "period_weeks": weeks,
+        "overall": _agg(all_fb),
+        "weekly": weekly,
+        "per_prompt_version": per_version,
+        "per_tool": per_tool,
+        "low_scoring": low_out,
+        "open_improvement_suggestions": int(suggestions_open),
+    }

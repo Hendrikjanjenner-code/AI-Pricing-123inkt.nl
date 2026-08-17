@@ -285,38 +285,34 @@ def get_data_freshness(db: Session) -> dict:
         "signals": _max(models.IntelligenceSignal.observed_at),
     }
 
+def get_active_prompt(db: Session) -> tuple[str, Optional[int], Optional[int]]:
+    """Laad de hoogste PromptVersion voor de Copilot; seed v1 vanuit de
+    ingebouwde SYSTEM_PROMPT als er nog geen versie bestaat.
 
-# ─── Antwoordstructuur ───────────────────────────────────────────────────────
-
-ANSWER_KEYS = [
-    "conclusion", "period", "sources", "data_freshness", "records",
-    "confidence", "limitations", "warnings", "suggested_action", "links",
-]
-
-SYSTEM_PROMPT = """Je bent de Commercial AI Copilot van het AI Pricing & Commercial Intelligence Platform.
-Je beantwoordt vragen van commerciële gebruikers (Nederlands) over pricing, marge, concurrentie, huismerk, promoties, traffic, inkoop en kansen.
-
-Regels:
-- Je mag UITSLUITEND data gebruiken die je via de aangeboden tools ophaalt. Verzin nooit cijfers.
-- Roep eerst de relevante tool(s) aan; combineer meerdere tools waar nodig.
-- Voor what-if-prijsvragen gebruik je simulate_price_change (change_pct als fractie, +3% = 0.03). Je voert NOOIT een prijswijziging uit — je simuleert alleen.
-- Als een tool 'data_available': false teruggeeft, zeg dat eerlijk ("data unavailable") en benoem dat als limitation.
-- Antwoord altijd in het Nederlands, zakelijk en concreet.
-
-Als je klaar bent met tools, geef je je eindantwoord als JSON-object met exact deze velden:
-{
-  "conclusion": "kernconclusie in 2-6 zinnen, met concrete cijfers uit de tooldata",
-  "period": "gebruikte periode, bv. 'laatste 30 dagen' of run-datum",
-  "confidence": 0.0-1.0 (jouw inschatting van betrouwbaarheid op basis van datadekking),
-  "limitations": ["beperkingen van dit antwoord"],
-  "warnings": ["waarschuwingen, bv. ontbrekende data of lage confidence"],
-  "suggested_action": "concrete vervolgactie voor de gebruiker (of null)",
-  "links": [{"label": "modulenaam", "path": "/frontend-pad"}]
-}
-Beschikbare frontend-paden voor links: /prijsadviezen, /beslissingen, /producten, /signalen, /competition, /huismerk-impact, /promotie-intelligence, /procurement-forecast, /opportunities, /traffic-dashboard, /elasticiteit.
-Geef ALLEEN het JSON-object, geen andere tekst."""
-
-
+    Returns (prompt_text, prompt_version_id, version)."""
+    try:
+        row = (db.query(models.PromptVersion)
+               .filter(models.PromptVersion.module_key == PROMPT_MODULE_KEY,
+                       models.PromptVersion.title == PROMPT_TITLE)
+               .order_by(models.PromptVersion.version.desc())
+               .first())
+        if row is None:
+            row = models.PromptVersion(
+                module_key=PROMPT_MODULE_KEY, title=PROMPT_TITLE, version=1,
+                prompt_text=SYSTEM_PROMPT, created_by="system",
+                notes="Automatisch geseed vanuit de ingebouwde Copilot-systeemprompt.",
+            )
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+        return row.prompt_text, row.id, row.version
+    except Exception as exc:
+        logger.warning("PromptVersion laden mislukt, fallback op ingebouwde prompt: %s", exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return SYSTEM_PROMPT, None, None
 def _default_answer(conclusion: str, warnings: list[str], freshness: dict) -> dict:
     return {
         "conclusion": conclusion,
@@ -369,7 +365,35 @@ def _execute_tool(db: Session, user: models.User, name: str, arguments: dict,
     # PII-scrub op ALLES wat richting het model gaat (§31)
     return pii_scrub(result), meta
 
+def build_messages(db: Session, user: models.User, history: list[dict],
+                   question: str, system_prompt: Optional[str] = None,
+                   history_summary: Optional[str] = None) -> list[dict]:
+    """Bouw de berichtenlijst richting het model:
+    systeemprompt (uit PromptVersion) + duurzaam geheugen + few-shot uit goed
+    beoordeelde eerdere antwoorden + (samengevatte) historie + de vraag.
+    Alles wordt PII-gescrubd (§31)."""
+    if system_prompt is None:
+        system_prompt, _pid, _v = get_active_prompt(db)
+    messages = [{"role": "system", "content": system_prompt}]
 
+    memory_block = get_memory_block(db, user)
+    if memory_block:
+        messages.append({"role": "system", "content": pii_scrub(memory_block)})
+
+    examples = get_fewshot_examples(db, question)
+    if examples:
+        messages.append({"role": "system", "content": pii_scrub(_fewshot_block(examples))})
+
+    # Lange gesprekken: samenvatting van oudere berichten i.p.v. hard afkappen
+    if history_summary and len(history) > MAX_HISTORY_MESSAGES:
+        messages.append({
+            "role": "system",
+            "content": pii_scrub("Samenvatting van het eerdere gesprek:\n" + history_summary),
+        })
+    for m in history[-MAX_HISTORY_MESSAGES:]:
+        messages.append({"role": m["role"], "content": pii_scrub(m["content"])})
+    messages.append({"role": "user", "content": pii_scrub(question)})
+    return messages
 def run_copilot(
     db: Session,
     user: models.User,
@@ -378,6 +402,7 @@ def run_copilot(
     conversation_id: Optional[int] = None,
     purpose: str = "copilot_question",
     shop_id: Optional[int] = None,
+    history_summary: Optional[str] = None,
 ) -> Generator[dict, None, None]:
     """
     Voer de volledige gateway-pipeline uit en yield events:
@@ -395,6 +420,9 @@ def run_copilot(
     error_message = None
     answer = None
 
+    # Prompt-lifecycle (§48): systeemprompt uit PromptVersion-governance
+    system_prompt, prompt_version_id, prompt_version = get_active_prompt(db)
+
     client, provider = _make_client()
     if client is None:
         status = "unavailable"
@@ -404,18 +432,20 @@ def run_copilot(
             ["AI-integratie (Replit AI) is niet geconfigureerd — geen LLM-call uitgevoerd."],
             freshness,
         )
+        answer["prompt_version_id"] = prompt_version_id
+        answer["prompt_version"] = prompt_version
         yield {"type": "answer", "answer": answer}
         _log_call(db, user, conversation_id, purpose, provider or "none", calls_meta,
-                  usage, roundtrips, started, status, "AI-provider niet geconfigureerd")
+                  usage, roundtrips, started, status, "AI-provider niet geconfigureerd",
+                  prompt_version_id=prompt_version_id)
         return
 
     # PII-scrub op ALLE tekst richting het model (§31): ook de vraag en de
     # gespreksgeschiedenis kunnen door de gebruiker ingevoerde
     # persoonsgegevens bevatten (e-mail, telefoonnummer, ...).
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-    for m in history[-MAX_HISTORY_MESSAGES:]:
-        messages.append({"role": m["role"], "content": pii_scrub(m["content"])})
-    messages.append({"role": "user", "content": pii_scrub(question)})
+    messages = build_messages(db, user, history, question,
+                              system_prompt=system_prompt,
+                              history_summary=history_summary)
     tools = build_tools()
 
     try:
@@ -493,6 +523,8 @@ def run_copilot(
     if not calls_meta and status == "success":
         answer["warnings"].append("Dit antwoord is niet onderbouwd met platformdata (geen tool-calls).")
         answer["confidence"] = min(float(answer.get("confidence") or 0), 0.3)
+    answer["prompt_version_id"] = prompt_version_id
+    answer["prompt_version"] = prompt_version
     for k in ANSWER_KEYS:
         answer.setdefault(k, None)
 
@@ -502,7 +534,8 @@ def run_copilot(
 
     yield {"type": "answer", "answer": answer}
     _log_call(db, user, conversation_id, purpose, provider, calls_meta, usage,
-              roundtrips, started, status, error_message)
+              roundtrips, started, status, error_message,
+              prompt_version_id=prompt_version_id)
 
 
 def _parse_answer(raw: str) -> dict:
@@ -534,7 +567,8 @@ def _parse_answer(raw: str) -> dict:
 def _log_call(db: Session, user: models.User, conversation_id: Optional[int],
               purpose: str, provider: str, calls_meta: list[dict], usage: dict,
               roundtrips: int, started: float, status: str,
-              error_message: Optional[str]) -> None:
+              error_message: Optional[str],
+              prompt_version_id: Optional[int] = None) -> None:
     """Log de gateway-call in AiModelCall + CostUsageRecord. Faalt stil-veilig."""
     duration_ms = round((time.time() - started) * 1000, 1)
     datasources = sorted({m.get("data_source") or "postgresql" for m in calls_meta}) if calls_meta else []
@@ -549,6 +583,7 @@ def _log_call(db: Session, user: models.User, conversation_id: Optional[int],
             total_tokens=usage["total_tokens"],
             llm_roundtrips=roundtrips, duration_ms=duration_ms,
             status=status, error_message=error_message,
+            prompt_version_id=prompt_version_id,
         ))
         db.add(models.CostUsageRecord(
             usage_type="ai_call", module="copilot", username=user.username,
@@ -563,3 +598,203 @@ def _log_call(db: Session, user: models.User, conversation_id: Optional[int],
             db.rollback()
         except Exception:
             pass
+
+def maybe_summarize_conversation(db: Session, user: models.User,
+                                 conversation_id: int) -> None:
+    """Vat oudere berichten van een lang gesprek samen (i.p.v. afkappen).
+    Fail-safe: fouten worden gelogd, nooit doorgegeven."""
+    try:
+        msgs = (db.query(models.AiMessage)
+                .filter(models.AiMessage.conversation_id == conversation_id)
+                .order_by(models.AiMessage.id).all())
+        if len(msgs) <= MAX_HISTORY_MESSAGES:
+            return
+        older = msgs[:-SUMMARY_KEEP_RECENT]
+        existing = (db.query(models.AiConversationSummary)
+                    .filter(models.AiConversationSummary.conversation_id == conversation_id)
+                    .first())
+        if existing and existing.upto_message_id == older[-1].id:
+            return  # al actueel
+        client, provider = _make_client()
+        if client is None:
+            return
+        started = time.time()
+        transcript = "\n".join(
+            f"{m.role}: {pii_scrub(m.content or '')[:1000]}" for m in older)[:20000]
+        prev = f"Bestaande samenvatting:\n{existing.summary}\n\n" if existing else ""
+        resp = client.chat.completions.create(
+            model=AI_MODEL, max_completion_tokens=1024,
+            messages=[
+                {"role": "system", "content":
+                 "Vat het onderstaande Copilot-gesprek beknopt samen in het Nederlands "
+                 "(max 10 zinnen): welke vragen zijn gesteld, welke conclusies en cijfers "
+                 "zijn gegeven, en welke voorkeuren toont de gebruiker. Geen opmaak."},
+                {"role": "user", "content": prev + transcript},
+            ])
+        summary = (resp.choices[0].message.content or "").strip()
+        if not summary:
+            return
+        summary = _scrub_text(summary)
+        if existing:
+            existing.summary = summary
+            existing.upto_message_id = older[-1].id
+            existing.updated_at = datetime.utcnow()
+        else:
+            db.add(models.AiConversationSummary(
+                conversation_id=conversation_id, summary=summary,
+                upto_message_id=older[-1].id))
+        db.commit()
+        usage = {"prompt_tokens": (resp.usage.prompt_tokens or 0) if resp.usage else 0,
+                 "completion_tokens": (resp.usage.completion_tokens or 0) if resp.usage else 0,
+                 "total_tokens": (resp.usage.total_tokens or 0) if resp.usage else 0}
+        _log_call(db, user, conversation_id, "conversation_summary", provider,
+                  [], usage, 1, started, "success", None)
+    except Exception as exc:
+        logger.warning("Gesprekssamenvatting mislukt: %s", exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+def maybe_extract_memory(db: Session, user: models.User,
+                         conversation_id: int) -> None:
+    """Extraheer duurzame voorkeuren/context uit het gesprek en sla ze op als
+    AiUserMemory (upsert per key). Draait elke MEMORY_EXTRACT_EVERY vragen.
+    Fail-safe: fouten worden gelogd, nooit doorgegeven."""
+    try:
+        user_msgs = (db.query(models.AiMessage)
+                     .filter(models.AiMessage.conversation_id == conversation_id,
+                             models.AiMessage.role == "user")
+                     .order_by(models.AiMessage.id).all())
+        if not user_msgs or len(user_msgs) % MEMORY_EXTRACT_EVERY != 0:
+            return
+        client, provider = _make_client()
+        if client is None:
+            return
+        started = time.time()
+        recent = user_msgs[-(MEMORY_EXTRACT_EVERY * 2):]
+        transcript = "\n".join(f"- {pii_scrub(m.content or '')[:600]}" for m in recent)
+        resp = client.chat.completions.create(
+            model=AI_MODEL, max_completion_tokens=1024,
+            messages=[
+                {"role": "system", "content":
+                 "Je destilleert DUURZAME voorkeuren en vaste context van een commerciële "
+                 "gebruiker uit diens Copilot-vragen (bv. favoriete categorieën, vaste SKU's, "
+                 "KPI-definitievoorkeuren, gewenste periodes). GEEN eenmalige vragen of "
+                 "persoonsgegevens. Antwoord als JSON-array: "
+                 '[{"key": "korte_snake_case_sleutel", "value": "waarde"}]. '
+                 "Maximaal 5 items; lege array [] als er niets duurzaams is."},
+                {"role": "user", "content": transcript},
+            ])
+        raw = (resp.choices[0].message.content or "").strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
+        try:
+            items = json.loads(raw)
+        except json.JSONDecodeError:
+            items = []
+        if not isinstance(items, list):
+            items = []
+        for it in items[:5]:
+            if not isinstance(it, dict):
+                continue
+            key = str(it.get("key") or "").strip()[:200]
+            value = _scrub_text(str(it.get("value") or "").strip())[:2000]
+            if not key or not value or _PII_KEY_PATTERN.search(key):
+                continue
+            row = (db.query(models.AiUserMemory)
+                   .filter(models.AiUserMemory.user_id == user.id,
+                           models.AiUserMemory.key == key).first())
+            if row:
+                row.value = value
+                row.source_conversation_id = conversation_id
+                row.updated_at = datetime.utcnow()
+            else:
+                db.add(models.AiUserMemory(
+                    user_id=user.id, key=key, value=value,
+                    source_conversation_id=conversation_id))
+        db.commit()
+        usage = {"prompt_tokens": (resp.usage.prompt_tokens or 0) if resp.usage else 0,
+                 "completion_tokens": (resp.usage.completion_tokens or 0) if resp.usage else 0,
+                 "total_tokens": (resp.usage.total_tokens or 0) if resp.usage else 0}
+        _log_call(db, user, conversation_id, "memory_extraction", provider,
+                  [], usage, 1, started, "success", None)
+    except Exception as exc:
+        logger.warning("Geheugen-extractie mislukt: %s", exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+def get_memory_block(db: Session, user: models.User) -> Optional[str]:
+    """Bouw het geheugen-contextblok: voorkeuren van deze gebruiker plus
+    organisatie-brede context (user_id NULL). None als er niets is."""
+    try:
+        rows = (db.query(models.AiUserMemory)
+                .filter((models.AiUserMemory.user_id == user.id) |
+                        (models.AiUserMemory.user_id.is_(None)))
+                .order_by(models.AiUserMemory.updated_at.desc())
+                .limit(MAX_MEMORY_ITEMS).all())
+    except Exception:
+        return None
+    if not rows:
+        return None
+    lines = [f"- {r.key}: {r.value}" + (" (organisatie-breed)" if r.user_id is None else "")
+             for r in rows]
+    return ("Bekende voorkeuren en vaste context van deze gebruiker/organisatie "
+            "(gebruik dit alleen als het relevant is voor de vraag):\n" + "\n".join(lines))
+
+def get_fewshot_examples(db: Session, question: str,
+                         limit: int = FEWSHOT_LIMIT) -> list[dict]:
+    """Zoek eerder positief beoordeelde, vergelijkbare vragen+antwoorden
+    (woordoverlap-similarity over recente positieve feedback)."""
+    try:
+        rows = (db.query(models.AiFeedback)
+                .filter(models.AiFeedback.score > 0,
+                        models.AiFeedback.question.isnot(None),
+                        models.AiFeedback.answer_excerpt.isnot(None))
+                .order_by(models.AiFeedback.created_at.desc())
+                .limit(200).all())
+    except Exception:
+        return []
+    scored = []
+    for r in rows:
+        sim = _similarity(question, r.question or "")
+        if sim >= 0.25:
+            scored.append((sim, r))
+    scored.sort(key=lambda t: t[0], reverse=True)
+    seen: set[str] = set()
+    out = []
+    for _sim, r in scored:
+        key = (r.question or "").strip().lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"question": r.question, "answer": r.answer_excerpt})
+        if len(out) >= limit:
+            break
+    return out
+
+def _fewshot_block(examples: list[dict]) -> str:
+    parts = ["Eerder goed beoordeelde antwoorden op vergelijkbare vragen "
+             "(alleen als stijl-/aanpakvoorbeeld — haal actuele cijfers ALTIJD "
+             "opnieuw op via de tools):"]
+    for ex in examples:
+        parts.append(f"Vraag: {ex['question']}\nGoed beoordeeld antwoord: {ex['answer']}")
+    return "\n\n".join(parts)
+
+def get_history_summary(db: Session, conversation_id: int) -> Optional[str]:
+    try:
+        row = (db.query(models.AiConversationSummary)
+               .filter(models.AiConversationSummary.conversation_id == conversation_id)
+               .first())
+        return row.summary if row else None
+    except Exception:
+        return None
+
+def _similarity(a: str, b: str) -> float:
+    wa = set(_WORD_RE.findall(a.lower()))
+    wb = set(_WORD_RE.findall(b.lower()))
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / len(wa | wb)
