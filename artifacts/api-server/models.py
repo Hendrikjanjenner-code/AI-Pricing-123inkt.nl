@@ -2277,6 +2277,32 @@ class AiModelCall(Base):
     status = Column(String(30), default="success")  # success / failed / unavailable
     error_message = Column(Text)
 
+class PlatformModule(Base):
+    """
+    Module-registry (§46/§49): per platformmodule de verwachte functionaliteit,
+    huidige implementatie, gap en prioriteit, plus production-readiness-scores
+    op de tien §46-criteria. Het label 'Production Ready' vereist expliciete
+    menselijke goedkeuring (production_approved_by).
+    """
+    __tablename__ = "platform_modules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    module_key = Column(String(100), unique=True, nullable=False, index=True)
+    name_nl = Column(String(255), nullable=False)
+    description_nl = Column(Text)
+    expected_feature = Column(Text)          # wat de spec verwacht
+    current_implementation = Column(Text)    # wat er nu is
+    gap = Column(Text)                       # wat ontbreekt
+    priority = Column(String(20), default="medium")  # low / medium / high / critical
+    # §46-criteria, elk 0-100
+    readiness_scores = Column(JSON)          # {functionality, integration, data_quality, tests, security, performance, auditability, monitoring, documentation, human_control}
+    readiness_label = Column(String(50), default="Concept")
+    production_approved_by = Column(String(100))   # expliciete menselijke goedkeuring
+    production_approved_at = Column(DateTime)
+    uses_real_data = Column(Boolean, default=False)  # echte data vs. testdata (§59)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 
 # ─── PIM-integratie & Product Content Intelligence (§23) ────────────────────
 # Vendor-neutrale contentlaag bovenop de DRS-productmaster (DimProduct).
@@ -2425,4 +2451,64 @@ class PimAiSuggestion(Base):
     status = Column(String(20), default="PENDING", index=True)  # PENDING / APPROVED / REJECTED
     reviewed_by = Column(String(100))
     reviewed_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class BacklogItem(Base):
+    """Development Backlog per module (§48)."""
+    __tablename__ = "backlog_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    module_key = Column(String(100), nullable=False, index=True)
+    title = Column(String(500), nullable=False)
+    description = Column(Text)
+    item_type = Column(String(50), default="missing_functionality")  # missing_functionality / bug / improvement / test / documentation
+    status = Column(String(30), default="open")     # open / in_progress / done / wont_do
+    priority = Column(String(20), default="medium") # low / medium / high / critical
+    owner = Column(String(100))
+    dependencies = Column(Text)                     # afhankelijkheden (vrije tekst / module keys)
+    data_sources = Column(Text)
+    tests = Column(Text)
+    business_value = Column(Text)
+    created_by = Column(String(100))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class DocPage(Base):
+    """Centrale documentatieomgeving (§58): één pagina per onderwerp,
+    bewerkbaar zodat de documentatie met de applicatie meegroeit."""
+    __tablename__ = "doc_pages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    slug = Column(String(100), unique=True, nullable=False, index=True)
+    title_nl = Column(String(255), nullable=False)
+    chapter = Column(String(100), nullable=False)   # §58-hoofdstuk (Architecture, Data Model, ...)
+    content_md = Column(Text, default="")
+    module_key = Column(String(100), index=True)    # optionele koppeling aan module
+    sort_order = Column(Integer, default=0)
+    updated_by = Column(String(100))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class FinalEvaluationReport(Base):
+    """Final Technical & Business Evaluation (§59): gegenereerd rapport dat de
+    twintig evaluatievragen beantwoordt, met onderscheid echte data vs. testdata."""
+    __tablename__ = "final_evaluation_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(300), default="Final Technical & Business Evaluation")
+    generated_by = Column(String(100))
+    sections_json = Column(JSON)                    # [{nr, vraag, antwoord, data_label, details}]
+    generated_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+class PromptVersion(Base):
+    """Prompt Library met versiebehoud per module (§48)."""
+    __tablename__ = "prompt_versions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    module_key = Column(String(100), nullable=False, index=True)
+    title = Column(String(500), nullable=False)
+    version = Column(Integer, default=1)
+    prompt_text = Column(Text, nullable=False)
+    notes = Column(Text)
+    created_by = Column(String(100))
     created_at = Column(DateTime, default=datetime.utcnow)

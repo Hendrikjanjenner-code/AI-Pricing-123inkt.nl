@@ -52,6 +52,7 @@ import {
   PackageSearch,
   BrainCircuit,
   Binoculars,
+  ClipboardCheck,
   Map,
   Server,
   Lightbulb,
@@ -66,6 +67,7 @@ const navGroepen = [
     label: "Operaties",
     items: [
       { href: "/", label: "Dashboard", icon: BarChart3 },
+      { href: "/command-center", label: "Command Center", icon: LayoutGrid },
       { href: "/copilot", label: "AI Copilot", icon: Sparkles },
       { href: "/signalen", label: "Intelligence Signals", icon: Bell },
       { href: "/beslissingen", label: "Beslissingen", icon: BrainCircuit },
@@ -193,6 +195,7 @@ const navGroepen = [
       { href: "/platform/kosten",       label: "Cost & Scalability",      icon: DollarSign },
       { href: "/platform/businesscase", label: "Businesscase per shop",   icon: Calculator },
       { href: "/platform/waarde",       label: "Business Value-meting",   icon: TrendingUp },
+      { href: "/platform/gap",          label: "Gap Dashboard",           icon: Target },
     ],
   },
   {
@@ -223,6 +226,9 @@ const navGroepen = [
     label: "Kennisplatform",
     items: [
       { href: "/modeldocumentatie", label: "Modeldocumentatie", icon: BookOpen },
+      { href: "/documentatie",      label: "Platformdocumentatie", icon: FileText },
+      { href: "/backlog",           label: "Development Backlog",  icon: ClipboardList },
+      { href: "/eindevaluatie",     label: "Eindevaluatie",        icon: ClipboardCheck },
     ],
   },
 ];

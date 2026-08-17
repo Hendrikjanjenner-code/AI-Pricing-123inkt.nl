@@ -109,6 +109,11 @@ import Opportunities from "@/pages/opportunities";
 import ModelRegistry from "@/pages/model-registry";
 import Beslissingen from "@/pages/decisions";
 import BeslissingDetail from "@/pages/decisions/detail";
+import CommandCenter from "@/pages/command-center";
+import PlatformGap from "@/pages/platform-gap";
+import DocsCenter from "@/pages/docs-center";
+import DevBacklog from "@/pages/dev-backlog";
+import Eindevaluatie from "@/pages/eindevaluatie";
 
 const queryClient = new QueryClient();
 
@@ -452,6 +457,23 @@ function Router() {
 
       <Route path="/modeldocumentatie">
         <ProtectedRoute><ModelDocumentatie /></ProtectedRoute>
+      </Route>
+
+      {/* Governance: Command Center, Gap Dashboard, Docs, Backlog, Eindevaluatie */}
+      <Route path="/command-center">
+        <ProtectedRoute><CommandCenter /></ProtectedRoute>
+      </Route>
+      <Route path="/platform/gap">
+        <ProtectedRoute><PlatformGap /></ProtectedRoute>
+      </Route>
+      <Route path="/documentatie">
+        <ProtectedRoute><DocsCenter /></ProtectedRoute>
+      </Route>
+      <Route path="/backlog">
+        <ProtectedRoute><DevBacklog /></ProtectedRoute>
+      </Route>
+      <Route path="/eindevaluatie">
+        <ProtectedRoute><Eindevaluatie /></ProtectedRoute>
       </Route>
 
       {/* Data & Integraties: DRS / GA4 */}
