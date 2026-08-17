@@ -2276,3 +2276,153 @@ class AiModelCall(Base):
     duration_ms = Column(Float)
     status = Column(String(30), default="success")  # success / failed / unavailable
     error_message = Column(Text)
+
+
+# ─── PIM-integratie & Product Content Intelligence (§23) ────────────────────
+# Vendor-neutrale contentlaag bovenop de DRS-productmaster (DimProduct).
+# DRS blijft eigenaar van de commerciële kernvelden; deze laag voegt families,
+# attributen, varianten/relaties, completeness-scores per channel, source
+# ownership per veld en AI-contentsuggesties (altijd als voorstel) toe.
+
+
+class PimFamily(Base):
+    """Productfamilie: bepaalt welke attributen voor een product vereist zijn."""
+    __tablename__ = "pim_family"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(100), unique=True, nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text)
+    # Categorieën (DimProduct.category) die automatisch aan deze familie
+    # gekoppeld worden; expliciete koppeling via PimProductContent wint.
+    category_patterns = Column(JSON)          # ["Papier", "Cartridges", ...]
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PimAttributeDefinition(Base):
+    """
+    Attribuutdefinitie met expliciete source ownership (§4): welk systeem is
+    eigenaar van dit veld. Waarden van een andere bron dan de eigenaar leveren
+    een conflict op in plaats van een stille overschrijving.
+    """
+    __tablename__ = "pim_attribute_definition"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(100), unique=True, nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    data_type = Column(String(30), default="text")   # text / number / boolean / select
+    unit = Column(String(50))                        # bv. g/m², vel, mm
+    allowed_values = Column(JSON)                    # voor select-type
+    # Source ownership: DRS / Leverancier / Handmatig / AI
+    source_owner = Column(String(50), default="Handmatig")
+    # Optioneel gekoppeld aan een familie; NULL = geldt voor alle producten
+    family_id = Column(Integer, ForeignKey("pim_family.id"), index=True)
+    is_required = Column(Boolean, default=False)     # vereist voor basiscompleteness
+    weight = Column(Float, default=1.0)              # gewicht in completeness-score
+    # Kolom op DimProduct waaruit dit attribuut automatisch gevuld wordt
+    dim_product_field = Column(String(100))
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PimAttributeValue(Base):
+    """Attribuutwaarde per SKU met herkomst (source) en review-metadata."""
+    __tablename__ = "pim_attribute_value"
+    __table_args__ = (
+        Index("ix_pim_attr_value_sku_attr", "sku_id", "attribute_id", unique=True),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    sku_id = Column(String(100), ForeignKey("dim_product.sku_id"), nullable=False, index=True)
+    attribute_id = Column(Integer, ForeignKey("pim_attribute_definition.id"), nullable=False, index=True)
+    value = Column(Text)
+    # Herkomst van deze waarde: DRS / Leverancier / Handmatig / AI
+    source = Column(String(50), default="Handmatig")
+    confidence = Column(Float)                       # gevuld bij AI-herkomst
+    updated_by = Column(String(100))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PimProductContent(Base):
+    """Contentstatus per SKU: familie-koppeling en variant-informatie."""
+    __tablename__ = "pim_product_content"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sku_id = Column(String(100), ForeignKey("dim_product.sku_id"), unique=True, nullable=False, index=True)
+    family_id = Column(Integer, ForeignKey("pim_family.id"), index=True)
+    # Variant: verwijst naar de parent-SKU waarvan dit een variant is
+    parent_sku_id = Column(String(100), index=True)
+    variant_axis = Column(String(100))               # bv. kleur / formaat / pakgrootte
+    variant_value = Column(String(255))
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PimProductRelation(Base):
+    """Productrelaties: variant_van / accessoire / vervangt / alternatief."""
+    __tablename__ = "pim_product_relation"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    related_sku_id = Column(String(100), nullable=False, index=True)
+    relation_type = Column(String(50), nullable=False)  # variant_van / accessoire / vervangt / alternatief
+    note = Column(Text)
+    created_by = Column(String(100))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PimChannel(Base):
+    """Channel-definitie voor channel readiness (bv. webshop, marketplace)."""
+    __tablename__ = "pim_channel"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(100), unique=True, nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    # Attribuutcodes die voor dit channel verplicht zijn
+    required_attribute_codes = Column(JSON)          # ["brand", "ean", ...]
+    min_completeness_pct = Column(Float, default=80.0)
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PimCompletenessScore(Base):
+    """Completeness/quality-score per SKU per channel (channel NULL = totaal)."""
+    __tablename__ = "pim_completeness_score"
+    __table_args__ = (
+        Index("ix_pim_completeness_sku_channel", "sku_id", "channel_code"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    channel_code = Column(String(100))               # NULL = overall
+    completeness_pct = Column(Float, default=0.0)    # 0..100, gewogen gevulde attributen
+    quality_score = Column(Float, default=0.0)       # 0..100, geldigheid/consistentie
+    channel_ready = Column(Boolean, default=False)
+    missing_attributes = Column(JSON)                # [attribute_code, ...]
+    quality_issues = Column(JSON)                    # [{code, bericht}]
+    run_date = Column(Date, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PimAiSuggestion(Base):
+    """
+    AI-suggestie voor een ontbrekend attribuut of contentveld.
+    Altijd een voorstel met review-status; wordt nooit automatisch toegepast.
+    """
+    __tablename__ = "pim_ai_suggestion"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sku_id = Column(String(100), nullable=False, index=True)
+    attribute_id = Column(Integer, ForeignKey("pim_attribute_definition.id"), index=True)
+    attribute_code = Column(String(100), nullable=False)
+    suggested_value = Column(Text, nullable=False)
+    current_value = Column(Text)                     # waarde op moment van suggestie
+    rationale = Column(Text)                         # uitleg van het model (NL)
+    confidence = Column(Float, default=0.0)
+    model_version = Column(String(100))
+    status = Column(String(20), default="PENDING", index=True)  # PENDING / APPROVED / REJECTED
+    reviewed_by = Column(String(100))
+    reviewed_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)

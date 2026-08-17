@@ -20,6 +20,8 @@ import CategorieHierarchie from "@/pages/categories-hierarchy";
 import Gegevensintegratie from "@/pages/data-upload";
 import DataIntegratie from "@/pages/data-integratie";
 import Datakwaliteit from "@/pages/data-quality";
+import PimContent from "@/pages/pim-content";
+import PimSuggestions from "@/pages/pim-suggestions";
 import Substitutiemonitor from "@/pages/substitutions";
 import Modelgezondheid from "@/pages/model-health";
 import ExportPrijsShape from "@/pages/export";
@@ -346,6 +348,12 @@ function Router() {
       </Route>
       <Route path="/data-quality">
         <ProtectedRoute><Datakwaliteit /></ProtectedRoute>
+      </Route>
+      <Route path="/content-completeness">
+        <ProtectedRoute><PimContent /></ProtectedRoute>
+      </Route>
+      <Route path="/contentsuggesties">
+        <ProtectedRoute><PimSuggestions /></ProtectedRoute>
       </Route>
       <Route path="/substituties">
         <ProtectedRoute><Substitutiemonitor /></ProtectedRoute>

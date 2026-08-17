@@ -25,3 +25,4 @@
 - [AI Gateway provider config](ai-gateway-provider.md) — Copilot LLM via AI_INTEGRATIONS_OPENAI_* (fallback OPENAI_API_KEY); unprovisioned = fail-safe mode, provision from main session.
 - [API curl paths in dev](api-curl-paths.md) — curl uvicorn's own port directly (`localhost:8080/api/...`); the port-80 preview proxy doubles the /api prefix and 404s.
 - [Test-shop teardown FK](test-suite-conventions.md) — request middleware writes cost-usage rows per shop; any teardown that deletes a shop must delete those rows first or FK-fails only in full-suite runs.
+- [PIM source ownership](pim-source-ownership.md) — attribute values keep a source; cross-source writes must warn, never silently overwrite (DRS stays master).

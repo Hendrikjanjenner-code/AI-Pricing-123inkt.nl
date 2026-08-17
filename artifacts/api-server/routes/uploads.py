@@ -302,6 +302,9 @@ async def validate_csv(
             ["a_brand_sku", "a_merk_sku"],
             ["private_label_sku", "huismerk_sku"],
         ],
+        "supplier-content": [
+            ["sku_id", "own_sku_id"],
+        ],
         "loyalty-members": [
             ["pseudonymous_customer_id", "customer_id", "klant_id"],
         ],
@@ -1291,3 +1294,83 @@ def _count_duplicates(rows: list[dict]) -> int:
         else:
             seen.add(key)
     return dups
+
+
+# ─── PIM: supplier-contentimport (§23) ───────────────────────────────────────
+
+def _process_supplier_content(rows, db: Session):
+    """
+    Leveranciers-contentimport: rijen met sku_id + attribuutkolommen
+    (kolomnamen = attribuutcodes, bv. description, color, material).
+    Source ownership (§4): waarden van een andere eigenaar (DRS/Handmatig/AI)
+    worden NIET stil overschreven — dat levert een conflictwaarschuwing op.
+    Alleen lege velden of bestaande Leverancier-waarden worden bijgewerkt.
+    """
+    from engine import pim_engine
+    pim_engine.ensure_defaults(db)
+    defs = {d.code.lower(): d for d in db.query(models.PimAttributeDefinition)
+            .filter(models.PimAttributeDefinition.active == True).all()}  # noqa: E712
+
+    processed, failed, warnings = 0, 0, []
+    for i, row in enumerate(rows, start=1):
+        try:
+            if not _enforce_row_validation(row, i, warnings):
+                failed += 1
+                continue
+            sku_id = _normalize_sku(row)
+            if not sku_id:
+                failed += 1
+                warnings.append(f"Rij {i} overgeslagen: sku_id / own_sku_id ontbreekt")
+                continue
+            product = db.query(models.DimProduct).filter(
+                models.DimProduct.sku_id == sku_id).first()
+            if product is None:
+                failed += 1
+                warnings.append(f"Rij {i} overgeslagen: SKU '{sku_id}' bestaat niet in de productmaster (DRS)")
+                continue
+
+            row_norm = {k.lower().strip(): (v or "").strip() for k, v in row.items()
+                        if isinstance(k, str)}
+            updated_any = False
+            for col, val in row_norm.items():
+                if col in ("sku_id", "own_sku_id") or not val:
+                    continue
+                d = defs.get(col)
+                if d is None:
+                    continue  # onbekende kolommen negeren (geen attribuut)
+                existing = db.query(models.PimAttributeValue).filter(
+                    models.PimAttributeValue.sku_id == sku_id,
+                    models.PimAttributeValue.attribute_id == d.id).first()
+                # Centrale ownership-policy (§4): DRS-owned velden en waarden
+                # van andere bronnen worden nooit stil overgenomen.
+                reason = pim_engine.check_write_allowed(d, existing, "Leverancier")
+                if reason:
+                    if existing is None or (existing.value or "") != val:
+                        warnings.append(f"Rij {i}: conflict voor {sku_id} — {reason} "
+                                        f"Leverancierswaarde ('{val}') is niet toegepast.")
+                    continue
+                if existing is None:
+                    db.add(models.PimAttributeValue(
+                        sku_id=sku_id, attribute_id=d.id, value=val,
+                        source="Leverancier", updated_by="supplier_import"))
+                    updated_any = True
+                elif existing.value != val:
+                    existing.value = val
+                    existing.updated_by = "supplier_import"
+                    updated_any = True
+            processed += 1
+        except Exception as e:
+            warnings.append(f"Rij {i}: {str(e)}")
+            failed += 1
+    db.commit()
+    return processed, failed, warnings
+
+
+@router.post("/supplier-content")
+async def upload_supplier_content(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
+):
+    """Leveranciers-contentimport (PIM §23): attribuutwaarden per SKU."""
+    return await _process_upload(file, "supplier-content", db, current_user, _process_supplier_content)

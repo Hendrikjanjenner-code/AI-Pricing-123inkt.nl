@@ -299,6 +299,37 @@ def _detect_issues(db: Session, total_skus: int) -> list[dict]:  # noqa: C901
             "Herhaald mislukkende runs kunnen betekenen dat adviezen stilletjes verouderen.",
             "Bekijk de foutmeldingen bij Model Health en los de onderliggende oorzaak op."))
 
+    # ── PIM content completeness (§23) ───────────────────────────────────
+    pim_scores = db.query(models.PimCompletenessScore).filter(
+        models.PimCompletenessScore.channel_code.is_(None)).all()
+    if pim_scores:
+        low_comp = sum(1 for s in pim_scores if (s.completeness_pct or 0) < 60.0)
+        if low_comp:
+            issues.append(_issue(
+                "PIM_LOW_COMPLETENESS", "warning", "Lage content-completeness",
+                "SKU's met een content-completeness onder 60%", low_comp,
+                "Systeem", "Productcontent",
+                "Onvolledige productcontent verzwakt concurrentie-matching, zoekvindbaarheid en channel readiness.",
+                "Open Content Completeness (PIM), vul ontbrekende attributen aan of genereer AI-suggesties."))
+        qual_issues = sum(1 for s in pim_scores if (s.quality_issues or []))
+        if qual_issues:
+            issues.append(_issue(
+                "PIM_QUALITY_ISSUES", "warning", "Contentkwaliteit-problemen",
+                "SKU's met inconsistente of ongeldige contentvelden (bv. te korte naam, onwaarschijnlijke grammage)", qual_issues,
+                "Systeem", "Productcontent",
+                "Inconsistente content leidt tot verkeerde vergelijkingen en zwakke productpresentatie.",
+                "Beoordeel de kwaliteitsissues per SKU op de Content Completeness-pagina."))
+
+    pim_pending = db.query(models.PimAiSuggestion).filter(
+        models.PimAiSuggestion.status == "PENDING").count()
+    if pim_pending:
+        issues.append(_issue(
+            "PIM_PENDING_SUGGESTIONS", "info", "Openstaande AI-contentsuggesties",
+            "AI-suggesties voor productcontent die op review wachten", pim_pending,
+            "AI", "Productcontent",
+            "Zolang suggesties niet beoordeeld zijn, blijft de content onvolledig.",
+            "Beoordeel de suggesties op de Contentsuggesties-pagina (goedkeuren of afwijzen)."))
+
     # ── DRS-specifieke checks (bestaand) ─────────────────────────────────
     hier_names = {r.category_name for r in db.query(models.DimCategoryHierarchy.category_name).all()}
     if hier_names:

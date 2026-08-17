@@ -62,6 +62,7 @@ def match_sku_to_competitor(
     competitor_mpn: Optional[str] = None,
     competitor_brand: Optional[str] = None,
     competitor_product_name: Optional[str] = None,
+    own_attributes: Optional[dict] = None,
 ) -> dict:
     """
     Voer een AI-matching uit voor één eigen SKU t.o.v. één concurrent-aanbod.
@@ -75,7 +76,15 @@ def match_sku_to_competitor(
         "brand_match": False,
         "product_type_match": False,
         "price_segment_match": False,
+        "attribute_match": False,
     }
+
+    # PIM-verrijkte attributen (§23/§12): EAN uit de contentlaag + attribuut-
+    # waarden die in de concurrent-productnaam terugkomen versterken de match.
+    own_attributes = own_attributes or {}
+    pim_ean = own_attributes.get("ean")
+    if competitor_ean and pim_ean and _normalize(competitor_ean) == _normalize(pim_ean):
+        signals["ean_match"] = True
 
     # EAN match
     if competitor_ean and own_product.oem_code:
@@ -93,11 +102,29 @@ def match_sku_to_competitor(
         if _normalize(competitor_brand) == _normalize(own_product.brand):
             signals["brand_match"] = True
 
-    # Product-type (keyword overlap in naam)
+    # Product-type (keyword overlap in naam, verrijkt met PIM-attributen)
     if competitor_product_name and own_product.product_name:
-        overlap = _word_overlap(competitor_product_name, own_product.product_name)
+        own_text = own_product.product_name
+        enrich_parts = [str(v) for k, v in own_attributes.items()
+                        if v and k in ("product_type", "material", "color",
+                                       "paper_size", "description")]
+        if enrich_parts:
+            own_text = own_text + " " + " ".join(enrich_parts)
+        overlap = _word_overlap(competitor_product_name, own_text)
         if overlap >= 0.4:
             signals["product_type_match"] = True
+
+    # Attribuut-match: concrete PIM-attribuutwaarden (kleur, materiaal,
+    # formaat, grammage) die letterlijk in de concurrent-naam terugkomen.
+    if competitor_product_name and own_attributes:
+        comp_norm = _normalize(competitor_product_name)
+        hits = 0
+        for k in ("color", "material", "paper_size", "paper_weight_gsm", "sheets_per_pack"):
+            v = own_attributes.get(k)
+            if v and len(_normalize(str(v))) >= 2 and _normalize(str(v)) in comp_norm:
+                hits += 1
+        if hits >= 1:
+            signals["attribute_match"] = True
 
     # Prijssegment
     if own_product.current_price and competitor_price:
@@ -117,25 +144,27 @@ def match_sku_to_competitor(
         )
     elif signals["brand_match"] and signals["product_type_match"] and signals["price_segment_match"]:
         match_type = "Sterk"
-        confidence = 0.80
+        confidence = 0.85 if signals["attribute_match"] else 0.80
         explanation = (
             f"Zelfde merk ({own_product.brand}), vergelijkbaar producttype "
             f"en vergelijkbaar prijssegment bij {competitor_name}."
         )
     elif signals["brand_match"] and signals["product_type_match"]:
         match_type = "Sterk"
-        confidence = 0.70
+        confidence = 0.75 if signals["attribute_match"] else 0.70
         explanation = (
             f"Zelfde merk en vergelijkbaar producttype bij {competitor_name}, "
             "maar prijssegment wijkt licht af."
         )
     elif signals["product_type_match"] and signals["price_segment_match"]:
         match_type = "Functioneel"
-        confidence = 0.55
+        confidence = 0.62 if signals["attribute_match"] else 0.55
         explanation = (
             f"Functioneel vergelijkbaar product bij {competitor_name}: "
             "zelfde toepassingstype en prijsklasse, maar ander merk."
         )
+        if signals["attribute_match"]:
+            explanation += " Productattributen (PIM) komen overeen."
     elif signals["brand_match"] or signals["product_type_match"]:
         match_type = "Categorie_Alternatief"
         confidence = 0.35
@@ -197,6 +226,15 @@ def run_matching_for_all(db: Session, lookback_days: int = 14) -> int:
         for p in db.query(models.DimProduct).all()
     }
 
+    # PIM-verrijkte attributen per SKU (§23): code -> waarde
+    attr_defs = {d.id: d.code for d in db.query(models.PimAttributeDefinition).all()}
+    pim_attrs: dict[str, dict] = {}
+    if attr_defs:
+        for v in db.query(models.PimAttributeValue).all():
+            code = attr_defs.get(v.attribute_id)
+            if code and v.value:
+                pim_attrs.setdefault(v.sku_id, {})[code] = v.value
+
     count = 0
     for row in deduped:
         own_product = products.get(row.sku_id)
@@ -208,6 +246,7 @@ def run_matching_for_all(db: Session, lookback_days: int = 14) -> int:
             competitor_name=row.competitor_name,
             competitor_price=float(row.price),
             competitor_url=row.url,
+            own_attributes=pim_attrs.get(row.sku_id),
         )
 
         # Upsert

@@ -214,6 +214,8 @@ const navGroepen = [
       { href: "/ga4-integratie",     label: "GA4 Integratie",              icon: TrendingUp },
       { href: "/gegevensintegratie", label: "Handmatige upload",           icon: Upload },
       { href: "/datakwaliteit",      label: "Datakwaliteit",               icon: Database },
+      { href: "/content-completeness", label: "Content Completeness (PIM)", icon: Layers },
+      { href: "/contentsuggesties",  label: "AI-contentsuggesties",        icon: Sparkles },
       { href: "/export",             label: "Prijsexport",                 icon: Download },
     ],
   },
