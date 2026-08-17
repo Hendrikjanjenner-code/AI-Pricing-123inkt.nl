@@ -157,15 +157,18 @@ def apply_ledger_entry(
         voucher_id=voucher_id,
         is_demo_data=is_demo_data,
     )
-    # Voeg eerst de ledger-rij toe en flush die binnen een savepoint: een
-    # IntegrityError op de unieke partiële index (member_id, external_ref)
-    # — het sluitstuk tegen gelijktijdige dubbele leveringen — komt dan als
-    # idempotente LedgerError terug zonder de omliggende (batch)transactie of
-    # de wallet-tellers te corrumperen. Sessie draait met autoflush=False, dus
-    # deze flush maakt de duplicate-check ook binnen één import-batch sluitend.
-    db.add(txn)
+    # Voeg de ledger-rij toe en flush die volledig BINNEN een savepoint: de
+    # add moet ná begin_nested() gebeuren, anders kan de flush die het
+    # savepoint opzet de pending rij al buiten het savepoint wegschrijven en
+    # markeert een IntegrityError op de unieke partiële index
+    # (member_id, external_ref) de héle omliggende (batch)transactie als
+    # mislukt. Binnen het savepoint komt diezelfde IntegrityError als
+    # idempotente LedgerError terug zonder de batch of de wallet-tellers te
+    # corrumperen. Sessie draait met autoflush=False, dus deze flush maakt de
+    # duplicate-check ook binnen één import-batch sluitend.
     try:
         with db.begin_nested():
+            db.add(txn)
             db.flush()
     except IntegrityError as ie:
         raise LedgerError(

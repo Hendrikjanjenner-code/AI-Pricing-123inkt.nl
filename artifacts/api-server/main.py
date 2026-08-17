@@ -30,7 +30,7 @@ from routes import (
     category_hierarchy, break_even, ecosystem, explainability,
     admin, connectors, data_sources,
     signals, shops, platform, loyalty,
-    basket, promotion_intelligence, forecast, opportunities, model_registry,
+    basket, promotion_intelligence, forecast, opportunities, model_registry, decisions,
 )
 
 # Optional modules (DRS import, PriceShape feed import) are imported
@@ -419,6 +419,7 @@ app.include_router(promotion_intelligence.router)
 app.include_router(forecast.router)
 app.include_router(opportunities.router)
 app.include_router(model_registry.router)
+app.include_router(decisions.router)
 
 # Register whichever optional modules imported successfully above. Modules
 # that failed to import were already recorded in disabled_optional_routers

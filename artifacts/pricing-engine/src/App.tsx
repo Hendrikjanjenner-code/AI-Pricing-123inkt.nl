@@ -104,6 +104,8 @@ import PromotionIntelligence from "@/pages/promotion-intelligence";
 import ForecastRisk from "@/pages/forecast-risk";
 import Opportunities from "@/pages/opportunities";
 import ModelRegistry from "@/pages/model-registry";
+import Beslissingen from "@/pages/decisions";
+import BeslissingDetail from "@/pages/decisions/detail";
 
 const queryClient = new QueryClient();
 
@@ -118,6 +120,14 @@ function Router() {
       {/* Intelligence Signals */}
       <Route path="/signalen">
         <ProtectedRoute><Signalen /></ProtectedRoute>
+      </Route>
+
+      {/* Commerciële Beslissingen (Decision Engine) */}
+      <Route path="/beslissingen">
+        <ProtectedRoute><Beslissingen /></ProtectedRoute>
+      </Route>
+      <Route path="/beslissingen/:id">
+        <ProtectedRoute><BeslissingDetail /></ProtectedRoute>
       </Route>
 
       {/* Prijsadviezen */}

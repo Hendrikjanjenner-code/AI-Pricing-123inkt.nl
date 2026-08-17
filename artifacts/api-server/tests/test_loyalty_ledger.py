@@ -206,3 +206,56 @@ def test_concurrent_redemptions_cannot_overspend(member):
         assert mismatches == []
     finally:
         check.close()
+
+
+def test_duplicate_then_valid_row_in_same_batch(db, member):
+    """
+    Regressietest voor het savepoint-gedrag: een duplicate external_ref midden
+    in een batch mag de omliggende transactie NIET als mislukt markeren.
+    Een geldige rij ná de duplicate moet gewoon nog committen — precies het
+    gedrag waarop de CSV-import (catch LedgerError → continue) leunt.
+    """
+    ref = f"BATCH-{uuid.uuid4().hex[:8]}"
+    li.apply_ledger_entry(db, member, date.today(), "earn", 100, external_ref=ref)
+    # Duplicate in dezelfde (batch)transactie → idempotente LedgerError
+    with pytest.raises(li.LedgerError):
+        li.apply_ledger_entry(db, member, date.today(), "earn", 100, external_ref=ref)
+    # Sessie is nog gezond: geldige vervolgrij + commit slagen
+    li.apply_ledger_entry(db, member, date.today(), "earn", 50,
+                          external_ref=f"BATCH-{uuid.uuid4().hex[:8]}")
+    db.commit()
+    wallet = li.ensure_wallet(db, member.id)
+    assert wallet.balance_points == 150
+    assert db.query(models.LoyaltyTransaction).filter_by(member_id=member.id).count() == 2
+
+
+def test_upload_batch_survives_duplicate_row():
+    """End-to-end: CSV-upload met duplicate external_ref tussen geldige rijen —
+    de upload slaagt, alleen de duplicate faalt."""
+    from routes.uploads import _process_loyalty_transactions
+    s = SessionLocal()
+    pid = f"TEST-UPL-{uuid.uuid4().hex[:8]}"
+    m = models.LoyaltyMember(shop_id=1, pseudonymous_customer_id=pid,
+                             tier_code="bronze", status="active", is_demo_data=False)
+    s.add(m)
+    s.commit()
+    ref = f"UPL-{uuid.uuid4().hex[:8]}"
+    rows = [
+        {"pseudonymous_customer_id": pid, "txn_type": "earn", "date": str(date.today()), "points_delta": "100", "external_ref": ref},
+        {"pseudonymous_customer_id": pid, "txn_type": "earn", "date": str(date.today()), "points_delta": "100", "external_ref": ref},
+        {"pseudonymous_customer_id": pid, "txn_type": "earn", "date": str(date.today()), "points_delta": "25", "external_ref": f"UPL-{uuid.uuid4().hex[:8]}"},
+    ]
+    try:
+        processed, failed, warnings = _process_loyalty_transactions(rows, s)
+        assert processed == 2 and failed == 1
+        assert any("Dubbele transactie" in w for w in warnings)
+        wallet = li.ensure_wallet(s, m.id)
+        assert wallet.balance_points == 125
+    finally:
+        s.rollback()
+        mid = m.id
+        s.query(models.LoyaltyTransaction).filter_by(member_id=mid).delete()
+        s.query(models.LoyaltyWallet).filter_by(member_id=mid).delete()
+        s.query(models.LoyaltyMember).filter_by(id=mid).delete()
+        s.commit()
+        s.close()

@@ -1760,6 +1760,47 @@ class CompetitorRanking(Base):
     model_version = Column(String(50))
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class Decision(Base):
+    """
+    Een commerciële beslissing per entiteit (SKU/categorie), opgebouwd uit
+    IntelligenceSignals van meerdere engines (§25). Bevat een aanbevolen
+    scenario + alternatieven, en doorloopt de §28-approvalstatussen
+    (draft → proposed → in_review → approved/rejected → executed / cancelled).
+    Human approval is verplicht; de engine voert nooit autonoom uit.
+    """
+    __tablename__ = "decisions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+
+    run_date = Column(Date, nullable=False, index=True)
+    entity_type = Column(String(50), nullable=False, index=True)   # sku / category
+    entity_id = Column(String(255), nullable=False, index=True)
+    entity_name = Column(String(500))
+
+    title = Column(String(500))
+    summary = Column(Text)                          # korte samenvatting van de beslissing
+    recommended_scenario_id = Column(Integer)       # FK-loos verwijzend naar decision_scenarios.id (gezet na insert)
+
+    # Signaalcontext (§53 reconstructie): welke signalen lagen ten grondslag
+    signal_ids = Column(JSON)                       # [int] — intelligence_signals.id
+    signal_snapshot = Column(JSON)                  # bevroren kopie van de gebruikte signalen
+    data_gaps = Column(JSON)                        # ["data unavailable: ..."] (§56)
+
+    # §28 approval-flow
+    status = Column(String(30), default="draft", index=True)
+    # draft / proposed / in_review / approved / rejected / executed / cancelled
+    proposed_by = Column(String(100))               # AI-model dat voorstelt
+    ai_model_version = Column(String(50))
+    reviewer = Column(String(100))                  # menselijke reviewer
+    reviewed_at = Column(DateTime)
+    review_note = Column(Text)
+
+    confidence = Column(Float, default=0.0)
+    model_version = Column(String(50))
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 class ModelRegistryEntry(Base):
     """
     Modelgovernance (§54): registratie van naam/versie/metrics/status per
@@ -1853,6 +1894,47 @@ class BusinessValueBaseline(Base):
     description = Column(Text)
     measured_at = Column(Date)
     created_by = Column(String(100))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class DecisionScenario(Base):
+    """
+    Eén scenario binnen een beslissing (§25): price increase/decrease/hold,
+    promotion, loyalty incentive, bundle, house-brand action, no action.
+    Elk scenario draagt verwachte impact + volledige WHY-structuur (§51).
+    """
+    __tablename__ = "decision_scenarios"
+
+    id = Column(Integer, primary_key=True, index=True)
+    decision_id = Column(Integer, ForeignKey("decisions.id"), nullable=False, index=True)
+
+    scenario_type = Column(String(50), nullable=False)
+    # price_increase / price_decrease / price_hold / promotion /
+    # loyalty_incentive / bundle / house_brand_action / no_action
+    label = Column(String(255))
+    description = Column(Text)
+
+    # Verwachte impact
+    expected_units = Column(Float)
+    expected_revenue = Column(Float)
+    expected_margin = Column(Float)
+    customer_impact = Column(String(500))
+    basket_impact = Column(String(500))
+    stock_impact = Column(String(500))
+    strategic_impact = Column(String(500))
+    risk_level = Column(String(20), default="medium")   # low / medium / high
+    risk_notes = Column(Text)
+    confidence = Column(Float, default=0.0)
+    score = Column(Float, default=0.0)               # rangschikkingsscore van de generator
+
+    is_recommended = Column(Boolean, default=False)
+
+    # WHY-structuur (§51)
+    why_factors = Column(JSON)        # [{factor, waarde, richting}]
+    why_sources = Column(JSON)        # [{engine, signal_type, signal_id}] of tabellen
+    why_assumptions = Column(JSON)    # ["aanname ..."]
+    why_calculations = Column(JSON)   # [{stap, formule, resultaat}]
+
+    parameters = Column(JSON)         # scenario-specifieke parameters (bv. new_price)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class FactForecastDaily(Base):
@@ -2038,6 +2120,24 @@ class LoyaltyWallet(Base):
     lifetime_redeemed = Column(Integer, default=0, nullable=False)
     lifetime_expired = Column(Integer, default=0, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class DecisionEvent(Base):
+    """
+    Statushistorie per beslissing (§53): elke overgang wordt vastgelegd met
+    actor, oude/nieuwe status en waarden, zodat elke beslissing achteraf
+    gereconstrueerd kan worden.
+    """
+    __tablename__ = "decision_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    decision_id = Column(Integer, ForeignKey("decisions.id"), nullable=False, index=True)
+    from_status = Column(String(30))
+    to_status = Column(String(30), nullable=False)
+    actor = Column(String(100), nullable=False)      # gebruikersnaam of AI-model
+    actor_type = Column(String(20), default="human") # human / ai
+    note = Column(Text)
+    values_snapshot = Column(JSON)                   # relevante waarden op moment van overgang
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 class Opportunity(Base):
     """
