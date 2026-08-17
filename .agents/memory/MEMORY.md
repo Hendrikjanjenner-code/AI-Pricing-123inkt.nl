@@ -1,4 +1,3 @@
-- [API curl paths in dev](api-curl-paths.md) — curl uvicorn's own port directly (`localhost:8080/api/...`); the port-80 preview proxy doubles the /api prefix and 404s.
 - [Seed strategy](seed-strategy.md) — seed_users_only() always runs on startup; full demo data only with SEED_DEMO_DATA=true env var.
 - [Backend validate-first uploads](backend-validate-first.md) — POST /api/uploads/validate?upload_type=X validates CSV without saving; frontend calls it before import.
 - [Traffic model fields](traffic-model-fields.md) — FactTrafficDaily uses entity_type/entity_id (not sku_id); entity_type="SKU" for per-SKU rows.
@@ -20,3 +19,4 @@
 - [configureWorkflow does not expand $PORT](workflow-port-env.md) — literal `$PORT` in artifact.toml dev commands isn't shell-expanded via configureWorkflow; hardcode the artifact's localPort explicitly.
 - [Duplicate legacy workflows cause DB race 500s](duplicate-workflow-db-race.md) — manual .replit workflows left alongside auto-generated artifact workflows can double-start a service and race on create_all, crashing the backend.
 - [Bulk refresh DB pitfalls](bulk-refresh-db-pitfalls.md) — numpy 2.x scalars leak as `np.float64(...)` into SQL (schema "np" error); bulk sync needs a separate long-timeout BackgroundSessionLocal, not the 4s request session.
+- [SessionLocal autoflush pitfall](session-autoflush.md) — sessions have autoflush=False; flush explicitly between write and read phases in engine pipelines, or queries see stale data.

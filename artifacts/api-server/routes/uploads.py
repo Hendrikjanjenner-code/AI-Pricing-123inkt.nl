@@ -99,7 +99,7 @@ _PRIJS_KOLOMMEN_SET = {
     "verkoopprijs", "verkoopprijs_incl_btw", "prijs_concurrent",
     "korting_waarde",
 }
-_DATUM_KOLOMMEN_SET = {"date", "datum", "start_date", "startdatum", "end_date", "einddatum"}
+_DATUM_KOLOMMEN_SET = {"date", "datum", "start_date", "startdatum", "end_date", "einddatum", "txn_date"}
 _EAN_KOLOMMEN_SET = {"ean", "ean_code", "ean13", "ean8", "barcode"}
 
 
@@ -293,6 +293,15 @@ async def validate_csv(
             ["a_brand_sku", "a_merk_sku"],
             ["private_label_sku", "huismerk_sku"],
         ],
+        "loyalty-members": [
+            ["pseudonymous_customer_id", "customer_id", "klant_id"],
+        ],
+        "loyalty-transactions": [
+            ["pseudonymous_customer_id", "customer_id", "klant_id"],
+            ["date", "datum", "txn_date"],
+            ["txn_type", "transactie_type", "type"],
+            ["points_delta", "points", "punten"],
+        ],
     }
     PRIJS_KOLOMMEN = {
         "price", "cost_price", "current_price", "min_price", "max_price",
@@ -305,7 +314,7 @@ async def validate_csv(
         "verkoopprijs", "verkoopprijs_incl_btw", "prijs_concurrent",
         "discount_value", "korting_waarde",
     }
-    DATUM_KOLOMMEN = {"date", "datum", "start_date", "startdatum", "end_date", "einddatum"}
+    DATUM_KOLOMMEN = {"date", "datum", "start_date", "startdatum", "end_date", "einddatum", "txn_date"}
     EAN_KOLOMMEN = {"ean", "ean_code", "ean13", "ean8", "barcode"}
 
     content = await file.read()
@@ -1107,3 +1116,142 @@ async def upload_price_rules(
         db.commit()
         return processed, failed, warnings
     return await _process_upload(file, "price_rules", db, current_user, _proc)
+
+
+# ---------------------------------------------------------------------------
+# Loyalty & Customer Value Intelligence imports (§22, §64.5)
+# Er is nog geen live loyalty-databron: CSV/XLSX-import is de primaire route.
+# Ledger-mutaties lopen uitsluitend via engine.loyalty_intelligence
+# (apply_ledger_entry) zodat wallet-saldi transactioneel correct blijven.
+# ---------------------------------------------------------------------------
+
+def _process_loyalty_members(rows, db: Session):
+    from engine import loyalty_intelligence as li
+    li.ensure_default_tiers(db)
+    processed, failed, warnings = 0, 0, []
+    for i, row in enumerate(rows, start=1):
+        try:
+            if not _enforce_row_validation(row, i, warnings):
+                failed += 1
+                continue
+            pid = _r(row, "pseudonymous_customer_id", "customer_id", "klant_id")
+            if not pid:
+                failed += 1
+                warnings.append(f"Rij {i} overgeslagen: pseudonymous_customer_id ontbreekt")
+                continue
+            joined = _r(row, "joined_at", "lid_sinds")
+            joined_date = None
+            if joined:
+                try:
+                    joined_date = datetime.strptime(joined, "%Y-%m-%d").date()
+                except ValueError:
+                    warnings.append(f"Rij {i}: joined_at '{joined}' ongeldig (YYYY-MM-DD) — genegeerd")
+            existing = db.query(models.LoyaltyMember).filter(
+                models.LoyaltyMember.pseudonymous_customer_id == pid).first()
+            if existing:
+                if joined_date:
+                    existing.joined_at = joined_date
+                if _r(row, "tier_code", "tier"):
+                    existing.tier_code = _r(row, "tier_code", "tier").lower()
+                if _r(row, "status"):
+                    existing.status = _r(row, "status").lower()
+                if _r(row, "referral_code"):
+                    existing.referral_code = _r(row, "referral_code")
+                if _r(row, "referred_by"):
+                    existing.referred_by = _r(row, "referred_by")
+            else:
+                member = models.LoyaltyMember(
+                    pseudonymous_customer_id=pid,
+                    joined_at=joined_date,
+                    tier_code=(_r(row, "tier_code", "tier") or "bronze").lower(),
+                    status=(_r(row, "status") or "active").lower(),
+                    referral_code=_r(row, "referral_code"),
+                    referred_by=_r(row, "referred_by"),
+                    consent_marketing=str(row.get("consent_marketing", "false")).lower() in ("1", "true", "yes"),
+                    is_demo_data=False,
+                )
+                db.add(member)
+                db.flush()
+                li.ensure_wallet(db, member.id)
+            processed += 1
+        except Exception as e:
+            warnings.append(f"Rij {i}: {str(e)}")
+            failed += 1
+    db.commit()
+    return processed, failed, warnings
+
+
+_LOYALTY_TXN_TYPES = {"earn", "redeem", "expire", "adjust", "referral_bonus", "campaign_bonus"}
+
+
+def _process_loyalty_transactions(rows, db: Session):
+    from engine import loyalty_intelligence as li
+    processed, failed, warnings = 0, 0, []
+    member_cache: dict[str, models.LoyaltyMember] = {}
+    for i, row in enumerate(rows, start=1):
+        try:
+            if not _enforce_row_validation(row, i, warnings):
+                failed += 1
+                continue
+            pid = _r(row, "pseudonymous_customer_id", "customer_id", "klant_id")
+            txn_type = (_r(row, "txn_type", "transactie_type", "type") or "").lower()
+            datum = _r(row, "date", "datum", "txn_date")
+            punten = _safe_int(_r(row, "points_delta", "points", "punten"))
+            if not pid or not datum or punten is None or not txn_type:
+                failed += 1
+                warnings.append(f"Rij {i} overgeslagen: verplicht veld ontbreekt")
+                continue
+            if txn_type not in _LOYALTY_TXN_TYPES:
+                failed += 1
+                warnings.append(f"Rij {i}: onbekend txn_type '{txn_type}' (geldig: {sorted(_LOYALTY_TXN_TYPES)})")
+                continue
+            try:
+                txn_date = datetime.strptime(datum, "%Y-%m-%d").date()
+            except ValueError:
+                failed += 1
+                warnings.append(f"Rij {i}: ongeldige datum '{datum}' (YYYY-MM-DD)")
+                continue
+            member = member_cache.get(pid) or db.query(models.LoyaltyMember).filter(
+                models.LoyaltyMember.pseudonymous_customer_id == pid).first()
+            if not member:
+                failed += 1
+                warnings.append(f"Rij {i}: lid '{pid}' onbekend — importeer eerst loyalty-members")
+                continue
+            member_cache[pid] = member
+            try:
+                li.apply_ledger_entry(
+                    db, member, txn_date, txn_type, punten,
+                    order_reference=_r(row, "order_reference", "order_ref"),
+                    order_value=_safe_float(_r(row, "order_value", "orderbedrag")),
+                    description=_r(row, "description", "omschrijving"),
+                    external_ref=_r(row, "external_ref", "externe_ref"),
+                    is_demo_data=False,
+                )
+            except li.LedgerError as le:
+                failed += 1
+                warnings.append(f"Rij {i}: {str(le)}")
+                continue
+            processed += 1
+        except Exception as e:
+            warnings.append(f"Rij {i}: {str(e)}")
+            failed += 1
+    db.commit()
+    return processed, failed, warnings
+
+
+@router.post("/loyalty-members")
+async def upload_loyalty_members(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
+):
+    return await _process_upload(file, "loyalty-members", db, current_user, _process_loyalty_members)
+
+
+@router.post("/loyalty-transactions")
+async def upload_loyalty_transactions(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
+):
+    return await _process_upload(file, "loyalty-transactions", db, current_user, _process_loyalty_transactions)

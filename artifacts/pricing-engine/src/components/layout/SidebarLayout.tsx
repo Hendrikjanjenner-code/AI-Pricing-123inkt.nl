@@ -2,6 +2,8 @@ import { useAuth } from "@/lib/auth";
 import { Link, useLocation } from "wouter";
 import {
   BarChart3,
+  HeartHandshake,
+  Gem,
   Settings,
   Upload,
   Database,
@@ -160,6 +162,13 @@ const navGroepen = [
       { href: "/procurement",  label: "Procurement Forecast",    icon: ShoppingCart },
       { href: "/economie",     label: "Economic Intelligence",   icon: Globe2 },
       { href: "/rapportages",  label: "Management Rapportages",  icon: FileText },
+    ],
+  },
+  {
+    label: "Loyalty & Customer Value",
+    items: [
+      { href: "/loyalty",        label: "Loyalty-overzicht", icon: HeartHandshake },
+      { href: "/customer-value", label: "Customer Value",    icon: Gem },
     ],
   },
   {

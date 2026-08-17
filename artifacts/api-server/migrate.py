@@ -326,6 +326,26 @@ def run_migrations(engine, metadata) -> None:
                     )
                     columns_skipped += 1
 
+    # Handmatige indexen die het add-column-framework niet dekt. Idempotent
+    # via IF NOT EXISTS. De unieke partiële index dwingt idempotente
+    # loyalty-imports af op databaseniveau (dubbele external_ref per lid).
+    _MANUAL_INDEXES = [
+        (
+            "uq_loyalty_txn_member_external_ref",
+            'CREATE UNIQUE INDEX IF NOT EXISTS uq_loyalty_txn_member_external_ref '
+            'ON loyalty_transactions (member_id, external_ref) '
+            'WHERE external_ref IS NOT NULL',
+        ),
+    ]
+    with engine.connect() as conn:
+        for _idx_name, _idx_sql in _MANUAL_INDEXES:
+            try:
+                conn.execute(text(_idx_sql))
+                conn.commit()
+            except Exception as exc:
+                conn.rollback()
+                logger.warning("Migration: could not create index '%s': %s", _idx_name, exc)
+
     if columns_added or columns_skipped or orphan_columns or columns_dropped:
         logger.info(
             "Migration complete: %d column(s) added, %d dropped, %d skipped, "

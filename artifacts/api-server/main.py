@@ -29,7 +29,7 @@ from routes import (
     cost, procurement, economic, reporting, bcg_transitions,
     category_hierarchy, break_even, ecosystem, explainability,
     admin, connectors,
-    signals, shops, platform,
+    signals, shops, platform, loyalty,
 )
 
 # Optional modules (DRS import, PriceShape feed import) are imported
@@ -411,6 +411,7 @@ app.include_router(connectors.router)
 app.include_router(signals.router)
 app.include_router(shops.router)
 app.include_router(platform.router)
+app.include_router(loyalty.router)
 
 # Register whichever optional modules imported successfully above. Modules
 # that failed to import were already recorded in disabled_optional_routers

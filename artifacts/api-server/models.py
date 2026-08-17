@@ -5,7 +5,7 @@ All tables match the spec: users, dim_product, dim_category, etc.
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Float, Boolean, DateTime, Text,
-    ForeignKey, Date, Numeric, JSON
+    ForeignKey, Date, Numeric, JSON, Index, text
 )
 from sqlalchemy.orm import relationship
 from database import Base
@@ -1620,6 +1620,21 @@ class ConnectorConfig(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+class LoyaltyTier(Base):
+    """Loyaliteitsniveaus (bijv. Brons/Zilver/Goud) met drempels en multipliers."""
+    __tablename__ = "loyalty_tiers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    code = Column(String(50), nullable=False, index=True)      # bronze / silver / gold
+    name = Column(String(100), nullable=False)
+    min_points_12m = Column(Integer, default=0)                 # drempel op 12m verdiende punten
+    earn_multiplier = Column(Float, default=1.0)                # punten per euro multiplier
+    benefits = Column(JSON)                                     # lijst met voordelen (tekst)
+    rank = Column(Integer, default=0)                           # sorteervolgorde (hoger = beter)
+    is_demo_data = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class CostUsageRecord(Base):
     """
     Werkelijk gemeten gebruik per module/shop/gebruiker/job (§37-§38).
@@ -1684,6 +1699,23 @@ class CompetitorRanking(Base):
     model_version = Column(String(50))
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class LoyaltyMember(Base):
+    """Pseudoniem loyaliteitslid (§31: geen PII, alleen pseudonymous_customer_id)."""
+    __tablename__ = "loyalty_members"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    pseudonymous_customer_id = Column(String(100), unique=True, nullable=False, index=True)
+    joined_at = Column(Date)
+    tier_code = Column(String(50), default="bronze", index=True)
+    status = Column(String(20), default="active")   # active / inactive / blocked
+    referral_code = Column(String(50), index=True)  # eigen code om anderen te werven
+    referred_by = Column(String(100))               # pseudonymous_customer_id van werver
+    consent_marketing = Column(Boolean, default=False)
+    is_demo_data = Column(Boolean, default=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 class BusinessValueMeasurement(Base):
     """
     Gemeten of geschatte waarde-realisatie (§39-§40). value_label maakt de
@@ -1742,3 +1774,160 @@ class BusinessValueBaseline(Base):
     measured_at = Column(Date)
     created_by = Column(String(100))
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class CustomerValueScore(Base):
+    """
+    Customer Intelligence per pseudoniem lid: CLV, churn, retentie, RFM en
+    Next Best Action — altijd met confidence en uitleg (§64.9-10).
+    """
+    __tablename__ = "customer_value_scores"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    member_id = Column(Integer, ForeignKey("loyalty_members.id"), nullable=False, index=True)
+    run_date = Column(Date, nullable=False, index=True)
+
+    # RFM-bouwstenen
+    recency_days = Column(Integer)
+    frequency_12m = Column(Integer)
+    monetary_12m = Column(Numeric(12, 4))
+    avg_order_value = Column(Numeric(12, 4))
+
+    # Afgeleide scores
+    clv_estimate = Column(Numeric(12, 4))       # verwachte 24m-waarde
+    churn_risk = Column(Float)                  # 0..1
+    retention_probability = Column(Float)       # 0..1
+    value_segment = Column(String(50))          # high_value / mid_value / low_value / at_risk / lost
+    confidence = Column(Float, default=0.0)
+    explanation = Column(Text)
+
+    # Next Best Action
+    next_best_action = Column(String(100))      # bv. loyalty_bonus / winback_voucher / tier_upgrade_nudge / no_action
+    nba_reason = Column(Text)
+    nba_expected_value = Column(Numeric(12, 4)) # verwachte incrementele waarde
+    nba_alternative = Column(String(100))       # vergelijking: bv. generieke prijsverlaging
+    nba_alternative_cost = Column(Numeric(12, 4))
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class LoyaltyFraudSignal(Base):
+    """Fraude-indicatoren op ledger-niveau (§22)."""
+    __tablename__ = "loyalty_fraud_signals"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    member_id = Column(Integer, ForeignKey("loyalty_members.id"), nullable=False, index=True)
+    run_date = Column(Date, nullable=False, index=True)
+    fraud_type = Column(String(50), nullable=False)  # abnormal_earn_rate / rapid_redemption / referral_ring / balance_mismatch
+    severity = Column(String(20), default="medium")
+    score = Column(Float, default=0.0)               # 0..1
+    explanation = Column(Text, nullable=False)
+    evidence = Column(JSON)
+    status = Column(String(20), default="open")      # open / reviewed / dismissed
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class LoyaltyReward(Base):
+    """Beloningen in de catalogus die met punten ingewisseld kunnen worden."""
+    __tablename__ = "loyalty_rewards"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    name = Column(String(255), nullable=False)
+    reward_type = Column(String(30), default="voucher")   # voucher / discount / gift
+    points_cost = Column(Integer, nullable=False)
+    monetary_value = Column(Numeric(10, 4))               # waarde in EUR (voor liability)
+    active = Column(Boolean, default=True)
+    is_demo_data = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class LoyaltyCampaignMembership(Base):
+    """Toewijzing lid ↔ campagne, incl. treatment/control groep."""
+    __tablename__ = "loyalty_campaign_memberships"
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(Integer, ForeignKey("loyalty_campaigns.id"), nullable=False, index=True)
+    member_id = Column(Integer, ForeignKey("loyalty_members.id"), nullable=False, index=True)
+    group_type = Column(String(20), default="treatment")  # treatment / control
+    assigned_at = Column(DateTime, default=datetime.utcnow)
+
+class LoyaltyVoucher(Base):
+    """Uitgegeven voucher (resultaat van een redemption)."""
+    __tablename__ = "loyalty_vouchers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    member_id = Column(Integer, ForeignKey("loyalty_members.id"), nullable=False, index=True)
+    reward_id = Column(Integer, ForeignKey("loyalty_rewards.id"))
+    code = Column(String(50), unique=True, nullable=False, index=True)
+    monetary_value = Column(Numeric(10, 4))
+    status = Column(String(20), default="issued")  # issued / used / expired / cancelled
+    issued_at = Column(Date)
+    expires_at = Column(Date)
+    used_at = Column(Date)
+    is_demo_data = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class LoyaltyTransaction(Base):
+    """
+    Ledger-entry (append-only). points_delta > 0 = earn/adjust-in,
+    < 0 = redemption/expiry/adjust-out. Saldo mag nooit negatief worden.
+    """
+    __tablename__ = "loyalty_transactions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    member_id = Column(Integer, ForeignKey("loyalty_members.id"), nullable=False, index=True)
+    txn_date = Column(Date, nullable=False, index=True)
+    txn_type = Column(String(30), nullable=False, index=True)  # earn / redeem / expire / adjust / referral_bonus / campaign_bonus
+    points_delta = Column(Integer, nullable=False)
+    order_reference = Column(String(100))          # pseudoniem orderkenmerk
+    order_value = Column(Numeric(12, 4))           # bestedingsbedrag (voor earn-rate checks)
+    campaign_id = Column(Integer, ForeignKey("loyalty_campaigns.id"))
+    voucher_id = Column(Integer, ForeignKey("loyalty_vouchers.id"))
+    description = Column(String(500))
+    external_ref = Column(String(150), index=True) # idempotentie-sleutel bij import
+    is_demo_data = Column(Boolean, default=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        # Database-afgedwongen idempotentie: dezelfde external_ref mag per lid
+        # maar één keer voorkomen (partieel: alleen niet-NULL refs).
+        Index(
+            "uq_loyalty_txn_member_external_ref",
+            "member_id", "external_ref",
+            unique=True,
+            postgresql_where=text("external_ref IS NOT NULL"),
+        ),
+    )
+
+class LoyaltyCampaign(Base):
+    """Loyaliteitscampagne met controlegroep (§22: meetbaar effect)."""
+    __tablename__ = "loyalty_campaigns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    name = Column(String(255), nullable=False)
+    campaign_type = Column(String(50), default="bonus_points")  # bonus_points / double_points / referral_drive
+    start_date = Column(Date)
+    end_date = Column(Date)
+    status = Column(String(20), default="active")  # draft / active / completed
+    bonus_multiplier = Column(Float, default=1.0)
+    control_group_pct = Column(Float, default=10.0)  # % leden uitgesloten als controlegroep
+    target_segment = Column(String(100))             # bv. churn_risk / high_value / all
+    is_demo_data = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class LoyaltyWallet(Base):
+    """
+    Wallet per lid. balance_points is een gedenormaliseerd saldo dat ALLEEN
+    via ledger-entries muteert (ledger-integriteit): saldo == som(ledger).
+    """
+    __tablename__ = "loyalty_wallets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    member_id = Column(Integer, ForeignKey("loyalty_members.id"), unique=True, nullable=False, index=True)
+    balance_points = Column(Integer, default=0, nullable=False)
+    lifetime_earned = Column(Integer, default=0, nullable=False)
+    lifetime_redeemed = Column(Integer, default=0, nullable=False)
+    lifetime_expired = Column(Integer, default=0, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

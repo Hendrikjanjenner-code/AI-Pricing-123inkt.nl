@@ -97,6 +97,9 @@ import PlatformHealth from "@/pages/platform-health";
 import PlatformKosten from "@/pages/platform-kosten";
 import PlatformBusinesscase from "@/pages/platform-businesscase";
 import BusinessValue from "@/pages/business-value";
+import LoyaltyDashboard from "@/pages/loyalty-dashboard";
+import LoyaltyMemberDetail from "@/pages/loyalty-member-detail";
+import CustomerValue from "@/pages/customer-value";
 
 const queryClient = new QueryClient();
 
@@ -352,6 +355,15 @@ function Router() {
       {/* Traffic Driver & Basket Intelligence */}
       <Route path="/traffic-driver">
         <ProtectedRoute><TrafficDriverDashboard /></ProtectedRoute>
+      </Route>
+      <Route path="/loyalty/leden/:id">
+        <ProtectedRoute><LoyaltyMemberDetail /></ProtectedRoute>
+      </Route>
+      <Route path="/loyalty">
+        <ProtectedRoute><LoyaltyDashboard /></ProtectedRoute>
+      </Route>
+      <Route path="/customer-value">
+        <ProtectedRoute><CustomerValue /></ProtectedRoute>
       </Route>
       <Route path="/basket-intelligence">
         <ProtectedRoute><BasketIntelligenceDashboard /></ProtectedRoute>

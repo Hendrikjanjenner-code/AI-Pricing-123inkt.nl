@@ -1,0 +1,663 @@
+"""
+Loyalty & Customer Value Intelligence Engine (masterprompt §22, §31, §64.5).
+
+Onderdelen:
+- Ledger-integriteit: wallet-saldi muteren uitsluitend via ledger-entries;
+  `apply_ledger_entry` is de enige toegestane mutatieroute en blokkeert
+  negatieve saldi. `verify_ledger_integrity` controleert saldo == som(ledger).
+- Customer Intelligence: RFM, CLV (24m-schatting), churn-risico en retentie
+  met confidence en uitleg — op pseudonymous_customer_id, geen PII (§31).
+- Next Best Action: per lid een aanbeveling incl. vergelijking met een
+  generieke prijsverlaging (§22), gepubliceerd als IntelligenceSignals.
+- Financial liability: openstaande punten + uitgegeven vouchers.
+- Fraudesignalen: abnormale earn-rates, snelle redemptions, referral-ringen
+  en saldo-mismatches.
+
+Er is nog geen live loyalty-databron; de module werkt met CSV/XLSX-import en
+expliciet gemarkeerde demodata (is_demo_data=True, §64.5).
+"""
+from __future__ import annotations
+
+import logging
+from datetime import date, datetime, timedelta
+from decimal import Decimal
+
+from sqlalchemy import func
+from sqlalchemy import text as sa_text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+import models
+
+logger = logging.getLogger(__name__)
+
+MODEL_VERSION = "loyalty-v1.0"
+# Boekhoudkundige puntwaarde voor liability (EUR per punt).
+POINT_VALUE_EUR = 0.01
+
+DEFAULT_TIERS = [
+    {"code": "bronze", "name": "Brons", "min_points_12m": 0, "earn_multiplier": 1.0, "rank": 1},
+    {"code": "silver", "name": "Zilver", "min_points_12m": 1500, "earn_multiplier": 1.25, "rank": 2},
+    {"code": "gold", "name": "Goud", "min_points_12m": 5000, "earn_multiplier": 1.5, "rank": 3},
+]
+
+
+class LedgerError(Exception):
+    """Ledger-mutatie geweigerd (bv. negatief saldo of dubbele external_ref)."""
+
+
+# Tekenregels per transactietype: credits moeten positief zijn, debits
+# negatief. 'adjust' mag beide kanten op (handmatige correctie), maar nooit 0.
+_CREDIT_TYPES = {"earn", "referral_bonus", "campaign_bonus"}
+_DEBIT_TYPES = {"redeem", "expire"}
+
+
+# ---------------------------------------------------------------------------
+# Ledger / wallet
+# ---------------------------------------------------------------------------
+
+def ensure_wallet(db: Session, member_id: int, *, for_update: bool = False) -> models.LoyaltyWallet:
+    def _query():
+        q = db.query(models.LoyaltyWallet).filter(
+            models.LoyaltyWallet.member_id == member_id
+        )
+        if for_update:
+            # Row-lock zodat gelijktijdige mutaties elkaar niet kunnen inhalen
+            # (twee redemptions die allebei de saldocheck halen).
+            q = q.with_for_update()
+        return q.first()
+
+    wallet = _query()
+    if not wallet:
+        # Atomair aanmaken via ON CONFLICT DO NOTHING: bij een race maakt
+        # precies één sessie de rij aan en pakt de ander die daarna (gelockt)
+        # op — zonder IntegrityError die de sessie zou invalideren.
+        db.execute(
+            sa_text(
+                "INSERT INTO loyalty_wallets (member_id, balance_points, "
+                "lifetime_earned, lifetime_redeemed, lifetime_expired) "
+                "VALUES (:mid, 0, 0, 0, 0) ON CONFLICT (member_id) DO NOTHING"
+            ),
+            {"mid": member_id},
+        )
+        wallet = _query()
+        if wallet is None:  # pragma: no cover — zou niet mogen gebeuren
+            raise LedgerError(f"Wallet voor lid {member_id} kon niet worden aangemaakt")
+    return wallet
+
+
+def apply_ledger_entry(
+    db: Session,
+    member: models.LoyaltyMember,
+    txn_date: date,
+    txn_type: str,
+    points_delta: int,
+    *,
+    order_reference: str | None = None,
+    order_value=None,
+    description: str | None = None,
+    external_ref: str | None = None,
+    campaign_id: int | None = None,
+    voucher_id: int | None = None,
+    is_demo_data: bool = False,
+    commit: bool = False,
+) -> models.LoyaltyTransaction:
+    """
+    Enige toegestane route om puntensaldi te muteren: schrijft een
+    append-only ledger-entry en werkt het wallet-saldo transactioneel bij.
+    Weigert mutaties die het saldo negatief zouden maken en dubbele
+    external_refs (idempotente import).
+    """
+    if points_delta == 0:
+        raise LedgerError("points_delta mag niet 0 zijn")
+    if txn_type in _CREDIT_TYPES and points_delta < 0:
+        raise LedgerError(
+            f"txn_type '{txn_type}' vereist positieve punten (kreeg {points_delta})"
+        )
+    if txn_type in _DEBIT_TYPES and points_delta > 0:
+        raise LedgerError(
+            f"txn_type '{txn_type}' vereist negatieve punten (kreeg {points_delta})"
+        )
+    if txn_type not in _CREDIT_TYPES | _DEBIT_TYPES | {"adjust"}:
+        raise LedgerError(f"onbekend txn_type '{txn_type}'")
+
+    # Lock de wallet-rij: saldocheck + update gebeuren atomair binnen de
+    # transactie, zodat gelijktijdige redemptions niet allebei kunnen slagen.
+    wallet = ensure_wallet(db, member.id, for_update=True)
+
+    # Duplicate-check NA het wallet-lock (gelijktijdige leveringen van dezelfde
+    # external_ref serialiseren eerst op het lock en zien elkaars rij daarna).
+    # De unieke partiële index uq_loyalty_txn_member_external_ref vormt het
+    # sluitstuk op databaseniveau; een IntegrityError daarop wordt hieronder
+    # als idempotente LedgerError afgehandeld.
+    if external_ref:
+        dup = db.query(models.LoyaltyTransaction).filter(
+            models.LoyaltyTransaction.external_ref == external_ref,
+            models.LoyaltyTransaction.member_id == member.id,
+        ).first()
+        if dup:
+            raise LedgerError(f"Dubbele transactie (external_ref={external_ref}) — overgeslagen")
+    new_balance = (wallet.balance_points or 0) + points_delta
+    if new_balance < 0:
+        raise LedgerError(
+            f"Saldo zou negatief worden ({wallet.balance_points} {points_delta:+d}) — geweigerd"
+        )
+
+    txn = models.LoyaltyTransaction(
+        shop_id=member.shop_id or 1,
+        member_id=member.id,
+        txn_date=txn_date,
+        txn_type=txn_type,
+        points_delta=points_delta,
+        order_reference=order_reference,
+        order_value=order_value,
+        description=description,
+        external_ref=external_ref,
+        campaign_id=campaign_id,
+        voucher_id=voucher_id,
+        is_demo_data=is_demo_data,
+    )
+    # Voeg eerst de ledger-rij toe en flush die binnen een savepoint: een
+    # IntegrityError op de unieke partiële index (member_id, external_ref)
+    # — het sluitstuk tegen gelijktijdige dubbele leveringen — komt dan als
+    # idempotente LedgerError terug zonder de omliggende (batch)transactie of
+    # de wallet-tellers te corrumperen. Sessie draait met autoflush=False, dus
+    # deze flush maakt de duplicate-check ook binnen één import-batch sluitend.
+    db.add(txn)
+    try:
+        with db.begin_nested():
+            db.flush()
+    except IntegrityError as ie:
+        raise LedgerError(
+            f"Dubbele transactie (external_ref={external_ref}) — overgeslagen"
+        ) from ie
+
+    # Pas daarna de wallet muteren — nooit bereikt bij een duplicate.
+    wallet.balance_points = new_balance
+    if points_delta > 0:
+        wallet.lifetime_earned = (wallet.lifetime_earned or 0) + points_delta
+    elif txn_type == "expire":
+        wallet.lifetime_expired = (wallet.lifetime_expired or 0) + (-points_delta)
+    else:
+        wallet.lifetime_redeemed = (wallet.lifetime_redeemed or 0) + (-points_delta)
+    db.flush()
+    if commit:
+        db.commit()
+    return txn
+
+
+def verify_ledger_integrity(db: Session) -> list[dict]:
+    """Controleer saldo == som(ledger) per wallet. Retourneert mismatches."""
+    sums = dict(
+        db.query(
+            models.LoyaltyTransaction.member_id,
+            func.coalesce(func.sum(models.LoyaltyTransaction.points_delta), 0),
+        ).group_by(models.LoyaltyTransaction.member_id).all()
+    )
+    mismatches = []
+    for wallet in db.query(models.LoyaltyWallet).all():
+        expected = int(sums.get(wallet.member_id, 0))
+        if int(wallet.balance_points or 0) != expected:
+            mismatches.append({
+                "member_id": wallet.member_id,
+                "wallet_balance": int(wallet.balance_points or 0),
+                "ledger_sum": expected,
+            })
+    return mismatches
+
+
+def recompute_tiers(db: Session) -> int:
+    """Herbereken tier per lid op basis van 12m verdiende punten."""
+    tiers = db.query(models.LoyaltyTier).order_by(models.LoyaltyTier.rank.desc()).all()
+    if not tiers:
+        return 0
+    cutoff = date.today() - timedelta(days=365)
+    earned = dict(
+        db.query(
+            models.LoyaltyTransaction.member_id,
+            func.coalesce(func.sum(models.LoyaltyTransaction.points_delta), 0),
+        ).filter(
+            models.LoyaltyTransaction.points_delta > 0,
+            models.LoyaltyTransaction.txn_date >= cutoff,
+        ).group_by(models.LoyaltyTransaction.member_id).all()
+    )
+    updated = 0
+    for member in db.query(models.LoyaltyMember).all():
+        pts = int(earned.get(member.id, 0))
+        new_tier = tiers[-1].code  # laagste als fallback
+        for t in tiers:  # aflopend op rank
+            if pts >= (t.min_points_12m or 0):
+                new_tier = t.code
+                break
+        if member.tier_code != new_tier:
+            member.tier_code = new_tier
+            updated += 1
+    return updated
+
+
+# ---------------------------------------------------------------------------
+# Customer Intelligence: RFM / CLV / churn / retentie / NBA
+# ---------------------------------------------------------------------------
+
+def _f(x) -> float:
+    return float(x) if x is not None else 0.0
+
+
+def compute_customer_value(db: Session, run_date: date | None = None) -> int:
+    """
+    Berekent per lid RFM, CLV (24m), churn-risico, retentiekans, segment en
+    Next Best Action. Heuristisch model met expliciete confidence en uitleg
+    (§64.9-10) — confidence schaalt met de hoeveelheid historie.
+    """
+    run_date = run_date or date.today()
+    cutoff_12m = run_date - timedelta(days=365)
+
+    members = db.query(models.LoyaltyMember).all()
+    if not members:
+        return 0
+
+    # Purchase-achtige events: earn-transacties met order_value
+    rows = db.query(
+        models.LoyaltyTransaction.member_id,
+        func.count(models.LoyaltyTransaction.id),
+        func.coalesce(func.sum(models.LoyaltyTransaction.order_value), 0),
+        func.max(models.LoyaltyTransaction.txn_date),
+    ).filter(
+        models.LoyaltyTransaction.txn_type == "earn",
+        models.LoyaltyTransaction.txn_date >= cutoff_12m,
+    ).group_by(models.LoyaltyTransaction.member_id).all()
+    stats_12m = {r[0]: r for r in rows}
+
+    last_any = dict(
+        db.query(
+            models.LoyaltyTransaction.member_id,
+            func.max(models.LoyaltyTransaction.txn_date),
+        ).filter(models.LoyaltyTransaction.txn_type == "earn")
+        .group_by(models.LoyaltyTransaction.member_id).all()
+    )
+
+    # Verwijder eerdere run van vandaag (idempotent)
+    db.query(models.CustomerValueScore).filter(
+        models.CustomerValueScore.run_date == run_date
+    ).delete()
+
+    n = 0
+    for m in members:
+        _, freq, monetary, _ = stats_12m.get(m.id, (m.id, 0, 0, None))
+        last_purchase = last_any.get(m.id)
+        recency = (run_date - last_purchase).days if last_purchase else None
+        monetary = _f(monetary)
+        aov = monetary / freq if freq else 0.0
+
+        # Churn-risico: logistisch oplopend met recency, gedempt door frequentie
+        if recency is None:
+            churn = 0.9
+        else:
+            base = min(1.0, recency / 365.0)          # 0..1 na een jaar stilte
+            damp = min(0.4, freq * 0.05)              # frequente kopers churnen minder snel
+            churn = round(max(0.02, min(0.98, base * (1.0 - damp) + 0.05)), 3)
+        retention = round(1.0 - churn, 3)
+
+        # CLV: verwachte 24m-waarde = 12m-besteding * 2 * retentiekans
+        clv = round(monetary * 2.0 * retention, 2)
+
+        # Segment
+        if recency is None or churn >= 0.85:
+            segment = "lost" if (recency or 9999) > 540 else "at_risk"
+        elif churn >= 0.6:
+            segment = "at_risk"
+        elif monetary >= 500 and freq >= 6:
+            segment = "high_value"
+        elif monetary >= 150:
+            segment = "mid_value"
+        else:
+            segment = "low_value"
+
+        # Confidence: schaalt met datapunten (frequentie) en aanwezige historie
+        confidence = round(min(0.9, 0.2 + 0.08 * min(freq, 8) + (0.1 if last_purchase else 0.0)), 2)
+
+        explanation = (
+            f"RFM 12m: recency={recency if recency is not None else 'geen aankopen'}d, "
+            f"frequentie={freq}, besteding=€{monetary:.2f} (AOV €{aov:.2f}). "
+            f"Churn-risico {churn:.0%} → retentiekans {retention:.0%}. "
+            f"CLV-schatting (24m) = 12m-besteding × 2 × retentiekans = €{clv:.2f}. "
+            f"Heuristisch model {MODEL_VERSION}; confidence {confidence:.0%} op basis van "
+            f"{freq} datapunten."
+        )
+
+        # Next Best Action + vergelijking met generieke prijsverlaging (§22)
+        nba, nba_reason, nba_ev, alt_cost = _next_best_action(segment, churn, monetary, aov, retention)
+
+        db.add(models.CustomerValueScore(
+            shop_id=m.shop_id or 1,
+            member_id=m.id,
+            run_date=run_date,
+            recency_days=recency,
+            frequency_12m=int(freq or 0),
+            monetary_12m=monetary,
+            avg_order_value=aov,
+            clv_estimate=clv,
+            churn_risk=churn,
+            retention_probability=retention,
+            value_segment=segment,
+            confidence=confidence,
+            explanation=explanation,
+            next_best_action=nba,
+            nba_reason=nba_reason,
+            nba_expected_value=nba_ev,
+            nba_alternative="generieke_prijsverlaging_2pct",
+            nba_alternative_cost=alt_cost,
+        ))
+        n += 1
+    return n
+
+
+def _next_best_action(segment: str, churn: float, monetary: float, aov: float, retention: float):
+    """
+    Kies NBA en kwantificeer t.o.v. het alternatief: een generieke
+    prijsverlaging van 2% over de 12m-besteding van dit lid (marge-offer
+    zonder targeting). Gericht loyalty-instrument is doorgaans goedkoper.
+    """
+    alt_cost = round(monetary * 0.02, 2)  # kost van 2% generieke prijsverlaging
+    if segment == "lost":
+        return ("no_action", "Lid is >18 maanden inactief; winback-kosten wegen "
+                "niet op tegen verwachte waarde.", 0.0, alt_cost)
+    if segment == "at_risk":
+        ev = round(monetary * 0.25 * (1 - churn + 0.3), 2)
+        return ("winback_voucher",
+                f"Hoog churn-risico ({churn:.0%}): gerichte winback-voucher (±€{max(aov*0.1, 5):.0f}) "
+                f"is goedkoper dan generieke prijsverlaging (€{alt_cost:.2f}) en behoudt marge "
+                "op niet-risico-klanten.", ev, alt_cost)
+    if segment == "high_value":
+        ev = round(monetary * 0.10, 2)
+        return ("tier_upgrade_nudge",
+                "Hoogwaardig lid: tier-voordeel benadrukken verhoogt retentie zonder "
+                f"prijsinvestering; generiek alternatief zou €{alt_cost:.2f} marge kosten.", ev, alt_cost)
+    if segment == "mid_value":
+        ev = round(monetary * 0.08, 2)
+        return ("loyalty_bonus",
+                "Gerichte bonuspunten-actie stimuleert herhaalaankoop tegen puntkosten "
+                f"(±€{monetary * 0.01:.2f}) i.p.v. generieke prijsverlaging (€{alt_cost:.2f}).",
+                ev, alt_cost)
+    return ("no_action", "Lage waarde en geen verhoogd churn-risico; geen actie is "
+            "rendabeler dan investeren.", 0.0, alt_cost)
+
+
+# ---------------------------------------------------------------------------
+# Financial liability
+# ---------------------------------------------------------------------------
+
+def liability_summary(db: Session) -> dict:
+    outstanding = int(db.query(
+        func.coalesce(func.sum(models.LoyaltyWallet.balance_points), 0)
+    ).scalar() or 0)
+    voucher_value = db.query(
+        func.coalesce(func.sum(models.LoyaltyVoucher.monetary_value), 0)
+    ).filter(models.LoyaltyVoucher.status == "issued").scalar() or 0
+    voucher_count = db.query(func.count(models.LoyaltyVoucher.id)).filter(
+        models.LoyaltyVoucher.status == "issued"
+    ).scalar() or 0
+    points_liability = round(outstanding * POINT_VALUE_EUR, 2)
+    # 30d expiry: punten die binnen 30 dagen vervallen (vouchers)
+    soon = date.today() + timedelta(days=30)
+    expiring_vouchers = db.query(func.count(models.LoyaltyVoucher.id)).filter(
+        models.LoyaltyVoucher.status == "issued",
+        models.LoyaltyVoucher.expires_at != None,  # noqa: E711
+        models.LoyaltyVoucher.expires_at <= soon,
+    ).scalar() or 0
+    return {
+        "outstanding_points": outstanding,
+        "point_value_eur": POINT_VALUE_EUR,
+        "points_liability_eur": points_liability,
+        "open_vouchers": int(voucher_count),
+        "voucher_liability_eur": round(float(voucher_value), 2),
+        "total_liability_eur": round(points_liability + float(voucher_value), 2),
+        "vouchers_expiring_30d": int(expiring_vouchers),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Fraude
+# ---------------------------------------------------------------------------
+
+def detect_fraud(db: Session, run_date: date | None = None) -> int:
+    """
+    Detecteert: abnormale earn-rate (punten >> verwacht t.o.v. order_value),
+    snelle redemption na earn (<48u patroon), referral-ringen (één werver met
+    veel inactieve referrals) en wallet/ledger-mismatches.
+    """
+    run_date = run_date or date.today()
+    db.query(models.LoyaltyFraudSignal).filter(
+        models.LoyaltyFraudSignal.run_date == run_date
+    ).delete()
+    n = 0
+
+    def _add(member_id: int, fraud_type: str, severity: str, score: float,
+             explanation: str, evidence: dict):
+        nonlocal n
+        db.add(models.LoyaltyFraudSignal(
+            member_id=member_id, run_date=run_date, fraud_type=fraud_type,
+            severity=severity, score=score, explanation=explanation, evidence=evidence,
+        ))
+        n += 1
+
+    # 1. Abnormale earn-rate: punten per euro >> tier-multiplier (verwacht ~1-1.5 pt/€)
+    cutoff = run_date - timedelta(days=90)
+    rows = db.query(
+        models.LoyaltyTransaction.member_id,
+        func.sum(models.LoyaltyTransaction.points_delta),
+        func.coalesce(func.sum(models.LoyaltyTransaction.order_value), 0),
+        func.count(models.LoyaltyTransaction.id),
+    ).filter(
+        models.LoyaltyTransaction.txn_type == "earn",
+        models.LoyaltyTransaction.txn_date >= cutoff,
+    ).group_by(models.LoyaltyTransaction.member_id).all()
+    for member_id, pts, val, cnt in rows:
+        val = _f(val)
+        if val > 0 and pts and (pts / val) > 3.0:
+            _add(member_id, "abnormal_earn_rate", "high", min(1.0, (pts / val) / 10.0),
+                 f"Earn-rate {pts / val:.1f} punten/€ over 90 dagen — verwacht ≤1.5 "
+                 f"(hoogste tier-multiplier). {int(pts)} punten op €{val:.2f} besteding.",
+                 {"points_90d": int(pts), "order_value_90d": val, "txn_count": int(cnt)})
+
+    # 2. Snelle redemption: ≥3 redemptions binnen 2 dagen na earns in 30 dagen
+    cutoff30 = run_date - timedelta(days=30)
+    redeem_counts = db.query(
+        models.LoyaltyTransaction.member_id,
+        func.count(models.LoyaltyTransaction.id),
+        func.sum(models.LoyaltyTransaction.points_delta),
+    ).filter(
+        models.LoyaltyTransaction.txn_type == "redeem",
+        models.LoyaltyTransaction.txn_date >= cutoff30,
+    ).group_by(models.LoyaltyTransaction.member_id).all()
+    for member_id, cnt, pts in redeem_counts:
+        if cnt >= 3:
+            _add(member_id, "rapid_redemption", "medium", min(1.0, cnt / 10.0),
+                 f"{cnt} redemptions binnen 30 dagen ({abs(int(pts or 0))} punten) — "
+                 "ongebruikelijk hoog inwisseltempo.",
+                 {"redemptions_30d": int(cnt), "points_redeemed": abs(int(pts or 0))})
+
+    # 3. Referral-ring: werver met ≥5 referrals waarvan >80% zonder enige earn
+    ref_rows = db.query(
+        models.LoyaltyMember.referred_by,
+        func.count(models.LoyaltyMember.id),
+    ).filter(models.LoyaltyMember.referred_by != None)  # noqa: E711
+    ref_rows = ref_rows.group_by(models.LoyaltyMember.referred_by).having(
+        func.count(models.LoyaltyMember.id) >= 5
+    ).all()
+    for referrer_pid, cnt in ref_rows:
+        referrer = db.query(models.LoyaltyMember).filter(
+            models.LoyaltyMember.pseudonymous_customer_id == referrer_pid
+        ).first()
+        if not referrer:
+            continue
+        referred_ids = [r[0] for r in db.query(models.LoyaltyMember.id).filter(
+            models.LoyaltyMember.referred_by == referrer_pid).all()]
+        active = db.query(func.count(func.distinct(models.LoyaltyTransaction.member_id))).filter(
+            models.LoyaltyTransaction.member_id.in_(referred_ids),
+            models.LoyaltyTransaction.txn_type == "earn",
+        ).scalar() or 0
+        inactive_pct = 1.0 - (active / cnt)
+        if inactive_pct > 0.8:
+            _add(referrer.id, "referral_ring", "high", round(inactive_pct, 2),
+                 f"{cnt} referrals waarvan {inactive_pct:.0%} nooit een aankoop deed — "
+                 "patroon past bij referral-bonus-misbruik.",
+                 {"referrals": int(cnt), "inactive_pct": round(inactive_pct, 2)})
+
+    # 4. Wallet/ledger-mismatch
+    for mm in verify_ledger_integrity(db):
+        _add(mm["member_id"], "balance_mismatch", "critical", 1.0,
+             f"Wallet-saldo ({mm['wallet_balance']}) wijkt af van ledger-som "
+             f"({mm['ledger_sum']}) — ledger-integriteit geschonden.",
+             mm)
+    return n
+
+
+# ---------------------------------------------------------------------------
+# Intelligence Signals (§7): publiceren richting Decision Engine
+# ---------------------------------------------------------------------------
+
+def _publish_signal(db: Session, **kw) -> None:
+    dedupe_key = f"{kw['engine']}:{kw['signal_type']}:{kw['entity_type']}:{kw['entity_id']}"
+    shop_id = kw.pop("shop_id", 1)
+    db.query(models.IntelligenceSignal).filter(
+        models.IntelligenceSignal.dedupe_key == dedupe_key,
+        models.IntelligenceSignal.shop_id == shop_id,
+        models.IntelligenceSignal.status == "active",
+    ).update({"status": "superseded"})
+    db.add(models.IntelligenceSignal(
+        shop_id=shop_id, dedupe_key=dedupe_key, model_version=MODEL_VERSION, **kw
+    ))
+
+
+def publish_signals(db: Session, run_date: date | None = None) -> int:
+    """
+    Publiceert loyalty-signalen: NBA per lid (top-churn/high-value), fraude,
+    liability-niveau. Elk signaal heeft explanation + evidence (§64.9-10).
+    """
+    run_date = run_date or date.today()
+    published = 0
+
+    scores = db.query(models.CustomerValueScore).filter(
+        models.CustomerValueScore.run_date == run_date,
+        models.CustomerValueScore.next_best_action != "no_action",
+    ).order_by(models.CustomerValueScore.clv_estimate.desc()).limit(50).all()
+    members = {m.id: m for m in db.query(models.LoyaltyMember).all()}
+
+    for s in scores:
+        m = members.get(s.member_id)
+        if not m:
+            continue
+        _publish_signal(
+            db,
+            engine="loyalty",
+            signal_type=f"nba_{s.next_best_action}",
+            severity="medium" if s.value_segment == "at_risk" else "info",
+            direction="positive",
+            entity_type="customer",
+            entity_id=m.pseudonymous_customer_id,
+            entity_name=f"Lid {m.pseudonymous_customer_id} ({s.value_segment})",
+            current_value=float(s.clv_estimate or 0),
+            confidence=float(s.confidence or 0),
+            explanation=(
+                f"Next Best Action '{s.next_best_action}': {s.nba_reason} "
+                f"Verwachte incrementele waarde €{float(s.nba_expected_value or 0):.2f} "
+                f"vs. generieke prijsverlaging (kost €{float(s.nba_alternative_cost or 0):.2f})."
+            ),
+            evidence={
+                "clv_estimate": float(s.clv_estimate or 0),
+                "churn_risk": s.churn_risk,
+                "retention_probability": s.retention_probability,
+                "value_segment": s.value_segment,
+                "nba_expected_value": float(s.nba_expected_value or 0),
+                "alternative": s.nba_alternative,
+                "alternative_cost": float(s.nba_alternative_cost or 0),
+            },
+            sources=["customer_value_scores", "loyalty_transactions", "loyalty_wallets"],
+            suggested_action=s.next_best_action,
+        )
+        published += 1
+
+    # Fraude: één signaal per open fraudemelding van vandaag
+    frauds = db.query(models.LoyaltyFraudSignal).filter(
+        models.LoyaltyFraudSignal.run_date == run_date,
+        models.LoyaltyFraudSignal.status == "open",
+    ).all()
+    for f in frauds:
+        m = members.get(f.member_id)
+        if not m:
+            continue
+        _publish_signal(
+            db,
+            engine="loyalty",
+            signal_type=f"fraud_{f.fraud_type}",
+            severity=f.severity or "medium",
+            direction="negative",
+            entity_type="customer",
+            entity_id=m.pseudonymous_customer_id,
+            entity_name=f"Lid {m.pseudonymous_customer_id}",
+            current_value=f.score,
+            confidence=min(0.95, 0.5 + (f.score or 0) / 2),
+            explanation=f.explanation,
+            evidence=f.evidence or {"fraud_type": f.fraud_type},
+            sources=["loyalty_fraud_signals", "loyalty_transactions"],
+            suggested_action="review_member",
+        )
+        published += 1
+
+    # Liability op shop-niveau
+    liab = liability_summary(db)
+    if liab["outstanding_points"] > 0:
+        _publish_signal(
+            db,
+            engine="loyalty",
+            signal_type="loyalty_liability_level",
+            severity="info",
+            direction="neutral",
+            entity_type="shop",
+            entity_id="1",
+            entity_name="Loyalty financial liability",
+            current_value=liab["total_liability_eur"],
+            confidence=0.95,
+            explanation=(
+                f"Openstaande loyaliteitsverplichting: {liab['outstanding_points']} punten "
+                f"(€{liab['points_liability_eur']:.2f}) + {liab['open_vouchers']} open vouchers "
+                f"(€{liab['voucher_liability_eur']:.2f}) = €{liab['total_liability_eur']:.2f}."
+            ),
+            evidence=liab,
+            sources=["loyalty_wallets", "loyalty_vouchers"],
+            suggested_action="monitor_liability",
+        )
+        published += 1
+
+    return published
+
+
+def run_loyalty_engine(db: Session) -> dict:
+    """Volledige run: tiers → customer value → fraude → signalen."""
+    run_date = date.today()
+    tiers_updated = recompute_tiers(db)
+    db.flush()
+    scored = compute_customer_value(db, run_date)
+    # SessionLocal draait met autoflush=False: expliciet flushen zodat de
+    # queries in detect_fraud/publish_signals de zojuist berekende rijen zien.
+    db.flush()
+    fraud = detect_fraud(db, run_date)
+    db.flush()
+    signals = publish_signals(db, run_date)
+    db.commit()
+    return {
+        "run_date": run_date.isoformat(),
+        "tiers_updated": tiers_updated,
+        "members_scored": scored,
+        "fraud_signals": fraud,
+        "intelligence_signals_published": signals,
+        "model_version": MODEL_VERSION,
+    }
+
+
+def ensure_default_tiers(db: Session) -> None:
+    if db.query(models.LoyaltyTier).count() == 0:
+        for t in DEFAULT_TIERS:
+            db.add(models.LoyaltyTier(**t))
+        db.commit()
