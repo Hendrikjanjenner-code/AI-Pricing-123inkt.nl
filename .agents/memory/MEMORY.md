@@ -1,3 +1,4 @@
+- [API curl paths in dev](api-curl-paths.md) — curl uvicorn's own port directly (`localhost:8080/api/...`); the port-80 preview proxy doubles the /api prefix and 404s.
 - [Seed strategy](seed-strategy.md) — seed_users_only() always runs on startup; full demo data only with SEED_DEMO_DATA=true env var.
 - [Backend validate-first uploads](backend-validate-first.md) — POST /api/uploads/validate?upload_type=X validates CSV without saving; frontend calls it before import.
 - [Traffic model fields](traffic-model-fields.md) — FactTrafficDaily uses entity_type/entity_id (not sku_id); entity_type="SKU" for per-SKU rows.

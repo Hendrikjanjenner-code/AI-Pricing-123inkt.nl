@@ -138,4 +138,9 @@ def run_procurement_engine(db: Session, ref_date: date | None = None) -> int:
         )
         db.add(FactProcurementForecastDaily(**rec))
     db.commit()
+
+    # Publiceer gestandaardiseerde IntelligenceSignals (§7-§8)
+    from engine.signal_emitters import emit_for_engine
+    emit_for_engine(db, "procurement")
+
     return len(products)

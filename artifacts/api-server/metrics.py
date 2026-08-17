@@ -101,3 +101,21 @@ def gross_margin_pct(revenue, cost):
 
 def asp(revenue, units):
     return safe_div(revenue, units)
+
+def margin_ratio(price, cost, default: float = 0.25):
+    """
+    Marge-ratio (0..1) = (prijs - kostprijs) / prijs.
+    Centrale definitie — engines mogen dit niet zelf herberekenen (§consolidatie).
+    Geeft `default` terug wanneer de prijs ontbreekt of 0 is.
+    """
+    r = safe_div(gross_margin(price, cost), price)
+    return r if r is not None else default
+
+def price_index(own_price, reference_price, default: float = 1.0):
+    """
+    Prijsindex = eigen prijs / referentieprijs (concurrentie).
+    < 1.0 betekent dat wij goedkoper zijn dan de markt (gunstig),
+    > 1.0 betekent dat wij duurder zijn. Centrale definitie.
+    """
+    r = safe_div(own_price, reference_price)
+    return r if r is not None else default

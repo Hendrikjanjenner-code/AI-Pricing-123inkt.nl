@@ -213,6 +213,24 @@ def create_signal(
     db.refresh(signal)
     return signal_to_dict(signal)
 
+@router.post("/refresh")
+def refresh_all_signals(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role("admin", "pricing_manager")),
+):
+    """
+    Draai alle signal-emitters over de meest recente engine-resultaten
+    (incl. verse competitor rankings) en expireer verouderde signalen.
+    """
+    from engine.signal_emitters import emit_all_signals
+    results = emit_all_signals(db)
+    return {
+        "status": "voltooid",
+        "published_per_engine": {k: v for k, v in results.items() if k not in ("expired",)},
+        "expired": results.get("expired", 0),
+        "failed_engines": [k for k, v in results.items() if v == -1],
+    }
+
 
 @router.post("/{signal_id}/dismiss")
 def dismiss_signal(

@@ -1619,3 +1619,34 @@ class ConnectorConfig(Base):
     configured_by = Column(String(100))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class CompetitorRanking(Base):
+    """
+    Concurrent-ranking per scope (masterprompt §9 en §11).
+    Drie gestandaardiseerde scores per concurrent:
+    - competition_relevance_score: hoe relevant is de concurrent als geheel
+    - price_relevance_score: hoe relevant is zijn prijszetting voor ons
+    - influence_score: hoeveel invloed heeft hij op onze conversie/prijs
+    Met rank, vorige rank en trend zodat verschuivingen zichtbaar zijn.
+    """
+    __tablename__ = "competitor_rankings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_date = Column(Date, nullable=False, index=True)
+    scope = Column(String(200), nullable=False, default="overall", index=True)  # "overall" of categorienaam
+    competitor_name = Column(String(255), nullable=False, index=True)
+
+    competition_relevance_score = Column(Float, default=0.0)   # §9.1
+    price_relevance_score = Column(Float, default=0.0)         # §9.2
+    influence_score = Column(Float, default=0.0)               # §9.3
+    combined_score = Column(Float, default=0.0)
+
+    rank = Column(Integer)
+    previous_rank = Column(Integer)
+    rank_trend = Column(String(10), default="stable")          # up / down / stable / new
+
+    confidence = Column(Float, default=0.0)
+    explanation = Column(Text)                                  # geen score zonder uitleg (§64.9)
+    evidence = Column(JSON)
+    model_version = Column(String(50))
+    created_at = Column(DateTime, default=datetime.utcnow)

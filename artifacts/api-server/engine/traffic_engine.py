@@ -392,4 +392,9 @@ def run_traffic_engine(db: Session) -> tuple[int, int]:
             continue
 
     db.commit()
+
+    # Publiceer gestandaardiseerde IntelligenceSignals (§7-§8)
+    from engine.signal_emitters import emit_for_engine
+    emit_for_engine(db, "traffic")
+
     return processed, skipped

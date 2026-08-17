@@ -9,6 +9,7 @@ import NotFound from "@/pages/not-found";
 // Bestaande pagina's
 import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
+import Signalen from "@/pages/signalen";
 import Prijsadviezen from "@/pages/recommendations";
 import PrijsadviesDetail from "@/pages/recommendations/detail";
 import Producten from "@/pages/skus";
@@ -101,6 +102,11 @@ function Router() {
       <Route path="/login" component={Login} />
       <Route path="/">
         <ProtectedRoute><Dashboard /></ProtectedRoute>
+      </Route>
+
+      {/* Intelligence Signals */}
+      <Route path="/signalen">
+        <ProtectedRoute><Signalen /></ProtectedRoute>
       </Route>
 
       {/* Prijsadviezen */}

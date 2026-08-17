@@ -140,6 +140,11 @@ def run_cost_engine(db: Session, ref_date: date | None = None) -> int:
         inserted += 1
 
     db.commit()
+
+    # Publiceer gestandaardiseerde IntelligenceSignals (§7-§8)
+    from engine.signal_emitters import emit_for_engine
+    emit_for_engine(db, "cost")
+
     return inserted
 
 

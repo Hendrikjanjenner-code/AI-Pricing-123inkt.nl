@@ -61,6 +61,7 @@ const navGroepen = [
     label: "Operaties",
     items: [
       { href: "/", label: "Dashboard", icon: BarChart3 },
+      { href: "/signalen", label: "Intelligence Signals", icon: Bell },
       { href: "/prijsadviezen", label: "Prijsadviezen", icon: List },
       { href: "/producten", label: "Producten", icon: Box },
     ],

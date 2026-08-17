@@ -138,6 +138,11 @@ def run_pricing_engine(db: Session) -> tuple[int, int]:
     for i in range(0, len(rec_maps), 5_000):
         db.bulk_insert_mappings(models.FactPricingRecommendationDaily, rec_maps[i:i + 5_000])
     db.commit()
+
+    # Publiceer gestandaardiseerde IntelligenceSignals (§7-§8)
+    from engine.signal_emitters import emit_for_engine
+    emit_for_engine(db, "pricing")
+
     return processed, skipped
 
 

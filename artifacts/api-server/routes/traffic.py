@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 import auth as auth_utils
 import models
+import metrics as metrics_lib
 from engine.traffic_engine import run_traffic_engine
 from engine.conversion_monitoring import (
     SIGNAL_LABELS_NL, SIGNAL_PRIORITY, SIGNAL_KLEUR, ADVIES_PER_SIGNAAL,
@@ -234,8 +235,7 @@ def get_traffic_sku_detail(
         crs=float(intel.conversion_risk_score or 0) if intel else 0,
         sgs=float(intel.search_gap_score or 0) if intel else 0,
         sessions=tot_sess,
-        margin_pct=float(product.current_price and product.cost_price and
-                         (product.current_price - product.cost_price) / product.current_price or 0.25),
+        margin_pct=float(metrics_lib.margin_ratio(product.current_price, product.cost_price)),
         stock_quantity=product.stock_quantity or 0,
         price_index=float(cps),
         reason_code=intel.reason_code or "NO_SIGNAL" if intel else "NO_SIGNAL",

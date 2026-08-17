@@ -922,3 +922,70 @@ def _run_out(r: models.CompetitorDiscoveryRun) -> dict:
         "parameters": r.parameters or {},
         "error_message": r.error_message,
     }
+
+
+# ── NIEUW: Rankings (§9 + §11) ───────────────────────────────────────────────
+
+@router.get("/rankings")
+def get_competitor_rankings(
+    scope: str = Query("overall"),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """
+    Concurrentrankings met de drie gestandaardiseerde scores (§9):
+    Competition Relevance, Price Relevance en Influence — plus rank,
+    vorige rank en trend (§11).
+    """
+    from sqlalchemy import func as _func
+    latest = db.query(_func.max(models.CompetitorRanking.run_date)).filter(
+        models.CompetitorRanking.scope == scope
+    ).scalar()
+    if not latest:
+        return {"scope": scope, "run_date": None, "rankings": [], "scopes": _ranking_scopes(db)}
+
+    rows = (
+        db.query(models.CompetitorRanking)
+        .filter(models.CompetitorRanking.scope == scope,
+                models.CompetitorRanking.run_date == latest)
+        .order_by(models.CompetitorRanking.rank)
+        .all()
+    )
+    return {
+        "scope": scope,
+        "run_date": str(latest),
+        "scopes": _ranking_scopes(db),
+        "rankings": [
+            {
+                "rank": r.rank,
+                "previous_rank": r.previous_rank,
+                "trend": r.rank_trend,
+                "competitor_name": r.competitor_name,
+                "competition_relevance_score": round(float(r.competition_relevance_score or 0), 4),
+                "price_relevance_score": round(float(r.price_relevance_score or 0), 4),
+                "influence_score": round(float(r.influence_score or 0), 4),
+                "combined_score": round(float(r.combined_score or 0), 4),
+                "confidence": round(float(r.confidence or 0), 2),
+                "explanation": r.explanation,
+                "evidence": r.evidence,
+                "model_version": r.model_version,
+            }
+            for r in rows
+        ],
+    }
+
+
+def _ranking_scopes(db: Session) -> list[str]:
+    scopes = [s[0] for s in db.query(models.CompetitorRanking.scope).distinct().all()]
+    return sorted(scopes, key=lambda s: (s != "overall", s))
+
+
+@router.post("/rankings/run")
+def run_rankings(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
+):
+    """Herbereken de competitor rankings (drie-scoremodel §9-§11)."""
+    from engine.competition_rankings import run_competitor_rankings
+    written = run_competitor_rankings(db)
+    return {"status": "voltooid", "rankings_geschreven": written}

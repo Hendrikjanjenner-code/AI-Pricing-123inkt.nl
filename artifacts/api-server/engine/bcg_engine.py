@@ -24,6 +24,7 @@ Resultaten worden opgeslagen in:
 from datetime import date, timedelta
 from sqlalchemy.orm import Session
 import models
+import metrics
 from engine.growth_scoring import calculate_growth_potential
 from engine.internal_bcg import calculate_internal_business_strength, classify_internal_bcg
 from engine.external_bcg import calculate_competitive_strength, calculate_market_opportunity, classify_external_bcg
@@ -121,7 +122,7 @@ def run_bcg_engine(db: Session) -> tuple[int, int]:
             margin_30d = sum(float(s["margin"]) for s in sku_sales if s["date"] >= cutoff_30)
             cost = float(product.cost_price or 1)
             price = float(product.current_price or cost * 1.3)
-            margin_pct = (price - cost) / price if price > 0 else 0.25
+            margin_pct = metrics.margin_ratio(price, cost)
 
             sku_context = {
                 "revenue_30d": rev_30d,
@@ -169,7 +170,7 @@ def run_bcg_engine(db: Session) -> tuple[int, int]:
                     a_price = float(a_brand.current_price or price * 2)
                     a_cost = float(a_brand.cost_price or a_price * 0.5)
                     a_data = {
-                        "margin_pct": (a_price - a_cost) / a_price if a_price > 0 else 0.2,
+                        "margin_pct": metrics.margin_ratio(a_price, a_cost, default=0.2),
                         "current_price": a_price,
                     }
                 _, _, _, plsv = calculate_private_label_value(sku_context, a_data)
@@ -216,7 +217,7 @@ def run_bcg_engine(db: Session) -> tuple[int, int]:
                     if a_brand:
                         a_p = float(a_brand.current_price or price * 2)
                         a_c = float(a_brand.cost_price or a_p * 0.5)
-                        a_data_pl = {"margin_pct": (a_p - a_c) / a_p if a_p > 0 else 0.2, "current_price": a_p}
+                        a_data_pl = {"margin_pct": metrics.margin_ratio(a_p, a_c, default=0.2), "current_price": a_p}
                     sw_prob, mg, isv_val, plsv_val = calculate_private_label_value(sku_context, a_data_pl)
                     pl_class, pl_prio = classify_private_label(plsv_val)
                     db.add(models.FactPrivateLabelIntelligence(
@@ -242,6 +243,11 @@ def run_bcg_engine(db: Session) -> tuple[int, int]:
     _run_category_bcg(db, today)
 
     db.commit()
+
+    # Publiceer gestandaardiseerde IntelligenceSignals (§7-§8)
+    from engine.signal_emitters import emit_for_engine
+    emit_for_engine(db, "bcg")
+
     return processed, skipped
 
 

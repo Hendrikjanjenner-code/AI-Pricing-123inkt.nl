@@ -175,7 +175,9 @@ def seed_database():
             models.User(username="viewer", email="viewer@pricing.local", full_name="Lisa Smit",
                         hashed_password=auth_utils.hash_password("viewer123"), role="viewer", is_active=True),
         ]
-        db.add_all(users)
+        # Idempotent: sla users over die al bestaan (seed_users_only draait eerder)
+        existing_usernames = {u.username for u in db.query(models.User).all()}
+        db.add_all([u for u in users if u.username not in existing_usernames])
         db.commit()
 
         # ── Categories ────────────────────────────────────────────────────
