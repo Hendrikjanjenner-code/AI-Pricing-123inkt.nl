@@ -339,26 +339,22 @@ def run_migrations(engine, metadata) -> None:
         # Concurrentprofielen zijn shop-scoped geworden: de oude globale
         # unique op competitor_name vervalt; uniek per (shop_id, naam).
         # Backfill van bestaande rijen naar shop 1 gebeurt via de DEFAULT.
+        # Twee varianten: de constraint-naam én de index-naam, zodat beide
+        # routes (ADD CONSTRAINT vs CREATE UNIQUE INDEX) worden afgedekt.
         (
             "drop_uq_competitor_profile_name",
             'ALTER TABLE competitor_profile '
             'DROP CONSTRAINT IF EXISTS competitor_profile_competitor_name_key',
         ),
-        # ORM-gegenereerde unieke index op alleen competitor_name (ix_…)
-        # werd aangemaakt toen het veld nog unique=True had. Nu shop-scoped,
-        # dus ook deze index weggooien zodat dezelfde naam in meerdere shops mag.
+        # Tweede variant: de legacy index (aangemaakt via CREATE UNIQUE INDEX)
+        # heeft een andere naam dan de constraint; beide moeten weg.
         (
             "drop_ix_competitor_profile_competitor_name",
             'DROP INDEX IF EXISTS ix_competitor_profile_competitor_name',
         ),
         (
-            "drop_ix_competitor_profile_name_unique",
+            "drop_ix_competitor_profile_competitor_name",
             'DROP INDEX IF EXISTS ix_competitor_profile_competitor_name',
-        ),
-        (
-            "ix_competitor_profile_name",
-            'CREATE INDEX IF NOT EXISTS ix_competitor_profile_competitor_name '
-            'ON competitor_profile (competitor_name)',
         ),
         (
             "backfill_competitor_profile_shop",

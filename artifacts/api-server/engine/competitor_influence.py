@@ -25,7 +25,11 @@ Vier concurrentielagen:
   intern      — eigen producten (huismerk vs A-merk)
 """
 from __future__ import annotations
+from datetime import date, timedelta
+from statistics import mean, pstdev
 from typing import Optional
+
+import models
 
 CIS_CLASSES = [
     (0.80, 1.01, "Primaire concurrent"),
@@ -110,3 +114,199 @@ def get_layer_label(layer: str) -> str:
         "categorie": "Categorieconcurrentie",
         "intern": "Interne concurrentie",
     }.get(layer, layer)
+
+
+# ── DB-schrijfende engine ────────────────────────────────────────────────────
+
+_WINDOW_DAYS = 30   # aantal dagen prijshistorie om op te baseren
+
+
+def run_cis_engine(db, ref_date: date | None = None) -> int:
+    """
+    Bereken CIS-scores per (sku_id, competitor_name) en schrijf ze naar
+    competitor_influence_scores.  Retourneert het aantal geschreven rijen.
+
+    Databronnen:
+    - fact_competitor_price_daily  → beschikbaarheid + prijsvolatiliteit (CSRS/CSS)
+    - sku_competition_score        → per-SKU sub-scores (PCIS-afgeleid)
+    - competitor_profile           → leverancierseigenschappen (CSRS/CSS)
+    - dim_product                  → eigen huidige prijs (prijsafwijking)
+    """
+    from sqlalchemy.orm import Session  # noqa: F401 – type-hint only
+
+    today = ref_date or date.today()
+    since = today - timedelta(days=_WINDOW_DAYS)
+
+    # ── 1. Concurrentprijshistorie per (sku, concurrent) ──────────────────
+    price_rows = (
+        db.query(
+            models.FactCompetitorPriceDaily.sku_id,
+            models.FactCompetitorPriceDaily.competitor_name,
+            models.FactCompetitorPriceDaily.date,
+            models.FactCompetitorPriceDaily.price,
+        )
+        .filter(
+            models.FactCompetitorPriceDaily.date >= since,
+            models.FactCompetitorPriceDaily.date <= today,
+            models.FactCompetitorPriceDaily.price.isnot(None),
+        )
+        .all()
+    )
+
+    if not price_rows:
+        return 0
+
+    # Groepeer: {(sku_id, competitor_name): [(date, price), ...]}
+    pair_prices: dict[tuple[str, str], list[tuple]] = {}
+    for sku, comp, d, p in price_rows:
+        pair_prices.setdefault((sku, comp), []).append((d, float(p)))
+
+    # ── 2. Hulpdata ───────────────────────────────────────────────────────
+    # Eigen huidige prijs per SKU
+    own_prices: dict[str, float] = {
+        p.sku_id: float(p.current_price)
+        for p in db.query(models.DimProduct).filter(
+            models.DimProduct.current_price.isnot(None)
+        ).all()
+    }
+
+    # Meest recente PCIS-sub-scores per SKU
+    pcis_by_sku: dict[str, models.SkuCompetitionScore] = {}
+    for row in (
+        db.query(models.SkuCompetitionScore)
+        .order_by(
+            models.SkuCompetitionScore.sku_id,
+            models.SkuCompetitionScore.run_date.desc(),
+        )
+        .all()
+    ):
+        if row.sku_id not in pcis_by_sku:
+            pcis_by_sku[row.sku_id] = row
+
+    # Concurrentprofielen
+    profiles: dict[str, models.CompetitorProfile] = {
+        p.competitor_name: p
+        for p in db.query(models.CompetitorProfile).all()
+    }
+
+    # ── 3. Verwijder vandaag's bestaande rijen (herrun = delete-then-insert)
+    db.query(models.CompetitorInfluenceScore).filter(
+        models.CompetitorInfluenceScore.run_date == today
+    ).delete(synchronize_session=False)
+
+    # ── 4. Bereken per paar en schrijf ────────────────────────────────────
+    written = 0
+    for (sku_id, competitor_name), entries in pair_prices.items():
+        prices = [p for _, p in entries]
+        days_with_data = len({d for d, _ in entries})
+        avg_price = mean(prices)
+        own_price = own_prices.get(sku_id)
+        pcis = pcis_by_sku.get(sku_id)
+        profile = profiles.get(competitor_name)
+
+        # ── PCIS-gebaseerde sub-scores ────────────────────────────────────
+        competitor_relevance = float(pcis.competitor_relevance_score or 0.5) if pcis else 0.5
+        product_comparability = float(pcis.product_comparability_score or 0.5) if pcis else 0.5
+        price_sensitivity = float(pcis.price_sensitivity_score or 0.5) if pcis else 0.5
+
+        # ── CSRS sub-scores (beschikbaarheid & betrouwbaarheid) ───────────
+        availability_rate = round(min(1.0, days_with_data / _WINDOW_DAYS), 4)
+        # Leversnelheid: normaliseer avg_delivery_days 0→1 op schaal tot 14d
+        avg_days = float(profile.avg_delivery_days or 3) if profile else 3.0
+        delivery_speed_score = round(max(0.0, 1.0 - avg_days / 14.0), 4)
+        stock_stability_score = round(min(1.0, availability_rate * 1.1), 4)
+        # in_stock_rate uit profiel geeft listing-consistentie
+        in_stock = float(profile.in_stock_rate or 0.7) if profile and profile.in_stock_rate else 0.7
+        listing_consistency_score = round(float(in_stock), 4)
+        csrs_score = round(mean([
+            availability_rate,
+            delivery_speed_score,
+            stock_stability_score,
+            listing_consistency_score,
+        ]), 4)
+
+        # ── CSS sub-scores (duurzaamheid prijs) ───────────────────────────
+        # Prijsafwijking t.o.v. eigen prijs (dichtbij = hoge score)
+        if own_price and own_price > 0:
+            price_deviation_score = round(
+                max(0.0, 1.0 - abs(avg_price - own_price) / own_price), 4
+            )
+        else:
+            price_deviation_score = 0.5
+
+        # Prijsstabiliteit: lage variatiecoëfficiënt = stabiel
+        if len(prices) > 1 and avg_price > 0:
+            cv = pstdev(prices) / avg_price
+            price_volatility_score = round(max(0.0, 1.0 - min(cv, 1.0)), 4)
+        else:
+            price_volatility_score = 0.7  # één datapunt → neutraal
+
+        # Concurrenttype: bekend profiel scoort hoger
+        competitor_type_score = 0.75 if profile else 0.5
+        # Leverbetrouwbaarheid: in_stock_rate als proxy
+        delivery_reliability_score = listing_consistency_score
+        css_score = round(mean([
+            price_deviation_score,
+            price_volatility_score,
+            competitor_type_score,
+            delivery_reliability_score,
+        ]), 4)
+
+        # ── CIS (multiplicatief) ──────────────────────────────────────────
+        cis_score = calculate_cis(
+            competitor_relevance_score=competitor_relevance,
+            css_score=css_score,
+            csrs_score=csrs_score,
+            product_comparability_score=product_comparability,
+            price_sensitivity_score=price_sensitivity,
+        )
+        cis_class = get_cis_class(cis_score)
+        status, pricing_action = get_cis_status(cis_score, csrs_score, css_score)
+        competitor_weight = calculate_competitor_weight(
+            competitor_relevance_score=competitor_relevance,
+            competitor_price_reliability_score=float(
+                pcis.competitor_price_reliability_score or 0.5
+            ) if pcis else 0.5,
+            css_score=css_score,
+            csrs_score=csrs_score,
+        )
+
+        # Prijsvergelijking met eigen prijs
+        price_vs_own_pct = (
+            round((avg_price / own_price - 1.0) * 100.0, 2)
+            if own_price and own_price > 0 else None
+        )
+
+        db.add(models.CompetitorInfluenceScore(
+            sku_id=sku_id,
+            competitor_name=competitor_name,
+            run_date=today,
+            competition_layer="direct",
+            competitor_relevance_score=round(competitor_relevance, 4),
+            product_comparability_score=round(product_comparability, 4),
+            price_sensitivity_score=round(price_sensitivity, 4),
+            # CSRS sub-scores
+            availability_rate=availability_rate,
+            delivery_speed_score=delivery_speed_score,
+            stock_stability_score=stock_stability_score,
+            listing_consistency_score=listing_consistency_score,
+            # CSS sub-scores
+            price_deviation_score=price_deviation_score,
+            price_volatility_score=price_volatility_score,
+            competitor_type_score=round(competitor_type_score, 4),
+            delivery_reliability_score=delivery_reliability_score,
+            # Samengesteld
+            csrs_score=csrs_score,
+            css_score=css_score,
+            cis_score=cis_score,
+            cis_class=cis_class,
+            status=status,
+            pricing_action=pricing_action,
+            competitor_price=round(avg_price, 4),
+            price_vs_own_pct=price_vs_own_pct,
+            competitor_weight=competitor_weight,
+        ))
+        written += 1
+
+    db.commit()
+    return written

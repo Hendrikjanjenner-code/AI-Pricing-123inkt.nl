@@ -985,10 +985,22 @@ def run_rankings(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
-    """Herbereken de competitor rankings (drie-scoremodel §9-§11)."""
+    """
+    Herbereken de competitor rankings (drie-scoremodel §9-§11).
+
+    Stap 1: bereken CIS-scores per SKU/concurrent uit de prijshistorie en
+            schrijf ze naar competitor_influence_scores.
+    Stap 2: bereken rankings die de CIS-scores als Influence-component lezen.
+    """
+    from engine.competitor_influence import run_cis_engine
     from engine.competition_rankings import run_competitor_rankings
-    written = run_competitor_rankings(db)
-    return {"status": "voltooid", "rankings_geschreven": written}
+    cis_written = run_cis_engine(db)
+    rankings_written = run_competitor_rankings(db)
+    return {
+        "status": "voltooid",
+        "cis_scores_geschreven": cis_written,
+        "rankings_geschreven": rankings_written,
+    }
 
 
 # ── NIEUW: Competition Intelligence — trends, events, dekking, kwaliteit ──────
