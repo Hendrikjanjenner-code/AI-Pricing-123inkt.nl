@@ -108,6 +108,23 @@ def trigger_model_run(
         run.completed_at = datetime.utcnow()
         run.error_message = str(e)
 
+    # Cost/usage-metering van deze job (§37): duur + resultaat per modelrun.
+    try:
+        from services.metering import record_usage
+        duur_ms = (run.completed_at - run.started_at).total_seconds() * 1000 if run.completed_at else None
+        record_usage(
+            "job", module="pricing_engine",
+            username=current_user.username,
+            job_id=f"model_run:{run.id}",
+            status_code=200 if run.status == "completed" else 500,
+            duration_ms=duur_ms,
+            quantity=float(run.skus_processed or 0),
+            extra={"status": run.status},
+            flush=True,
+        )
+    except Exception:
+        pass
+
     db.commit()
     db.refresh(run)
     return {

@@ -29,7 +29,7 @@ from routes import (
     cost, procurement, economic, reporting, bcg_transitions,
     category_hierarchy, break_even, ecosystem, explainability,
     admin, connectors,
-    signals, shops,
+    signals, shops, platform,
 )
 
 # Optional modules (DRS import, PriceShape feed import) are imported
@@ -177,6 +177,66 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# ------------------------------------------------------------------
+# Observability-middleware (§41-§42): correlation ID per request,
+# gestructureerde JSON-logs, rolling API-metrics en cost-metering.
+# ------------------------------------------------------------------
+import json
+import time as _time
+import uuid
+
+from services import metering as _metering
+
+# /api/health* wordt zeer frequent gepolst; niet meteren om ruis te voorkomen.
+_METERING_EXCLUDE = ("/api/healthz", "/api/health", "/api", "/api/")
+
+
+@app.middleware("http")
+async def observability_middleware(request: Request, call_next):
+    correlation_id = request.headers.get("X-Correlation-ID") or uuid.uuid4().hex[:16]
+    request.state.correlation_id = correlation_id
+    start = _time.perf_counter()
+    status_code = 500
+    error_msg = None
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+    except Exception as exc:
+        error_msg = str(exc)
+        raise
+    finally:
+        duration_ms = (_time.perf_counter() - start) * 1000
+        path = request.url.path
+        if path.startswith("/api") and path not in _METERING_EXCLUDE:
+            module = _metering.module_from_path(path)
+            _metering.track_request(module, duration_ms, status_code)
+            _actor_username, _actor_shop_id = _metering.actor_from_request(request)
+            _metering.record_usage(
+                "api_request", module=module,
+                username=_actor_username, shop_id=_actor_shop_id,
+                correlation_id=correlation_id,
+                endpoint=path, method=request.method,
+                status_code=status_code, duration_ms=duration_ms,
+            )
+            if status_code >= 500 or error_msg:
+                _metering.track_error(
+                    correlation_id=correlation_id, method=request.method,
+                    path=path, status_code=status_code,
+                    message=error_msg or f"HTTP {status_code}", module=module,
+                )
+            # Gestructureerde logregel (JSON) met correlation ID
+            logger.info(json.dumps({
+                "type": "http_request",
+                "correlation_id": correlation_id,
+                "method": request.method,
+                "path": path,
+                "status": status_code,
+                "duration_ms": round(duration_ms, 1),
+            }))
+    response.headers["X-Correlation-ID"] = correlation_id
+    return response
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -350,6 +410,7 @@ app.include_router(admin.router)
 app.include_router(connectors.router)
 app.include_router(signals.router)
 app.include_router(shops.router)
+app.include_router(platform.router)
 
 # Register whichever optional modules imported successfully above. Modules
 # that failed to import were already recorded in disabled_optional_routers

@@ -170,6 +170,15 @@ const navGroepen = [
     ],
   },
   {
+    label: "Platform & Waarde",
+    items: [
+      { href: "/platform/health",       label: "Platform Health Center",  icon: Activity },
+      { href: "/platform/kosten",       label: "Cost & Scalability",      icon: DollarSign },
+      { href: "/platform/businesscase", label: "Businesscase per shop",   icon: Calculator },
+      { href: "/platform/waarde",       label: "Business Value-meting",   icon: TrendingUp },
+    ],
+  },
+  {
     label: "Configuratie",
     items: [
       { href: "/categorieen",             label: "Categorieregels",      icon: Layers },

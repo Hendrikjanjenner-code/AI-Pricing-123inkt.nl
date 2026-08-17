@@ -93,6 +93,10 @@ import BreakEvenAnalyse from "@/pages/break-even-analyse";
 import PpfsAnalyse from "@/pages/ppfs-analyse";
 import MarketingVsKorting from "@/pages/marketing-vs-korting";
 import Margebescherming from "@/pages/margebescherming";
+import PlatformHealth from "@/pages/platform-health";
+import PlatformKosten from "@/pages/platform-kosten";
+import PlatformBusinesscase from "@/pages/platform-businesscase";
+import BusinessValue from "@/pages/business-value";
 
 const queryClient = new QueryClient();
 
@@ -377,6 +381,20 @@ function Router() {
       </Route>
       <Route path="/margebescherming">
         <ProtectedRoute><Margebescherming /></ProtectedRoute>
+      </Route>
+
+      {/* Platform & Waarde */}
+      <Route path="/platform/health">
+        <ProtectedRoute><PlatformHealth /></ProtectedRoute>
+      </Route>
+      <Route path="/platform/kosten">
+        <ProtectedRoute><PlatformKosten /></ProtectedRoute>
+      </Route>
+      <Route path="/platform/businesscase">
+        <ProtectedRoute><PlatformBusinesscase /></ProtectedRoute>
+      </Route>
+      <Route path="/platform/waarde">
+        <ProtectedRoute><BusinessValue /></ProtectedRoute>
       </Route>
 
       <Route path="/modeldocumentatie">

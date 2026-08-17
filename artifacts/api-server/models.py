@@ -1620,6 +1620,39 @@ class ConnectorConfig(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+class CostUsageRecord(Base):
+    """
+    Werkelijk gemeten gebruik per module/shop/gebruiker/job (§37-§38).
+    Elke rij is één gemeten gebruikseenheid: een API-request, AI-call,
+    achtergrondjob, import of databaseoperatie — met duur, tokens en
+    (geschatte) kosten. Basis voor het Cost & Scalability Dashboard.
+    """
+    __tablename__ = "cost_usage_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    occurred_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    usage_type = Column(String(50), nullable=False, index=True)  # api_request / ai_call / job / import / db / compute
+    module = Column(String(100), index=True)      # bv. pricing, competition, uploads, auth
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    username = Column(String(100), index=True)
+    job_id = Column(String(100), index=True)      # model_run:<id> / import:<id> / sync:<naam>
+    correlation_id = Column(String(64), index=True)
+
+    endpoint = Column(String(255))
+    method = Column(String(10))
+    status_code = Column(Integer)
+    duration_ms = Column(Float)
+
+    # AI-metering
+    ai_model = Column(String(100))
+    tokens_in = Column(Integer)
+    tokens_out = Column(Integer)
+
+    quantity = Column(Float, default=1.0)         # aantal eenheden (rijen, requests, ...)
+    cost_eur = Column(Numeric(12, 6))             # geschatte kosten in EUR
+    extra = Column(JSON)
+
 class CompetitorRanking(Base):
     """
     Concurrent-ranking per scope (masterprompt §9 en §11).
@@ -1649,4 +1682,63 @@ class CompetitorRanking(Base):
     explanation = Column(Text)                                  # geen score zonder uitleg (§64.9)
     evidence = Column(JSON)
     model_version = Column(String(50))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class BusinessValueMeasurement(Base):
+    """
+    Gemeten of geschatte waarde-realisatie (§39-§40). value_label maakt de
+    hardheid expliciet: REALIZED / MEASURED / ESTIMATED / SIMULATED.
+    """
+    __tablename__ = "business_value_measurements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    metric_key = Column(String(100), nullable=False, index=True)
+    label = Column(String(255), nullable=False)
+    value = Column(Float, nullable=False)
+    unit = Column(String(50))
+    value_label = Column(String(20), nullable=False, default="ESTIMATED")  # REALIZED / MEASURED / ESTIMATED / SIMULATED
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    period_start = Column(Date)
+    period_end = Column(Date)
+    explanation = Column(Text)                    # waarom deze waarde / hoe gemeten
+    assumptions = Column(JSON)                    # gebruikte aannames bij ESTIMATED/SIMULATED
+    source = Column(String(100))                  # handmatig / metering / model
+    created_by = Column(String(100))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class PlatformAssumption(Base):
+    """
+    Expliciete, zichtbare aannames (§64.11) voor kostenscenario's en
+    businesscase. Bewerkbaar door admins; elke berekening toont welke
+    aannames zijn gebruikt.
+    """
+    __tablename__ = "platform_assumptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String(100), unique=True, nullable=False, index=True)
+    label = Column(String(255), nullable=False)
+    value = Column(Float, nullable=False)
+    unit = Column(String(50))                     # EUR/maand, uur/week, %, EUR
+    category = Column(String(50), default="cost") # cost / value / scaling
+    description = Column(Text)
+    source = Column(String(255), default="aanname")  # aanname / gemeten / offerte
+    updated_by = Column(String(100))
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class BusinessValueBaseline(Base):
+    """
+    Nulmeting (§39): hoe lang duurde een taak / hoeveel analyses werden
+    gedaan vóór het platform. Basis om besparing tegen af te zetten.
+    """
+    __tablename__ = "business_value_baselines"
+
+    id = Column(Integer, primary_key=True, index=True)
+    metric_key = Column(String(100), nullable=False, index=True)
+    label = Column(String(255), nullable=False)
+    baseline_value = Column(Float, nullable=False)
+    unit = Column(String(50))                     # uur/week, analyses/maand, EUR/maand
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    description = Column(Text)
+    measured_at = Column(Date)
+    created_by = Column(String(100))
     created_at = Column(DateTime, default=datetime.utcnow)
