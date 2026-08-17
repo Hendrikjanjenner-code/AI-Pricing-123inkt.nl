@@ -24,6 +24,8 @@ import type {
   CategoryMarginItem,
   CategoryStrategy,
   ConfidenceBucket,
+  CreateShopRequest,
+  CreateSignalRequest,
   CreateUserRequest,
   DashboardSummary,
   DataQualityReport,
@@ -36,8 +38,10 @@ import type {
   GetExportHistoryParams,
   HealthStatus,
   ImportJob,
+  IntelligenceSignal,
   ListProductsParams,
   ListRecommendationsParams,
+  ListSignalsParams,
   ListUploadsParams,
   LoginRequest,
   MessageResponse,
@@ -52,6 +56,10 @@ import type {
   RecommendationDetail,
   RecommendationListResponse,
   RejectRequest,
+  Shop,
+  ShopListResponse,
+  SignalCatalog,
+  SignalListResponse,
   SkuHistory,
   StrategyCountItem,
   SubstitutionPair,
@@ -3701,4 +3709,581 @@ export const useDeleteUser = <
   TContext
 > => {
   return useMutation(getDeleteUserMutationOptions(options));
+};
+
+/**
+ * @summary List intelligence signals
+ */
+export const getListSignalsUrl = (params?: ListSignalsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/signals?${stringifiedParams}`
+    : `/api/signals`;
+};
+
+export const listSignals = async (
+  params?: ListSignalsParams,
+  options?: RequestInit,
+): Promise<SignalListResponse> => {
+  return customFetch<SignalListResponse>(getListSignalsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListSignalsQueryKey = (params?: ListSignalsParams) => {
+  return [`/api/signals`, ...(params ? [params] : [])] as const;
+};
+
+export const getListSignalsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listSignals>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListSignalsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSignals>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListSignalsQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listSignals>>> = ({
+    signal,
+  }) => listSignals(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listSignals>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListSignalsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listSignals>>
+>;
+export type ListSignalsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List intelligence signals
+ */
+
+export function useListSignals<
+  TData = Awaited<ReturnType<typeof listSignals>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListSignalsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSignals>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListSignalsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Publish an intelligence signal
+ */
+export const getCreateSignalUrl = () => {
+  return `/api/signals`;
+};
+
+export const createSignal = async (
+  createSignalRequest: CreateSignalRequest,
+  options?: RequestInit,
+): Promise<IntelligenceSignal> => {
+  return customFetch<IntelligenceSignal>(getCreateSignalUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createSignalRequest),
+  });
+};
+
+export const getCreateSignalMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createSignal>>,
+    TError,
+    { data: BodyType<CreateSignalRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createSignal>>,
+  TError,
+  { data: BodyType<CreateSignalRequest> },
+  TContext
+> => {
+  const mutationKey = ["createSignal"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createSignal>>,
+    { data: BodyType<CreateSignalRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createSignal(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateSignalMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createSignal>>
+>;
+export type CreateSignalMutationBody = BodyType<CreateSignalRequest>;
+export type CreateSignalMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Publish an intelligence signal
+ */
+export const useCreateSignal = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createSignal>>,
+    TError,
+    { data: BodyType<CreateSignalRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createSignal>>,
+  TError,
+  { data: BodyType<CreateSignalRequest> },
+  TContext
+> => {
+  return useMutation(getCreateSignalMutationOptions(options));
+};
+
+/**
+ * @summary Approved semantic functions and metric definitions
+ */
+export const getGetSignalCatalogUrl = () => {
+  return `/api/signals/catalog`;
+};
+
+export const getSignalCatalog = async (
+  options?: RequestInit,
+): Promise<SignalCatalog> => {
+  return customFetch<SignalCatalog>(getGetSignalCatalogUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetSignalCatalogQueryKey = () => {
+  return [`/api/signals/catalog`] as const;
+};
+
+export const getGetSignalCatalogQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSignalCatalog>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getSignalCatalog>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetSignalCatalogQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getSignalCatalog>>
+  > = ({ signal }) => getSignalCatalog({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSignalCatalog>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSignalCatalogQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSignalCatalog>>
+>;
+export type GetSignalCatalogQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Approved semantic functions and metric definitions
+ */
+
+export function useGetSignalCatalog<
+  TData = Awaited<ReturnType<typeof getSignalCatalog>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getSignalCatalog>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSignalCatalogQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Get one intelligence signal
+ */
+export const getGetSignalUrl = (id: number) => {
+  return `/api/signals/${id}`;
+};
+
+export const getSignal = async (
+  id: number,
+  options?: RequestInit,
+): Promise<IntelligenceSignal> => {
+  return customFetch<IntelligenceSignal>(getGetSignalUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetSignalQueryKey = (id: number) => {
+  return [`/api/signals/${id}`] as const;
+};
+
+export const getGetSignalQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSignal>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSignal>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetSignalQueryKey(id);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getSignal>>> = ({
+    signal,
+  }) => getSignal(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<Awaited<ReturnType<typeof getSignal>>, TError, TData> & {
+    queryKey: QueryKey;
+  };
+};
+
+export type GetSignalQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSignal>>
+>;
+export type GetSignalQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Get one intelligence signal
+ */
+
+export function useGetSignal<
+  TData = Awaited<ReturnType<typeof getSignal>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSignal>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSignalQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Dismiss an intelligence signal
+ */
+export const getDismissSignalUrl = (id: number) => {
+  return `/api/signals/${id}/dismiss`;
+};
+
+export const dismissSignal = async (
+  id: number,
+  options?: RequestInit,
+): Promise<IntelligenceSignal> => {
+  return customFetch<IntelligenceSignal>(getDismissSignalUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getDismissSignalMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof dismissSignal>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof dismissSignal>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["dismissSignal"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof dismissSignal>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return dismissSignal(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DismissSignalMutationResult = NonNullable<
+  Awaited<ReturnType<typeof dismissSignal>>
+>;
+
+export type DismissSignalMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Dismiss an intelligence signal
+ */
+export const useDismissSignal = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof dismissSignal>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof dismissSignal>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getDismissSignalMutationOptions(options));
+};
+
+/**
+ * @summary List shops
+ */
+export const getListShopsUrl = () => {
+  return `/api/shops`;
+};
+
+export const listShops = async (
+  options?: RequestInit,
+): Promise<ShopListResponse> => {
+  return customFetch<ShopListResponse>(getListShopsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListShopsQueryKey = () => {
+  return [`/api/shops`] as const;
+};
+
+export const getListShopsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listShops>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<Awaited<ReturnType<typeof listShops>>, TError, TData>;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListShopsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listShops>>> = ({
+    signal,
+  }) => listShops({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listShops>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListShopsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listShops>>
+>;
+export type ListShopsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List shops
+ */
+
+export function useListShops<
+  TData = Awaited<ReturnType<typeof listShops>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<Awaited<ReturnType<typeof listShops>>, TError, TData>;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListShopsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create a shop
+ */
+export const getCreateShopUrl = () => {
+  return `/api/shops`;
+};
+
+export const createShop = async (
+  createShopRequest: CreateShopRequest,
+  options?: RequestInit,
+): Promise<Shop> => {
+  return customFetch<Shop>(getCreateShopUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createShopRequest),
+  });
+};
+
+export const getCreateShopMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createShop>>,
+    TError,
+    { data: BodyType<CreateShopRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createShop>>,
+  TError,
+  { data: BodyType<CreateShopRequest> },
+  TContext
+> => {
+  const mutationKey = ["createShop"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createShop>>,
+    { data: BodyType<CreateShopRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createShop(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateShopMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createShop>>
+>;
+export type CreateShopMutationBody = BodyType<CreateShopRequest>;
+export type CreateShopMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Create a shop
+ */
+export const useCreateShop = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createShop>>,
+    TError,
+    { data: BodyType<CreateShopRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createShop>>,
+  TError,
+  { data: BodyType<CreateShopRequest> },
+  TContext
+> => {
+  return useMutation(getCreateShopMutationOptions(options));
 };

@@ -1116,3 +1116,202 @@ export const DeleteUserParams = zod.object({
 export const DeleteUserResponse = zod.object({
   message: zod.string(),
 });
+
+/**
+ * @summary List intelligence signals
+ */
+export const ListSignalsQueryParams = zod.object({
+  engine: zod.coerce.string().nullish(),
+  severity: zod.coerce.string().nullish(),
+  entity_type: zod.coerce.string().nullish(),
+  entity_id: zod.coerce.string().nullish(),
+  status: zod.coerce.string().nullish(),
+  shop_id: zod.coerce.number().nullish(),
+  page: zod.coerce.number().nullish(),
+  page_size: zod.coerce.number().nullish(),
+});
+
+export const ListSignalsResponse = zod.object({
+  signals: zod.array(
+    zod.object({
+      id: zod.number(),
+      shop_id: zod.number().nullish(),
+      engine: zod.string(),
+      signal_type: zod.string(),
+      severity: zod.string(),
+      direction: zod.string().nullish(),
+      entity_type: zod.string(),
+      entity_id: zod.string(),
+      entity_name: zod.string().nullish(),
+      metric: zod.string().nullish(),
+      current_value: zod.number().nullish(),
+      previous_value: zod.number().nullish(),
+      expected_value: zod.number().nullish(),
+      change_pct: zod.number().nullish(),
+      confidence: zod.number().nullish(),
+      explanation: zod.string(),
+      evidence: zod.unknown().optional(),
+      sources: zod.unknown().optional(),
+      suggested_action: zod.string().nullish(),
+      observed_at: zod.string().nullish(),
+      valid_until: zod.string().nullish(),
+      model_version: zod.string().nullish(),
+      status: zod.string(),
+    }),
+  ),
+  total: zod.number(),
+  page: zod.number(),
+  page_size: zod.number(),
+  filter_options: zod
+    .object({
+      engines: zod.array(zod.string()).optional(),
+      severities: zod.array(zod.string()).optional(),
+      entity_types: zod.array(zod.string()).optional(),
+    })
+    .optional(),
+});
+
+/**
+ * @summary Publish an intelligence signal
+ */
+export const CreateSignalBody = zod.object({
+  engine: zod.string(),
+  signal_type: zod.string(),
+  severity: zod.string().optional(),
+  direction: zod.string().nullish(),
+  entity_type: zod.string(),
+  entity_id: zod.string(),
+  entity_name: zod.string().nullish(),
+  metric: zod.string().nullish(),
+  current_value: zod.number().nullish(),
+  previous_value: zod.number().nullish(),
+  expected_value: zod.number().nullish(),
+  change_pct: zod.number().nullish(),
+  confidence: zod.number().nullish(),
+  explanation: zod.string(),
+  evidence: zod.unknown(),
+  sources: zod.unknown(),
+  suggested_action: zod.string().nullish(),
+  valid_until: zod.string().nullish(),
+  model_version: zod.string().nullish(),
+  shop_id: zod.number().nullish(),
+});
+
+/**
+ * @summary Approved semantic functions and metric definitions
+ */
+export const GetSignalCatalogResponse = zod.object({
+  semantic_functions: zod.array(
+    zod.object({
+      name: zod.string(),
+      description: zod.string(),
+      required_roles: zod.array(zod.string()),
+    }),
+  ),
+  metrics: zod.array(
+    zod.object({
+      name: zod.string(),
+      label_nl: zod.string(),
+      description: zod.string(),
+      formula: zod.string(),
+      unit: zod.string(),
+    }),
+  ),
+});
+
+/**
+ * @summary Get one intelligence signal
+ */
+export const GetSignalParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const GetSignalResponse = zod.object({
+  id: zod.number(),
+  shop_id: zod.number().nullish(),
+  engine: zod.string(),
+  signal_type: zod.string(),
+  severity: zod.string(),
+  direction: zod.string().nullish(),
+  entity_type: zod.string(),
+  entity_id: zod.string(),
+  entity_name: zod.string().nullish(),
+  metric: zod.string().nullish(),
+  current_value: zod.number().nullish(),
+  previous_value: zod.number().nullish(),
+  expected_value: zod.number().nullish(),
+  change_pct: zod.number().nullish(),
+  confidence: zod.number().nullish(),
+  explanation: zod.string(),
+  evidence: zod.unknown().optional(),
+  sources: zod.unknown().optional(),
+  suggested_action: zod.string().nullish(),
+  observed_at: zod.string().nullish(),
+  valid_until: zod.string().nullish(),
+  model_version: zod.string().nullish(),
+  status: zod.string(),
+});
+
+/**
+ * @summary Dismiss an intelligence signal
+ */
+export const DismissSignalParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const DismissSignalResponse = zod.object({
+  id: zod.number(),
+  shop_id: zod.number().nullish(),
+  engine: zod.string(),
+  signal_type: zod.string(),
+  severity: zod.string(),
+  direction: zod.string().nullish(),
+  entity_type: zod.string(),
+  entity_id: zod.string(),
+  entity_name: zod.string().nullish(),
+  metric: zod.string().nullish(),
+  current_value: zod.number().nullish(),
+  previous_value: zod.number().nullish(),
+  expected_value: zod.number().nullish(),
+  change_pct: zod.number().nullish(),
+  confidence: zod.number().nullish(),
+  explanation: zod.string(),
+  evidence: zod.unknown().optional(),
+  sources: zod.unknown().optional(),
+  suggested_action: zod.string().nullish(),
+  observed_at: zod.string().nullish(),
+  valid_until: zod.string().nullish(),
+  model_version: zod.string().nullish(),
+  status: zod.string(),
+});
+
+/**
+ * @summary List shops
+ */
+export const ListShopsResponse = zod.object({
+  shops: zod.array(
+    zod.object({
+      id: zod.number(),
+      shop_code: zod.string(),
+      name: zod.string(),
+      country: zod.string(),
+      currency: zod.string(),
+      legal_entity: zod.string().nullish(),
+      channel: zod.string(),
+      is_default: zod.boolean(),
+      active: zod.boolean(),
+    }),
+  ),
+});
+
+/**
+ * @summary Create a shop
+ */
+export const CreateShopBody = zod.object({
+  shop_code: zod.string(),
+  name: zod.string(),
+  country: zod.string().optional(),
+  currency: zod.string().optional(),
+  legal_entity: zod.string().nullish(),
+  channel: zod.string().optional(),
+});

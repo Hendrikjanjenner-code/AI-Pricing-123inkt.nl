@@ -56,7 +56,7 @@ def create_user(
         raise HTTPException(status_code=400, detail="Username already exists")
     if db.query(models.User).filter(models.User.email == req.email).first():
         raise HTTPException(status_code=400, detail="Email already exists")
-    if req.role not in ("admin", "pricing_manager", "analyst", "viewer"):
+    if req.role not in auth_utils.VALID_ROLES:
         raise HTTPException(status_code=400, detail="Invalid role")
     user = models.User(
         username=req.username,
@@ -86,7 +86,7 @@ def update_user(
     if req.full_name is not None:
         user.full_name = req.full_name
     if req.role is not None:
-        if req.role not in ("admin", "pricing_manager", "analyst", "viewer"):
+        if req.role not in auth_utils.VALID_ROLES:
             raise HTTPException(status_code=400, detail="Invalid role")
         user.role = req.role
     if req.is_active is not None:

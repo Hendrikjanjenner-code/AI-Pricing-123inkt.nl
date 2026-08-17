@@ -39,6 +39,21 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
+# Canonieke rollen (masterprompt §35). Rollen zijn geen vrije strings meer:
+# elke create/update van een gebruiker valideert tegen deze set, en
+# require_role() weigert onbekende rolnamen al bij het definiëren van de route.
+VALID_ROLES = ("admin", "pricing_manager", "analyst", "viewer")
+
+
+def validate_role(role: str) -> str:
+    """Valideer een rolnaam; raise 400 bij een onbekende rol."""
+    if role not in VALID_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid role '{role}'. Valid roles: {', '.join(VALID_ROLES)}",
+        )
+    return role
+
 
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
@@ -121,6 +136,12 @@ def create_default_admin_if_missing() -> None:
 
 def require_role(*roles: str):
     """Dependency factory that checks the current user's role."""
+    unknown = [r for r in roles if r not in VALID_ROLES]
+    if unknown:
+        # Programmeerfout: route eist een niet-bestaande rol. Direct falen bij
+        # startup is veiliger dan een permanent onbereikbaar endpoint.
+        raise ValueError(f"require_role: unknown role(s) {unknown}; valid: {VALID_ROLES}")
+
     def role_checker(current_user: models.User = Depends(get_current_user)):
         if current_user.role not in roles:
             raise HTTPException(status_code=403, detail="Insufficient permissions")

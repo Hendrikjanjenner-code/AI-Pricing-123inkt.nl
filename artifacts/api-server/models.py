@@ -11,6 +11,68 @@ from sqlalchemy.orm import relationship
 from database import Base
 
 
+class DimShop(Base):
+    """
+    Canonieke shop-dimensie (masterprompt §36): het platform is multi-shop
+    voorbereid. Elke commerciële entiteit hoort bij precies één shop.
+    De bestaande installatie draait met één default shop (id=1).
+    """
+    __tablename__ = "dim_shop"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_code = Column(String(50), unique=True, nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    country = Column(String(2), default="NL")        # ISO 3166-1 alpha-2
+    currency = Column(String(3), default="EUR")      # ISO 4217
+    legal_entity = Column(String(255))
+    channel = Column(String(50), default="online")   # online / retail / marketplace
+    is_default = Column(Boolean, default=False)
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class IntelligenceSignal(Base):
+    """
+    Gestandaardiseerd Commercial Intelligence Signal (masterprompt §7).
+    Elke engine publiceert bevindingen in dit ene formaat zodat de Decision
+    Engine, Copilot en dashboards ze uniform kunnen consumeren.
+    Geen signaal zonder explanation + evidence (§64.9-10).
+    """
+    __tablename__ = "intelligence_signals"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+
+    engine = Column(String(100), nullable=False, index=True)       # bv. competition, pricing, traffic
+    signal_type = Column(String(100), nullable=False, index=True)  # bv. competitive_pressure_increased
+    severity = Column(String(20), default="info")   # info / low / medium / high / critical
+    direction = Column(String(20))                  # positive / negative / neutral
+
+    entity_type = Column(String(50), nullable=False, index=True)   # sku / category / brand / competitor / shop
+    entity_id = Column(String(255), nullable=False, index=True)
+    entity_name = Column(String(500))
+
+    metric = Column(String(100))                    # centrale metric-naam (metrics.py)
+    current_value = Column(Float)
+    previous_value = Column(Float)
+    expected_value = Column(Float)
+    change_pct = Column(Float)
+
+    confidence = Column(Float, default=0.0)         # 0..1
+    explanation = Column(Text, nullable=False)      # verplicht: waarom dit signaal
+    evidence = Column(JSON)                         # onderbouwende datapunten
+    sources = Column(JSON)                          # gebruikte bronnen/tabellen
+    suggested_action = Column(String(255))
+
+    observed_at = Column(DateTime, default=datetime.utcnow, index=True)
+    valid_until = Column(DateTime)
+    model_version = Column(String(50))
+
+    status = Column(String(20), default="active")   # active / expired / superseded / dismissed
+    dedupe_key = Column(String(255), index=True)    # engine:signal_type:entity — voorkomt duplicaten
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -35,6 +97,12 @@ class DimCategory(Base):
 
 
 class DimProduct(Base):
+    """
+    Product-dimensie. Canonical grain-keuze (masterprompt §4): sku_id is
+    GLOBAAL uniek over alle shops heen — hetzelfde artikel in een tweede shop
+    krijgt een eigen sku_id. shop_id geeft de eigenaar-shop aan en wordt in
+    shop-gescopeerde queries als filter gebruikt.
+    """
     __tablename__ = "dim_product"
 
     sku_id = Column(String(100), primary_key=True, index=True)
@@ -76,6 +144,7 @@ class DimProduct(Base):
     price_incl_vat = Column(Numeric(10, 4))    # Verkoopprijs incl BTW
     is_active = Column(Boolean, default=True)  # actief in DRS
     import_source = Column(String(50))     # "DRS" / "CSV" / "seed"
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -108,6 +177,7 @@ class FactSalesDaily(Base):
     id = Column(Integer, primary_key=True, index=True)
     date = Column(Date, nullable=False)
     sku_id = Column(String(100), nullable=False, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
     units_sold = Column(Integer, default=0)
     revenue = Column(Numeric(12, 4))
     cost = Column(Numeric(12, 4))
@@ -121,6 +191,7 @@ class FactPriceDaily(Base):
     id = Column(Integer, primary_key=True, index=True)
     date = Column(Date, nullable=False)
     sku_id = Column(String(100), nullable=False, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
     price = Column(Numeric(10, 4))
     cost_price = Column(Numeric(10, 4))
 
@@ -131,6 +202,7 @@ class FactCompetitorPriceDaily(Base):
     id = Column(Integer, primary_key=True, index=True)
     date = Column(Date, nullable=False)
     sku_id = Column(String(100), nullable=False, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
     competitor_name = Column(String(255), nullable=False)
     price = Column(Numeric(10, 4))
     url = Column(Text)
@@ -146,6 +218,7 @@ class FactInventoryDaily(Base):
     id = Column(Integer, primary_key=True, index=True)
     date = Column(Date, nullable=False)
     sku_id = Column(String(100), nullable=False, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
     stock_quantity = Column(Integer, default=0)
     days_of_stock = Column(Float)
 
@@ -167,6 +240,7 @@ class FactPricingRecommendationDaily(Base):
     id = Column(Integer, primary_key=True, index=True)
     date = Column(Date, nullable=False)
     sku_id = Column(String(100), nullable=False, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
     current_price = Column(Numeric(10, 4))
     recommended_price = Column(Numeric(10, 4))
     recommended_change_pct = Column(Float)

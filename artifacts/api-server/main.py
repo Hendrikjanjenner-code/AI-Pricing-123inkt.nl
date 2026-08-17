@@ -29,6 +29,7 @@ from routes import (
     cost, procurement, economic, reporting, bcg_transitions,
     category_hierarchy, break_even, ecosystem, explainability,
     admin, connectors,
+    signals, shops,
 )
 
 # Optional modules (DRS import, PriceShape feed import) are imported
@@ -82,6 +83,11 @@ async def lifespan(app: FastAPI):
             conn.execute(text("SELECT 1"))
         startup_state["database_status"] = "connected"
         logger.info("Startup: database connected.")
+
+        # 2c. Canonical model: default shop aanmaken + shop_id backfill
+        from canonical import ensure_default_shop
+        ensure_default_shop()
+        logger.info("Startup: default shop ensured en shop_id backfill uitgevoerd.")
 
         # 3. Always ensure the 4 demo user accounts exist (needed for login)
         from seed import seed_users_only
@@ -320,6 +326,8 @@ app.include_router(ecosystem.router)
 app.include_router(explainability.router)
 app.include_router(admin.router)
 app.include_router(connectors.router)
+app.include_router(signals.router)
+app.include_router(shops.router)
 
 # Register whichever optional modules imported successfully above. Modules
 # that failed to import were already recorded in disabled_optional_routers

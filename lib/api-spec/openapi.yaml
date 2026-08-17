@@ -33,6 +33,10 @@ tags:
     description: User management
   - name: skus
     description: SKU deep dive
+  - name: signals
+    description: Intelligence Signals (gestandaardiseerde engine-signalen)
+  - name: shops
+    description: Shop dimension (multi-shop)
 
 paths:
   /healthz:
@@ -896,6 +900,156 @@ paths:
               schema:
                 $ref: "#/components/schemas/MessageResponse"
 
+  /signals:
+    get:
+      operationId: listSignals
+      tags: [signals]
+      summary: List intelligence signals
+      parameters:
+        - name: engine
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: severity
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: entity_type
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: entity_id
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: status
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: shop_id
+          in: query
+          schema:
+            type: ["integer", "null"]
+        - name: page
+          in: query
+          schema:
+            type: ["integer", "null"]
+        - name: page_size
+          in: query
+          schema:
+            type: ["integer", "null"]
+      responses:
+        "200":
+          description: Signal list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignalListResponse"
+    post:
+      operationId: createSignal
+      tags: [signals]
+      summary: Publish an intelligence signal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSignalRequest"
+      responses:
+        "201":
+          description: Created signal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntelligenceSignal"
+
+  /signals/catalog:
+    get:
+      operationId: getSignalCatalog
+      tags: [signals]
+      summary: Approved semantic functions and metric definitions
+      responses:
+        "200":
+          description: Catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignalCatalog"
+
+  /signals/{id}:
+    get:
+      operationId: getSignal
+      tags: [signals]
+      summary: Get one intelligence signal
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Signal detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntelligenceSignal"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /signals/{id}/dismiss:
+    post:
+      operationId: dismissSignal
+      tags: [signals]
+      summary: Dismiss an intelligence signal
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Dismissed signal
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntelligenceSignal"
+
+  /shops:
+    get:
+      operationId: listShops
+      tags: [shops]
+      summary: List shops
+      responses:
+        "200":
+          description: Shop list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShopListResponse"
+    post:
+      operationId: createShop
+      tags: [shops]
+      summary: Create a shop
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateShopRequest"
+      responses:
+        "201":
+          description: Created shop
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shop"
+
 components:
   schemas:
     HealthStatus:
@@ -1642,3 +1796,209 @@ components:
         total:
           type: integer
       required: [items, total]
+
+    IntelligenceSignal:
+      type: object
+      properties:
+        id:
+          type: integer
+        shop_id:
+          type: ["integer", "null"]
+        engine:
+          type: string
+        signal_type:
+          type: string
+        severity:
+          type: string
+        direction:
+          type: ["string", "null"]
+        entity_type:
+          type: string
+        entity_id:
+          type: string
+        entity_name:
+          type: ["string", "null"]
+        metric:
+          type: ["string", "null"]
+        current_value:
+          type: ["number", "null"]
+        previous_value:
+          type: ["number", "null"]
+        expected_value:
+          type: ["number", "null"]
+        change_pct:
+          type: ["number", "null"]
+        confidence:
+          type: ["number", "null"]
+        explanation:
+          type: string
+        evidence: {}
+        sources: {}
+        suggested_action:
+          type: ["string", "null"]
+        observed_at:
+          type: ["string", "null"]
+        valid_until:
+          type: ["string", "null"]
+        model_version:
+          type: ["string", "null"]
+        status:
+          type: string
+      required: [id, engine, signal_type, severity, entity_type, entity_id, explanation, status]
+
+    SignalListResponse:
+      type: object
+      properties:
+        signals:
+          type: array
+          items:
+            $ref: "#/components/schemas/IntelligenceSignal"
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        filter_options:
+          type: object
+          properties:
+            engines:
+              type: array
+              items:
+                type: string
+            severities:
+              type: array
+              items:
+                type: string
+            entity_types:
+              type: array
+              items:
+                type: string
+      required: [signals, total, page, page_size]
+
+    CreateSignalRequest:
+      type: object
+      properties:
+        engine:
+          type: string
+        signal_type:
+          type: string
+        severity:
+          type: string
+        direction:
+          type: ["string", "null"]
+        entity_type:
+          type: string
+        entity_id:
+          type: string
+        entity_name:
+          type: ["string", "null"]
+        metric:
+          type: ["string", "null"]
+        current_value:
+          type: ["number", "null"]
+        previous_value:
+          type: ["number", "null"]
+        expected_value:
+          type: ["number", "null"]
+        change_pct:
+          type: ["number", "null"]
+        confidence:
+          type: ["number", "null"]
+        explanation:
+          type: string
+        evidence: {}
+        sources: {}
+        suggested_action:
+          type: ["string", "null"]
+        valid_until:
+          type: ["string", "null"]
+        model_version:
+          type: ["string", "null"]
+        shop_id:
+          type: ["integer", "null"]
+      required: [engine, signal_type, entity_type, entity_id, explanation, evidence, sources]
+
+    SignalCatalog:
+      type: object
+      properties:
+        semantic_functions:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              description:
+                type: string
+              required_roles:
+                type: array
+                items:
+                  type: string
+            required: [name, description, required_roles]
+        metrics:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              label_nl:
+                type: string
+              description:
+                type: string
+              formula:
+                type: string
+              unit:
+                type: string
+            required: [name, label_nl, description, formula, unit]
+      required: [semantic_functions, metrics]
+
+    Shop:
+      type: object
+      properties:
+        id:
+          type: integer
+        shop_code:
+          type: string
+        name:
+          type: string
+        country:
+          type: string
+        currency:
+          type: string
+        legal_entity:
+          type: ["string", "null"]
+        channel:
+          type: string
+        is_default:
+          type: boolean
+        active:
+          type: boolean
+      required: [id, shop_code, name, country, currency, channel, is_default, active]
+
+    ShopListResponse:
+      type: object
+      properties:
+        shops:
+          type: array
+          items:
+            $ref: "#/components/schemas/Shop"
+      required: [shops]
+
+    CreateShopRequest:
+      type: object
+      properties:
+        shop_code:
+          type: string
+        name:
+          type: string
+        country:
+          type: string
+        currency:
+          type: string
+        legal_entity:
+          type: ["string", "null"]
+        channel:
+          type: string
+      required: [shop_code, name]

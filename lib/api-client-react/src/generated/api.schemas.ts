@@ -568,6 +568,140 @@ export interface ExportHistoryResponse {
   total: number;
 }
 
+export interface IntelligenceSignal {
+  id: number;
+  /** @nullable */
+  shop_id?: number | null;
+  engine: string;
+  signal_type: string;
+  severity: string;
+  /** @nullable */
+  direction?: string | null;
+  entity_type: string;
+  entity_id: string;
+  /** @nullable */
+  entity_name?: string | null;
+  /** @nullable */
+  metric?: string | null;
+  /** @nullable */
+  current_value?: number | null;
+  /** @nullable */
+  previous_value?: number | null;
+  /** @nullable */
+  expected_value?: number | null;
+  /** @nullable */
+  change_pct?: number | null;
+  /** @nullable */
+  confidence?: number | null;
+  explanation: string;
+  evidence?: unknown;
+  sources?: unknown;
+  /** @nullable */
+  suggested_action?: string | null;
+  /** @nullable */
+  observed_at?: string | null;
+  /** @nullable */
+  valid_until?: string | null;
+  /** @nullable */
+  model_version?: string | null;
+  status: string;
+}
+
+export type SignalListResponseFilterOptions = {
+  engines?: string[];
+  severities?: string[];
+  entity_types?: string[];
+};
+
+export interface SignalListResponse {
+  signals: IntelligenceSignal[];
+  total: number;
+  page: number;
+  page_size: number;
+  filter_options?: SignalListResponseFilterOptions;
+}
+
+export interface CreateSignalRequest {
+  engine: string;
+  signal_type: string;
+  severity?: string;
+  /** @nullable */
+  direction?: string | null;
+  entity_type: string;
+  entity_id: string;
+  /** @nullable */
+  entity_name?: string | null;
+  /** @nullable */
+  metric?: string | null;
+  /** @nullable */
+  current_value?: number | null;
+  /** @nullable */
+  previous_value?: number | null;
+  /** @nullable */
+  expected_value?: number | null;
+  /** @nullable */
+  change_pct?: number | null;
+  /** @nullable */
+  confidence?: number | null;
+  explanation: string;
+  evidence: unknown;
+  sources: unknown;
+  /** @nullable */
+  suggested_action?: string | null;
+  /** @nullable */
+  valid_until?: string | null;
+  /** @nullable */
+  model_version?: string | null;
+  /** @nullable */
+  shop_id?: number | null;
+}
+
+export type SignalCatalogSemanticFunctionsItem = {
+  name: string;
+  description: string;
+  required_roles: string[];
+};
+
+export type SignalCatalogMetricsItem = {
+  name: string;
+  label_nl: string;
+  description: string;
+  formula: string;
+  unit: string;
+};
+
+export interface SignalCatalog {
+  semantic_functions: SignalCatalogSemanticFunctionsItem[];
+  metrics: SignalCatalogMetricsItem[];
+}
+
+export interface Shop {
+  id: number;
+  shop_code: string;
+  name: string;
+  country: string;
+  currency: string;
+  /** @nullable */
+  legal_entity?: string | null;
+  channel: string;
+  is_default: boolean;
+  active: boolean;
+}
+
+export interface ShopListResponse {
+  shops: Shop[];
+}
+
+export interface CreateShopRequest {
+  shop_code: string;
+  name: string;
+  country?: string;
+  currency?: string;
+  /** @nullable */
+  legal_entity?: string | null;
+  channel?: string;
+}
+
 export type ListProductsParams = {
   /**
    * @nullable
@@ -670,4 +804,39 @@ export type PushRecommendationsToDrsParams = {
 
 export type GetExportHistoryParams = {
   limit?: number;
+};
+
+export type ListSignalsParams = {
+  /**
+   * @nullable
+   */
+  engine?: string | null;
+  /**
+   * @nullable
+   */
+  severity?: string | null;
+  /**
+   * @nullable
+   */
+  entity_type?: string | null;
+  /**
+   * @nullable
+   */
+  entity_id?: string | null;
+  /**
+   * @nullable
+   */
+  status?: string | null;
+  /**
+   * @nullable
+   */
+  shop_id?: number | null;
+  /**
+   * @nullable
+   */
+  page?: number | null;
+  /**
+   * @nullable
+   */
+  page_size?: number | null;
 };
