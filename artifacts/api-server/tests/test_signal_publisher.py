@@ -383,7 +383,7 @@ class TestCompetitionEmitter:
         score = models.SkuCompetitionScore(
             sku_id=sku_id,
             run_date=date_type.today(),
-            price_index=1.12,          # 12% duurder → competitive_pressure_increased
+            price_index=9.99,          # extreem duurder → altijd in top-MAX_PER_TYPE, ook met echte feed-data in de DB
             competition_class="Critical",
             pcis_score=0.8,
             reference_price=10.00,
@@ -424,7 +424,7 @@ class TestCompetitionEmitter:
         score = models.SkuCompetitionScore(
             sku_id=sku_id,
             run_date=date_type.today(),
-            price_index=0.88,          # 12% goedkoper → price_increase_opportunity
+            price_index=0.01,          # extreem goedkoper → altijd in top-MAX_PER_TYPE, ook met echte feed-data in de DB
             competition_class="Monitor",
             pcis_score=0.3,
             reference_price=10.00,

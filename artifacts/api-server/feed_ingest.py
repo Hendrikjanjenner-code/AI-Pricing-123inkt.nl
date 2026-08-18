@@ -300,8 +300,101 @@ def _read_feed(db: Session, content: bytes | None = None,
     return _parse_content(content, content_type, fmt)
 
 
+import re as _re
+
+_WIDE_VENDOR_RE = _re.compile(r"^vendor_(\d+)\s+(.+)$")
+
+# Basisproductvelden die expliciet gemapt worden in het brede CSV-formaat;
+# alle overige niet-lege basiskolommen gaan verliesvrij mee in raw_attributes.
+_WIDE_PRODUCT_MAPPED = {"gtin", "ean", "barcode", "itemgroupid", "name",
+                        "producttitle", "priceinclvat", "costpriceexclvat",
+                        "ppc_producttype", "category"}
+# Vendorsubvelden die expliciet gemapt worden; de rest (priceWithShipping,
+# previousPrice, shippingCost, source, pricePosition, …) blijft in raw.
+_WIDE_VENDOR_MAPPED = {"domain", "price", "producturl", "stockstatus"}
+
+
+def _normalize_wide_csv(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """
+    Normaliseer het BREDE PriceShape CSV-exportformaat: één product per rij,
+    concurrenten in kolomgroepen `vendor_N <veld>` (domain, price, stockStatus,
+    productUrl, priceWithShipping, …). Dit is het formaat dat de standaard
+    export-feed (public.app.priceshape.io …/export/…) daadwerkelijk levert:
+    geen gtin-kolom — `itemGroupId` is de productsleutel.
+    """
+    catalog: dict[str, dict] = {}
+    comp_rows: list[dict] = []
+    # Dedupliceer offers over de HELE feed op (sku, domein): dubbele
+    # productrijen of herhaalde vendor-kolommen mogen geen dubbele
+    # dagobservaties opleveren (eerste voorkomen wint — zelfde semantiek als
+    # `seen_domains` in de JSON-normalisatie).
+    seen_offers: set[tuple[str, str]] = set()
+    for r in rows:
+        gtin = _s(r.get("gtin") or r.get("ean") or r.get("barcode"))
+        sku = gtin or _s(r.get("itemgroupid"))
+        if not sku:
+            continue
+
+        base: dict = {}
+        vendors: dict[int, dict] = {}
+        for k, v in r.items():
+            m = _WIDE_VENDOR_RE.match(k)
+            if m:
+                vendors.setdefault(int(m.group(1)), {})[m.group(2).strip()] = v
+            else:
+                base[k] = v
+
+        if sku not in catalog:
+            title = _s(base.get("name") or base.get("producttitle")) or sku
+            top, leaf = _split_category(base.get("ppc_producttype") or base.get("category"))
+            raw = {k: v for k, v in base.items()
+                   if _s(v) and k not in _WIDE_PRODUCT_MAPPED}
+            catalog[sku] = {
+                "sku_id": sku, "ean": gtin or None, "product_name": title[:500],
+                "brand": _brand_from_title(title)[:255] if _brand_from_title(title) else None,
+                "category": top, "subcategory": leaf,
+                "product_group": _s(base.get("itemgroupid")) or None,
+                "current_price": _f(base.get("priceinclvat")),
+                "price_incl_vat": _f(base.get("priceinclvat")),
+                "cost_price": _f(base.get("costpriceexclvat")),
+                "strategy_type": _DEFAULT_STRATEGY, "lifecycle_status": "active",
+                "is_active": True, "import_source": SOURCE_NAME, "data_quality_score": 1.0,
+                "raw_attributes": _with_overflow(
+                    raw or None, {"_productTitle_full": (title, 500)}),
+            }
+
+        for idx in sorted(vendors):
+            v = vendors[idx]
+            domain_raw = _s(v.get("domain"))
+            domain = domain_raw.lower()
+            price = _f(v.get("price"))
+            if not domain or price is None:
+                continue
+            if (sku, domain) in seen_offers:
+                continue
+            seen_offers.add((sku, domain))
+            vraw = {k: val for k, val in v.items()
+                    if _s(val) and k not in _WIDE_VENDOR_MAPPED}
+            comp_rows.append({
+                "sku_id": sku, "competitor_name": domain[:255], "price": price,
+                "url": _s(v.get("producturl")) or None,
+                "in_stock": _parse_bool(v.get("stockstatus")),
+                "delivery_days": None,
+                "currency": None,
+                "vendor_name": None,
+                "observed_at": None,
+                # Bewaar het ORIGINELE (niet-kleingeschreven) domein bij overflow.
+                "raw_attributes": _with_overflow(
+                    vraw or None, {"_domain_full": (domain_raw, 255)}),
+            })
+    return list(catalog.values()), comp_rows
+
+
 def _normalize_flat(rows: list[dict]) -> tuple[list[dict], list[dict]]:
     """Fallback voor niet-JSON feeds: platte, ge-unneste rijen (alias-gebaseerd)."""
+    # Breed exportformaat (vendor_N-kolommen)? Dan de speciale wide-normalisatie.
+    if rows and any(_WIDE_VENDOR_RE.match(k) for k in rows[0].keys()):
+        return _normalize_wide_csv(rows)
     catalog: dict[str, dict] = {}
     comp_rows: list[dict] = []
     for r in rows:

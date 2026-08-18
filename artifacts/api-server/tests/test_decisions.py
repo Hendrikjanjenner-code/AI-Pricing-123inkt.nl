@@ -20,6 +20,8 @@ from main import app
 from database import SessionLocal
 import models
 from engine.signal_publisher import publish_signal
+from unittest.mock import patch
+import engine.decision_engine as decision_engine
 from engine.decision_engine import run_decision_engine
 
 ADMIN_LOGIN = {"username": "dev_admin", "password": "admin123"}
@@ -200,14 +202,19 @@ def test_category_decisions_derived_from_sku_signals(client, admin_headers, db):
             _seed_signal(db, sku)
         db.commit()
 
-        r = client.post("/api/decisions/run", headers=admin_headers)
+        # Onbeperkt budget: met echte feed-data outranken bestaande categorieën
+        # de testcategorie anders binnen het standaard budget.
+        with patch.object(decision_engine, "MAX_DECISIONS_PER_RUN", 10**6):
+            r = client.post("/api/decisions/run", headers=admin_headers)
         assert r.status_code == 200, r.text
         result = r.json()
         assert result["decisions_created"] >= 3  # ≥2 SKU's + ≥1 categorie
 
         # Categoriebeslissing is aangemaakt met entity_type="category"
+        # Filter op entity_id: met echte feed-data in de DB kunnen er veel
+        # categoriebeslissingen zijn en valt onze categorie anders buiten pagina 1.
         items = client.get(
-            "/api/decisions", params={"entity_type": "category"}, headers=admin_headers
+            "/api/decisions", params={"entity_type": "category", "entity_id": cat}, headers=admin_headers
         ).json()["items"]
         cat_items = [d for d in items if d["entity_id"] == cat]
         assert len(cat_items) == 1, f"Verwacht 1 categoriebeslissing voor '{cat}', kreeg: {[d['entity_id'] for d in items]}"
@@ -251,11 +258,12 @@ def test_category_decision_without_sales_has_data_gaps(client, admin_headers, db
         _seed_signal(db, sku)
         db.commit()
 
-        r = client.post("/api/decisions/run", headers=admin_headers)
+        with patch.object(decision_engine, "MAX_DECISIONS_PER_RUN", 10**6):
+            r = client.post("/api/decisions/run", headers=admin_headers)
         assert r.status_code == 200, r.text
 
         items = client.get(
-            "/api/decisions", params={"entity_type": "category"}, headers=admin_headers
+            "/api/decisions", params={"entity_type": "category", "entity_id": cat}, headers=admin_headers
         ).json()["items"]
         cat_items = [d for d in items if d["entity_id"] == cat]
         assert len(cat_items) == 1, "Categoriebeslissing moet aangemaakt worden ook zonder verkoop"

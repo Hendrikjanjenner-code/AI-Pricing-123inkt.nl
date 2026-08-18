@@ -1,7 +1,19 @@
 ---
-name: PriceShape feed JSON shape
-description: The real PriceShape export-feed JSON structure and how competitor prices must be un-nested.
+name: PriceShape feed shapes (JSON + wide CSV)
+description: The real PriceShape export-feed structures (JSON with nested vendors[], and the wide CSV of the default feed) and how competitor prices must be un-nested.
 ---
+
+# Default feed = WIDE CSV, no gtin
+
+The built-in default export feed (`public.app.priceshape.io/.../export/...`, ~13 MB)
+returns **text/csv**, NOT JSON: one product per row, **no gtin/ean column**
+(`itemGroupId` is the product key), decimal commas, and competitors as wide column
+groups `vendor_N <field>` (domain, price, stockStatus e.g. "InStock", productUrl,
+priceWithShipping, previousPrice, shippingCost, source, pricePosition, quantity) up
+to N=50. The CSV parser lowercases headers → keys like `vendor_1 domain`. Ingest
+un-nests these into per-competitor rows, dedupes offers on (sku, lowercased domain)
+across the whole feed (first occurrence wins), and leaves `ean` NULL — never invent
+an EAN. Unmapped fields go loss-free into raw_attributes.
 
 # PriceShape output-feed (export URL) JSON shape
 

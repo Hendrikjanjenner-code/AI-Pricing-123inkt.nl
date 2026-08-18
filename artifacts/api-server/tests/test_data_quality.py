@@ -484,14 +484,12 @@ class TestStaleAiModels:
         db.commit()
         run_id = old_run.id
         try:
-            # Patch today +2 dagen zodat de 10 dagen oude run zeker stale is
-            # ongeacht andere recentere runs (we controleren alleen onze eigen trigger)
             total_skus = db.query(models.DimProduct).count()
-            future = date.today() + timedelta(days=2)
-            with patch.object(dq_module, '_date') as mock_d:
-                mock_d.today.return_value = future
-                # Verberg alle andere geslaagde runs door alleen de stale run zichtbaar
-                # te laten: patch func.max te retourneren via de bestaande DB.
+            # De detectie vergelijkt de RECENTSTE geslaagde run met utcnow();
+            # een echte sync van vandaag zou de stale-trigger anders verbergen.
+            # Verlaag daarom de drempel zodat élke leeftijd als stale telt —
+            # we testen puur de triggerlogica, niet de kalender.
+            with patch.object(dq_module, 'MODEL_STALE_DAYS', -1):
                 detected = _detect_issues(db, total_skus)
             codes = {d["issue_code"] for d in detected}
             assert "STALE_AI_MODELS" in codes, \
