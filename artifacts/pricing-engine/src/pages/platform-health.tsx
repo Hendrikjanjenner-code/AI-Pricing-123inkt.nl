@@ -95,7 +95,21 @@ export default function PlatformHealth() {
                 <div>Gem. {c.avg_response_ms} ms · p95 {Math.round(c.p95_response_ms)} ms</div>
                 <div>Foutpercentage: {c.error_rate_pct}%</div>
               </>}
-              {key === "ai" && <div>{c.calls_last_24h} AI-calls (24u), {c.failed_last_24h} mislukt</div>}
+              {key === "ai" && <>
+                <div>{c.calls_last_24h} AI-calls (24u), {c.failed_last_24h} mislukt</div>
+                {c.provider_reachable === false && (
+                  <div className="text-red-600 font-medium">⚠ AI-sleutel ongeldig of onbereikbaar</div>
+                )}
+                {c.provider_reachable === false && c.provider_error && (
+                  <div className="text-red-500 break-words">{c.provider_error}</div>
+                )}
+                {c.provider_reachable === null && (
+                  <div className="text-amber-600">Bereikbaarheid nog niet getest</div>
+                )}
+                {c.provider_reachable === true && (
+                  <div className="text-green-700">AI-provider bereikbaar ✓</div>
+                )}
+              </>}
               {key === "jobs" && <>
                 {c.laatste_run && <div>Laatste run: {new Date(c.laatste_run).toLocaleString("nl-NL")}</div>}
                 <div>Gefaald (7d): {c.failed_last_7d}</div>

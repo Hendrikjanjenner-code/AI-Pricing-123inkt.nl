@@ -130,6 +130,62 @@ def ai_available() -> bool:
     return _provider_config() is not None
 
 
+# ─── Provider-bereikbaarheidstest (probe) ────────────────────────────────────
+# Goedkope startup-/poll-check: roept models.list() aan (geen tokens verbruikt).
+# Resultaat wordt 5 minuten gecachet zodat herhaalde /api/copilot/status-calls
+# de externe API niet spammen.
+
+_PROBE_TTL_SECONDS = 300  # cache 5 minuten
+
+_probe_cache: dict = {
+    "reachable": None,     # True / False / None (nog niet getest)
+    "error": None,         # str of None
+    "checked_at": 0.0,     # epoch float
+}
+
+
+def probe_provider(force: bool = False) -> tuple[bool, Optional[str]]:
+    """Test of de geconfigureerde LLM-provider bereikbaar is.
+
+    Gebruikt models.list() — geen tokenverbruik, geen kosten.
+    Resultaat wordt MAX_PROBE_TTL_SECONDS gecachet.
+
+    Returns (reachable, error_message).
+    """
+    now = time.time()
+    if not force and _probe_cache["reachable"] is not None:
+        if now - _probe_cache["checked_at"] < _PROBE_TTL_SECONDS:
+            return _probe_cache["reachable"], _probe_cache["error"]
+
+    cfg = _provider_config()
+    if cfg is None:
+        _probe_cache.update({"reachable": False, "error": "Geen AI-sleutel geconfigureerd.", "checked_at": now})
+        return False, "Geen AI-sleutel geconfigureerd."
+
+    try:
+        from openai import OpenAI
+        kwargs: dict = {"api_key": cfg["api_key"], "timeout": 10.0}
+        if cfg["base_url"]:
+            kwargs["base_url"] = cfg["base_url"]
+        client = OpenAI(**kwargs)
+        client.models.list()
+        _probe_cache.update({"reachable": True, "error": None, "checked_at": now})
+        return True, None
+    except Exception as exc:
+        error_msg = str(exc)
+        logger.warning("AI provider-probe mislukt: %s", error_msg)
+        _probe_cache.update({"reachable": False, "error": error_msg, "checked_at": now})
+        return False, error_msg
+
+
+def get_provider_reachable() -> tuple[Optional[bool], Optional[str]]:
+    """Geeft het gecachete probe-resultaat terug zonder een nieuwe probe te starten.
+
+    Returns (reachable_or_None, error_or_None).
+    """
+    return _probe_cache["reachable"], _probe_cache["error"]
+
+
 def _make_client():
     cfg = _provider_config()
     if not cfg:

@@ -68,9 +68,20 @@ def copilot_status(
     _: models.User = Depends(auth_utils.get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Beschikbaarheid van de AI-dienst + voorbeeldvragen (§26)."""
+    """Beschikbaarheid van de AI-dienst + voorbeeldvragen (§26).
+
+    `provider_reachable` geeft aan of de externe API-sleutel geldig en bereikbaar
+    is (gecachet; vernieuwd bij opstarten en daarna elke 5 minuten op verzoek).
+    `provider_error` bevat de foutmelding als de probe mislukt is.
+    """
+    # probe_provider() is TTL-bewust (5 minuten cache): het voert alleen een
+    # nieuwe netwerkoproep uit als de cache verlopen is. Zo is de status-response
+    # altijd vers zonder de externe API te spammen.
+    reachable, probe_error = ai_gateway.probe_provider()
     return {
         "ai_available": ai_gateway.ai_available(),
+        "provider_reachable": reachable,
+        "provider_error": probe_error,
         "model": ai_gateway.AI_MODEL,
         "example_questions": EXAMPLE_QUESTIONS,
         "approved_functions": [

@@ -65,6 +65,8 @@ startup_state: dict = {
     "database_status": "unknown",
     "started_at": None,
     "last_start_error": None,
+    "ai_provider_reachable": None,   # True / False / None (nog niet getest)
+    "ai_provider_error": None,       # foutmelding als probe mislukt
 }
 
 
@@ -145,6 +147,45 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("Startup: PriceShape feed-sync scheduler disabled via DISABLE_FEED_SYNC.")
 
+        # 6. AI-sleutel bereikbaarheidstest (goedkope probe, geen tokenverbruik).
+        # Resultaat wordt opgeslagen in startup_state én in ai_gateway._probe_cache
+        # zodat /api/copilot/status het direct kan teruggeven.
+        try:
+            from ai_gateway import probe_provider
+            _ai_reachable, _ai_error = probe_provider(force=True)
+            startup_state["ai_provider_reachable"] = _ai_reachable
+            startup_state["ai_provider_error"] = _ai_error
+            if _ai_reachable:
+                logger.info("Startup: AI provider bereikbaar.")
+            else:
+                logger.warning("Startup: AI provider NIET bereikbaar — %s", _ai_error)
+                # Stel direct een beheerder-alert in voor een ongeldige/verlopen
+                # sleutel bij opstarten — niet wachten op de eerste monitorcyclus.
+                try:
+                    from services.ai_key_monitor import _emit_alert
+                    _emit_alert(False, _ai_error)
+                except Exception as _alert_exc:
+                    logger.warning("Startup: alert aanmaken mislukt: %s", _alert_exc)
+        except Exception as _probe_exc:
+            startup_state["ai_provider_reachable"] = False
+            startup_state["ai_provider_error"] = str(_probe_exc)
+            logger.warning("Startup: AI provider-probe mislukt: %s", _probe_exc)
+            try:
+                from services.ai_key_monitor import _emit_alert
+                _emit_alert(False, str(_probe_exc))
+            except Exception as _alert_exc:
+                logger.warning("Startup: alert aanmaken mislukt: %s", _alert_exc)
+
+        # 7. Start de AI-sleutel monitor die periodiek bereikbaarheid controleert
+        # en beheerders actief waarschuwt bij statuswijzigingen.
+        ai_key_monitor_task = None
+        if os.environ.get("DISABLE_AI_KEY_MONITOR", "false").lower() not in ("1", "true", "yes"):
+            from services.ai_key_monitor import start_ai_key_monitor
+            ai_key_monitor_task = start_ai_key_monitor()
+            logger.info("Startup: AI-sleutel monitor started.")
+        else:
+            logger.info("Startup: AI-sleutel monitor disabled via DISABLE_AI_KEY_MONITOR.")
+
         startup_state["backend_status"] = "running"
         startup_state["started_at"] = datetime.now(timezone.utc).isoformat()
         logger.info("Startup: backend started successfully.")
@@ -160,13 +201,14 @@ async def lifespan(app: FastAPI):
         logger.error("Startup FAILED: %s\n%s", exc, traceback.format_exc())
         health_monitor_task = None
         feed_sync_task = None
+        ai_key_monitor_task = None
         # Re-raise so the process doesn't silently pretend to be healthy —
         # but the error is now captured in startup_state for diagnostics.
         raise
     try:
         yield
     finally:
-        for _bg_task in (health_monitor_task, feed_sync_task):
+        for _bg_task in (health_monitor_task, feed_sync_task, ai_key_monitor_task):
             if _bg_task is not None:
                 _bg_task.cancel()
                 try:

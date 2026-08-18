@@ -176,17 +176,37 @@ def platform_health(
         "connectoren": conn_items,
     }
 
-    # AI: gemeten AI-calls (24 uur)
+    # AI: gemeten AI-calls (24 uur) + provider-bereikbaarheid (gecachet probe)
     ai_q = db.query(CostUsageRecord).filter(
         CostUsageRecord.usage_type == "ai_call",
         CostUsageRecord.occurred_at >= nu - timedelta(hours=24),
     )
     ai_totaal = ai_q.count()
     ai_fouten = ai_q.filter(CostUsageRecord.status_code >= 400).count() if ai_totaal else 0
+
+    # Provider-probe: gebruik gecachet resultaat (geen extra externe call per paginaload)
+    from ai_gateway import get_provider_reachable
+    ai_reachable, ai_probe_error = get_provider_reachable()
+
+    # Status: "error" als provider onbereikbaar is of foutpercentage hoog;
+    # "degraded" als probe nog niet is gelopen (None).
+    if ai_reachable is False:
+        ai_status = "error"
+    elif ai_reachable is None:
+        ai_status = "degraded"
+    elif ai_totaal and ai_fouten / ai_totaal > 0.2:
+        ai_status = "error"
+    elif ai_totaal:
+        ai_status = "ok"
+    else:
+        ai_status = "not_used"
+
     ai = {
-        "status": "error" if (ai_totaal and ai_fouten / ai_totaal > 0.2) else ("ok" if ai_totaal else "not_used"),
+        "status": ai_status,
         "calls_last_24h": ai_totaal,
         "failed_last_24h": ai_fouten,
+        "provider_reachable": ai_reachable,
+        "provider_error": ai_probe_error,
     }
 
     # Applicatie
