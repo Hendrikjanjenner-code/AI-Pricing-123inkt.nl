@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { CheckCircle2, XCircle, Play, Search, Globe, Tag } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useShopId } from "@/hooks/use-shop-id";
 
 function apiFetch(path: string, opts?: RequestInit) {
   const token = localStorage.getItem("auth_token");
@@ -40,26 +41,32 @@ const STATUS_LABELS: Record<string, string> = {
 export default function CompetitionDiscovery() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const shopId = useShopId();
   const [statusFilter, setStatusFilter] = useState("all");
   const [zoekterm, setZoekterm] = useState("");
 
   const { data, isLoading } = useQuery({
-    queryKey: ["competition-discovery", statusFilter],
-    queryFn: () => apiFetch(`/api/competition/discovery?page_size=100${statusFilter !== "all" ? `&status=${statusFilter}` : ""}`),
+    queryKey: ["competition-discovery", statusFilter, shopId],
+    queryFn: () => {
+      const p = new URLSearchParams({ page_size: "100" });
+      if (statusFilter !== "all") p.set("status", statusFilter);
+      if (shopId !== undefined) p.set("shop_id", String(shopId));
+      return apiFetch(`/api/competition/discovery?${p}`);
+    },
   });
 
   const approveMutation = useMutation({
-    mutationFn: (id: number) => apiFetch(`/api/competition/discovery/${id}/approve`, { method: "POST" }),
+    mutationFn: (id: number) => apiFetch(`/api/competition/discovery/${id}/approve${shopId !== undefined ? `?shop_id=${shopId}` : ""}`, { method: "POST" }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["competition-discovery"] }); toast({ title: "Goedgekeurd" }); },
   });
 
   const rejectMutation = useMutation({
-    mutationFn: (id: number) => apiFetch(`/api/competition/discovery/${id}/reject`, { method: "POST" }),
+    mutationFn: (id: number) => apiFetch(`/api/competition/discovery/${id}/reject${shopId !== undefined ? `?shop_id=${shopId}` : ""}`, { method: "POST" }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["competition-discovery"] }); toast({ title: "Afgewezen" }); },
   });
 
   const runMutation = useMutation({
-    mutationFn: () => apiFetch("/api/competition/discovery/run", { method: "POST" }),
+    mutationFn: () => apiFetch(`/api/competition/discovery/run${shopId !== undefined ? `?shop_id=${shopId}` : ""}`, { method: "POST" }),
     onSuccess: (d) => {
       qc.invalidateQueries({ queryKey: ["competition-discovery"] });
       toast({ title: "Discovery-run gestart", description: `${d.candidates_found} concurrenten gevonden, ${d.candidates_new} nieuw.` });

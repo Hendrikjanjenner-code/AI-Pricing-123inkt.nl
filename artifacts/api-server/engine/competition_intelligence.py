@@ -724,6 +724,93 @@ def warn_suspicious_matches(db: Session, run_date: Optional[date] = None) -> int
     return n_signals
 
 
+# ── Strategie-herkenning (per shop) ──────────────────────────────────────────
+
+def run_strategies(db: Session, run_date: Optional[date] = None) -> int:
+    """Herken en persisteer concurrentstrategie per concurrent per shop.
+
+    Leest de afgelopen 30 dagen fact_competitor_price_daily per shop,
+    classificeert via competitor_strategy_engine en slaat het resultaat op
+    in competitor_strategy_result (upsert op competitor_name + shop_id +
+    run_date zodat herdraaien idempotent is).
+    """
+    from engine.competitor_strategy_engine import analyseer_alle_concurrenten, STRATEGIE_LABELS
+    rd = run_date or date.today()
+    since = rd - timedelta(days=30)
+    n_results = 0
+
+    shops = [sid for (sid,) in db.query(models.DimProduct.shop_id).distinct().all() if sid is not None]
+    if not shops:
+        shops = [1]
+
+    for shop_id in shops:
+        rijen = (
+            db.query(models.FactCompetitorPriceDaily)
+            .join(models.DimProduct, models.DimProduct.sku_id == models.FactCompetitorPriceDaily.sku_id)
+            .filter(
+                models.FactCompetitorPriceDaily.date >= since,
+                models.DimProduct.shop_id == shop_id,
+            )
+            .order_by(models.FactCompetitorPriceDaily.competitor_name,
+                      models.FactCompetitorPriceDaily.date)
+            .all()
+        )
+        prijsdata: dict[str, list] = {}
+        for r in rijen:
+            if r.price is None:
+                continue
+            prijsdata.setdefault(r.competitor_name or "Onbekend", []).append(
+                (r.date, float(r.price)))
+
+        if not prijsdata:
+            continue
+
+        resultaten = analyseer_alle_concurrenten(prijsdata)
+        for res in resultaten:
+            naam = res.get("concurrent") or res.get("competitor_name", "")
+            if not naam:
+                continue
+            vorige = (
+                db.query(models.CompetitorStrategyResult)
+                .filter(
+                    models.CompetitorStrategyResult.competitor_name == naam,
+                    models.CompetitorStrategyResult.shop_id == shop_id,
+                    models.CompetitorStrategyResult.run_date < rd,
+                )
+                .order_by(models.CompetitorStrategyResult.run_date.desc())
+                .first()
+            )
+            vorige_type = vorige.strategy_type if vorige else None
+            nieuwe_type = res.get("strategy_type")
+
+            row = (
+                db.query(models.CompetitorStrategyResult)
+                .filter(
+                    models.CompetitorStrategyResult.competitor_name == naam,
+                    models.CompetitorStrategyResult.shop_id == shop_id,
+                    models.CompetitorStrategyResult.run_date == rd,
+                )
+                .first()
+            )
+            if row is None:
+                row = models.CompetitorStrategyResult(
+                    competitor_name=naam, shop_id=shop_id, run_date=rd)
+                db.add(row)
+            row.strategy_type = nieuwe_type
+            row.strategy_label_nl = STRATEGIE_LABELS.get(nieuwe_type or "", nieuwe_type or "")
+            row.confidence = res.get("confidence", 0.0)
+            row.explanation_nl = res.get("explanation_nl") or res.get("uitleg")
+            row.recommended_action_nl = res.get("recommended_action_nl") or res.get("aanbevolen_actie")
+            row.period_days = 30
+            row.data_points = res.get("data_points", 0)
+            row.previous_strategy_type = vorige_type
+            row.strategy_changed = (vorige_type is not None and vorige_type != nieuwe_type)
+            n_results += 1
+
+    db.commit()
+    return n_results
+
+
 # ── Orchestratie ─────────────────────────────────────────────────────────────
 
 def comparable_price_series(rows) -> dict[str, list]:

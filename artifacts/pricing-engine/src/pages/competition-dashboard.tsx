@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Search, TrendingDown, TrendingUp, Target, AlertTriangle, Circle } from "lucide-react";
 import { useState } from "react";
+import { useShopId, withShop } from "@/hooks/use-shop-id";
 
 function apiFetch(path: string) {
   const token = localStorage.getItem("auth_token");
@@ -41,17 +42,24 @@ function ScoreBar({ label, value }: { label: string; value: number }) {
 }
 
 export default function CompetitionDashboard() {
+  const shopId = useShopId();
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [zoekterm, setZoekterm] = useState("");
 
   const { data: dashData, isLoading } = useQuery({
-    queryKey: ["competition-dashboard", categoryFilter],
-    queryFn: () => apiFetch(`/api/competition/dashboard${categoryFilter !== "all" ? `?category=${encodeURIComponent(categoryFilter)}` : ""}`),
+    queryKey: ["competition-dashboard", categoryFilter, shopId],
+    queryFn: () => {
+      const p = new URLSearchParams();
+      if (categoryFilter !== "all") p.set("category", categoryFilter);
+      if (shopId !== undefined) p.set("shop_id", String(shopId));
+      const qs = p.toString();
+      return apiFetch(`/api/competition/dashboard${qs ? `?${qs}` : ""}`);
+    },
   });
 
   const { data: summary } = useQuery({
-    queryKey: ["competition-summary"],
-    queryFn: () => apiFetch("/api/competition/summary"),
+    queryKey: ["competition-summary", shopId],
+    queryFn: () => apiFetch(`/api/competition/summary${shopId !== undefined ? `?shop_id=${shopId}` : ""}`),
   });
 
   const categories = dashData?.categories || [];

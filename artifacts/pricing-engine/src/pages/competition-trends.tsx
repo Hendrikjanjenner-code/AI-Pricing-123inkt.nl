@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TrendingUp, PackageX, Percent, Activity } from "lucide-react";
+import { useShopId, withShop } from "@/hooks/use-shop-id";
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip,
   CartesianGrid, Legend, AreaChart, Area, ReferenceLine,
@@ -27,29 +28,30 @@ const EVENT_LABELS: Record<string, { label: string; cls: string }> = {
 const LINE_COLORS = ["#2563eb", "#dc2626", "#059669", "#d97706", "#7c3aed", "#0891b2", "#be185d"];
 
 export default function CompetitionTrends() {
+  const shopId = useShopId();
   const [days, setDays] = useState("30");
   const [eventType, setEventType] = useState("all");
 
   const { data: priceTrend, isLoading: loadingTrend } = useQuery({
-    queryKey: ["comp-trend-price-index", days],
-    queryFn: () => apiFetch(`/api/competition/trends/price-index?days=${days}`),
+    queryKey: ["comp-trend-price-index", days, shopId],
+    queryFn: () => apiFetch(`/api/competition/trends/price-index?${withShop(`days=${days}`, shopId)}`),
   });
   const { data: coverage } = useQuery({
-    queryKey: ["comp-coverage-latest"],
-    queryFn: () => apiFetch("/api/competition/coverage"),
+    queryKey: ["comp-coverage-latest", shopId],
+    queryFn: () => apiFetch(`/api/competition/coverage${shopId !== undefined ? `?shop_id=${shopId}` : ""}`),
   });
   const { data: coverageTrend } = useQuery({
-    queryKey: ["comp-coverage-trend"],
-    queryFn: () => apiFetch("/api/competition/trends/coverage?days=90"),
+    queryKey: ["comp-coverage-trend", shopId],
+    queryFn: () => apiFetch(`/api/competition/trends/coverage?${withShop("days=90", shopId)}`),
   });
   const { data: availability } = useQuery({
-    queryKey: ["comp-availability", days],
-    queryFn: () => apiFetch(`/api/competition/availability?days=${days}`),
+    queryKey: ["comp-availability", days, shopId],
+    queryFn: () => apiFetch(`/api/competition/availability?${withShop(`days=${days}`, shopId)}`),
   });
   const { data: events } = useQuery({
-    queryKey: ["comp-events", days, eventType],
+    queryKey: ["comp-events", days, eventType, shopId],
     queryFn: () => apiFetch(
-      `/api/competition/events?days=${days}${eventType !== "all" ? `&event_type=${eventType}` : ""}&page_size=100`),
+      `/api/competition/events?${withShop(`days=${days}${eventType !== "all" ? `&event_type=${eventType}` : ""}&page_size=100`, shopId)}`),
   });
 
   const series = priceTrend?.series || [];

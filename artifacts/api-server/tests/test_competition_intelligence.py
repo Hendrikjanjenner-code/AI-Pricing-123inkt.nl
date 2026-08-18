@@ -25,11 +25,10 @@ SKU_B = f"{PFX}-B"
 COMP_1 = f"{PFX}-shop1.nl"
 COMP_2 = f"{PFX}-shop2.nl"
 
-# Constanten voor de suspicious-match tests
+# Constanten voor de warn_suspicious_matches-testfixtures
 WM_PFX = f"WMTEST{uuid.uuid4().hex[:6]}"
 WM_SKU = f"{WM_PFX}-SKU"
 WM_COMP = f"{WM_PFX}-comp.nl"
-
 
 @pytest.fixture(scope="module")
 def client():
@@ -391,6 +390,44 @@ def test_multi_shop_isolation(client, admin_headers, run_engines):
                            headers=admin_headers).json()["items"]
         tot = [i for i in cov_b if i["category"] is None]
         assert tot and tot[0]["own_products"] == 1
+
+        # AI-matching isolatie: default shop ziet shop-B match niet
+        resp = client.get("/api/competition/ai-matching", headers=admin_headers)
+        assert resp.status_code == 200
+        match_skus = [m["own_sku_id"] for m in resp.json()["items"]]
+        assert sku_b2 not in match_skus, "Default shop ziet shop-B match"
+
+        # Shop-B scope ziet zijn eigen match wél
+        resp = client.get(f"/api/competition/ai-matching?shop_id={shop_b}",
+                          headers=admin_headers)
+        assert resp.status_code == 200
+        match_skus_b = [m["own_sku_id"] for m in resp.json()["items"]]
+        assert sku_b2 in match_skus_b, "Shop-B scope ziet eigen match niet"
+
+        # IDOR-check: approve via default-shop scope geeft 404 voor shop-B match
+        match_b = db.query(models.AiMatchResult).filter(
+            models.AiMatchResult.own_sku_id == sku_b2).first()
+        if match_b:
+            resp_idor = client.post(
+                f"/api/competition/ai-matching/{match_b.id}/approve",
+                headers=admin_headers)
+            assert resp_idor.status_code == 404, (
+                f"IDOR: approve van shop-B match via default shop gaf {resp_idor.status_code}")
+
+        # Summary en skus: default shop geeft 200 (kan leeg zijn, maar bevat geen shop-B producten)
+        resp = client.get("/api/competition/summary", headers=admin_headers)
+        assert resp.status_code == 200
+        resp = client.get("/api/competition/skus", headers=admin_headers)
+        assert resp.status_code == 200
+        assert all(m["sku_id"] != sku_b2 for m in resp.json()["items"])
+
+        # Strategies en rankings: shop-B scope geeft 200 (data afhankelijk van run)
+        resp = client.get(f"/api/competition/strategies?shop_id={shop_b}",
+                          headers=admin_headers)
+        assert resp.status_code == 200
+        resp = client.get(f"/api/competition/rankings?shop_id={shop_b}",
+                          headers=admin_headers)
+        assert resp.status_code == 200
     finally:
         for model, col in [
             (models.IntelligenceSignal, models.IntelligenceSignal.shop_id),
@@ -535,7 +572,8 @@ def test_warn_suspicious_matches_publishes_signal(suspicious_seed):
         db.close()
 
 def test_warn_suspicious_matches_idempotent(suspicious_seed):
-    """Tweede aanroep op dezelfde run_date mag geen extra signaal aanmaken."""
+    """Tweede aanroep op dezelfde run_date mag geen extra signaal aanmaken.
+    Vereist dat test_warn_suspicious_matches_publishes_signal al eerder is gedraaid."""
     from engine.competition_intelligence import warn_suspicious_matches
     sid, _skus = suspicious_seed
     db = SessionLocal()

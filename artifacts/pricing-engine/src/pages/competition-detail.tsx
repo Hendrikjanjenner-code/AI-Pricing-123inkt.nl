@@ -10,6 +10,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, Cell
 } from "recharts";
 import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
+import { useShopId } from "@/hooks/use-shop-id";
 
 const KLASSE_KLEUREN: Record<string, string> = {
   Critical: "bg-red-500/15 text-red-700 border-red-300",
@@ -54,12 +55,13 @@ const UITSLUITINGS_LABELS: Record<string, string> = {
 };
 
 export default function ConcurrentieDetail() {
+  const shopId = useShopId();
   const params = useParams<{ sku_id: string }>();
   const skuId = params.sku_id;
 
   const { data, isLoading } = useQuery({
-    queryKey: ["competition-detail", skuId],
-    queryFn: () => apiFetch(`/api/competition/skus/${skuId}`),
+    queryKey: ["competition-detail", skuId, shopId],
+    queryFn: () => apiFetch(`/api/competition/skus/${skuId}${shopId !== undefined ? `?shop_id=${shopId}` : ""}`),
     enabled: !!skuId,
   });
 

@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Search, TrendingUp, Package, Tag, Layers, Euro } from "lucide-react";
+import { useShopId } from "@/hooks/use-shop-id";
 
 function apiFetch(path: string) {
   const token = localStorage.getItem("auth_token");
@@ -21,16 +22,18 @@ const GAP_TYPE_CONFIG: Record<string, { label: string; color: string; icon: any 
 };
 
 export default function CompetitionAssortmentGap() {
+  const shopId = useShopId();
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [gapTypeFilter, setGapTypeFilter] = useState("all");
   const [zoekterm, setZoekterm] = useState("");
 
   const { data, isLoading } = useQuery({
-    queryKey: ["competition-assortment-gap", categoryFilter, gapTypeFilter],
+    queryKey: ["competition-assortment-gap", categoryFilter, gapTypeFilter, shopId],
     queryFn: () => {
       const p = new URLSearchParams({ page_size: "200" });
       if (categoryFilter !== "all") p.set("category", categoryFilter);
       if (gapTypeFilter !== "all") p.set("gap_type", gapTypeFilter);
+      if (shopId !== undefined) p.set("shop_id", String(shopId));
       return apiFetch(`/api/competition/assortment-gap?${p}`);
     },
   });

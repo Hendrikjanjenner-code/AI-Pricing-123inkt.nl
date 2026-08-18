@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { ArrowRight, AlertTriangle } from "lucide-react";
+import { useShopId, withShop } from "@/hooks/use-shop-id";
 
 function apiFetch(path: string) {
   const token = localStorage.getItem("auth_token");
@@ -43,12 +44,13 @@ const STRATEGIE_LABELS: Record<string, string> = {
 };
 
 export default function CompetitionStrategies() {
+  const shopId = useShopId();
   const [lookbackDays, setLookbackDays] = useState("30");
   const [stratFilter, setStratFilter] = useState("all");
 
   const { data, isLoading } = useQuery({
-    queryKey: ["competition-strategies", lookbackDays],
-    queryFn: () => apiFetch(`/api/competition/strategies?lookback_days=${lookbackDays}`),
+    queryKey: ["competition-strategies", lookbackDays, shopId],
+    queryFn: () => apiFetch(`/api/competition/strategies?${withShop(`lookback_days=${lookbackDays}`, shopId)}`),
   });
 
   const strategies: any[] = (data?.strategieen || []).filter((s: any) =>

@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Search, Circle, ChevronRight } from "lucide-react";
+import { useShopId } from "@/hooks/use-shop-id";
 
 function apiFetch(path: string) {
   const token = localStorage.getItem("auth_token");
@@ -31,16 +32,18 @@ const SCORE_DEFS = [
 ];
 
 export default function CompetitionCategories() {
+  const shopId = useShopId();
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [labelFilter, setLabelFilter] = useState("all");
   const [zoekterm, setZoekterm] = useState("");
 
   const { data, isLoading } = useQuery({
-    queryKey: ["competition-categories", categoryFilter, labelFilter],
+    queryKey: ["competition-categories", categoryFilter, labelFilter, shopId],
     queryFn: () => {
       const params = new URLSearchParams({ page_size: "200" });
       if (categoryFilter !== "all") params.set("category", categoryFilter);
       if (labelFilter !== "all") params.set("relevance_label", labelFilter);
+      if (shopId !== undefined) params.set("shop_id", String(shopId));
       return apiFetch(`/api/competition/categories?${params}`);
     },
   });

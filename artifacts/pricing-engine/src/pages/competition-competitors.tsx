@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Search, Circle, Building2, TrendingDown } from "lucide-react";
+import { useShopId } from "@/hooks/use-shop-id";
 
 function apiFetch(path: string) {
   const token = localStorage.getItem("auth_token");
@@ -27,12 +28,18 @@ const SEGMENT_COLORS: Record<string, string> = {
 };
 
 export default function CompetitionCompetitors() {
+  const shopId = useShopId();
   const [labelFilter, setLabelFilter] = useState("all");
   const [zoekterm, setZoekterm] = useState("");
 
   const { data, isLoading } = useQuery({
-    queryKey: ["competition-competitors", labelFilter],
-    queryFn: () => apiFetch(`/api/competition/competitors?page_size=100${labelFilter !== "all" ? `&relevance_label=${labelFilter}` : ""}`),
+    queryKey: ["competition-competitors", labelFilter, shopId],
+    queryFn: () => {
+      const p = new URLSearchParams({ page_size: "100" });
+      if (labelFilter !== "all") p.set("relevance_label", labelFilter);
+      if (shopId !== undefined) p.set("shop_id", String(shopId));
+      return apiFetch(`/api/competition/competitors?${p}`);
+    },
   });
 
   const items = (data?.items || []).filter((c: any) =>

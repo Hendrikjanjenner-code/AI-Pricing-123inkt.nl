@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CheckCircle2, XCircle, Clock, Play, Tag } from "lucide-react";
+import { useShopId } from "@/hooks/use-shop-id";
 
 function apiFetch(path: string) {
   const token = localStorage.getItem("auth_token");
@@ -23,15 +24,17 @@ function formatDuration(start: string, end: string) {
 }
 
 export default function CompetitionDiscoveryLog() {
+  const shopId = useShopId();
+
   const { data, isLoading } = useQuery({
-    queryKey: ["competition-discovery-log"],
-    queryFn: () => apiFetch("/api/competition/discovery-log?page_size=20"),
+    queryKey: ["competition-discovery-log", shopId],
+    queryFn: () => apiFetch(`/api/competition/discovery-log?${shopId !== undefined ? `shop_id=${shopId}&` : ""}page_size=20`),
   });
 
   // Discovery-queue statistieken per run
   const { data: queueData } = useQuery({
-    queryKey: ["competition-discovery-queue-all"],
-    queryFn: () => apiFetch("/api/competition/discovery?page_size=200"),
+    queryKey: ["competition-discovery-queue-all", shopId],
+    queryFn: () => apiFetch(`/api/competition/discovery?${shopId !== undefined ? `shop_id=${shopId}&` : ""}page_size=200`),
   });
 
   const runs = data?.items || [];

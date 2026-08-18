@@ -41,9 +41,9 @@ MAX_TOOL_ROUNDS = 6
 MAX_HISTORY_MESSAGES = 12
 SUMMARY_KEEP_RECENT = 4   # laatste N berichten niet meenemen in samenvatting (behoud context)
 LLM_TIMEOUT_SECONDS = 90
-FEWSHOT_LIMIT = 5       # max aantal few-shot voorbeelden uit positieve feedback
-MAX_MEMORY_ITEMS = 20   # max AiUserMemory-regels in context
-MEMORY_EXTRACT_EVERY = 5  # na elk N-de user-bericht geheugen opslaan
+FEWSHOT_LIMIT = 5        # max aantal few-shot voorbeelden uit positieve feedback
+MAX_MEMORY_ITEMS = 20    # max AiUserMemory-regels in context
+MEMORY_EXTRACT_EVERY = 5 # na elk N-de user-bericht geheugen opslaan
 
 PROMPT_MODULE_KEY = "copilot"
 PROMPT_TITLE = "Copilot Systeemprompt"

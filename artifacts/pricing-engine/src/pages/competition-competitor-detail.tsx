@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { ArrowLeft, Circle, Globe, TrendingUp, ShoppingBag } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { useShopId } from "@/hooks/use-shop-id";
 
 function apiFetch(path: string) {
   const token = localStorage.getItem("auth_token");
@@ -39,12 +40,13 @@ const STRATEGIE_LABELS: Record<string, string> = {
 };
 
 export default function CompetitorDetail() {
+  const shopId = useShopId();
   const { id: competitorName } = useParams<{ id: string }>();
   const name = decodeURIComponent(competitorName || "");
 
   const { data, isLoading } = useQuery({
-    queryKey: ["competitor-detail", name],
-    queryFn: () => apiFetch(`/api/competition/competitors/${encodeURIComponent(name)}`),
+    queryKey: ["competitor-detail", name, shopId],
+    queryFn: () => apiFetch(`/api/competition/competitors/${encodeURIComponent(name)}${shopId !== undefined ? `?shop_id=${shopId}` : ""}`),
     enabled: !!name,
   });
 

@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import { CheckCircle2, XCircle, Search, Link as LinkIcon, Check, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useShopId, withShop } from "@/hooks/use-shop-id";
 
 function apiFetch(path: string, opts?: RequestInit) {
   const token = localStorage.getItem("auth_token");
@@ -40,27 +41,35 @@ const STATUS_COLORS: Record<string, string> = {
 export default function CompetitionAiMatching() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const shopId = useShopId();
   const [matchTypeFilter, setMatchTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [minConfidence, setMinConfidence] = useState(0);
   const [zoekterm, setZoekterm] = useState("");
 
   const { data, isLoading } = useQuery({
-    queryKey: ["competition-ai-matching", matchTypeFilter, statusFilter, minConfidence],
+    queryKey: ["competition-ai-matching", matchTypeFilter, statusFilter, minConfidence, shopId],
     queryFn: () => {
       const p = new URLSearchParams({ page_size: "100", min_confidence: (minConfidence / 100).toString() });
       if (matchTypeFilter !== "all") p.set("match_type", matchTypeFilter);
       if (statusFilter !== "all") p.set("status", statusFilter);
+      if (shopId !== undefined) p.set("shop_id", String(shopId));
       return apiFetch(`/api/competition/ai-matching?${p}`);
     },
   });
 
   const approveMutation = useMutation({
-    mutationFn: (id: number) => apiFetch(`/api/competition/ai-matching/${id}/approve`, { method: "POST" }),
+    mutationFn: (id: number) => apiFetch(
+      `/api/competition/ai-matching/${id}/approve${shopId !== undefined ? `?shop_id=${shopId}` : ""}`,
+      { method: "POST" },
+    ),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["competition-ai-matching"] }); toast({ title: "Match goedgekeurd" }); },
   });
   const rejectMutation = useMutation({
-    mutationFn: (id: number) => apiFetch(`/api/competition/ai-matching/${id}/reject`, { method: "POST" }),
+    mutationFn: (id: number) => apiFetch(
+      `/api/competition/ai-matching/${id}/reject${shopId !== undefined ? `?shop_id=${shopId}` : ""}`,
+      { method: "POST" },
+    ),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["competition-ai-matching"] }); toast({ title: "Match afgewezen" }); },
   });
 
@@ -72,8 +81,8 @@ export default function CompetitionAiMatching() {
   );
 
   const { data: quality } = useQuery({
-    queryKey: ["competition-match-quality"],
-    queryFn: () => apiFetch("/api/competition/match-quality"),
+    queryKey: ["competition-match-quality", shopId],
+    queryFn: () => apiFetch(`/api/competition/match-quality${shopId !== undefined ? `?shop_id=${shopId}` : ""}`),
   });
 
   // Statistieken

@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Target, TrendingUp, AlertTriangle, Lightbulb, Eye, ChevronRight } from "lucide-react";
 import { Link } from "wouter";
+import { useShopId } from "@/hooks/use-shop-id";
 
 function apiFetch(path: string) {
   const token = localStorage.getItem("auth_token");
@@ -20,13 +21,15 @@ const PRIORITY_COLORS: Record<string, string> = {
 };
 
 export default function CompetitionManagement() {
+  const shopId = useShopId();
   const [categoryFilter, setCategoryFilter] = useState("all");
 
   const { data, isLoading } = useQuery({
-    queryKey: ["competition-management", categoryFilter],
+    queryKey: ["competition-management", categoryFilter, shopId],
     queryFn: () => {
       const p = new URLSearchParams();
       if (categoryFilter !== "all") p.set("category", categoryFilter);
+      if (shopId !== undefined) p.set("shop_id", String(shopId));
       return apiFetch(`/api/competition/management?${p}`);
     },
   });
