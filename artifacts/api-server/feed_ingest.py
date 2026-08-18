@@ -744,7 +744,7 @@ def score_competition(db: Session) -> int:
         cv = (pstdev(prices) / avg) if avg > 0 and len(prices) > 1 else 0.0
 
         sub = {
-            "product_comparability": 0.9,  # GTIN-match → hoge vergelijkbaarheid
+            "product_comparability": 0.9,  # feed-koppeling (GTIN of itemGroupId) → hoge vergelijkbaarheid
             "price_sensitivity": _clamp(cv * 2.0),
             "substitution": 0.0,
             "competitor_relevance": _clamp(used / 8.0),
@@ -830,6 +830,21 @@ def build_ai_matches(db: Session) -> int:
         comp = float(price)
         diff_pct = round((own - comp) / comp * 100, 2) if own and comp > 0 else None
         ean = prod.ean if prod else None
+        # De feed koppelt op itemGroupId wanneer er geen GTIN/EAN aanwezig is
+        # (standaard PriceShape-exportfeed). ean_match wordt alleen True gezet
+        # als het product daadwerkelijk een EAN heeft; anders is de koppeling
+        # via itemGroupId (ook een exacte feed-koppeling, maar geen EAN-match).
+        has_ean = bool(ean)
+        if has_ean:
+            explanation = (
+                f"Exacte EAN-koppeling uit de PriceShape-feed: aanbod van {naam} "
+                f"is gekoppeld op EAN {ean}."
+            )
+        else:
+            explanation = (
+                f"Feed-koppeling via itemGroupId ({sku_id}): aanbod van {naam} "
+                f"is door PriceShape aan dit product gekoppeld (feed bevat geen GTIN)."
+            )
         matches.append({
             "own_sku_id": sku_id,
             "competitor_name": naam,
@@ -837,11 +852,8 @@ def build_ai_matches(db: Session) -> int:
             "competitor_url": url,
             "match_type": "Exact",
             "confidence": 1.0,
-            "explanation_nl": (
-                f"Exacte GTIN-match uit de PriceShape-feed: aanbod van {naam} "
-                f"is gekoppeld op EAN {ean or sku_id}."
-            ),
-            "ean_match": True,
+            "explanation_nl": explanation,
+            "ean_match": has_ean,
             "mpn_match": False,
             "oem_match": False,
             "brand_match": False,

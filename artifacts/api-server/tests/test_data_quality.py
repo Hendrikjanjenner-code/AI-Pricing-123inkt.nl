@@ -148,6 +148,13 @@ def _make_issue_dict(code, severity="warning", count=1):
 
 class TestMissingEan:
     def test_triggers(self, client, auth):
+        """MISSING_EAN verschijnt zodra er een SKU zonder EAN is.
+
+        De severity is 'info' als nagenoeg de gehele feed geen EAN heeft
+        (PriceShape itemGroupId-feed) of 'warning' als het partieel is.
+        Beide zijn correct — we testen alleen dat het issue aanwezig is en
+        een geldig affected_count heeft.
+        """
         db = SessionLocal()
         sku = f"{PFX}-NO-EAN"
         try:
@@ -155,7 +162,9 @@ class TestMissingEan:
             result = _scan(client, auth)
             assert "MISSING_EAN" in _issue_codes(result)
             issue = _find_issue(result, "MISSING_EAN")
-            assert issue["severity"] == "warning"
+            assert issue["severity"] in ("warning", "info"), (
+                f"MISSING_EAN severity moet 'warning' of 'info' zijn, was {issue['severity']!r}"
+            )
             assert issue["affected_count"] >= 1
         finally:
             _delete_products(db, sku)

@@ -56,12 +56,29 @@ def _detect_issues(db: Session, total_skus: int) -> list[dict]:  # noqa: C901
     # ── Ontbrekende & dubbele identifiers ─────────────────────────────────
     missing_ean = db.query(P).filter((P.ean.is_(None)) | (P.ean == "")).count()
     if missing_ean:
-        issues.append(_issue(
-            "MISSING_EAN", "warning", "Ontbrekende EAN-codes",
-            "SKU's zonder EAN-code (barcode)", missing_ean,
-            "DRS", "Producten",
-            "Zonder EAN kan concurrentie-matching (PriceShape) deze producten niet betrouwbaar koppelen; prijsadviezen missen marktcontext.",
-            "Vul EAN-codes aan in DRS of via een product-CSV met kolom 'ean'."))
+        # Feedbreed signaal: als ≥95% van de catalogus geen EAN heeft, koppelt
+        # de PriceShape-feed op itemGroupId — dat is een bewust feedformaat
+        # (geen gebrek), niet 3.228 losse artikelproblemen.
+        feed_wide_no_ean = total_skus > 0 and missing_ean >= int(total_skus * 0.95)
+        if feed_wide_no_ean:
+            issues.append(_issue(
+                "MISSING_EAN", "info", "Feed zonder EAN-codes (itemGroupId-koppeling)",
+                f"De gehele feed ({missing_ean} SKU's) bevat geen GTIN/EAN — "
+                "PriceShape koppelt op itemGroupId", missing_ean,
+                "PriceShape", "Producten",
+                "Concurrent-matching verloopt via de feed-koppeling op itemGroupId; "
+                "EAN-verificatie met externe bronnen is niet mogelijk zonder GTIN.",
+                "Geen actie vereist als de PriceShape-export bewust op itemGroupId "
+                "exporteert. Voeg een GTIN-kolom toe in PriceShape als externe "
+                "EAN-verificatie gewenst is."))
+        else:
+            issues.append(_issue(
+                "MISSING_EAN", "warning", "Ontbrekende EAN-codes",
+                "SKU's zonder EAN-code (barcode)", missing_ean,
+                "DRS", "Producten",
+                "Zonder EAN kan concurrentie-matching (PriceShape) deze producten "
+                "niet betrouwbaar koppelen; prijsadviezen missen marktcontext.",
+                "Vul EAN-codes aan in DRS of via een product-CSV met kolom 'ean'."))
 
     dup_eans = (db.query(P.ean, func.count(P.sku_id))
                 .filter(P.ean.isnot(None), P.ean != "")
