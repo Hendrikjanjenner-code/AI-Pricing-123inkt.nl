@@ -2354,6 +2354,27 @@ class AiBudgetConfig(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     updated_by = Column(String(100))
 
+class AiProviderSetting(Base):
+    """
+    Persistente providerkeuze voor de AI Gateway (Task #79).
+
+    Singleton-rij (id=1). active_provider bepaalt welke LLM-provider de
+    gateway gebruikt:
+      - "replit_ai_openai"  →  Replit AI-integratie (AI_INTEGRATIONS_OPENAI_*)
+      - "openai_direct"     →  eigen OPENAI_API_KEY
+      - None                →  automatisch: Replit AI zodra geconfigureerd,
+                               anders de eigen OpenAI-sleutel.
+
+    Een expliciete keuze valt nooit stil terug op de andere provider: is de
+    gekozen provider niet geconfigureerd, dan is de AI-dienst 'niet
+    beschikbaar' en toont het beheerderspaneel dat expliciet.
+    """
+    __tablename__ = "ai_provider_setting"
+
+    id = Column(Integer, primary_key=True)
+    active_provider = Column(String(50), nullable=True)  # None = automatisch
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = Column(String(100))
 class AiBudgetSlot(Base):
     """
     Atomisch reserveringsregister voor AI-budgetten (§34): één rij per

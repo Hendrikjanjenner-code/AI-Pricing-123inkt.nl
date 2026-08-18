@@ -112,18 +112,124 @@ MAX_MEMORY_ITEMS = 20
 _WORD_RE = re.compile(r"[a-záéíóúàèìòùäëïöüñç]{3,}", re.IGNORECASE)
 
 
-# ─── Provider-configuratie (Replit AI Integrations, geen eigen key) ─────────
+# ─── Provider-configuratie (Task #79: expliciete providerkeuze) ─────────────
+#
+# Twee providers:
+#   - PROVIDER_REPLIT ("replit_ai_openai"): Replit AI-integratie via
+#     AI_INTEGRATIONS_OPENAI_BASE_URL / AI_INTEGRATIONS_OPENAI_API_KEY
+#     (Replit-beheerde billing).
+#   - PROVIDER_OPENAI ("openai_direct"): eigen OPENAI_API_KEY.
+#
+# De actieve provider is een beheerdersinstelling in de database
+# (AiProviderSetting, singleton). Zonder expliciete keuze geldt de veilige
+# standaard: Replit AI zodra die geconfigureerd is, anders de eigen sleutel.
+# Een expliciete keuze valt NOOIT stil terug op de andere provider.
+
+PROVIDER_REPLIT = "replit_ai_openai"
+PROVIDER_OPENAI = "openai_direct"
+KNOWN_PROVIDERS = (PROVIDER_REPLIT, PROVIDER_OPENAI)
+
+PROVIDER_LABELS = {
+    PROVIDER_REPLIT: "Replit AI (beheerde billing)",
+    PROVIDER_OPENAI: "Eigen OpenAI-sleutel",
+}
+
+# Cache van de DB-instelling zodat _provider_config() geen DB-sessie nodig
+# heeft op elk hot path (ai_available, _make_client). Korte TTL; wordt
+# geïnvalideerd bij elke wissel via set_active_provider().
+_SETTING_TTL_SECONDS = 30
+_setting_cache: dict = {"value": None, "loaded": False, "checked_at": 0.0}
+
+
+def _env_config(provider: str) -> Optional[dict]:
+    """Env-configuratie voor één provider, of None als niet geconfigureerd."""
+    if provider == PROVIDER_REPLIT:
+        base = os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL")
+        key = os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY")
+        if base and key:
+            return {"base_url": base, "api_key": key, "provider": PROVIDER_REPLIT}
+        return None
+    if provider == PROVIDER_OPENAI:
+        direct = os.environ.get("OPENAI_API_KEY")
+        if direct:
+            return {"base_url": None, "api_key": direct, "provider": PROVIDER_OPENAI}
+        return None
+    return None
+
+
+def provider_configured(provider: str) -> bool:
+    return _env_config(provider) is not None
+
+
+def _load_setting_from_db() -> Optional[str]:
+    """Lees de persistente providerkeuze (None = automatisch)."""
+    db = SessionLocal()
+    try:
+        row = db.query(models.AiProviderSetting).order_by(
+            models.AiProviderSetting.id).first()
+        return row.active_provider if row else None
+    finally:
+        db.close()
+
+
+def get_chosen_provider() -> Optional[str]:
+    """De expliciet gekozen provider uit de DB (gecachet), of None (auto)."""
+    now = time.time()
+    if _setting_cache["loaded"] and now - _setting_cache["checked_at"] < _SETTING_TTL_SECONDS:
+        return _setting_cache["value"]
+    try:
+        value = _load_setting_from_db()
+    except Exception as exc:
+        # DB nog niet klaar (bv. tijdens opstarten): val terug op auto-modus,
+        # maar cache dit niet als geldige waarde.
+        logger.warning("Providerinstelling niet leesbaar: %s", exc)
+        return _setting_cache["value"] if _setting_cache["loaded"] else None
+    _setting_cache.update({"value": value, "loaded": True, "checked_at": now})
+    return value
+
+
+def set_active_provider(db, provider: Optional[str], updated_by: str) -> None:
+    """Persisteer de providerkeuze (admin). provider=None → automatisch."""
+    if provider is not None and provider not in KNOWN_PROVIDERS:
+        raise ValueError(f"Onbekende provider: {provider}")
+    row = db.query(models.AiProviderSetting).order_by(
+        models.AiProviderSetting.id).first()
+    if row is None:
+        row = models.AiProviderSetting()
+        db.add(row)
+    row.active_provider = provider
+    row.updated_by = updated_by
+    row.updated_at = models.datetime.utcnow()
+    db.commit()
+    # Cache direct verversen + probes resetten zodat de wissel meteen geldt.
+    _setting_cache.update({"value": provider, "loaded": True, "checked_at": time.time()})
+    _probe_cache.clear()
+
+
+def resolve_active_provider() -> Optional[str]:
+    """Bepaal welke provider nu actief is.
+
+    Expliciete keuze wint altijd (ook als die niet geconfigureerd is — dan is
+    de AI-dienst bewust 'niet beschikbaar', geen stille terugval).
+    Zonder keuze: Replit AI zodra geconfigureerd, anders eigen sleutel.
+    """
+    chosen = get_chosen_provider()
+    if chosen is not None:
+        return chosen
+    if provider_configured(PROVIDER_REPLIT):
+        return PROVIDER_REPLIT
+    if provider_configured(PROVIDER_OPENAI):
+        return PROVIDER_OPENAI
+    return None
+
 
 def _provider_config() -> Optional[dict]:
-    """Replit AI-integratie eerst; OPENAI_API_KEY als expliciete fallback."""
-    base = os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL")
-    key = os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY")
-    if base and key:
-        return {"base_url": base, "api_key": key, "provider": "replit_ai_openai"}
-    direct = os.environ.get("OPENAI_API_KEY")
-    if direct:
-        return {"base_url": None, "api_key": direct, "provider": "openai_direct"}
-    return None
+    """Configuratie van de actieve provider, of None als (de gekozen
+    provider) niet geconfigureerd is. Geen stille terugval."""
+    active = resolve_active_provider()
+    if active is None:
+        return None
+    return _env_config(active)
 
 
 def ai_available() -> bool:
@@ -132,58 +238,95 @@ def ai_available() -> bool:
 
 # ─── Provider-bereikbaarheidstest (probe) ────────────────────────────────────
 # Goedkope startup-/poll-check: roept models.list() aan (geen tokens verbruikt).
-# Resultaat wordt 5 minuten gecachet zodat herhaalde /api/copilot/status-calls
-# de externe API niet spammen.
+# Resultaat wordt per provider 5 minuten gecachet zodat herhaalde
+# /api/copilot/status-calls de externe API niet spammen.
 
 _PROBE_TTL_SECONDS = 300  # cache 5 minuten
 
-_probe_cache: dict = {
-    "reachable": None,     # True / False / None (nog niet getest)
-    "error": None,         # str of None
-    "checked_at": 0.0,     # epoch float
-}
+# {provider: {"reachable": bool, "error": str|None, "checked_at": float}}
+_probe_cache: dict = {}
 
 
-def probe_provider(force: bool = False) -> tuple[bool, Optional[str]]:
-    """Test of de geconfigureerde LLM-provider bereikbaar is.
-
-    Gebruikt models.list() — geen tokenverbruik, geen kosten.
-    Resultaat wordt MAX_PROBE_TTL_SECONDS gecachet.
-
-    Returns (reachable, error_message).
-    """
-    now = time.time()
-    if not force and _probe_cache["reachable"] is not None:
-        if now - _probe_cache["checked_at"] < _PROBE_TTL_SECONDS:
-            return _probe_cache["reachable"], _probe_cache["error"]
-
-    cfg = _provider_config()
+def _run_probe(provider: str, timeout: float = 10.0) -> tuple[bool, Optional[str]]:
+    """Voer een live bereikbaarheidstest uit voor één provider (geen cache)."""
+    cfg = _env_config(provider)
     if cfg is None:
-        _probe_cache.update({"reachable": False, "error": "Geen AI-sleutel geconfigureerd.", "checked_at": now})
-        return False, "Geen AI-sleutel geconfigureerd."
-
+        return False, "Provider niet geconfigureerd (ontbrekende sleutel/omgeving)."
     try:
         from openai import OpenAI
-        kwargs: dict = {"api_key": cfg["api_key"], "timeout": 10.0}
+        kwargs: dict = {"api_key": cfg["api_key"], "timeout": timeout}
         if cfg["base_url"]:
             kwargs["base_url"] = cfg["base_url"]
         client = OpenAI(**kwargs)
         client.models.list()
-        _probe_cache.update({"reachable": True, "error": None, "checked_at": now})
         return True, None
     except Exception as exc:
         error_msg = str(exc)
-        logger.warning("AI provider-probe mislukt: %s", error_msg)
-        _probe_cache.update({"reachable": False, "error": error_msg, "checked_at": now})
+        logger.warning("AI provider-probe (%s) mislukt: %s", provider, error_msg)
         return False, error_msg
 
 
+def probe_provider(force: bool = False, provider: Optional[str] = None) -> tuple[bool, Optional[str]]:
+    """Test of de (actieve) LLM-provider bereikbaar is.
+
+    Gebruikt models.list() — geen tokenverbruik, geen kosten.
+    Resultaat wordt _PROBE_TTL_SECONDS per provider gecachet.
+
+    Returns (reachable, error_message).
+    """
+    target = provider or resolve_active_provider()
+    if target is None:
+        return False, "Geen AI-provider geconfigureerd."
+
+    now = time.time()
+    cached = _probe_cache.get(target)
+    if not force and cached is not None and now - cached["checked_at"] < _PROBE_TTL_SECONDS:
+        return cached["reachable"], cached["error"]
+
+    reachable, error_msg = _run_probe(target)
+    _probe_cache[target] = {"reachable": reachable, "error": error_msg, "checked_at": now}
+    return reachable, error_msg
+
+
 def get_provider_reachable() -> tuple[Optional[bool], Optional[str]]:
-    """Geeft het gecachete probe-resultaat terug zonder een nieuwe probe te starten.
+    """Geeft het gecachete probe-resultaat van de actieve provider terug
+    zonder een nieuwe probe te starten.
 
     Returns (reachable_or_None, error_or_None).
     """
-    return _probe_cache["reachable"], _probe_cache["error"]
+    target = resolve_active_provider()
+    cached = _probe_cache.get(target) if target else None
+    if cached is None:
+        return None, None
+    return cached["reachable"], cached["error"]
+
+
+def provider_overview() -> dict:
+    """Statusoverzicht voor het beheerderspaneel (Task #79)."""
+    chosen = get_chosen_provider()
+    active = resolve_active_provider()
+    providers = []
+    for pid in KNOWN_PROVIDERS:
+        configured = provider_configured(pid)
+        entry = {
+            "id": pid,
+            "label": PROVIDER_LABELS[pid],
+            "configured": configured,
+            "active": pid == active,
+            "reachable": None,
+            "error": None if configured else "Provider niet geconfigureerd (ontbrekende sleutel/omgeving).",
+        }
+        if pid == active and configured:
+            reachable, error_msg = probe_provider(provider=pid)
+            entry["reachable"] = reachable
+            entry["error"] = error_msg
+        providers.append(entry)
+    return {
+        "active_provider": active,
+        "chosen_provider": chosen,   # None = automatisch
+        "mode": "manual" if chosen is not None else "auto",
+        "providers": providers,
+    }
 
 
 def _make_client():

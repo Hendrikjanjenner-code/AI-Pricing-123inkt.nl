@@ -45,6 +45,76 @@ export default function Instellingen() {
   const [migraties, setMigraties] = useState<any[]>([]);
   const [migratiesLaden, setMigratiesLaden] = useState(false);
 
+  // AI-provider (Task #79): actieve provider + status van beide opties
+  const [providerInfo, setProviderInfo] = useState<any>(null);
+  const [providerLaden, setProviderLaden] = useState(false);
+  const [providerWisselBezig, setProviderWisselBezig] = useState(false);
+  const [providerTestBezig, setProviderTestBezig] = useState<string | null>(null);
+  const [providerTests, setProviderTests] = useState<Record<string, { reachable: boolean; error: string | null }>>({});
+
+  const laadProvider = async () => {
+    setProviderLaden(true);
+    try {
+      const res = await fetch(`${BASE}/api/copilot/provider`, {
+        headers: { Authorization: `Bearer ${getAuthToken()}` },
+      });
+      if (!res.ok) throw new Error();
+      setProviderInfo(await res.json());
+    } catch {
+      toast({ title: "AI-providerstatus ophalen mislukt", variant: "destructive" });
+    } finally {
+      setProviderLaden(false);
+    }
+  };
+
+  const wisselProvider = async (provider: string | null) => {
+    setProviderWisselBezig(true);
+    try {
+      const res = await fetch(`${BASE}/api/copilot/provider`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${getAuthToken()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ provider }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.detail || "Wisselen mislukt");
+      setProviderInfo(d);
+      setProviderTests({});
+      toast({
+        title: "AI-provider gewijzigd",
+        description: d.warning ?? undefined,
+        variant: d.warning ? "destructive" : undefined,
+      });
+    } catch (e: any) {
+      toast({ title: "AI-provider wisselen mislukt", description: e?.message, variant: "destructive" });
+    } finally {
+      setProviderWisselBezig(false);
+    }
+  };
+
+  const testProvider = async (provider: string) => {
+    setProviderTestBezig(provider);
+    try {
+      const res = await fetch(`${BASE}/api/copilot/provider/test`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${getAuthToken()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ provider }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.detail || "Test mislukt");
+      setProviderTests(prev => ({ ...prev, [provider]: { reachable: d.reachable, error: d.error } }));
+    } catch (e: any) {
+      setProviderTests(prev => ({ ...prev, [provider]: { reachable: false, error: e?.message ?? "Test mislukt" } }));
+    } finally {
+      setProviderTestBezig(null);
+    }
+  };
+
   const laadMigraties = async () => {
     setMigratiesLaden(true);
     try {
@@ -80,7 +150,10 @@ export default function Instellingen() {
   };
 
   useEffect(() => {
-    if (user?.role === "admin") laadMigraties();
+    if (user?.role === "admin") {
+      laadMigraties();
+      laadProvider();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role]);
 
@@ -252,6 +325,109 @@ export default function Instellingen() {
           </Table>
         </CardContent>
       </Card>
+
+      {user?.role === "admin" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <RefreshCw className="w-5 h-5" />
+              AI-provider (Copilot)
+            </CardTitle>
+            <CardDescription>
+              Kies welke provider de AI Copilot gebruikt. De keuze wordt opgeslagen en
+              overleeft een herstart. Een niet-geconfigureerde provider valt nooit stil
+              terug op de andere optie.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {providerLaden && !providerInfo ? (
+              <Skeleton className="h-24 w-full" />
+            ) : providerInfo ? (
+              <>
+                <div className="text-sm text-muted-foreground">
+                  Modus:{" "}
+                  <Badge variant="outline">
+                    {providerInfo.mode === "manual" ? "Handmatig gekozen" : "Automatisch (Replit AI zodra geconfigureerd)"}
+                  </Badge>
+                  {providerInfo.updated_by && (
+                    <span className="ml-2">
+                      Laatst gewijzigd door {providerInfo.updated_by}
+                      {providerInfo.updated_at ? ` op ${new Date(providerInfo.updated_at).toLocaleString("nl-NL")}` : ""}
+                    </span>
+                  )}
+                </div>
+                <div className="space-y-3">
+                  {providerInfo.providers?.map((p: any) => {
+                    const test = providerTests[p.id];
+                    return (
+                      <div key={p.id} className="flex flex-wrap items-center gap-3 border rounded-md p-3">
+                        <div className="flex-1 min-w-[220px]">
+                          <div className="font-medium flex items-center gap-2">
+                            {p.label}
+                            {p.active && <Badge>Actief</Badge>}
+                          </div>
+                          <div className="text-sm mt-1 space-x-2">
+                            {p.configured ? (
+                              <Badge variant="outline" className="text-green-600 border-green-600/40">Geconfigureerd</Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-red-600 border-red-600/40">Niet geconfigureerd</Badge>
+                            )}
+                            {p.active && p.reachable === true && (
+                              <Badge variant="outline" className="text-green-600 border-green-600/40">Bereikbaar</Badge>
+                            )}
+                            {p.active && p.reachable === false && (
+                              <Badge variant="outline" className="text-red-600 border-red-600/40">Niet bereikbaar</Badge>
+                            )}
+                            {test && (
+                              <Badge variant="outline" className={test.reachable ? "text-green-600 border-green-600/40" : "text-red-600 border-red-600/40"}>
+                                Test: {test.reachable ? "OK" : "mislukt"}
+                              </Badge>
+                            )}
+                          </div>
+                          {(p.error || test?.error) && (
+                            <p className="text-xs text-red-600 mt-1 break-all">{test?.error ?? p.error}</p>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={providerTestBezig === p.id || !p.configured}
+                            onClick={() => testProvider(p.id)}
+                          >
+                            {providerTestBezig === p.id ? "Testen..." : "Test verbinding"}
+                          </Button>
+                          {!p.active && (
+                            <Button
+                              size="sm"
+                              disabled={providerWisselBezig}
+                              onClick={() => wisselProvider(p.id)}
+                            >
+                              Activeren
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex gap-2">
+                  {providerInfo.mode === "manual" && (
+                    <Button size="sm" variant="outline" disabled={providerWisselBezig} onClick={() => wisselProvider(null)}>
+                      Terug naar automatisch
+                    </Button>
+                  )}
+                  <Button size="sm" variant="ghost" disabled={providerLaden} onClick={laadProvider}>
+                    <RefreshCw className="w-4 h-4 mr-1" /> Vernieuwen
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">Status niet beschikbaar.</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {user?.role === "admin" && (
         <Card className="border-destructive/30">

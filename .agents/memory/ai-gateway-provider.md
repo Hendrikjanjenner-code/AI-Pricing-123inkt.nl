@@ -10,3 +10,6 @@ Rules for the LLM boundary:
 **Why:** the LLM is an untrusted input channel — prompt injection can request other tenants' data or echo PII; these invariants are the tenant-isolation and privacy boundary.
 
 **How to apply:** when adding gateway tools or prompts, keep these three invariants and cover each with an adversarial test.
+
+## Provider choice (persistent)
+The active LLM provider is a DB-backed admin setting (singleton `AiProviderSetting`): explicit choice wins with no silent fallback; auto mode prefers Replit AI when `AI_INTEGRATIONS_OPENAI_*` are set, else `OPENAI_API_KEY`. Probe cache is per provider and resets on switch. `setupReplitAIIntegrations` is NOT available in task environments — provisioning the Replit AI env vars must happen from the main session; once provisioned, auto mode activates Replit AI without code changes.

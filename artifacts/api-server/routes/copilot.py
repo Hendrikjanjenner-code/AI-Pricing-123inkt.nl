@@ -279,6 +279,72 @@ def send_message(
     )
 
 
+# ─── Providerbeheer (Task #79): Replit AI vs. eigen OpenAI-sleutel ───────────
+
+@router.get("/provider")
+def get_provider_status(
+    _: models.User = Depends(auth_utils.require_role("admin")),
+    db: Session = Depends(get_db),
+):
+    """Actieve AI-provider + configuratiestatus van beide opties (admin)."""
+    overview = ai_gateway.provider_overview()
+    row = db.query(models.AiProviderSetting).order_by(
+        models.AiProviderSetting.id).first()
+    overview["updated_at"] = row.updated_at.isoformat() if row and row.updated_at else None
+    overview["updated_by"] = row.updated_by if row else None
+    return overview
+
+
+@router.put("/provider")
+def switch_provider(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role("admin")),
+):
+    """Wissel expliciet van AI-provider (admin). De keuze wordt persistent
+    opgeslagen en overleeft een herstart. `provider=null` → automatisch
+    (Replit AI zodra geconfigureerd, anders eigen sleutel)."""
+    provider = payload.get("provider")
+    if provider is not None and provider not in ai_gateway.KNOWN_PROVIDERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Onbekende provider; kies uit {list(ai_gateway.KNOWN_PROVIDERS)} of null (automatisch)",
+        )
+    warning = None
+    if provider is not None and not ai_gateway.provider_configured(provider):
+        # Bewuste keuze toestaan, maar nooit stil: de dienst is dan expliciet
+        # 'niet beschikbaar' totdat de provider geconfigureerd is.
+        warning = (
+            f"Provider '{provider}' is nog niet geconfigureerd; de Copilot is "
+            "niet beschikbaar totdat de bijbehorende sleutel/omgeving is ingesteld."
+        )
+    ai_gateway.set_active_provider(db, provider, updated_by=current_user.username)
+    out = ai_gateway.provider_overview()
+    out["warning"] = warning
+    return out
+
+
+@router.post("/provider/test")
+def test_provider(
+    payload: dict = Body(default={}),
+    _: models.User = Depends(auth_utils.require_role("admin")),
+):
+    """Live verbindingstest voor één provider (admin). Verbruikt geen tokens."""
+    provider = payload.get("provider")
+    if provider not in ai_gateway.KNOWN_PROVIDERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"provider is verplicht; kies uit {list(ai_gateway.KNOWN_PROVIDERS)}",
+        )
+    reachable, error = ai_gateway.probe_provider(force=True, provider=provider)
+    return {
+        "provider": provider,
+        "configured": ai_gateway.provider_configured(provider),
+        "reachable": reachable,
+        "error": error,
+    }
+
+
 @router.get("/model-calls")
 def list_model_calls(
     limit: int = 50,

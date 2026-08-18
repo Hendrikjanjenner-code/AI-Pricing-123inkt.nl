@@ -23,11 +23,24 @@ import ai_gateway  # noqa: E402
 
 # ─── Helperfuncties ───────────────────────────────────────────────────────────
 
-def _reset_probe_cache(reachable=None, error=None, checked_at=0.0):
-    """Zet de module-level probe-cache terug naar een bekende staat."""
-    ai_gateway._probe_cache.update(
-        {"reachable": reachable, "error": error, "checked_at": checked_at}
-    )
+_P = ai_gateway.PROVIDER_OPENAI  # standaard testprovider
+
+
+def _reset_probe_cache(reachable=None, error=None, checked_at=0.0, provider=_P):
+    """Zet de module-level probe-cache terug naar een bekende staat.
+
+    reachable=None → cache volledig leeg (nog niet getest).
+    """
+    ai_gateway._probe_cache.clear()
+    if reachable is not None:
+        ai_gateway._probe_cache[provider] = {
+            "reachable": reachable, "error": error, "checked_at": checked_at,
+        }
+
+
+def _patch_active(provider=_P):
+    """Patch de actieve provider (DB-instelling) naar een vaste waarde."""
+    return patch.object(ai_gateway, "resolve_active_provider", return_value=provider)
 
 
 def _make_openai_client_mock(fail_with=None):
@@ -48,16 +61,24 @@ class TestProbeProvider(unittest.TestCase):
 
     def test_returns_false_when_no_provider_configured(self):
         """Zonder geconfigureerde sleutel is de provider onbereikbaar."""
-        with patch.object(ai_gateway, "_provider_config", return_value=None):
+        with patch.object(ai_gateway, "resolve_active_provider", return_value=None):
             reachable, error = ai_gateway.probe_provider(force=True)
         self.assertFalse(reachable)
-        self.assertIn("Geen AI-sleutel", error)
+        self.assertIn("Geen AI-provider", error)
+
+    def test_returns_false_when_chosen_provider_not_configured(self):
+        """Expliciet gekozen maar niet geconfigureerde provider → onbereikbaar, geen terugval."""
+        with _patch_active(), patch.object(ai_gateway, "_env_config", return_value=None):
+            reachable, error = ai_gateway.probe_provider(force=True)
+        self.assertFalse(reachable)
+        self.assertIn("niet geconfigureerd", error)
 
     def test_returns_true_when_models_list_succeeds(self):
         """Als models.list() slaagt, is de provider bereikbaar."""
-        fake_cfg = {"base_url": None, "api_key": "sk-test", "provider": "openai_direct"}
+        fake_cfg = {"base_url": None, "api_key": "sk-test", "provider": _P}
         client_mock = _make_openai_client_mock()
-        with patch.object(ai_gateway, "_provider_config", return_value=fake_cfg), \
+        with _patch_active(), \
+             patch.object(ai_gateway, "_env_config", return_value=fake_cfg), \
              patch("openai.OpenAI", return_value=client_mock):
             reachable, error = ai_gateway.probe_provider(force=True)
         self.assertTrue(reachable)
@@ -66,9 +87,10 @@ class TestProbeProvider(unittest.TestCase):
 
     def test_returns_false_when_models_list_raises(self):
         """Als models.list() een uitzondering gooit, is de provider onbereikbaar."""
-        fake_cfg = {"base_url": None, "api_key": "sk-bad", "provider": "openai_direct"}
+        fake_cfg = {"base_url": None, "api_key": "sk-bad", "provider": _P}
         client_mock = _make_openai_client_mock(fail_with=Exception("401 Unauthorized"))
-        with patch.object(ai_gateway, "_provider_config", return_value=fake_cfg), \
+        with _patch_active(), \
+             patch.object(ai_gateway, "_env_config", return_value=fake_cfg), \
              patch("openai.OpenAI", return_value=client_mock):
             reachable, error = ai_gateway.probe_provider(force=True)
         self.assertFalse(reachable)
@@ -76,9 +98,10 @@ class TestProbeProvider(unittest.TestCase):
 
     def test_cache_prevents_repeated_network_calls(self):
         """Binnen het cache-venster wordt models.list() niet opnieuw aangeroepen."""
-        fake_cfg = {"base_url": None, "api_key": "sk-test", "provider": "openai_direct"}
+        fake_cfg = {"base_url": None, "api_key": "sk-test", "provider": _P}
         client_mock = _make_openai_client_mock()
-        with patch.object(ai_gateway, "_provider_config", return_value=fake_cfg), \
+        with _patch_active(), \
+             patch.object(ai_gateway, "_env_config", return_value=fake_cfg), \
              patch("openai.OpenAI", return_value=client_mock):
             # Eerste aanroep vult de cache
             ai_gateway.probe_provider(force=True)
@@ -89,9 +112,10 @@ class TestProbeProvider(unittest.TestCase):
 
     def test_force_bypasses_cache(self):
         """force=True slaat de cache altijd over."""
-        fake_cfg = {"base_url": None, "api_key": "sk-test", "provider": "openai_direct"}
+        fake_cfg = {"base_url": None, "api_key": "sk-test", "provider": _P}
         client_mock = _make_openai_client_mock()
-        with patch.object(ai_gateway, "_provider_config", return_value=fake_cfg), \
+        with _patch_active(), \
+             patch.object(ai_gateway, "_env_config", return_value=fake_cfg), \
              patch("openai.OpenAI", return_value=client_mock):
             ai_gateway.probe_provider(force=True)
             ai_gateway.probe_provider(force=True)
@@ -99,61 +123,78 @@ class TestProbeProvider(unittest.TestCase):
 
     def test_expired_cache_triggers_new_probe(self):
         """Als de cache verlopen is (checked_at = 0), wordt een nieuwe probe gedaan."""
-        fake_cfg = {"base_url": None, "api_key": "sk-test", "provider": "openai_direct"}
+        fake_cfg = {"base_url": None, "api_key": "sk-test", "provider": _P}
         client_mock = _make_openai_client_mock()
         # Cache als verlopen markeren
         _reset_probe_cache(reachable=True, error=None, checked_at=0.0)
-        with patch.object(ai_gateway, "_provider_config", return_value=fake_cfg), \
+        with _patch_active(), \
+             patch.object(ai_gateway, "_env_config", return_value=fake_cfg), \
              patch("openai.OpenAI", return_value=client_mock):
             ai_gateway.probe_provider(force=False)
         self.assertEqual(client_mock.models.list.call_count, 1)
 
     def test_fresh_cache_skips_network(self):
         """Als de cache vers is, wordt geen netwerkoproep gedaan."""
-        fake_cfg = {"base_url": None, "api_key": "sk-test", "provider": "openai_direct"}
+        fake_cfg = {"base_url": None, "api_key": "sk-test", "provider": _P}
         client_mock = _make_openai_client_mock()
         # Cache als vers markeren
         _reset_probe_cache(reachable=True, error=None, checked_at=time.time())
-        with patch.object(ai_gateway, "_provider_config", return_value=fake_cfg), \
+        with _patch_active(), \
+             patch.object(ai_gateway, "_env_config", return_value=fake_cfg), \
              patch("openai.OpenAI", return_value=client_mock):
             reachable, _ = ai_gateway.probe_provider(force=False)
         client_mock.models.list.assert_not_called()
         self.assertTrue(reachable)
 
+    def test_probe_cache_is_per_provider(self):
+        """Een verse cache voor provider A geldt niet voor provider B."""
+        fake_cfg = {"base_url": None, "api_key": "sk-test", "provider": ai_gateway.PROVIDER_REPLIT}
+        client_mock = _make_openai_client_mock()
+        # Cache vers voor openai_direct; probe replit → moet wel netwerk doen
+        _reset_probe_cache(reachable=True, error=None, checked_at=time.time())
+        with patch.object(ai_gateway, "_env_config", return_value=fake_cfg), \
+             patch("openai.OpenAI", return_value=client_mock):
+            ai_gateway.probe_provider(force=False, provider=ai_gateway.PROVIDER_REPLIT)
+        client_mock.models.list.assert_called_once()
+
     def test_get_provider_reachable_returns_cached_state(self):
         """get_provider_reachable() geeft de gecachte staat terug zonder netwerkoproep."""
         _reset_probe_cache(reachable=True, error=None, checked_at=time.time())
-        reachable, error = ai_gateway.get_provider_reachable()
+        with _patch_active():
+            reachable, error = ai_gateway.get_provider_reachable()
         self.assertTrue(reachable)
         self.assertIsNone(error)
 
     def test_get_provider_reachable_returns_none_when_not_probed(self):
         """get_provider_reachable() geeft None terug als er nog geen probe is gedaan."""
         _reset_probe_cache()
-        reachable, error = ai_gateway.get_provider_reachable()
+        with _patch_active():
+            reachable, error = ai_gateway.get_provider_reachable()
         self.assertIsNone(reachable)
 
     def test_probe_updates_cache(self):
         """Na een succesvolle probe is de cache bijgewerkt met reachable=True."""
-        fake_cfg = {"base_url": None, "api_key": "sk-test", "provider": "openai_direct"}
+        fake_cfg = {"base_url": None, "api_key": "sk-test", "provider": _P}
         client_mock = _make_openai_client_mock()
         _reset_probe_cache()
-        with patch.object(ai_gateway, "_provider_config", return_value=fake_cfg), \
+        with _patch_active(), \
+             patch.object(ai_gateway, "_env_config", return_value=fake_cfg), \
              patch("openai.OpenAI", return_value=client_mock):
             ai_gateway.probe_provider(force=True)
-        self.assertTrue(ai_gateway._probe_cache["reachable"])
-        self.assertGreater(ai_gateway._probe_cache["checked_at"], 0)
+        self.assertTrue(ai_gateway._probe_cache[_P]["reachable"])
+        self.assertGreater(ai_gateway._probe_cache[_P]["checked_at"], 0)
 
     def test_probe_failure_updates_cache_with_error(self):
         """Na een mislukte probe slaat de cache reachable=False en de foutmelding op."""
-        fake_cfg = {"base_url": None, "api_key": "sk-bad", "provider": "openai_direct"}
+        fake_cfg = {"base_url": None, "api_key": "sk-bad", "provider": _P}
         client_mock = _make_openai_client_mock(fail_with=Exception("Connection refused"))
         _reset_probe_cache()
-        with patch.object(ai_gateway, "_provider_config", return_value=fake_cfg), \
+        with _patch_active(), \
+             patch.object(ai_gateway, "_env_config", return_value=fake_cfg), \
              patch("openai.OpenAI", return_value=client_mock):
             ai_gateway.probe_provider(force=True)
-        self.assertFalse(ai_gateway._probe_cache["reachable"])
-        self.assertIn("Connection refused", ai_gateway._probe_cache["error"])
+        self.assertFalse(ai_gateway._probe_cache[_P]["reachable"])
+        self.assertIn("Connection refused", ai_gateway._probe_cache[_P]["error"])
 
 
 # ─── Tests voor _run_probe_cycle (transitie-detectie + alerting) ─────────────
@@ -296,27 +337,29 @@ class TestStartupState(unittest.TestCase):
 
     def test_startup_probe_populates_cache_on_success(self):
         """Na een gesimuleerde succesvolle probe is de cache op True gezet."""
-        fake_cfg = {"base_url": None, "api_key": "sk-test", "provider": "openai_direct"}
+        fake_cfg = {"base_url": None, "api_key": "sk-test", "provider": _P}
         client_mock = _make_openai_client_mock()
         _reset_probe_cache()
-        with patch.object(ai_gateway, "_provider_config", return_value=fake_cfg), \
+        with _patch_active(), \
+             patch.object(ai_gateway, "_env_config", return_value=fake_cfg), \
              patch("openai.OpenAI", return_value=client_mock):
             reachable, error = ai_gateway.probe_provider(force=True)
         self.assertTrue(reachable)
         self.assertIsNone(error)
-        self.assertTrue(ai_gateway._probe_cache["reachable"])
+        self.assertTrue(ai_gateway._probe_cache[_P]["reachable"])
 
     def test_startup_probe_populates_cache_on_failure(self):
         """Na een mislukte probe staat de cache op False met foutmelding."""
-        fake_cfg = {"base_url": None, "api_key": "sk-bad", "provider": "openai_direct"}
+        fake_cfg = {"base_url": None, "api_key": "sk-bad", "provider": _P}
         client_mock = _make_openai_client_mock(fail_with=Exception("403 Forbidden"))
         _reset_probe_cache()
-        with patch.object(ai_gateway, "_provider_config", return_value=fake_cfg), \
+        with _patch_active(), \
+             patch.object(ai_gateway, "_env_config", return_value=fake_cfg), \
              patch("openai.OpenAI", return_value=client_mock):
             reachable, error = ai_gateway.probe_provider(force=True)
         self.assertFalse(reachable)
         self.assertIn("403", error)
-        self.assertFalse(ai_gateway._probe_cache["reachable"])
+        self.assertFalse(ai_gateway._probe_cache[_P]["reachable"])
 
 
 # ─── Lifecycle-integratie: startup met ongeldige sleutel ─────────────────────
