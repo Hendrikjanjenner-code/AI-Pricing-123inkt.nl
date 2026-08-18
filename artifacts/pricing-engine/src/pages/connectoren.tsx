@@ -37,7 +37,8 @@ interface ConnectorSummary {
   name: string;
   label: string;
   configured: boolean;
-  source: "db" | "env" | null;
+  source: "db" | "env" | "default" | null;
+  default_feed_url?: string | null;
   fields: FieldDef[];
   fields_filled: string[];
   masked_values: Record<string, string>;
@@ -436,7 +437,11 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
             </div>
             {isConfigured && (
               <Badge variant="outline" className="text-xs">
-                {connector.source === "db" ? "DB-config" : "Omgevingsvariabele"}
+                {connector.source === "db"
+                  ? "DB-config"
+                  : connector.source === "default"
+                  ? "Standaard-feed"
+                  : "Omgevingsvariabele"}
               </Badge>
             )}
           </div>
@@ -492,6 +497,16 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {connector.name === "priceshape" && connector.source === "default" && connector.default_feed_url && (
+          <div className="rounded-md bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-800">
+            <span className="font-medium">Standaard-feed actief.</span>{" "}
+            De connector gebruikt automatisch de vaste feed-URL{" "}
+            <span className="font-mono break-all">{connector.default_feed_url}</span>.
+            Je hoeft niets in te vullen; een eigen URL opslaan overschrijft de standaard,
+            ontkoppelen valt hierop terug.
           </div>
         )}
 

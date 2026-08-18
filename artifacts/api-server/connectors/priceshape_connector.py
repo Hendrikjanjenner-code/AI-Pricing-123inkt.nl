@@ -36,6 +36,16 @@ class ConnectorError(Exception):
     """Fout bij verbinding met of data-ophalen uit PriceShape."""
 
 
+# Ingebouwde standaard-feed-URL: de connector werkt hiermee out-of-the-box en
+# valt hier ALTIJD op terug wanneer er geen DB-config en geen omgevings-
+# variabelen zijn (bijv. na "Ontkoppelen"). De URL verdwijnt dus nooit meer
+# stilzwijgend. Een opgeslagen DB-config of PRICESHAPE_* env-var overschrijft
+# deze standaard.
+DEFAULT_FEED_URL = (
+    "https://public.app.priceshape.io/api/2022-08/export/6a840b16eb5c30c6a32d49c6"
+)
+
+
 def _get_raw_config(db=None) -> dict:
     """
     Lees de volledige PriceShape-connectorconfig (inclusief `mode`): DB-config
@@ -75,7 +85,21 @@ def _get_raw_config(db=None) -> dict:
         env["api_url"] = base_url
         env["api_key"] = api_key
         env["account_id"] = os.environ.get("PRICESHAPE_ACCOUNT_ID", "")
-    return env
+        return env
+
+    # Niets geconfigureerd: val terug op de ingebouwde standaard-feed zodat de
+    # connector nooit meer "niet geconfigureerd" is.
+    return {
+        "mode": "feed",
+        "feed_url": DEFAULT_FEED_URL,
+        "feed_format": "auto",
+        "is_default": True,
+    }
+
+
+def is_default_feed_active(db=None) -> bool:
+    """True als de ingebouwde standaard-feed-URL actief is (geen DB/env-config)."""
+    return bool(_get_raw_config(db=db).get("is_default"))
 
 
 def _get_mode(creds: dict) -> str:

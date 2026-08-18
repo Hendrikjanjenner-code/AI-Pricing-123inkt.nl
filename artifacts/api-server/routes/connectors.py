@@ -121,7 +121,7 @@ router = APIRouter(prefix="/api/connectors", tags=["connectors"])
 CONNECTOR_FIELDS = {
     "priceshape": [
         {"key": "mode", "label": "Verbindingstype", "required": False, "secret": False,
-         "type": "select", "default": "rest", "placeholder": "",
+         "type": "select", "default": "feed", "placeholder": "",
          "options": [
              {"value": "rest", "label": "REST API (endpoint + sleutel)"},
              {"value": "feed", "label": "Output-feed (één URL: CSV/JSON/XML)"},
@@ -134,9 +134,9 @@ CONNECTOR_FIELDS = {
         {"key": "account_id", "label": "Account ID", "required": False, "secret": False,
          "mode": "rest", "placeholder": "optioneel"},
         # Feed-modus
-        {"key": "feed_url", "label": "Feed-URL", "required": True, "secret": True,
+        {"key": "feed_url", "label": "Feed-URL", "required": False, "secret": True,
          "mode": "feed",
-         "placeholder": "https://public.priceshape.io/export/…?token=…"},
+         "placeholder": "leeg laten = standaard-feed-URL"},
         {"key": "feed_format", "label": "Formaat", "required": False, "secret": False,
          "mode": "feed", "type": "select", "default": "auto", "placeholder": "",
          "options": [
@@ -250,7 +250,19 @@ def _connector_summary(db: Session, name: str) -> dict:
     configured = has_db_creds or configured_via_env
     source = "db" if has_db_creds else ("env" if configured_via_env else None)
 
+    # PriceShape heeft een ingebouwde standaard-feed-URL: zonder DB/env-config
+    # is de connector tóch geconfigureerd (bron "default") en verdwijnt de
+    # feed-URL dus nooit — ook niet na "Ontkoppelen".
+    default_feed_url = None
+    if name == "priceshape":
+        from connectors.priceshape_connector import DEFAULT_FEED_URL
+        default_feed_url = DEFAULT_FEED_URL
+        if not configured:
+            configured = True
+            source = "default"
+
     return {
+        "default_feed_url": default_feed_url,
         "name": name,
         "label": CONNECTOR_LABELS[name],
         "configured": configured,
@@ -378,6 +390,18 @@ def save_connector(
         }
         creds = {k: v for k, v in creds.items() if k in allowed}
 
+    # PriceShape feed-modus: een lege feed-URL betekent "gebruik de standaard".
+    # Dat geldt zowel wanneer er nog niets is opgeslagen als wanneer de gebruiker
+    # het veld expliciet leegmaakt (reset van een eigen URL naar de standaard) —
+    # de gewone merge zou een expliciet lege waarde anders negeren en de oude
+    # eigen URL stilzwijgend behouden.
+    if name == "priceshape" and mode == "feed":
+        from connectors.priceshape_connector import DEFAULT_FEED_URL
+        explicit_blank = ("feed_url" in body.credentials
+                          and not (body.credentials.get("feed_url") or "").strip())
+        if explicit_blank or not (creds.get("feed_url") or "").strip():
+            creds["feed_url"] = DEFAULT_FEED_URL
+
     # Controleer vereiste velden (modus-bewust)
     required_keys = [
         f["key"] for f in fields_def
@@ -465,7 +489,8 @@ def sync_connector(
 
     cfg = _get_config(db, name)
     env_configured = _check_env_configured(name)
-    if not cfg and not env_configured:
+    # PriceShape valt altijd terug op de ingebouwde standaard-feed-URL.
+    if not cfg and not env_configured and name != "priceshape":
         raise HTTPException(status_code=400, detail="Connector is niet geconfigureerd.")
 
     # De sync verwerkt honderdduizenden rijen per DELETE/INSERT en overschrijdt

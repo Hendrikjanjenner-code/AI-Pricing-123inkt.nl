@@ -53,11 +53,13 @@ def _int_env(name: str, default: int) -> int:
 
 
 def _is_priceshape_configured(db) -> bool:
-    """True als PriceShape via DB-credentials of omgevingsvariabelen is ingesteld."""
-    from routes.connectors import _get_config, _check_env_configured
-    cfg = _get_config(db, "priceshape")
-    has_db_creds = bool(cfg and cfg.encrypted_credentials)
-    return has_db_creds or _check_env_configured("priceshape")
+    """
+    True als PriceShape is ingesteld. Dat is tegenwoordig ALTIJD het geval:
+    zonder DB-credentials of omgevingsvariabelen valt de connector terug op de
+    ingebouwde standaard-feed-URL (DEFAULT_FEED_URL) — de geplande sync mag die
+    dus nooit overslaan.
+    """
+    return True
 
 
 def _run_sync_once() -> dict | None:
