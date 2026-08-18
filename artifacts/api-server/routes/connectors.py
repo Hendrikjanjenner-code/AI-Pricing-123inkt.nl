@@ -585,11 +585,18 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
                     counts["producten_bijgewerkt"] = res["products_updated"]
                     counts["eigen_prijzen"] = res["own_prices"]
                     counts["concurrentprijzen"] = res["competitor_rows"]
+                    counts["beschikbaarheidsrijen"] = res.get("offer_rows", 0)
+                    counts["overgeslagen_door_instellingen"] = res.get("skipped_by_settings", 0)
+                    skipped_note = (
+                        f" {res['skipped_by_settings']} rijen overgeslagen door importinstellingen."
+                        if res.get("skipped_by_settings") else ""
+                    )
                     message = (
                         f"PriceShape feed-sync voltooid: {res['products_total']} producten "
                         f"({res['products_new']} nieuw, {res['products_updated']} bijgewerkt), "
-                        f"{res['competitor_rows']} concurrentprijzen ingelezen. "
-                        "Draai een modelrun om aanbevelingen en concurrentie-scores te vernieuwen."
+                        f"{res['competitor_rows']} concurrentprijzen ingelezen."
+                        + skipped_note +
+                        " Draai een modelrun om aanbevelingen en concurrentie-scores te vernieuwen."
                     )
                 else:
                     priceshape_connector._get_credentials(db=db)

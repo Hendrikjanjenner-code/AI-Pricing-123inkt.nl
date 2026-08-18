@@ -186,11 +186,18 @@ def persist_competitor_rows(db: Session, rows: list[dict], mode: str, username: 
     Rijen die niet aan een bekende SKU matchen worden overgeslagen (nooit stil
     gedropt uit het rapport dat de aanroeper zelf opstelt). Commit gebeurt hier.
 
-    Returns {created, updated, skipped, removed}.
+    Returns {created, updated, skipped, removed, skipped_by_settings}.
     """
-    created = updated = skipped = removed = 0
+    from services import import_settings as imps
+    settings = imps.get_settings(db, "priceshape")
+    created = updated = skipped = removed = skipped_by_settings = 0
     now = datetime.utcnow()
     today = now.date()
+
+    if not imps.component_enabled(settings, "competitor_prices"):
+        # Onderdeel volledig uitgevinkt: niets importeren, niets wissen.
+        return {"created": 0, "updated": 0, "skipped": 0, "removed": 0,
+                "skipped_by_settings": len(rows)}
 
     all_products = db.query(models.DimProduct.sku_id, models.DimProduct.ean, models.DimProduct.oem_code).all()
     known_skus = {p.sku_id for p in all_products}
@@ -210,6 +217,11 @@ def persist_competitor_rows(db: Session, rows: list[dict], mode: str, username: 
         comp_naam = _trunc(get_alias(row, *COMPETITOR_NAME_ALIASES), 255)
         prijs = _safe_float(get_alias(row, *COMPETITOR_PRICE_ALIASES))
         if prijs is None or not comp_naam:
+            continue
+
+        if imps.competitor_disabled(settings, comp_naam):
+            # Uitgevinkte concurrent: rij overslaan, bestaande data blijft staan.
+            skipped_by_settings += 1
             continue
 
         ts = _safe_date(get_alias(row, *TIMESTAMP_ALIASES)) or today
@@ -266,6 +278,10 @@ def persist_competitor_rows(db: Session, rows: list[dict], mode: str, username: 
             .all()
         )
         for rec in existing_in_scope:
+            if imps.competitor_disabled(settings, rec.competitor_name):
+                # Uitgevinkte concurrent: bestaande data nooit wissen, ook niet
+                # in "vervangen"-modus (de rijen zijn bewust niet aangeleverd).
+                continue
             key = (rec.date, rec.sku_id, rec.competitor_name)
             if key not in seen_keys:
                 db.delete(rec)
@@ -273,11 +289,13 @@ def persist_competitor_rows(db: Session, rows: list[dict], mode: str, username: 
 
     _log_audit(db, "fact_competitor_price_daily", "PRICESHAPE_IMPORT", "import", username,
                None, {"created": created, "updated": updated, "skipped": skipped, "removed": removed,
+                      "skipped_by_settings": skipped_by_settings,
                       "mode": mode, "filename": filename},
                details=f"import_source={SOURCE_NAME} mode={mode}")
     db.commit()
 
-    return {"created": created, "updated": updated, "skipped": skipped, "removed": removed}
+    return {"created": created, "updated": updated, "skipped": skipped, "removed": removed,
+            "skipped_by_settings": skipped_by_settings}
 
 
 @router.post("/validate")
@@ -399,6 +417,7 @@ async def import_priceshape(
         updated = res["updated"]
         skipped = res["skipped"]
         removed = res["removed"]
+        skipped_by_settings = res.get("skipped_by_settings", 0)
 
         total = created + updated
         job.rows_processed = total
@@ -406,7 +425,11 @@ async def import_priceshape(
         job.rows_duplicates = skipped or 0
         job.status = "bijgewerkt" if updated > 0 else "geimporteerd"
         job.completed_at = datetime.utcnow()
-        job.warnings_json = report["warnings"][:50]
+        setting_warnings = (
+            [f"{skipped_by_settings} rijen overgeslagen door importinstellingen (uitgevinkte onderdelen/concurrenten)"]
+            if skipped_by_settings else []
+        )
+        job.warnings_json = (setting_warnings + report["warnings"])[:50]
         job.error_log = [{"rij": None, "bericht": w} for w in report["warnings"][:100]]
         db.commit()
 
@@ -417,13 +440,16 @@ async def import_priceshape(
             "updated": updated,
             "skipped": skipped,
             "removed": removed,
+            "skipped_by_settings": skipped_by_settings,
             "rows_processed": total,
-            "warnings": report["warnings"],
+            "warnings": setting_warnings + report["warnings"],
             "skus_niet_gevonden": report["skus_niet_gevonden"],
             "message": (
                 f"PriceShape import voltooid ({mode}): {created} nieuw, {updated} bijgewerkt"
                 + (f", {removed} verwijderd" if removed else "")
-                + (f", {skipped} overgeslagen" if skipped else "") + "."
+                + (f", {skipped} overgeslagen" if skipped else "")
+                + (f", {skipped_by_settings} overgeslagen door importinstellingen" if skipped_by_settings else "")
+                + "."
             ),
         }
 
@@ -471,6 +497,50 @@ async def list_priceshape_jobs(
         }
         for j in jobs
     ]
+
+
+@router.get("/import-settings")
+async def get_import_settings(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """Importselectie-instellingen (aan/uitvinken) + bekende concurrenten uit de feed."""
+    from services import import_settings as imps
+    settings = imps.get_settings(db, "priceshape")
+    known = [r[0] for r in db.query(models.FactCompetitorPriceDaily.competitor_name)
+             .filter(models.FactCompetitorPriceDaily.source.in_(["priceshape", SOURCE_NAME]))
+             .distinct().order_by(models.FactCompetitorPriceDaily.competitor_name).limit(500).all()]
+    disabled = set(settings["disabled_competitors"])
+    # Ook uitgevinkte concurrenten blijven zichtbaar (anders kun je ze nooit
+    # meer aanvinken zodra hun data niet meer ververst wordt).
+    all_names = sorted(set(known) | disabled, key=str.lower)
+    return {
+        **settings,
+        "component_labels": imps.COMPONENT_LABELS_NL,
+        "competitors": [{"name": n, "enabled": n.lower() not in disabled} for n in all_names],
+    }
+
+
+@router.put("/import-settings")
+async def update_import_settings(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
+):
+    """Sla de importselectie op (persistent — overleeft herstart)."""
+    from services import import_settings as imps
+    components = payload.get("components") or {}
+    disabled = payload.get("disabled_competitors") or []
+    if not isinstance(components, dict) or not isinstance(disabled, list):
+        raise HTTPException(400, "Ongeldige payload: components (object) en disabled_competitors (lijst) verwacht")
+    try:
+        settings = imps.save_settings(db, components, disabled, current_user.username)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    _log_audit(db, "feed_import_setting", "priceshape", "update", current_user.username,
+               None, settings, details="Importselectie gewijzigd")
+    db.commit()
+    return settings
 
 
 @router.get("/connection")

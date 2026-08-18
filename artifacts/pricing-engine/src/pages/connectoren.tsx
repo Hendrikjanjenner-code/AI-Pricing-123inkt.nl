@@ -90,6 +90,182 @@ function StatusDot({ status }: { status: ConnStatus | null | undefined }) {
   return <div className={`w-2 h-2 rounded-full ${STATUS_COLOR[status] ?? "bg-gray-400"}`} />;
 }
 
+interface ImportSettings {
+  components: Record<string, boolean>;
+  component_labels: Record<string, string>;
+  disabled_competitors: string[];
+  competitors: { name: string; enabled: boolean }[];
+  updated_by: string | null;
+  updated_at: string | null;
+}
+
+function ImportSettingsPanel() {
+  const [settings, setSettings] = useState<ImportSettings | null>(null);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const resp = await fetch(`${BASE}/api/uploads/priceshape/import-settings`, {
+        headers: getAuthHeaders(),
+      });
+      if (!resp.ok) throw new Error();
+      setSettings(await resp.json());
+    } catch {
+      setFeedback("Fout: importinstellingen konden niet worden geladen.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (open && !settings) void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const toggleComponent = (key: string) => {
+    setSettings((s) => s && ({ ...s, components: { ...s.components, [key]: !s.components[key] } }));
+    setDirty(true);
+    setFeedback(null);
+  };
+
+  const toggleCompetitor = (name: string) => {
+    setSettings((s) => {
+      if (!s) return s;
+      const lower = name.toLowerCase();
+      const disabled = new Set(s.disabled_competitors);
+      if (disabled.has(lower)) disabled.delete(lower); else disabled.add(lower);
+      return {
+        ...s,
+        disabled_competitors: Array.from(disabled),
+        competitors: s.competitors.map((c) =>
+          c.name === name ? { ...c, enabled: !c.enabled } : c),
+      };
+    });
+    setDirty(true);
+    setFeedback(null);
+  };
+
+  const handleSave = async () => {
+    if (!settings) return;
+    setSaving(true);
+    setFeedback(null);
+    try {
+      const resp = await fetch(`${BASE}/api/uploads/priceshape/import-settings`, {
+        method: "PUT",
+        headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          components: settings.components,
+          disabled_competitors: settings.disabled_competitors,
+        }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => null);
+        throw new Error(err?.detail || "Opslaan mislukt");
+      }
+      setDirty(false);
+      setFeedback("Importinstellingen opgeslagen. Ze gelden voor feed-sync én handmatige upload.");
+      await load();
+    } catch (e) {
+      setFeedback(`Fout: ${e instanceof Error ? e.message : "opslaan mislukt"}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <Button size="sm" variant="outline" onClick={() => setOpen((v) => !v)}>
+        {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        <span className="ml-1.5">Importinstellingen</span>
+      </Button>
+
+      {open && (
+        <div className="rounded-md border border-input p-3 space-y-3">
+          <p className="text-xs text-muted-foreground">
+            Vink aan welke data-onderdelen en concurrenten worden geïmporteerd.
+            Uitgevinkte onderdelen worden overgeslagen bij elke sync en upload;
+            bestaande data wordt daarbij nooit gewist.
+          </p>
+
+          {loading && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+
+          {settings && (
+            <>
+              <div>
+                <Label className="text-xs font-medium">Data-onderdelen</Label>
+                <div className="mt-1.5 grid gap-1.5">
+                  {Object.entries(settings.component_labels).map(([key, label]) => (
+                    <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-input"
+                        checked={settings.components[key] ?? true}
+                        onChange={() => toggleComponent(key)}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-xs font-medium">
+                  Concurrenten ({settings.competitors.length})
+                </Label>
+                {settings.competitors.length === 0 ? (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Nog geen concurrenten bekend — draai eerst een synchronisatie of import.
+                  </p>
+                ) : (
+                  <div className="mt-1.5 grid grid-cols-2 gap-1.5 max-h-56 overflow-y-auto pr-1">
+                    {settings.competitors.map((c) => (
+                      <label key={c.name} className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-input"
+                          checked={c.enabled}
+                          onChange={() => toggleCompetitor(c.name)}
+                        />
+                        <span className="truncate" title={c.name}>{c.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {feedback && (
+                <div className={`text-sm rounded-md px-3 py-2 ${
+                  feedback.startsWith("Fout")
+                    ? "bg-red-50 text-red-800 border border-red-200"
+                    : "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                }`}>
+                  {feedback}
+                </div>
+              )}
+
+              <Button size="sm" onClick={handleSave} disabled={saving || !dirty}>
+                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                <span className="ml-1.5">Instellingen opslaan</span>
+              </Button>
+              {settings.updated_at && (
+                <p className="text-xs text-muted-foreground">
+                  Laatst gewijzigd {formatDate(settings.updated_at)}
+                  {settings.updated_by ? ` door ${settings.updated_by}` : ""}
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface ConnectorCardProps {
   connector: ConnectorSummary;
   onRefresh: () => void;
@@ -318,6 +494,8 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
             )}
           </div>
         )}
+
+        {connector.name === "priceshape" && <ImportSettingsPanel />}
 
         <div className="flex flex-wrap gap-2">
           {isConfigured && (

@@ -144,6 +144,7 @@ class DimProduct(Base):
     price_incl_vat = Column(Numeric(10, 4))    # Verkoopprijs incl BTW
     is_active = Column(Boolean, default=True)  # actief in DRS
     import_source = Column(String(50))     # "DRS" / "CSV" / "seed"
+    raw_attributes = Column(JSON)          # alle overige feedvelden (verliesvrij, per bron)
     shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -210,6 +211,13 @@ class FactCompetitorPriceDaily(Base):
     # scope destructive "vervangen" cleanups to a single pipeline so importing
     # one source never deletes competitor prices captured by another.
     source = Column(String(50), default="manual")
+    # Volledige feed-data (PriceShape output feed levert meer dan alleen prijs):
+    in_stock = Column(Boolean)                 # voorraadstatus bij de concurrent
+    delivery_days = Column(Float)              # levertijd in dagen
+    currency = Column(String(3))               # ISO 4217 valuta van de prijs
+    vendor_name = Column(String(255))          # weergavenaam (naast domein)
+    observed_at = Column(DateTime)             # timestamp uit de feed
+    raw_attributes = Column(JSON)              # alle overige vendorvelden (verliesvrij)
 
 
 class FactInventoryDaily(Base):
@@ -536,6 +544,26 @@ class InternalCompetitionScore(Base):
 # ─── Concurrentenregister ────────────────────────────────────────────────────
 # PriceShape is de externe prijsbron; interne scraping is verwijderd. Het
 # concurrentenregister blijft bestaan voor competition-intelligence.
+
+class FeedImportSetting(Base):
+    """
+    Importselectie-instellingen per connector (PriceShape): welke data-onderdelen
+    en welke concurrenten worden geïmporteerd. Persistent (overleeft herstart) en
+    toegepast door de feed-ingest, de connector-sync én de handmatige upload.
+
+    components: {"own_prices": bool, "cost_prices": bool, "competitor_prices": bool,
+                 "availability": bool, "extra_attributes": bool}
+    disabled_competitors: lijst van concurrent-domeinen die worden overgeslagen.
+    """
+    __tablename__ = "feed_import_setting"
+
+    id = Column(Integer, primary_key=True, index=True)
+    connector_name = Column(String(100), unique=True, nullable=False, index=True)
+    components = Column(JSON)
+    disabled_competitors = Column(JSON)
+    updated_by = Column(String(100))
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 
 class DimCompetitor(Base):
     """Concurrentenregister (gevoed vanuit de PriceShape-feed / handmatig)."""
