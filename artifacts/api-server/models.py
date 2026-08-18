@@ -491,6 +491,8 @@ class SkuElasticity(Base):
 
     elasticity_confidence_score = Column(Float, default=0.0)
     confidence_class = Column(String(50))         # hoog_betrouwbaar / bruikbaar / laag_betrouwbaar
+    method_label = Column(String(30))             # "regressie" | "heuristiek"
+    regression_r2 = Column(Float)                 # R² van de OLS-fit (None bij heuristiek)
 
     # Context-factoren gebruikt
     category = Column(String(255))

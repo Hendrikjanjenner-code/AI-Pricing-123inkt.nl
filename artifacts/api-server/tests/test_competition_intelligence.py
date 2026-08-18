@@ -25,9 +25,9 @@ SKU_B = f"{PFX}-B"
 COMP_1 = f"{PFX}-shop1.nl"
 COMP_2 = f"{PFX}-shop2.nl"
 
-# Constanten voor de warn_suspicious_matches-testfixtures
+# Constanten voor warn_suspicious_matches-tests (taak 47)
 WM_PFX = f"WMTEST{uuid.uuid4().hex[:6]}"
-WM_SKU = f"{WM_PFX}-SKU"
+WM_SKU = f"{WM_PFX}-sku"
 WM_COMP = f"{WM_PFX}-comp.nl"
 
 @pytest.fixture(scope="module")
@@ -448,7 +448,125 @@ def test_multi_shop_isolation(client, admin_headers, run_engines):
         db.commit()
         db.close()
 
+def test_multi_shop_dashboard_profile_strategy_simulation(client, admin_headers, run_engines):
+    """Dashboard, CompetitorProfile, CompetitorStrategyResult en simulatie mogen
+    nooit data van een andere shop laten lekken of op schrijven."""
+    import uuid as _uuid
+    code2 = f"citest2-{_uuid.uuid4().hex[:8]}"
+    resp = client.post("/api/shops", json={"shop_code": code2, "name": "CI Shop C"},
+                       headers=admin_headers)
+    assert resp.status_code == 201, resp.text
+    shop_c = resp.json()["id"]
+    sku_c = f"{PFX}-SHOPC"
+    comp_c = f"{PFX}-shopc-comp.nl"
+    db = SessionLocal()
+    today = date.today()
+    try:
+        db.add(models.DimProduct(sku_id=sku_c, product_name="Shop C product",
+                                 category=f"{PFX}-cat-c", current_price=50.0,
+                                 shop_id=shop_c))
+        # Concurrentprijzen voor shop C (eigen concurrent, eigen SKU)
+        for i in range(5, -1, -1):
+            db.add(models.FactCompetitorPriceDaily(
+                date=today - timedelta(days=i), sku_id=sku_c,
+                competitor_name=comp_c, price=45.0,
+                shop_id=shop_c))
+        # Profiel + strategie voor shop C concurrent
+        db.add(models.CompetitorProfile(
+            competitor_name=comp_c, shop_id=shop_c,
+            assortment_size=99, price_segment="BUDGET",
+            relevance_label="HIGH", traffic_light="green",
+            run_date=today,
+        ))
+        db.add(models.CompetitorStrategyResult(
+            competitor_name=comp_c, shop_id=shop_c,
+            strategy_type="SHOPC_STRAT", run_date=today, confidence=0.9,
+        ))
+        # CategoryCompetitorRelevance voor shop C
+        db.add(models.CategoryCompetitorRelevance(
+            competitor_name=comp_c, shop_id=shop_c,
+            category=f"{PFX}-cat-c", combined_score=0.95,
+        ))
+        db.commit()
 
+        # 1. Dashboard voor de default shop mag geen shop-C-concurrent bevatten
+        resp = client.get("/api/competition/dashboard", headers=admin_headers)
+        assert resp.status_code == 200
+        all_names_default = [
+            item["competitor_name"]
+            for cat in resp.json().get("categories", [])
+            for item in cat.get("competitors", [])
+        ]
+        assert comp_c not in all_names_default, (
+            "Dashboard default shop bevat concurrent van shop C"
+        )
+
+        # 2. Dashboard voor shop C bevat wél de shop-C-concurrent
+        resp_c = client.get(f"/api/competition/dashboard?shop_id={shop_c}",
+                            headers=admin_headers)
+        assert resp_c.status_code == 200
+        all_names_c = [
+            item["competitor_name"]
+            for cat in resp_c.json().get("categories", [])
+            for item in cat.get("competitors", [])
+        ]
+        assert comp_c in all_names_c, (
+            "Dashboard shop C toont niet de eigen concurrent"
+        )
+
+        # 3. /competitors voor default shop bevat comp_c NIET
+        resp_prof = client.get("/api/competition/competitors", headers=admin_headers)
+        assert resp_prof.status_code == 200
+        names_default = [p["competitor_name"] for p in resp_prof.json().get("items", [])]
+        assert comp_c not in names_default, (
+            "/competitors default-shop toont concurrent van shop C"
+        )
+
+        # 4. /competitors voor shop C bevat comp_c wél
+        resp_prof_c = client.get(f"/api/competition/competitors?shop_id={shop_c}",
+                                 headers=admin_headers)
+        assert resp_prof_c.status_code == 200
+        names_c = [p["competitor_name"] for p in resp_prof_c.json().get("items", [])]
+        assert comp_c in names_c, (
+            "/competitors shop C toont niet de eigen concurrent"
+        )
+
+        # 5. Strategies voor de default shop bevatten comp_c NIET
+        resp_strat = client.get("/api/competition/strategies", headers=admin_headers)
+        assert resp_strat.status_code == 200
+        # Strategies haalt live fact-data op; comp_c heeft alleen shop-C fact-rijen
+        # dus strategieen default-shop mag comp_c niet tonen
+        strat_names = [s.get("competitor") for s in resp_strat.json().get("strategieen", [])]
+        assert comp_c not in strat_names, (
+            "/strategies default-shop bevat strategie van shop-C-concurrent"
+        )
+
+        # 6. Simulatie voor SKU_A (default shop) mag geen shop-C fact-rijen gebruiken
+        resp_sim = client.post("/api/competition/simulate",
+                               json={"sku_id": SKU_A, "change_pct": -0.05},
+                               headers=admin_headers)
+        assert resp_sim.status_code == 200
+        sim = resp_sim.json()
+        if sim.get("data_available"):
+            comp_names_sim = [c["competitor"] for c in sim.get("per_competitor", [])]
+            assert comp_c not in comp_names_sim, (
+                "Simulatie voor SKU_A bevat concurrent van shop C"
+            )
+
+    finally:
+        for model, col in [
+            (models.CategoryCompetitorRelevance, models.CategoryCompetitorRelevance.shop_id),
+            (models.CompetitorProfile, models.CompetitorProfile.shop_id),
+            (models.CompetitorStrategyResult, models.CompetitorStrategyResult.shop_id),
+            (models.FactCompetitorPriceDaily, models.FactCompetitorPriceDaily.shop_id),
+            (models.DimProduct, models.DimProduct.shop_id),
+            (models.CostUsageRecord, models.CostUsageRecord.shop_id),
+        ]:
+            db.query(model).filter(col == shop_c).delete(synchronize_session=False)
+        db.query(models.DimShop).filter(models.DimShop.id == shop_c).delete(
+            synchronize_session=False)
+        db.commit()
+        db.close()
 def test_viewer_cannot_run_engines(client, seed):
     resp = client.post("/api/auth/login",
                        json={"username": "dev_viewer", "password": "viewer123"})
@@ -457,6 +575,22 @@ def test_viewer_cannot_run_engines(client, seed):
     h = {"Authorization": f"Bearer {resp.json()['token']}"}
     assert client.post("/api/competition/intelligence/run", headers=h).status_code == 403
 
+def test_ols_returns_r2():
+    """_ols_two_vars retourneert nu (b, c, r2) in plaats van (b, c)."""
+    import math
+    from engine.competition_intelligence import _ols_two_vars
+
+    # Perfecte lineaire relatie → R² ≈ 1.0
+    # x1 en x2 mogen NIET perfect gecorreleerd zijn (singuliere matrix)
+    x1 = [float(i) for i in range(10)]
+    x2 = [float(i % 3) + 0.1 * i for i in range(10)]  # niet-collineair
+    y  = [2.0 + 3.0 * x1[i] - 1.0 * x2[i] for i in range(10)]
+    res = _ols_two_vars(y, x1, x2)
+    assert res is not None
+    b, c, r2 = res
+    assert abs(b - 3.0) < 1e-6
+    assert abs(c - (-1.0)) < 1e-6
+    assert abs(r2 - 1.0) < 1e-6
 @pytest.fixture(scope="module")
 def suspicious_seed():
     """Seed: 6 PENDING AI-matches met |price_diff_pct| > 40 zodat de drempel
@@ -571,16 +705,15 @@ def test_warn_suspicious_matches_publishes_signal(suspicious_seed):
     finally:
         db.close()
 
+
 def test_warn_suspicious_matches_idempotent(suspicious_seed):
-    """Tweede aanroep op dezelfde run_date mag geen extra signaal aanmaken.
-    Vereist dat test_warn_suspicious_matches_publishes_signal al eerder is gedraaid."""
+    """Tweede aanroep op dezelfde run_date mag geen extra signaal aanmaken
+    (test_warn_suspicious_matches_publishes_signal heeft al één signaal aangemaakt)."""
     from engine.competition_intelligence import warn_suspicious_matches
     sid, _skus = suspicious_seed
     db = SessionLocal()
     try:
         rd = date.today()
-        # Eerste aanroep is al gedaan in test_warn_suspicious_matches_publishes_signal;
-        # een tweede aanroep mag het signaal niet verdubbelen.
         n = warn_suspicious_matches(db, rd)
         assert n == 0, f"Idempotentie geschonden: {n} extra signalen aangemaakt"
         count = db.query(models.IntelligenceSignal).filter(
@@ -592,6 +725,7 @@ def test_warn_suspicious_matches_idempotent(suspicious_seed):
         assert count == 1, f"Verwacht 1 actief signaal, kreeg {count}"
     finally:
         db.close()
+
 
 def test_warn_suspicious_matches_below_threshold():
     """Als het aantal verdachte matches voor een shop kleiner is dan de drempel,
@@ -680,3 +814,221 @@ def test_run_all_includes_suspicious_match_signals(suspicious_seed):
         assert isinstance(result["suspicious_match_signals"], int)
     finally:
         db2.close()
+
+def _seed_elast_sku(db, sku, n_days=20, own_prices=None, comp_prices=None,
+                    sales_fn=None):
+    """Zaai een SKU met factrijen voor elasticiteitstests.
+    sales_fn(i, price) -> units_sold; standaard: 100.
+    """
+    if own_prices is None:
+        own_prices = ([10.0, 10.5, 11.0, 11.5, 12.0] * 10)[:n_days]
+    if comp_prices is None:
+        comp_prices = [10.8, 11.3, 11.8]
+    if sales_fn is None:
+        sales_fn = lambda i, p: 100
+    db.add(models.DimProduct(sku_id=sku, product_name=f"ElastTest {sku}",
+                             current_price=10.0, cost_price=6.0, stock_quantity=20))
+    db.flush()
+    today = date.today()
+    for i in range(n_days):
+        d = today - timedelta(days=i + 1)
+        p = own_prices[i]
+        units = max(1, sales_fn(i, p))
+        db.add(models.FactPriceDaily(date=d, sku_id=sku, price=p))
+        db.add(models.FactSalesDaily(date=d, sku_id=sku,
+                                      units_sold=units, revenue=units * p))
+        db.add(models.FactCompetitorPriceDaily(
+            date=d, sku_id=sku, competitor_name="tc.nl",
+            price=comp_prices[i % len(comp_prices)]))
+    db.commit()
+
+def test_ols_noisy_data_low_r2():
+    """Bij ruisige data geeft _ols_two_vars een lage R²."""
+    import random
+    from engine.competition_intelligence import _ols_two_vars
+    random.seed(42)
+    n = 20
+    # Zorg voor niet-collineaire predictors
+    x1 = [float(i) for i in range(n)]
+    x2 = [float(i % 4) + 0.7 * (i // 4) for i in range(n)]  # niet-collineair
+    # Pure ruis als y → R² dicht bij 0
+    y = [random.uniform(-5, 5) for _ in range(n)]
+    res = _ols_two_vars(y, x1, x2)
+    assert res is not None
+    _, _, r2 = res
+    assert r2 < 0.5  # ruis → lage fit
+
+def test_elasticity_heuristic_low_confidence_when_few_data():
+    """Bij te weinig datapunten (< elasticity_min_days) gebruikt de engine
+    de heuristiek met lage of middelhoge confidence (nooit regressie-niveau)."""
+    db = SessionLocal()
+    today = date.today()
+    sku = f"ELAST-FEW-{uuid.uuid4().hex[:6]}"
+    try:
+        db.add(models.DimProduct(sku_id=sku, product_name="Few-data SKU",
+                                 current_price=15.0, cost_price=8.0, stock_quantity=5))
+        db.flush()
+        # Voeg slechts 3 datadagen toe (onder elasticity_min_days=14)
+        for i in range(3):
+            d = today - timedelta(days=i)
+            db.add(models.FactPriceDaily(date=d, sku_id=sku, price=15.0))
+            db.add(models.FactSalesDaily(date=d, sku_id=sku, units_sold=10,
+                                         revenue=150.0))
+            db.add(models.FactCompetitorPriceDaily(
+                date=d, sku_id=sku, competitor_name="test-comp.nl", price=16.0))
+        db.commit()
+
+        from engine.competition_intelligence import run_elasticity
+        run_elasticity(db, run_date=today)
+        db.expire_all()
+
+        e = (db.query(models.SkuElasticity)
+             .filter(models.SkuElasticity.sku_id == sku,
+                     models.SkuElasticity.run_date == today)
+             .first())
+        assert e is not None
+        assert e.method_label == "heuristiek", (
+            f"Verwacht heuristiek bij 3 datapunten, kreeg: {e.method_label!r}"
+        )
+        assert e.regression_r2 is None
+        # Confidence mag niet in de regressie-range vallen (≥ 0.5 + 14/100)
+        assert e.elasticity_confidence_score < 0.65
+    finally:
+        db.query(models.SkuElasticity).filter(
+            models.SkuElasticity.sku_id == sku).delete()
+        db.query(models.FactCompetitorPriceDaily).filter(
+            models.FactCompetitorPriceDaily.sku_id == sku).delete()
+        db.query(models.FactSalesDaily).filter(
+            models.FactSalesDaily.sku_id == sku).delete()
+        db.query(models.FactPriceDaily).filter(
+            models.FactPriceDaily.sku_id == sku).delete()
+        db.query(models.DimProduct).filter(
+            models.DimProduct.sku_id == sku).delete()
+        db.commit()
+        db.close()
+
+def test_simulation_exposes_method_label(client, admin_headers, run_engines):
+    """De simulatie toont het methodeniveau van de gebruikte elasticiteit."""
+    resp = client.post("/api/competition/simulate", headers=admin_headers,
+                       json={"sku_id": SKU_A, "change_pct": -0.05})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    eu = body.get("elasticity_used", {})
+    assert "method" in eu, f"'method' ontbreekt in elasticity_used: {eu}"
+    assert eu["method"] in ("regressie", "heuristiek", "default"), eu["method"]
+    # regression_r2 is None bij heuristiek, float bij regressie
+    assert "regression_r2" in eu
+
+def test_elasticity_r2_gate_forces_heuristic_despite_negative_b():
+    """R²-drempel (DETERMINISTISCH): engine kiest 'heuristiek' als R² < drempel,
+    ook als b < 0 (correct negatief teken — de sign-check zou dus door mogen gaan).
+
+    We patchen _ols_two_vars zodat het deterministisch (-1.5, 0.3, 0.05) retourneert:
+    b=-1.5 heeft het juiste economische teken, maar R²=0.05 < min_r2=0.10.
+    Zonder de R²-check zou de engine de regressie accepteren; MET de check moet
+    hij terugvallen op 'heuristiek' met regression_r2=None.
+    Dit bewijst dat de R²-check niet verwijderbaar is zonder de test te breken.
+    """
+    from unittest.mock import patch
+    from engine import competition_intelligence as ci
+    from engine.competition_intelligence import run_elasticity, DEFAULTS
+
+    db = SessionLocal()
+    today = date.today()
+    sku = f"ELAST-GATE-{uuid.uuid4().hex[:6]}"
+    try:
+        # 20 dagen, 5 unieke prijzen (voldoet aan min_days=14 en min_unique=5)
+        _seed_elast_sku(db, sku, n_days=20,
+                        own_prices=([10.0, 10.5, 11.0, 11.5, 12.0] * 4),
+                        sales_fn=lambda i, p: int(110 - 4 * p))  # negatief verband
+
+        min_r2 = DEFAULTS["elasticity_min_r2"]  # 0.10
+        assert min_r2 > 0.05, "Testwaarde R²=0.05 moet echte drempel onderschrijden"
+
+        # OLS-stub: correct teken, slechte fit → engine MOET heuristiek kiezen
+        with patch.object(ci, '_ols_two_vars', return_value=(-1.5, 0.3, 0.05)):
+            run_elasticity(db, run_date=today)
+
+        db.expire_all()
+        e = (db.query(models.SkuElasticity)
+             .filter(models.SkuElasticity.sku_id == sku,
+                     models.SkuElasticity.run_date == today)
+             .first())
+        assert e is not None, "Geen SkuElasticity-record aangemaakt"
+        assert e.method_label == "heuristiek", (
+            f"b=-1.5 maar R²=0.05 < {min_r2}: verwacht 'heuristiek', "
+            f"maar method_label='{e.method_label}'"
+        )
+        assert e.regression_r2 is None, (
+            f"regression_r2 moet None zijn bij heuristiek, is {e.regression_r2}"
+        )
+    finally:
+        _cleanup_elast_sku(db, sku)
+        db.close()
+
+def test_elasticity_method_label_persisted(run_engines):
+    """Na een engine-run heeft elk SkuElasticity-record een method_label."""
+    db = SessionLocal()
+    try:
+        e = (db.query(models.SkuElasticity)
+             .filter(models.SkuElasticity.sku_id == SKU_A)
+             .order_by(models.SkuElasticity.run_date.desc())
+             .first())
+        assert e is not None, "Geen SkuElasticity voor SKU_A na engine-run"
+        assert e.method_label in ("regressie", "heuristiek"), (
+            f"Onverwachte method_label: {e.method_label!r}"
+        )
+        # Als methode regressie is, moet regression_r2 ingevuld zijn
+        if e.method_label == "regressie":
+            assert e.regression_r2 is not None and 0.0 <= e.regression_r2 <= 1.0
+        # Als methode heuristiek is, moet regression_r2 None zijn
+        else:
+            assert e.regression_r2 is None
+    finally:
+        db.close()
+
+def _cleanup_elast_sku(db, sku):
+    db.query(models.SkuElasticity).filter(
+        models.SkuElasticity.sku_id == sku).delete(synchronize_session=False)
+    db.query(models.FactCompetitorPriceDaily).filter(
+        models.FactCompetitorPriceDaily.sku_id == sku).delete(synchronize_session=False)
+    db.query(models.FactSalesDaily).filter(
+        models.FactSalesDaily.sku_id == sku).delete(synchronize_session=False)
+    db.query(models.FactPriceDaily).filter(
+        models.FactPriceDaily.sku_id == sku).delete(synchronize_session=False)
+    db.query(models.DimProduct).filter(
+        models.DimProduct.sku_id == sku).delete(synchronize_session=False)
+    db.commit()
+
+def test_elasticity_unique_price_gate_forces_heuristic():
+    """Unieke-prijspuntdrempel (DETERMINISTISCH): < 5 unieke eigen prijzen → altijd
+    heuristiek, ongeacht R² of teken van b. Onafhankelijke test van deze gate.
+    """
+    from engine.competition_intelligence import run_elasticity, DEFAULTS
+
+    db = SessionLocal()
+    today = date.today()
+    sku = f"ELAST-UNQ-{uuid.uuid4().hex[:6]}"
+    min_unique = DEFAULTS["elasticity_min_unique_prices"]  # 5
+    try:
+        # Slechts 3 unieke prijzen (< min_unique=5), genoeg datapunten (21 > 14)
+        own_prices = ([10.0, 11.0, 12.0] * 7)  # 21 rijen, 3 unieke waarden
+        _seed_elast_sku(db, sku, n_days=21, own_prices=own_prices,
+                        sales_fn=lambda i, p: int(120 - 5 * p))  # negatief verband
+
+        run_elasticity(db, run_date=today)
+        db.expire_all()
+
+        e = (db.query(models.SkuElasticity)
+             .filter(models.SkuElasticity.sku_id == sku,
+                     models.SkuElasticity.run_date == today)
+             .first())
+        assert e is not None, "Geen SkuElasticity-record aangemaakt"
+        assert e.method_label == "heuristiek", (
+            f"3 unieke prijzen < {min_unique}: verwacht 'heuristiek', "
+            f"maar method_label='{e.method_label}'"
+        )
+        assert e.regression_r2 is None
+    finally:
+        _cleanup_elast_sku(db, sku)
+        db.close()

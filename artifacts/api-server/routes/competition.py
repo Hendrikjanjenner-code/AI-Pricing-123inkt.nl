@@ -26,10 +26,12 @@ def get_competition_summary(
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     sid = _scope(db, shop_id)
-    shop_skus = [r[0] for r in db.query(models.DimProduct.sku_id).filter(
-        models.DimProduct.shop_id == sid).all()]
+    shop_sku_ids = [r.sku_id for r in
+                    db.query(models.DimProduct.sku_id)
+                    .filter(models.DimProduct.shop_id == sid).all()]
     scores = db.query(models.SkuCompetitionScore).filter(
-        models.SkuCompetitionScore.sku_id.in_(shop_skus)).all()
+        models.SkuCompetitionScore.sku_id.in_(shop_sku_ids)
+    ).all()
     if not scores:
         return {
             "total_skus_scored": 0, "avg_pcis": 0,
@@ -81,10 +83,13 @@ def list_competition_skus(
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     sid = _scope(db, shop_id)
-    shop_skus = [r[0] for r in db.query(models.DimProduct.sku_id).filter(
-        models.DimProduct.shop_id == sid).all()]
+    # Begrens tot SKU's van deze shop
+    shop_sku_ids = [r.sku_id for r in
+                    db.query(models.DimProduct.sku_id)
+                    .filter(models.DimProduct.shop_id == sid).all()]
     q = db.query(models.SkuCompetitionScore).filter(
-        models.SkuCompetitionScore.sku_id.in_(shop_skus))
+        models.SkuCompetitionScore.sku_id.in_(shop_sku_ids)
+    )
     if competition_class:
         q = q.filter(models.SkuCompetitionScore.competition_class == competition_class)
     if category:
@@ -92,7 +97,8 @@ def list_competition_skus(
             p.sku_id
             for p in db.query(models.DimProduct).filter(
                 models.DimProduct.category == category,
-                models.DimProduct.shop_id == sid).all()
+                models.DimProduct.shop_id == sid,
+            ).all()
         ]
         q = q.filter(models.SkuCompetitionScore.sku_id.in_(sku_ids))
 
@@ -186,15 +192,21 @@ def get_sku_competition_detail(
 
 @router.get("/charts/pcis-distribution")
 def get_pcis_distribution(
+    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
+    sid = _scope(db, shop_id)
+    shop_sku_ids = [r.sku_id for r in
+                    db.query(models.DimProduct.sku_id)
+                    .filter(models.DimProduct.shop_id == sid).all()]
     classes = ["Critical", "Strong", "Influence", "Monitor", "Ignore"]
     return [
         {
             "class": cls,
             "count": db.query(models.SkuCompetitionScore).filter(
-                models.SkuCompetitionScore.competition_class == cls
+                models.SkuCompetitionScore.competition_class == cls,
+                models.SkuCompetitionScore.sku_id.in_(shop_sku_ids),
             ).count(),
         }
         for cls in classes
@@ -203,16 +215,23 @@ def get_pcis_distribution(
 
 @router.get("/charts/price-index-by-category")
 def get_price_index_by_category(
+    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
+    sid = _scope(db, shop_id)
+    shop_sku_ids = {r.sku_id for r in
+                   db.query(models.DimProduct.sku_id)
+                   .filter(models.DimProduct.shop_id == sid).all()}
     scores = db.query(models.SkuCompetitionScore).filter(
-        models.SkuCompetitionScore.price_index.isnot(None)
+        models.SkuCompetitionScore.price_index.isnot(None),
+        models.SkuCompetitionScore.sku_id.in_(shop_sku_ids),
     ).all()
-    sku_ids = [s.sku_id for s in scores]
     products = {
         p.sku_id: p
-        for p in db.query(models.DimProduct).filter(models.DimProduct.sku_id.in_(sku_ids)).all()
+        for p in db.query(models.DimProduct).filter(
+            models.DimProduct.sku_id.in_([s.sku_id for s in scores])
+        ).all()
     }
     category_data: dict = {}
     for score in scores:
@@ -231,14 +250,20 @@ def get_price_index_by_category(
 
 @router.get("/charts/sub-scores-by-class")
 def get_sub_scores_by_class(
+    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
+    sid = _scope(db, shop_id)
+    shop_sku_ids = [r.sku_id for r in
+                    db.query(models.DimProduct.sku_id)
+                    .filter(models.DimProduct.shop_id == sid).all()]
     classes = ["Critical", "Strong", "Influence", "Monitor", "Ignore"]
     result = []
     for cls in classes:
         rows = db.query(models.SkuCompetitionScore).filter(
-            models.SkuCompetitionScore.competition_class == cls
+            models.SkuCompetitionScore.competition_class == cls,
+            models.SkuCompetitionScore.sku_id.in_(shop_sku_ids),
         ).all()
         if not rows:
             continue
@@ -267,11 +292,12 @@ def get_competition_dashboard(
 ):
     """
     Top-10 concurrenten per categorie met alle 7 scores, verkeerslicht,
-    strategie-label en laatste prijswijziging.
+    strategie-label en laatste prijswijziging — shop-gefilterd.
     """
     sid = _scope(db, shop_id)
     q = db.query(models.CategoryCompetitorRelevance).filter(
-        models.CategoryCompetitorRelevance.shop_id == sid)
+        models.CategoryCompetitorRelevance.shop_id == sid
+    )
     if category:
         q = q.filter(models.CategoryCompetitorRelevance.category == category)
     rows = q.order_by(
@@ -286,9 +312,13 @@ def get_competition_dashboard(
         if len(cat_items) < 10:
             cat_items.append(_category_score_out(row))
 
-    # Haal profielen en strategieën op (shop-scoped)
-    profielen = {p.competitor_name: p for p in db.query(models.CompetitorProfile).filter(
-        models.CompetitorProfile.shop_id == sid).all()}
+    # Haal profielen en strategieën op — shop-gefilterd
+    profielen = {
+        p.competitor_name: p
+        for p in db.query(models.CompetitorProfile).filter(
+            models.CompetitorProfile.shop_id == sid
+        ).all()
+    }
     strategieen = {
         s.competitor_name: s
         for s in db.query(models.CompetitorStrategyResult)
@@ -322,6 +352,7 @@ def get_competition_dashboard(
         "categories": result,
         "total_categories": len(result),
         "filter_category": category,
+        "shop_id": sid,
     }
 
 
@@ -418,7 +449,8 @@ def list_competitors(
 ):
     sid = _scope(db, shop_id)
     q = db.query(models.CompetitorProfile).filter(
-        models.CompetitorProfile.shop_id == sid)
+        models.CompetitorProfile.shop_id == sid
+    )
     if relevance_label:
         q = q.filter(models.CompetitorProfile.relevance_label == relevance_label)
     total = q.count()
@@ -451,7 +483,7 @@ def get_competitor_profile(
     if not profile:
         raise HTTPException(404, f"Concurrent '{competitor_name}' niet gevonden")
 
-    # Haal categoriescores op (shop-scoped)
+    # Haal categoriescores op (shop-gefilterd)
     cat_scores = (
         db.query(models.CategoryCompetitorRelevance)
         .filter(models.CategoryCompetitorRelevance.competitor_name == competitor_name,
@@ -460,7 +492,7 @@ def get_competitor_profile(
         .all()
     )
 
-    # Haal strategie op (shop-scoped)
+    # Haal strategie op (shop-gefilterd)
     strategie = (
         db.query(models.CompetitorStrategyResult)
         .filter(models.CompetitorStrategyResult.competitor_name == competitor_name,
@@ -565,10 +597,13 @@ def list_ai_matches(
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     sid = _scope(db, shop_id)
-    shop_skus = [r[0] for r in db.query(models.DimProduct.sku_id).filter(
-        models.DimProduct.shop_id == sid).all()]
+    # Begrens tot SKU's van deze shop via DimProduct (AiMatchResult heeft geen shop_id)
+    shop_sku_ids = [r.sku_id for r in
+                    db.query(models.DimProduct.sku_id)
+                    .filter(models.DimProduct.shop_id == sid).all()]
     q = db.query(models.AiMatchResult).filter(
-        models.AiMatchResult.own_sku_id.in_(shop_skus))
+        models.AiMatchResult.own_sku_id.in_(shop_sku_ids)
+    )
     if match_type:
         q = q.filter(models.AiMatchResult.match_type == match_type)
     if min_confidence > 0:
@@ -689,7 +724,7 @@ def get_competitor_strategies(
     Herkent per concurrent de prijsstrategie uit de ECHTE concurrentprijs-
     historie in de PriceShape-feed (fact_competitor_price_daily). Betrouwbare
     herkenning vereist meerdere dagen historie; bij te weinig historie wordt een
-    waarschuwing meegegeven (`low_history`).
+    waarschuwing meegegeven (`low_history`). Shop-gefilterd.
     """
     from engine.competitor_strategy_engine import analyseer_alle_concurrenten
     sid = _scope(db, shop_id)
@@ -998,7 +1033,8 @@ def get_competitor_rankings(
         models.CompetitorRanking.shop_id == sid,
     ).scalar()
     if not latest:
-        return {"scope": scope, "run_date": None, "rankings": [], "scopes": _ranking_scopes(db, sid)}
+        return {"scope": scope, "run_date": None, "rankings": [],
+                "scopes": _ranking_scopes(db, sid)}
 
     rows = (
         db.query(models.CompetitorRanking)
@@ -1011,7 +1047,7 @@ def get_competitor_rankings(
     return {
         "scope": scope,
         "run_date": str(latest),
-        "scopes": _ranking_scopes(db),
+        "scopes": _ranking_scopes(db, sid),
         "rankings": [
             {
                 "rank": r.rank,

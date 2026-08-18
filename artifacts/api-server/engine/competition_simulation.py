@@ -38,11 +38,13 @@ def simulate_competitor_scenario(
     change_pct: float,
     assume_follow: Optional[list[str]] = None,
     assume_no_follow: Optional[list[str]] = None,
+    shop_id: Optional[int] = None,
 ) -> dict:
     """
     Simuleer een eigen prijswijziging (fractie, bv. -0.05) met per-concurrent
     volgkansen. `assume_follow` / `assume_no_follow` overschrijven de
     strategie-gebaseerde volgkans (1.0 resp. 0.0) voor de genoemde concurrenten.
+    shop_id bakent de scope af; standaard wordt de shop van het product gebruikt.
     """
     if change_pct is None or abs(change_pct) > 0.5:
         raise HTTPException(status_code=400, detail="change_pct moet tussen -0.5 en 0.5 liggen")
@@ -51,18 +53,21 @@ def simulate_competitor_scenario(
         models.DimProduct.sku_id == sku_id).first()
     if not product:
         raise HTTPException(status_code=404, detail=f"SKU {sku_id} niet gevonden")
+    # Shop-scope: gebruik de shop van het product (of de meegegeven shop_id indien opgegeven)
+    sid = shop_id if shop_id is not None else (product.shop_id or 1)
     own_price = float(product.current_price) if product.current_price else None
     if not own_price:
         raise HTTPException(status_code=400, detail=f"SKU {sku_id} heeft geen actuele prijs")
     cost = float(product.cost_price) if product.cost_price else None
 
-    # Meest recente concurrentprijzen (laatste waarnemingsdag per concurrent)
+    # Meest recente concurrentprijzen (laatste waarnemingsdag per concurrent) — shop-gefilterd
     since = date.today() - timedelta(days=14)
     rows = (
         db.query(models.FactCompetitorPriceDaily)
         .filter(models.FactCompetitorPriceDaily.sku_id == sku_id,
                 models.FactCompetitorPriceDaily.date >= since,
-                models.FactCompetitorPriceDaily.price.isnot(None))
+                models.FactCompetitorPriceDaily.price.isnot(None),
+                models.FactCompetitorPriceDaily.shop_id == sid)
         .order_by(models.FactCompetitorPriceDaily.date)
         .all()
     )
@@ -79,10 +84,11 @@ def simulate_competitor_scenario(
             "note": "Geen recente concurrentprijzen voor deze SKU — simulatie niet mogelijk.",
         }
 
-    # Strategieën per concurrent (laatste run)
+    # Strategieën per concurrent (laatste run) — shop-gefilterd
     strategies: dict[str, models.CompetitorStrategyResult] = {}
     for s in (db.query(models.CompetitorStrategyResult)
-              .filter(models.CompetitorStrategyResult.competitor_name.in_(list(latest)))
+              .filter(models.CompetitorStrategyResult.competitor_name.in_(list(latest)),
+                      models.CompetitorStrategyResult.shop_id == sid)
               .order_by(models.CompetitorStrategyResult.run_date)
               .all()):
         strategies[s.competitor_name] = s
@@ -141,10 +147,11 @@ def simulate_competitor_scenario(
     volume_effect_nobody = own_e * change_pct
     volume_effect_all = own_e * change_pct + comp_e * change_pct
 
-    # Baseline: verkoop laatste 30 dagen
+    # Baseline: verkoop laatste 30 dagen — shop-gefilterd
     sales = (db.query(models.FactSalesDaily)
              .filter(models.FactSalesDaily.sku_id == sku_id,
-                     models.FactSalesDaily.date >= date.today() - timedelta(days=30))
+                     models.FactSalesDaily.date >= date.today() - timedelta(days=30),
+                     models.FactSalesDaily.shop_id == sid)
              .all())
     base_units = sum(float(s.units_sold or 0) for s in sales)
 
@@ -168,7 +175,9 @@ def simulate_competitor_scenario(
         "current_price": round(own_price, 2),
         "new_price": round(new_own, 2),
         "elasticity_used": {"own": own_e, "competitive": comp_e,
-                            "source": "sku_elasticity" if elast else "default"},
+                            "source": "sku_elasticity" if elast else "default",
+                            "method": elast.method_label if elast and elast.method_label else "default",
+                            "regression_r2": float(elast.regression_r2) if elast and elast.regression_r2 is not None else None},
         "price_index": {
             "before": idx_before,
             "expected": idx_expected,

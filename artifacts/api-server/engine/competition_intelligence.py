@@ -53,6 +53,10 @@ DEFAULTS = {
     "oos_min_competitors": 1,
     # Elasticiteit: minimale gezamenlijke dagen voor regressie
     "elasticity_min_days": 14,
+    # Elasticiteit: minimale R² voor regressieresultaat om geaccepteerd te worden
+    "elasticity_min_r2": 0.10,
+    # Elasticiteit: minimaal aantal unieke eigen prijspunten voor regressie
+    "elasticity_min_unique_prices": 5,
     # Elasticiteit: lookback-venster in dagen
     "elasticity_lookback_days": 90,
     # Dekking: match-statussen die meetellen (REJECTED nooit)
@@ -125,23 +129,37 @@ def run_coverage(db: Session, run_date: Optional[date] = None) -> int:
         own_per_shop[sid] = own_per_shop.get(sid, 0) + 1
         own_per_shop_cat[(sid, c)] = own_per_shop_cat.get((sid, c), 0) + 1
 
-    latest_match_date = db.query(models.AiMatchResult.run_date).order_by(
-        models.AiMatchResult.run_date.desc()).first()
+    # Gebruik per-shop de meest recente match-datum zodat een shop die al langer
+    # niet is ververst niet leegtrekt door de globale maximumdatum van een andere shop.
+    shop_skus: dict[int, list[str]] = {}
+    for p in products:
+        shop_skus.setdefault(p.shop_id or 1, []).append(p.sku_id)
+
     matches = []
-    if latest_match_date:
-        matches = (
+    for _sid, sku_ids in shop_skus.items():
+        latest_for_shop = (
+            db.query(models.AiMatchResult.run_date)
+            .filter(models.AiMatchResult.own_sku_id.in_(sku_ids))
+            .order_by(models.AiMatchResult.run_date.desc())
+            .first()
+        )
+        if not latest_for_shop:
+            continue
+        shop_matches = (
             db.query(
                 models.AiMatchResult.own_sku_id,
                 models.AiMatchResult.competitor_name,
             )
             .filter(
-                models.AiMatchResult.run_date == latest_match_date[0],
+                models.AiMatchResult.run_date == latest_for_shop[0],
                 models.AiMatchResult.status != "REJECTED",
                 models.AiMatchResult.confidence >= float(cfg["coverage_min_confidence"]),
+                models.AiMatchResult.own_sku_id.in_(sku_ids),
             )
             .distinct()
             .all()
         )
+        matches.extend(shop_matches)
 
     # matched sku's per (shop, concurrent) — totaal en per categorie
     per_comp_total: dict[tuple[int, str], set[str]] = {}
@@ -216,13 +234,22 @@ def detect_price_events(db: Session, run_date: Optional[date] = None) -> int:
         .all()
     )
 
+    # SKU-eigenaar per shop: cross-shop fact-rijen worden genegeerd
+    prod_shops: dict[str, int] = {
+        p.sku_id: (p.shop_id or 1)
+        for p in db.query(models.DimProduct.sku_id, models.DimProduct.shop_id).all()
+    }
     series: dict[tuple[str, str], list] = {}
     shop_of: dict[tuple[str, str], int] = {}
     for sku, comp, d, price, shop_id in rows:
         if (sku, comp) in rejected:
             continue
+        owner_shop = prod_shops.get(sku)
+        # Gooi rijen weg waarvan de feed-shop niet overeenkomt met de SKU-eigenaar
+        if owner_shop and (shop_id or 1) != owner_shop:
+            continue
         series.setdefault((sku, comp), []).append((d, float(price)))
-        shop_of[(sku, comp)] = shop_id or 1
+        shop_of[(sku, comp)] = owner_shop or shop_id or 1
 
     # bestaande events van vandaag verwijderen (idempotente rerun)
     db.query(models.CompetitorPriceEvent).filter(
@@ -313,13 +340,21 @@ def detect_promo_events(db: Session, run_date: Optional[date] = None) -> int:
         .order_by(models.FactCompetitorPriceDaily.date)
         .all()
     )
+    # SKU-eigenaar per shop: cross-shop fact-rijen worden genegeerd
+    prod_shops_promo: dict[str, int] = {
+        p.sku_id: (p.shop_id or 1)
+        for p in db.query(models.DimProduct.sku_id, models.DimProduct.shop_id).all()
+    }
     series: dict[tuple[str, str], list] = {}
     shop_of: dict[tuple[str, str], int] = {}
     for sku, comp, d, price, shop_id in rows:
         if (sku, comp) in rejected:
             continue
+        owner_shop = prod_shops_promo.get(sku)
+        if owner_shop and (shop_id or 1) != owner_shop:
+            continue
         series.setdefault((sku, comp), []).append((d, float(price)))
-        shop_of[(sku, comp)] = shop_id or 1
+        shop_of[(sku, comp)] = owner_shop or shop_id or 1
 
     # herberekenbaar: promo-events in het venster vervangen
     db.query(models.CompetitorPriceEvent).filter(
@@ -511,12 +546,12 @@ def update_availability(db: Session, run_date: Optional[date] = None) -> int:
 # ── 5. Elasticiteit ──────────────────────────────────────────────────────────
 
 def _ols_two_vars(y: list[float], x1: list[float], x2: list[float]):
-    """OLS met intercept: y = a + b*x1 + c*x2. Retourneert (b, c) of None."""
+    """OLS met intercept: y = a + b*x1 + c*x2.
+    Retourneert (b, c, r2) of None bij een singulair stelsel.
+    r2 = R² van de fit (0..1); negatieve waarden worden op 0.0 geclampt."""
     n = len(y)
     if n < 3:
         return None
-    # Normal equations (3x3), pure Python
-    import itertools
     X = [[1.0, x1[i], x2[i]] for i in range(n)]
     XtX = [[sum(X[k][i] * X[k][j] for k in range(n)) for j in range(3)] for i in range(3)]
     Xty = [sum(X[k][i] * y[k] for k in range(n)) for i in range(3)]
@@ -533,7 +568,16 @@ def _ols_two_vars(y: list[float], x1: list[float], x2: list[float]):
                 for cc in range(4):
                     M[r][cc] -= f * M[col][cc]
     coefs = [M[i][3] / M[i][i] for i in range(3)]
-    return coefs[1], coefs[2]
+    a, b, c = coefs[0], coefs[1], coefs[2]
+    # R² = 1 − SS_res / SS_tot
+    y_mean = sum(y) / n
+    ss_tot = sum((yi - y_mean) ** 2 for yi in y)
+    if ss_tot < 1e-14:
+        r2 = 0.0
+    else:
+        ss_res = sum((y[i] - (a + b * x1[i] + c * x2[i])) ** 2 for i in range(n))
+        r2 = max(0.0, 1.0 - ss_res / ss_tot)
+    return b, c, r2
 
 
 def run_elasticity(db: Session, run_date: Optional[date] = None) -> int:
@@ -548,29 +592,39 @@ def run_elasticity(db: Session, run_date: Optional[date] = None) -> int:
 
     from engine.elasticity_engine import calculate_elasticity
 
+    # Shop van elk product: factrijen tellen alleen mee als hun shop_id
+    # overeenkomt met de shop van het product (datascheiding per shop).
+    prod_shop = {p.sku_id: p.shop_id for p in
+                 db.query(models.DimProduct.sku_id, models.DimProduct.shop_id).all()}
+
     sales = {}
     for r in db.query(models.FactSalesDaily.sku_id, models.FactSalesDaily.date,
-                      models.FactSalesDaily.units_sold).filter(
+                      models.FactSalesDaily.units_sold,
+                      models.FactSalesDaily.shop_id).filter(
             models.FactSalesDaily.date >= since).all():
-        if r.units_sold and r.units_sold > 0:
+        if r.units_sold and r.units_sold > 0 and r.shop_id == prod_shop.get(r.sku_id):
             sales.setdefault(r.sku_id, {})[r.date] = float(r.units_sold)
 
     own_prices = {}
     for r in db.query(models.FactPriceDaily.sku_id, models.FactPriceDaily.date,
-                      models.FactPriceDaily.price).filter(
+                      models.FactPriceDaily.price,
+                      models.FactPriceDaily.shop_id).filter(
             models.FactPriceDaily.date >= since).all():
-        if r.price and float(r.price) > 0:
+        if r.price and float(r.price) > 0 and r.shop_id == prod_shop.get(r.sku_id):
             own_prices.setdefault(r.sku_id, {})[r.date] = float(r.price)
 
     comp_prices: dict[str, dict[date, list[float]]] = {}
     for r in db.query(models.FactCompetitorPriceDaily.sku_id,
                       models.FactCompetitorPriceDaily.competitor_name,
                       models.FactCompetitorPriceDaily.date,
-                      models.FactCompetitorPriceDaily.price).filter(
+                      models.FactCompetitorPriceDaily.price,
+                      models.FactCompetitorPriceDaily.shop_id).filter(
             models.FactCompetitorPriceDaily.date >= since).all():
         if r.price is None or float(r.price) <= 0:
             continue
         if (r.sku_id, r.competitor_name) in rejected:
+            continue
+        if r.shop_id != prod_shop.get(r.sku_id):
             continue
         comp_prices.setdefault(r.sku_id, {}).setdefault(r.date, []).append(float(r.price))
 
@@ -609,25 +663,40 @@ def run_elasticity(db: Session, run_date: Optional[date] = None) -> int:
         conf = float(heur["elasticity_confidence_score"])
         conf_class = heur["confidence_class"]
         method = "heuristiek"
+        reg_r2: Optional[float] = None
+
+        min_r2 = float(cfg.get("elasticity_min_r2", 0.10))
+        min_unique = int(cfg.get("elasticity_min_unique_prices", 5))
 
         if len(common) >= min_days:
-            y = [math.log(s_days[d]) for d in common]
-            x1 = [math.log(p_days[d]) for d in common]
-            x2 = [math.log(min(c_days[d])) for d in common]
-            # regressie vereist echte variatie in beide prijsreeksen
-            if pstdev(x1) > 1e-6 and pstdev(x2) > 1e-6:
-                res = _ols_two_vars(y, x1, x2)
+            y_log = [math.log(s_days[d]) for d in common]
+            x1_log = [math.log(p_days[d]) for d in common]
+            x2_log = [math.log(min(c_days[d])) for d in common]
+            # Tel unieke eigen prijspunten (afgerond op cent)
+            unique_prices = len({round(p_days[d], 2) for d in common})
+            # Regressie vereist echte variatie in beide prijsreeksen
+            if (unique_prices >= min_unique
+                    and pstdev(x1_log) > 1e-6
+                    and pstdev(x2_log) > 1e-6):
+                res = _ols_two_vars(y_log, x1_log, x2_log)
                 if res is not None:
-                    b, c = res
-                    # clamp naar plausibele economische ranges
-                    own_est = max(-6.0, min(-0.1, float(b)))
-                    comp_est = max(0.0, min(4.0, float(c)))
-                    if -6.0 < float(b) < 0:  # alleen accepteren bij correct teken
+                    b, c, r2 = res
+                    # Alleen accepteren bij correct teken én voldoende fit-kwaliteit
+                    if -6.0 < float(b) < 0 and r2 >= min_r2:
+                        own_est = max(-6.0, min(-0.1, float(b)))
+                        comp_est = max(0.0, min(4.0, float(c)))
                         own_e = round(own_est, 3)
                         comp_e = round(comp_est, 3)
                         conf = min(0.95, 0.5 + len(common) / 100)
                         conf_class = "hoog_betrouwbaar" if conf >= 0.75 else "bruikbaar"
                         method = "regressie"
+                        reg_r2 = round(r2, 4)
+                    else:
+                        logger.debug(
+                            "Elasticiteit SKU %s: regressie verworpen "
+                            "(b=%.3f, R²=%.3f < %.2f) → heuristiek",
+                            sku_id, float(b) if res else float("nan"), r2, min_r2,
+                        )
 
         db.add(models.SkuElasticity(
             sku_id=sku_id, run_date=rd,
@@ -638,6 +707,8 @@ def run_elasticity(db: Session, run_date: Optional[date] = None) -> int:
                 heur["internal_substitution_elasticity"]),
             elasticity_confidence_score=round(float(conf), 3),
             confidence_class=conf_class,
+            method_label=method,
+            regression_r2=reg_r2,
             category=prod.category,
             pcis_score_used=pcis, csrs_score_used=0.5,
             sales_volume_30d=float(vol_30),
@@ -726,89 +797,58 @@ def warn_suspicious_matches(db: Session, run_date: Optional[date] = None) -> int
 
 # ── Strategie-herkenning (per shop) ──────────────────────────────────────────
 
-def run_strategies(db: Session, run_date: Optional[date] = None) -> int:
-    """Herken en persisteer concurrentstrategie per concurrent per shop.
-
-    Leest de afgelopen 30 dagen fact_competitor_price_daily per shop,
-    classificeert via competitor_strategy_engine en slaat het resultaat op
-    in competitor_strategy_result (upsert op competitor_name + shop_id +
-    run_date zodat herdraaien idempotent is).
-    """
-    from engine.competitor_strategy_engine import analyseer_alle_concurrenten, STRATEGIE_LABELS
+def run_strategies(db: Session, run_date: Optional[date] = None,
+                   lookback_days: int = 30) -> int:
+    """Herken en persisteer per shop de prijsstrategie per concurrent uit de
+    shop-gefilterde concurrentprijshistorie (upsert per shop/concurrent/run)."""
+    from engine.competitor_strategy_engine import analyseer_alle_concurrenten
     rd = run_date or date.today()
-    since = rd - timedelta(days=30)
-    n_results = 0
-
-    shops = [sid for (sid,) in db.query(models.DimProduct.shop_id).distinct().all() if sid is not None]
-    if not shops:
-        shops = [1]
-
-    for shop_id in shops:
-        rijen = (
-            db.query(models.FactCompetitorPriceDaily)
-            .join(models.DimProduct, models.DimProduct.sku_id == models.FactCompetitorPriceDaily.sku_id)
-            .filter(
-                models.FactCompetitorPriceDaily.date >= since,
-                models.DimProduct.shop_id == shop_id,
-            )
-            .order_by(models.FactCompetitorPriceDaily.competitor_name,
-                      models.FactCompetitorPriceDaily.date)
-            .all()
-        )
-        prijsdata: dict[str, list] = {}
-        for r in rijen:
-            if r.price is None:
-                continue
-            prijsdata.setdefault(r.competitor_name or "Onbekend", []).append(
-                (r.date, float(r.price)))
-
+    since = rd - timedelta(days=lookback_days)
+    n = 0
+    shop_ids = [s for (s,) in db.query(models.DimProduct.shop_id).distinct().all()
+                if s is not None]
+    for sid in shop_ids:
+        rows = (db.query(models.FactCompetitorPriceDaily)
+                .join(models.DimProduct,
+                      models.DimProduct.sku_id == models.FactCompetitorPriceDaily.sku_id)
+                .filter(models.FactCompetitorPriceDaily.date >= since,
+                        models.FactCompetitorPriceDaily.shop_id == sid,
+                        models.DimProduct.shop_id == sid,  # eigenaar-shop-validatie
+                        models.FactCompetitorPriceDaily.price.isnot(None))
+                .all())
+        prijsdata = comparable_price_series(rows)
         if not prijsdata:
             continue
-
-        resultaten = analyseer_alle_concurrenten(prijsdata)
-        for res in resultaten:
-            naam = res.get("concurrent") or res.get("competitor_name", "")
+        for res in analyseer_alle_concurrenten(prijsdata):
+            naam = res.get("concurrent")
             if not naam:
                 continue
-            vorige = (
-                db.query(models.CompetitorStrategyResult)
-                .filter(
-                    models.CompetitorStrategyResult.competitor_name == naam,
-                    models.CompetitorStrategyResult.shop_id == shop_id,
-                    models.CompetitorStrategyResult.run_date < rd,
-                )
-                .order_by(models.CompetitorStrategyResult.run_date.desc())
-                .first()
-            )
-            vorige_type = vorige.strategy_type if vorige else None
-            nieuwe_type = res.get("strategy_type")
-
-            row = (
-                db.query(models.CompetitorStrategyResult)
-                .filter(
-                    models.CompetitorStrategyResult.competitor_name == naam,
-                    models.CompetitorStrategyResult.shop_id == shop_id,
-                    models.CompetitorStrategyResult.run_date == rd,
-                )
-                .first()
-            )
-            if row is None:
+            prev = (db.query(models.CompetitorStrategyResult)
+                    .filter(models.CompetitorStrategyResult.competitor_name == naam,
+                            models.CompetitorStrategyResult.shop_id == sid)
+                    .order_by(models.CompetitorStrategyResult.run_date.desc())
+                    .first())
+            stype = res.get("strategy_type")
+            if prev and prev.run_date == rd:
+                row = prev
+                prev_type = row.previous_strategy_type
+            else:
                 row = models.CompetitorStrategyResult(
-                    competitor_name=naam, shop_id=shop_id, run_date=rd)
+                    competitor_name=naam, run_date=rd, shop_id=sid)
+                prev_type = prev.strategy_type if prev else None
                 db.add(row)
-            row.strategy_type = nieuwe_type
-            row.strategy_label_nl = STRATEGIE_LABELS.get(nieuwe_type or "", nieuwe_type or "")
-            row.confidence = res.get("confidence", 0.0)
-            row.explanation_nl = res.get("explanation_nl") or res.get("uitleg")
-            row.recommended_action_nl = res.get("recommended_action_nl") or res.get("aanbevolen_actie")
-            row.period_days = 30
-            row.data_points = res.get("data_points", 0)
-            row.previous_strategy_type = vorige_type
-            row.strategy_changed = (vorige_type is not None and vorige_type != nieuwe_type)
-            n_results += 1
-
+            row.strategy_type = stype
+            row.strategy_label_nl = res.get("label_nl")
+            row.confidence = res.get("confidence")
+            row.explanation_nl = res.get("reden")
+            row.recommended_action_nl = res.get("aanbevolen_reactie")
+            row.period_days = lookback_days
+            row.data_points = res.get("datapunten")
+            row.previous_strategy_type = prev_type
+            row.strategy_changed = bool(prev_type and stype and prev_type != stype)
+            n += 1
     db.commit()
-    return n_results
+    return n
 
 
 # ── Orchestratie ─────────────────────────────────────────────────────────────

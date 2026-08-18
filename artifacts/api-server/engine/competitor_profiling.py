@@ -189,14 +189,17 @@ def build_or_update_profile(
 
     relevance_label, traffic_light = _relevance_label(combined)
 
-    # Upsert profiel
+    # Upsert profiel — altijd per (shop_id, competitor_name) om cross-shop
+    # overschrijving te voorkomen (CompetitorProfile heeft een UNIQUE-constraint
+    # op (shop_id, competitor_name)).
     profile = (
         db.query(models.CompetitorProfile)
-        .filter(models.CompetitorProfile.competitor_name == competitor_name)
+        .filter(models.CompetitorProfile.competitor_name == competitor_name,
+                models.CompetitorProfile.shop_id == sid)
         .first()
     )
     if not profile:
-        profile = models.CompetitorProfile(competitor_name=competitor_name)
+        profile = models.CompetitorProfile(competitor_name=competitor_name, shop_id=sid)
         db.add(profile)
 
     profile.domain = domain

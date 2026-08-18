@@ -80,6 +80,37 @@ Als je klaar bent met tools, geef je je eindantwoord als JSON-object met exact d
 Beschikbare frontend-paden voor links: /prijsadviezen, /beslissingen, /producten, /signalen, /competition, /huismerk-impact, /promotie-intelligence, /procurement-forecast, /opportunities, /traffic-dashboard, /elasticiteit.
 Geef ALLEEN het JSON-object, geen andere tekst."""
 
+# ─── Prompt-governance ────────────────────────────────────────────────────────
+PROMPT_MODULE_KEY = "copilot"
+PROMPT_TITLE = "Copilot Systeemprompt"
+SYSTEM_PROMPT = (
+    "Je bent de AI Pricing Copilot van dit commercieel-intelligence platform. "
+    "Je helpt commerciële teams met prijsanalyse, concurrentiebeelden en besluit-"
+    "ondersteuning op basis van platformdata. "
+    "Antwoord altijd in het Nederlands, beknopt en cijfermatig onderbouwd. "
+    "Je roept alleen goedgekeurde tools aan (semantic functions) — je voert "
+    "nooit zelfstandig prijswijzigingen of andere mutaties uit. "
+    "Als data ontbreekt of onzeker is, zeg dat dan expliciet."
+)
+
+# Verplichte sleutels in elk Copilot-antwoord (§antwoord-schema)
+ANSWER_KEYS = [
+    "conclusion", "period", "sources", "data_freshness", "records",
+    "confidence", "limitations", "warnings", "suggested_action", "links",
+]
+
+# Gesprekssamenvatting: bewaar de laatste N berichten ongecomprimeerd
+SUMMARY_KEEP_RECENT = 6
+# Geheugenextractie: elke N gebruikersvragen
+MEMORY_EXTRACT_EVERY = 5
+# Few-shot hergebruik: maximaal N voorbeelden per vraag
+FEWSHOT_LIMIT = 3
+# Geheugen: maximaal N geheugenitems per gebruiker+organisatie
+MAX_MEMORY_ITEMS = 20
+
+# Woordtokenizer voor Jaccard-similarity (few-shot matching)
+_WORD_RE = re.compile(r"[a-záéíóúàèìòùäëïöüñç]{3,}", re.IGNORECASE)
+
 
 # ─── Provider-configuratie (Replit AI Integrations, geen eigen key) ─────────
 
