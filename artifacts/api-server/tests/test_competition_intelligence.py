@@ -437,6 +437,9 @@ def test_multi_shop_isolation(client, admin_headers, run_engines):
             (models.FactCompetitorPriceDaily, models.FactCompetitorPriceDaily.shop_id),
             (models.DimProduct, models.DimProduct.shop_id),
             (models.CostUsageRecord, models.CostUsageRecord.shop_id),
+            (models.CompetitorProfile, models.CompetitorProfile.shop_id),
+            (models.CompetitorStrategyResult, models.CompetitorStrategyResult.shop_id),
+            (models.CompetitorRanking, models.CompetitorRanking.shop_id),
         ]:
             db.query(model).filter(col == shop_b).delete(synchronize_session=False)
         db.query(models.AiMatchResult).filter(
