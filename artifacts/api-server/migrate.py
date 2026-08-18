@@ -365,6 +365,15 @@ def run_migrations(engine, metadata) -> None:
             'CREATE UNIQUE INDEX IF NOT EXISTS uq_competitor_profile_shop_name '
             'ON competitor_profile (shop_id, competitor_name)',
         ),
+        # Partiële unique index: dwingt de globale standaard-singleton af voor
+        # ai_budget_config (username IS NULL). PostgreSQL's gewone UNIQUE op een
+        # nullable kolom staat meerdere NULL-rijen toe; de partiële index niet.
+        (
+            "uq_ai_budget_config_global_singleton",
+            'CREATE UNIQUE INDEX IF NOT EXISTS uq_ai_budget_config_global_singleton '
+            'ON ai_budget_config ((username IS NULL)) '
+            'WHERE username IS NULL',
+        ),
     ]
     with engine.connect() as conn:
         for _idx_name, _idx_sql in _MANUAL_INDEXES:

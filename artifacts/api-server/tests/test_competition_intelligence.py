@@ -25,6 +25,11 @@ SKU_B = f"{PFX}-B"
 COMP_1 = f"{PFX}-shop1.nl"
 COMP_2 = f"{PFX}-shop2.nl"
 
+# Constanten voor de suspicious-match tests
+WM_PFX = f"WMTEST{uuid.uuid4().hex[:6]}"
+WM_SKU = f"{WM_PFX}-SKU"
+WM_COMP = f"{WM_PFX}-comp.nl"
+
 
 @pytest.fixture(scope="module")
 def client():
@@ -506,27 +511,6 @@ def suspicious_seed():
         db.commit()
         db.close()
 
-def test_warn_suspicious_matches_idempotent(suspicious_seed):
-    """Tweede aanroep op dezelfde run_date mag geen extra signaal aanmaken."""
-    from engine.competition_intelligence import warn_suspicious_matches
-    sid, _skus = suspicious_seed
-    db = SessionLocal()
-    try:
-        rd = date.today()
-        # Eerste aanroep is al gedaan in test_warn_suspicious_matches_publishes_signal;
-        # een tweede aanroep mag het signaal niet verdubbelen.
-        n = warn_suspicious_matches(db, rd)
-        assert n == 0, f"Idempotentie geschonden: {n} extra signalen aangemaakt"
-        count = db.query(models.IntelligenceSignal).filter(
-            models.IntelligenceSignal.signal_type == "suspicious_ai_matches",
-            models.IntelligenceSignal.entity_id == "ai-matching",
-            models.IntelligenceSignal.shop_id == sid,
-            models.IntelligenceSignal.status == "active",
-        ).count()
-        assert count == 1, f"Verwacht 1 actief signaal, kreeg {count}"
-    finally:
-        db.close()
-
 def test_warn_suspicious_matches_publishes_signal(suspicious_seed):
     """Als het aantal verdachte matches >= drempel, moet er een signaal worden gepubliceerd."""
     from engine.competition_intelligence import warn_suspicious_matches
@@ -547,6 +531,27 @@ def test_warn_suspicious_matches_publishes_signal(suspicious_seed):
         assert ev.get("suspicious_count") >= 6
         assert ev.get("link") == "/competition/ai-matching"
         assert sig.sources and "ai_match_result" in sig.sources
+    finally:
+        db.close()
+
+def test_warn_suspicious_matches_idempotent(suspicious_seed):
+    """Tweede aanroep op dezelfde run_date mag geen extra signaal aanmaken."""
+    from engine.competition_intelligence import warn_suspicious_matches
+    sid, _skus = suspicious_seed
+    db = SessionLocal()
+    try:
+        rd = date.today()
+        # Eerste aanroep is al gedaan in test_warn_suspicious_matches_publishes_signal;
+        # een tweede aanroep mag het signaal niet verdubbelen.
+        n = warn_suspicious_matches(db, rd)
+        assert n == 0, f"Idempotentie geschonden: {n} extra signalen aangemaakt"
+        count = db.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.signal_type == "suspicious_ai_matches",
+            models.IntelligenceSignal.entity_id == "ai-matching",
+            models.IntelligenceSignal.shop_id == sid,
+            models.IntelligenceSignal.status == "active",
+        ).count()
+        assert count == 1, f"Verwacht 1 actief signaal, kreeg {count}"
     finally:
         db.close()
 

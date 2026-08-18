@@ -726,6 +726,91 @@ def warn_suspicious_matches(db: Session, run_date: Optional[date] = None) -> int
 
 # ── Orchestratie ─────────────────────────────────────────────────────────────
 
+def comparable_price_series(rows) -> dict[str, list]:
+    """Bouw per concurrent een vergelijkbare dagreeks uit ruwe (sku, datum,
+    prijs)-waarnemingen: elke SKU wordt genormaliseerd op zijn eigen eerste
+    waarneming (relatieve prijs), en per datum wordt het gemiddelde van die
+    relatieve prijzen genomen — precies één deterministische waarde per datum.
+    Zo worden assortiments-prijsniveauverschillen niet als prijsbewegingen
+    gezien. Rows: iterable met .competitor_name, .sku_id, .date, .price."""
+    per_comp: dict[str, dict] = {}
+    for r in rows:
+        if r.price is None or float(r.price) <= 0:
+            continue
+        naam = r.competitor_name or "Onbekend"
+        c = per_comp.setdefault(naam, {})
+        c.setdefault(r.sku_id, {})[r.date] = float(r.price)
+    out: dict[str, list] = {}
+    for naam, skus in per_comp.items():
+        rel_per_date: dict = {}
+        for sku, by_date in skus.items():
+            dates = sorted(by_date)
+            base = by_date[dates[0]]
+            if base <= 0:
+                continue
+            for d in dates:
+                rel_per_date.setdefault(d, []).append(by_date[d] / base)
+        serie = [(d, round(sum(v) / len(v), 6))
+                 for d, v in sorted(rel_per_date.items())]
+        if serie:
+            out[naam] = serie
+    return out
+
+
+def run_strategies(db: Session, run_date: Optional[date] = None,
+                   lookback_days: int = 30) -> int:
+    """Herken en persisteer per shop de prijsstrategie per concurrent uit de
+    shop-gefilterde concurrentprijshistorie (upsert per shop/concurrent/run)."""
+    from engine.competitor_strategy_engine import analyseer_alle_concurrenten
+    rd = run_date or date.today()
+    since = rd - timedelta(days=lookback_days)
+    n = 0
+    shop_ids = [s for (s,) in db.query(models.DimProduct.shop_id).distinct().all()
+                if s is not None]
+    for sid in shop_ids:
+        rows = (db.query(models.FactCompetitorPriceDaily)
+                .join(models.DimProduct,
+                      models.DimProduct.sku_id == models.FactCompetitorPriceDaily.sku_id)
+                .filter(models.FactCompetitorPriceDaily.date >= since,
+                        models.FactCompetitorPriceDaily.shop_id == sid,
+                        models.DimProduct.shop_id == sid,  # eigenaar-shop-validatie
+                        models.FactCompetitorPriceDaily.price.isnot(None))
+                .all())
+        prijsdata = comparable_price_series(rows)
+        if not prijsdata:
+            continue
+        for res in analyseer_alle_concurrenten(prijsdata):
+            naam = res.get("concurrent")
+            if not naam:
+                continue
+            prev = (db.query(models.CompetitorStrategyResult)
+                    .filter(models.CompetitorStrategyResult.competitor_name == naam,
+                            models.CompetitorStrategyResult.shop_id == sid)
+                    .order_by(models.CompetitorStrategyResult.run_date.desc())
+                    .first())
+            stype = res.get("strategy_type")
+            if prev and prev.run_date == rd:
+                row = prev
+                prev_type = row.previous_strategy_type
+            else:
+                row = models.CompetitorStrategyResult(
+                    competitor_name=naam, run_date=rd, shop_id=sid)
+                prev_type = prev.strategy_type if prev else None
+                db.add(row)
+            row.strategy_type = stype
+            row.strategy_label_nl = res.get("label_nl")
+            row.confidence = res.get("confidence")
+            row.explanation_nl = res.get("reden")
+            row.recommended_action_nl = res.get("aanbevolen_reactie")
+            row.period_days = lookback_days
+            row.data_points = res.get("datapunten")
+            row.previous_strategy_type = prev_type
+            row.strategy_changed = bool(prev_type and stype and prev_type != stype)
+            n += 1
+    db.commit()
+    return n
+
+
 def run_all(db: Session, run_date: Optional[date] = None) -> dict:
     """Draai alle competition-intelligence stappen; retourneer samenvatting."""
     rd = run_date or date.today()

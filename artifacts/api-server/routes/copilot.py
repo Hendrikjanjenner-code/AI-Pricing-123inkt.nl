@@ -5,13 +5,12 @@ Chat met gespreksgeschiedenis; elk antwoord loopt via de AI Gateway
 (ai_gateway.py) en is dus beperkt tot approved semantic-layer-functies.
 """
 import json
+from datetime import date, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from datetime import timedelta
-
-from sqlalchemy import desc, func
+from sqlalchemy import case, desc, func
 from sqlalchemy.orm import Session
 
 import ai_gateway
@@ -139,6 +138,7 @@ def delete_conversation(
 @router.post("/conversations/{conversation_id}/messages")
 def send_message(
     conversation_id: int,
+    background_tasks: BackgroundTasks,
     payload: dict = Body(...),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
@@ -159,22 +159,56 @@ def send_message(
 
     conv = _own_conversation(db, current_user, conversation_id)
 
+    # Atomische budgetreservering vóór de SSE-stream (§34): gooit 429 als het
+    # dagbudget op is. Hier (vóór StreamingResponse) zodat de client een echte
+    # 429 ontvangt, niet een generiek SSE-foutantwoord na een 200-header.
+    # slot_date = de datum waarvoor is gereserveerd (doorgeven aan run_copilot
+    # voor correcte reconciliatie bij calls die om middernacht eindigen).
+    # max_tokens = de dagelijkse tokenlimiet voor deze gebruiker (voor per-ronde
+    # controle in run_copilot zodat overruns door grote tool-output worden gestopt).
+    slot_date, max_tokens = ai_gateway.check_and_reserve_budget(
+        current_user.username, current_user.role
+    )
+
     # Geschiedenis vóór het opslaan van de nieuwe vraag
     prior = db.query(models.AiMessage).filter(
         models.AiMessage.conversation_id == conv.id
     ).order_by(models.AiMessage.id).all()
     history = [{"role": m.role, "content": m.content} for m in prior]
 
-    # Vraag opslaan; titel afleiden van de eerste vraag
-    db.add(models.AiMessage(conversation_id=conv.id, role="user", content=question))
-    if not prior:
-        conv.title = question[:300]
-    db.commit()
+    # Vraag opslaan; titel afleiden van de eerste vraag.
+    # Als de opslag mislukt, geef de slot-reservering terug zodat het dagbudget
+    # niet wordt uitgeput door een mislukte opslaagtransactie.
+    try:
+        db.add(models.AiMessage(conversation_id=conv.id, role="user", content=question))
+        if not prior:
+            conv.title = question[:300]
+        db.commit()
+    except Exception:
+        ai_gateway.release_budget_slot_reservation(db, current_user.username, slot_date)
+        raise
 
     # Lange gesprekken: samenvatting van oudere berichten meesturen (leerloop)
     history_summary = ai_gateway.get_history_summary(db, conv.id)
 
+    # Volg bij of de generator minstens één keer is geïtereerd door Starlette.
+    # Als de client vóór de eerste byte disconnecteert, is de generator nooit
+    # gestart en loopt run_copilot's finally niet → cleanup via background task.
+    _generator_started: list[bool] = [False]
+
+    def _release_if_never_started() -> None:
+        """Achtergrondtaak: geef reservering terug als de generator nooit liep."""
+        if not _generator_started[0]:
+            release_db = ai_gateway.SessionLocal()
+            try:
+                ai_gateway.release_budget_slot_reservation(
+                    release_db, current_user.username, slot_date
+                )
+            finally:
+                release_db.close()
+
     def event_stream():
+        _generator_started[0] = True
         final_answer = None
         try:
             for event in ai_gateway.run_copilot(
@@ -183,6 +217,8 @@ def send_message(
                 # Shop-scope server-side uit het gesprek — nooit uit modeloutput
                 shop_id=conv.shop_id,
                 history_summary=history_summary,
+                slot_date=slot_date,
+                max_tokens=max_tokens,
             ):
                 if event.get("type") == "answer":
                     final_answer = event["answer"]
@@ -221,6 +257,10 @@ def send_message(
         except Exception:
             pass
 
+    # Achtergrondtaak: geef reservering terug als de generator nooit is gestart
+    # (client-disconnect vóór eerste byte, of pre-stream fout na message-save).
+    background_tasks.add_task(_release_if_never_started)
+
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
@@ -249,6 +289,24 @@ def list_model_calls(
         "total_tokens": r.total_tokens, "llm_roundtrips": r.llm_roundtrips,
         "duration_ms": r.duration_ms, "status": r.status,
         "error_message": r.error_message,
+    } for r in rows]
+
+@router.get("/budget/config")
+def list_budget_configs(
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth_utils.require_role("admin")),
+):
+    """Haal alle geconfigureerde AI-budgetten op (admin)."""
+    rows = db.query(models.AiBudgetConfig).order_by(
+        models.AiBudgetConfig.username.nullsfirst()
+    ).all()
+    return [{
+        "id": r.id,
+        "username": r.username,  # None = globale standaard
+        "max_calls_per_day": r.max_calls_per_day,
+        "max_tokens_per_day": r.max_tokens_per_day,
+        "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        "updated_by": r.updated_by,
     } for r in rows]
 
 
@@ -430,4 +488,126 @@ def quality_dashboard(
         "per_tool": per_tool,
         "low_scoring": low_out,
         "open_improvement_suggestions": int(suggestions_open),
+    }
+
+@router.get("/budget/usage")
+def budget_usage_today(
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth_utils.require_role("admin")),
+):
+    """
+    Verbruiksoverzicht voor vandaag vanuit de reserveringsslots (§34).
+    Toont per gebruiker: gereserveerde calls/tokens, werkelijk verbruik en limiet.
+    """
+    today = date.today()
+
+    # Overschrijdingen tellen vanuit AiModelCall
+    exceeded_rows = db.query(
+        models.AiModelCall.username,
+        func.sum(
+            case((models.AiModelCall.status == "budget_exceeded", 1), else_=0)
+        ).label("exceeded_count"),
+    ).filter(
+        func.date(models.AiModelCall.timestamp) == today,
+    ).group_by(models.AiModelCall.username).all()
+    exceeded_map = {r.username: int(r.exceeded_count or 0) for r in exceeded_rows}
+
+    # Slot-tabel als primaire bron voor gereserveerde counts
+    slots = db.query(models.AiBudgetSlot).filter(
+        models.AiBudgetSlot.slot_date == today,
+    ).all()
+
+    result = []
+    for slot in slots:
+        username = slot.username
+        max_calls, max_tokens = ai_gateway._get_budget_config(db, username)
+        result.append({
+            "username": username,
+            "calls_reserved": slot.calls_reserved,
+            "tokens_reserved": slot.tokens_reserved,
+            "tokens_actual": slot.tokens_actual,
+            "budget_exceeded_count": exceeded_map.get(username, 0),
+            "max_calls_per_day": max_calls,
+            "max_tokens_per_day": max_tokens,
+            "calls_pct": round(slot.calls_reserved / max_calls * 100, 1) if max_calls else None,
+            "tokens_pct": round(slot.tokens_reserved / max_tokens * 100, 1) if max_tokens else None,
+        })
+    return {"date": today.isoformat(), "users": result}
+
+@router.delete("/budget/config/{config_id}")
+def delete_budget_config(
+    config_id: int,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth_utils.require_role("admin")),
+):
+    """Verwijder een budgetlimiet (admin)."""
+    row = db.query(models.AiBudgetConfig).filter(
+        models.AiBudgetConfig.id == config_id
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Budgetconfiguratie niet gevonden")
+    db.delete(row)
+    db.commit()
+    return {"message": "Budgetconfiguratie verwijderd"}
+
+@router.put("/budget/config")
+def upsert_budget_config(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role("admin")),
+):
+    """
+    Maak een budgetlimiet aan of update hem.
+    Body: { username?: string|null, max_calls_per_day?: int|null, max_tokens_per_day?: int|null }
+    username=null → globale standaard; weglaten van een veld behoudt de huidige waarde.
+    """
+    username = payload.get("username")  # None of een string
+    row = db.query(models.AiBudgetConfig).filter(
+        models.AiBudgetConfig.username == username
+        if username is not None
+        else models.AiBudgetConfig.username.is_(None)
+    ).first()
+    if row is None:
+        row = models.AiBudgetConfig(username=username)
+        db.add(row)
+
+    if "max_calls_per_day" in payload:
+        v = payload["max_calls_per_day"]
+        if v is not None:
+            try:
+                v = int(v)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=422, detail="max_calls_per_day moet een geheel getal zijn")
+            if v < 1:
+                raise HTTPException(status_code=422, detail="max_calls_per_day moet minimaal 1 zijn")
+        row.max_calls_per_day = v
+    if "max_tokens_per_day" in payload:
+        v = payload["max_tokens_per_day"]
+        if v is not None:
+            try:
+                v = int(v)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=422, detail="max_tokens_per_day moet een geheel getal zijn")
+            min_tokens = ai_gateway._UPFRONT_TOKEN_RESERVATION
+            if v < min_tokens:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"max_tokens_per_day moet minimaal {min_tokens:,} zijn "
+                        f"(de upfront-reservering per verzoek). "
+                        "Een lagere waarde zou alle verzoeken permanent blokkeren."
+                    ),
+                )
+        row.max_tokens_per_day = v
+    row.updated_by = current_user.username
+
+    db.commit()
+    db.refresh(row)
+    return {
+        "id": row.id,
+        "username": row.username,
+        "max_calls_per_day": row.max_calls_per_day,
+        "max_tokens_per_day": row.max_tokens_per_day,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        "updated_by": row.updated_by,
     }

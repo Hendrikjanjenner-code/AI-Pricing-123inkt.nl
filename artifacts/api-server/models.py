@@ -2299,6 +2299,53 @@ class AiModelCall(Base):
     error_message = Column(Text)
     prompt_version_id = Column(Integer, index=True)  # gebruikte PromptVersion (§48)
 
+class AiBudgetConfig(Base):
+    """
+    Dagelijkse AI-budgetlimieten (§34) per gebruiker of als globale standaard.
+
+    - username=None  →  globale standaard (geldt voor alle gebruikers zonder eigen rij)
+    - username=<naam> →  gebruikersspecifieke override
+    - max_calls_per_day  = None  →  geen limiet voor calls
+    - max_tokens_per_day = None  →  geen limiet voor tokens
+
+    De globale singleton (username IS NULL) wordt afgedwongen via een partial
+    unique index (zie migrate.py). SQLAlchemy's unique=True op een nullable
+    kolom voorkomt dit niet in PostgreSQL.
+    """
+    __tablename__ = "ai_budget_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # unique=True hier bewust NIET: de partial unique index in migrate.py
+    # dwingt de singleton-beperking correct af in PostgreSQL.
+    username = Column(String(100), nullable=True, index=True)
+    # None = geen limiet actief
+    max_calls_per_day = Column(Integer, nullable=True)
+    max_tokens_per_day = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = Column(String(100))
+
+class AiBudgetSlot(Base):
+    """
+    Atomisch reserveringsregister voor AI-budgetten (§34): één rij per
+    (gebruiker, dag). Vóór elke LLM-call worden calls_reserved en
+    tokens_reserved atomisch verhoogd met SELECT FOR UPDATE. Na de call
+    wordt tokens_actual bijgewerkt met het werkelijke verbruik.
+
+    De combinatie (username, slot_date) is uniek (zie UniqueConstraint).
+    """
+    __tablename__ = "ai_budget_slots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(100), nullable=False, index=True)
+    slot_date = Column(Date, nullable=False)
+    calls_reserved = Column(Integer, default=0, nullable=False)
+    tokens_reserved = Column(Integer, default=0, nullable=False)
+    tokens_actual = Column(Integer, default=0, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("username", "slot_date", name="uq_ai_budget_slots_user_date"),
+    )
+
 class AiFeedback(Base):
     """
     Feedback op één Copilot-antwoord (leerloop): duim omhoog/omlaag met

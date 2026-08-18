@@ -23,12 +23,13 @@ import logging
 import os
 import re
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Generator, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import func
+from sqlalchemy import func, and_
 from sqlalchemy.orm import Session
+from database import SessionLocal
 
 import models
 from semantic_layer import SEMANTIC_FUNCTIONS
@@ -38,6 +39,7 @@ logger = logging.getLogger("uvicorn.error")
 AI_MODEL = os.environ.get("AI_COPILOT_MODEL", "gpt-5.1")
 MAX_TOOL_ROUNDS = 6
 MAX_HISTORY_MESSAGES = 12
+SUMMARY_KEEP_RECENT = 4   # laatste N berichten niet meenemen in samenvatting (behoud context)
 LLM_TIMEOUT_SECONDS = 90
 FEWSHOT_LIMIT = 5       # max aantal few-shot voorbeelden uit positieve feedback
 MAX_MEMORY_ITEMS = 20   # max AiUserMemory-regels in context
@@ -305,8 +307,58 @@ def build_tools() -> list[dict]:
     return tools
 
 
-# ─── Data-versheid ───────────────────────────────────────────────────────────
+# ─── Dagelijks budgetbewaking (§34) ─────────────────────────────────────────
 
+DEFAULT_MAX_CALLS_PER_DAY = int(os.environ.get("AI_MAX_CALLS_PER_DAY", "50"))
+DEFAULT_MAX_TOKENS_PER_DAY = int(os.environ.get("AI_MAX_TOKENS_PER_DAY", "500000"))
+
+# Worst-case tokenreservering per aanvraag, upfront vergrendeld vóór de eerste
+# LLM-aanroep. Dekt alle MAX_TOOL_ROUNDS rondes inclusief invoertokens:
+#   - Voltooiingstokens: MAX_TOOL_ROUNDS × max_completion_tokens (8192) = 49.152
+#   - Invoertokens (systeem-prompt, geschiedenis, toolresultaten): vergelijkbaar
+# Totale reservering = MAX_TOOL_ROUNDS × 8192 × 2 ≈ 98.304 tokens.
+# reconcile_budget_slot() geeft het ongebruikte deel terug na de call.
+_MAX_COMPLETION_PER_CALL = 8192                                      # max_completion_tokens
+_UPFRONT_TOKEN_RESERVATION = MAX_TOOL_ROUNDS * _MAX_COMPLETION_PER_CALL * 2  # ≈ 98_304
+
+# Kleinere reservering voor interne hulp-calls (samenvatting, geheugenextractie):
+# max_completion_tokens=1024, transcript ≤ 20 000 chars ≈ 5 000 tokens invoer.
+# Worst case ≈ 6 024; we reserveren één rondebudget (8 192) als veiligheidsmarge.
+_UPFRONT_AUXILIARY_RESERVATION = _MAX_COMPLETION_PER_CALL  # 8_192
+
+def _get_budget_config(db: Session, username: str) -> tuple[Optional[int], Optional[int]]:
+    """Haal de effectieve limiet op: gebruikersspecifiek → globaal → env-standaard."""
+    user_row = db.query(models.AiBudgetConfig).filter(
+        models.AiBudgetConfig.username == username
+    ).first()
+    if user_row:
+        return user_row.max_calls_per_day, user_row.max_tokens_per_day
+
+    global_row = db.query(models.AiBudgetConfig).filter(
+        models.AiBudgetConfig.username.is_(None)
+    ).first()
+    if global_row:
+        return global_row.max_calls_per_day, global_row.max_tokens_per_day
+
+    return DEFAULT_MAX_CALLS_PER_DAY, DEFAULT_MAX_TOKENS_PER_DAY
+
+def _log_budget_exceeded(username: str, user_role: str, reason: str) -> None:
+    """Log een budgetoverschrijding in een aparte kortstondige sessie."""
+    log_db = SessionLocal()
+    try:
+        log_db.add(models.AiModelCall(
+            username=username, user_role=user_role,
+            purpose="copilot_question", provider="none",
+            model=AI_MODEL, prompt_tokens=0, completion_tokens=0,
+            total_tokens=0, llm_roundtrips=0, duration_ms=0,
+            status="budget_exceeded", error_message=reason,
+        ))
+        log_db.commit()
+    except Exception as exc:
+        logger.warning("Logging budget_exceeded mislukt: %s", exc)
+        log_db.rollback()
+    finally:
+        log_db.close()
 def get_data_freshness(db: Session) -> dict:
     """Laatste datum per kernbron; onderdeel van elk Copilot-antwoord."""
     def _max(col):
@@ -441,6 +493,8 @@ def run_copilot(
     purpose: str = "copilot_question",
     shop_id: Optional[int] = None,
     history_summary: Optional[str] = None,
+    slot_date: Optional[date] = None,
+    max_tokens: Optional[int] = None,
 ) -> Generator[dict, None, None]:
     """
     Voer de volledige gateway-pipeline uit en yield events:
@@ -462,118 +516,169 @@ def run_copilot(
     system_prompt, prompt_version_id, prompt_version = get_active_prompt(db)
 
     client, provider = _make_client()
-    if client is None:
-        status = "unavailable"
-        answer = _default_answer(
-            "De AI-dienst is momenteel niet geconfigureerd. De rest van de applicatie "
-            "werkt gewoon door; alle dashboards en modules blijven beschikbaar.",
-            ["AI-integratie (Replit AI) is niet geconfigureerd — geen LLM-call uitgevoerd."],
-            freshness,
-        )
+
+    # _log_call zit in een finally-blok zodat het ook bij vroegtijdige sluiting
+    # van de generator (client-disconnect, generator.close()) altijd wordt
+    # aangeroepen — en daarmee ook reconcile_budget_slot (§34). Het is
+    # gegarandeerd exactly-once: de return in het no-provider-pad bereikt
+    # alsnog de finally voordat de generator stopt.
+    try:
+        if client is None:
+            status = "unavailable"
+            answer = _default_answer(
+                "De AI-dienst is momenteel niet geconfigureerd. De rest van de applicatie "
+                "werkt gewoon door; alle dashboards en modules blijven beschikbaar.",
+                ["AI-integratie (Replit AI) is niet geconfigureerd — geen LLM-call uitgevoerd."],
+                freshness,
+            )
+            answer["prompt_version_id"] = prompt_version_id
+            answer["prompt_version"] = prompt_version
+            yield {"type": "answer", "answer": answer}
+            error_message = "AI-provider niet geconfigureerd"
+            return  # finally loopt alsnog na return in een generator
+
+        # PII-scrub op ALLE tekst richting het model (§31): ook de vraag en de
+        # gespreksgeschiedenis kunnen door de gebruiker ingevoerde
+        # persoonsgegevens bevatten (e-mail, telefoonnummer, ...).
+        messages = build_messages(db, user, history, question,
+                                  system_prompt=system_prompt,
+                                  history_summary=history_summary)
+        tools = build_tools()
+
+        try:
+            yield {"type": "status", "message": "Vraag analyseren…"}
+            for _round in range(MAX_TOOL_ROUNDS):
+                # Pre-ronde schatting (§34): controleer vóór de LLM-aanroep of de
+                # berichten nog binnen de per-verzoek tokenruimte passen. Dit voorkomt
+                # dat grote tool-outputs de reservering overschrijden door ook de
+                # invoertokens mee te tellen vóór de call in plaats van alleen erna.
+                if max_tokens is not None:
+                    est_prompt = len(json.dumps(messages, default=str)) // 4
+                    if (usage["total_tokens"] + est_prompt + _MAX_COMPLETION_PER_CALL
+                            > _UPFRONT_TOKEN_RESERVATION):
+                        answer = _default_answer(
+                            "De beschikbare tokenruimte voor dit verzoek is bijna op. "
+                            "Stel een kortere of specifiekere vraag om binnen het "
+                            "dagbudget te blijven.",
+                            [f"Geschatte prompt ({est_prompt:,} tokens) + "
+                             f"voltooiing ({_MAX_COMPLETION_PER_CALL:,}) zou de "
+                             f"reservering ({_UPFRONT_TOKEN_RESERVATION:,} tokens) "
+                             "overschrijden."],
+                            freshness,
+                        )
+                        status = "budget_exceeded"
+                        break
+
+                resp = client.chat.completions.create(
+                    model=AI_MODEL,
+                    max_completion_tokens=_MAX_COMPLETION_PER_CALL,
+                    messages=messages,
+                    tools=tools,
+                )
+                roundtrips += 1
+                if resp.usage:
+                    usage["prompt_tokens"] += resp.usage.prompt_tokens or 0
+                    usage["completion_tokens"] += resp.usage.completion_tokens or 0
+                    usage["total_tokens"] += resp.usage.total_tokens or 0
+
+                # Post-ronde tokencontrole (§34): stop verdere rondes zodra dit
+                # verzoek zijn upfront-reservering heeft opgebruikt. Door te
+                # vergelijken met _UPFRONT_TOKEN_RESERVATION (de per-verzoek
+                # toewijzing) in plaats van max_tokens (de dagelijkse limiet)
+                # wordt ook het eerder door andere verzoeken verbruikte dagbudget
+                # correct meegewogen: de toewijzing is immer gelijk aan de
+                # reservering, ongeacht hoeveel tokens eerder die dag zijn gebruikt.
+                if max_tokens is not None and usage["total_tokens"] >= _UPFRONT_TOKEN_RESERVATION:
+                    answer = _default_answer(
+                        "De tokenruimte voor dit verzoek is bereikt. Stel een kortere of "
+                        "specifiekere vraag, of neem contact op met een beheerder voor een "
+                        "hogere dagelijkse limiet.",
+                        [f"Verzoek-tokenlimiet bereikt "
+                         f"({usage['total_tokens']:,} ≥ {_UPFRONT_TOKEN_RESERVATION:,} tokens)."],
+                        freshness,
+                    )
+                    status = "budget_exceeded"
+                    break
+
+                msg = resp.choices[0].message
+
+                if msg.tool_calls:
+                    messages.append({
+                        "role": "assistant",
+                        "content": msg.content,
+                        "tool_calls": [tc.model_dump() for tc in msg.tool_calls],
+                    })
+                    for tc in msg.tool_calls:
+                        try:
+                            args = json.loads(tc.function.arguments or "{}")
+                        except json.JSONDecodeError:
+                            args = {}
+                        yield {"type": "status", "message": f"Data ophalen: {tc.function.name}…"}
+                        result, meta = _execute_tool(db, user, tc.function.name, args,
+                                                     shop_id=shop_id)
+                        calls_meta.append(meta)
+                        yield {"type": "tool", "name": tc.function.name,
+                               "records": meta.get("records"), "data_source": meta.get("data_source")}
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": json.dumps(result, default=str)[:60000],
+                        })
+                    continue
+
+                # Geen tool-calls meer: dit is het eindantwoord
+                raw = (msg.content or "").strip()
+                answer = _parse_answer(raw)
+                break
+
+            if answer is None:
+                answer = _default_answer(
+                    "Het maximum aantal analysestappen is bereikt zonder eindantwoord. "
+                    "Stel de vraag specifieker (bv. met een SKU of categorie).",
+                    ["Tool-limiet bereikt zonder afgerond antwoord."], freshness)
+                status = "failed"
+        except Exception as exc:
+            logger.error("AI Gateway LLM-fout: %s", exc)
+            status = "failed"
+            error_message = str(exc)[:500]
+            answer = _default_answer(
+                "De AI-dienst is tijdelijk niet bereikbaar. Probeer het over enkele "
+                "minuten opnieuw — alle overige modules blijven gewoon werken.",
+                ["LLM-storing: het antwoord kon niet worden gegenereerd (§56 fail-safe)."],
+                freshness,
+            )
+
+        # Verrijk het antwoord met gateway-metadata (bronnen, versheid, records)
+        answer.setdefault("warnings", [])
+        answer.setdefault("limitations", [])
+        answer["sources"] = [
+            {"function": m["name"], "data_source": m.get("data_source") or "postgresql",
+             "records": m.get("records")}
+            for m in calls_meta
+        ]
+        answer["data_freshness"] = freshness
+        answer["records"] = sum(int(m.get("records") or 0) for m in calls_meta)
+        if not calls_meta and status == "success":
+            answer["warnings"].append("Dit antwoord is niet onderbouwd met platformdata (geen tool-calls).")
+            answer["confidence"] = min(float(answer.get("confidence") or 0), 0.3)
         answer["prompt_version_id"] = prompt_version_id
         answer["prompt_version"] = prompt_version
+        for k in ANSWER_KEYS:
+            answer.setdefault(k, None)
+
+        # Belt-and-braces: ook het eindantwoord zelf wordt gescrubd vóór
+        # weergave en persistentie (het model kan PII uit de vraag echoën).
+        answer = pii_scrub(answer)
+
         yield {"type": "answer", "answer": answer}
+
+    finally:
+        # Gegarandeerd aangeroepen: normaal einde, vroegtijdig sluiten (disconnect),
+        # en het no-provider return-pad. reconcile_budget_slot loopt hier altijd.
+        # slot_date wordt doorgegeven zodat reconciliatie de juiste dag bijwerkt.
         _log_call(db, user, conversation_id, purpose, provider or "none", calls_meta,
-                  usage, roundtrips, started, status, "AI-provider niet geconfigureerd",
-                  prompt_version_id=prompt_version_id)
-        return
-
-    # PII-scrub op ALLE tekst richting het model (§31): ook de vraag en de
-    # gespreksgeschiedenis kunnen door de gebruiker ingevoerde
-    # persoonsgegevens bevatten (e-mail, telefoonnummer, ...).
-    messages = build_messages(db, user, history, question,
-                              system_prompt=system_prompt,
-                              history_summary=history_summary)
-    tools = build_tools()
-
-    try:
-        yield {"type": "status", "message": "Vraag analyseren…"}
-        for _round in range(MAX_TOOL_ROUNDS):
-            resp = client.chat.completions.create(
-                model=AI_MODEL,
-                max_completion_tokens=8192,
-                messages=messages,
-                tools=tools,
-            )
-            roundtrips += 1
-            if resp.usage:
-                usage["prompt_tokens"] += resp.usage.prompt_tokens or 0
-                usage["completion_tokens"] += resp.usage.completion_tokens or 0
-                usage["total_tokens"] += resp.usage.total_tokens or 0
-            msg = resp.choices[0].message
-
-            if msg.tool_calls:
-                messages.append({
-                    "role": "assistant",
-                    "content": msg.content,
-                    "tool_calls": [tc.model_dump() for tc in msg.tool_calls],
-                })
-                for tc in msg.tool_calls:
-                    try:
-                        args = json.loads(tc.function.arguments or "{}")
-                    except json.JSONDecodeError:
-                        args = {}
-                    yield {"type": "status", "message": f"Data ophalen: {tc.function.name}…"}
-                    result, meta = _execute_tool(db, user, tc.function.name, args,
-                                                 shop_id=shop_id)
-                    calls_meta.append(meta)
-                    yield {"type": "tool", "name": tc.function.name,
-                           "records": meta.get("records"), "data_source": meta.get("data_source")}
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": json.dumps(result, default=str)[:60000],
-                    })
-                continue
-
-            # Geen tool-calls meer: dit is het eindantwoord
-            raw = (msg.content or "").strip()
-            answer = _parse_answer(raw)
-            break
-
-        if answer is None:
-            answer = _default_answer(
-                "Het maximum aantal analysestappen is bereikt zonder eindantwoord. "
-                "Stel de vraag specifieker (bv. met een SKU of categorie).",
-                ["Tool-limiet bereikt zonder afgerond antwoord."], freshness)
-            status = "failed"
-    except Exception as exc:
-        logger.error("AI Gateway LLM-fout: %s", exc)
-        status = "failed"
-        error_message = str(exc)[:500]
-        answer = _default_answer(
-            "De AI-dienst is tijdelijk niet bereikbaar. Probeer het over enkele "
-            "minuten opnieuw — alle overige modules blijven gewoon werken.",
-            ["LLM-storing: het antwoord kon niet worden gegenereerd (§56 fail-safe)."],
-            freshness,
-        )
-
-    # Verrijk het antwoord met gateway-metadata (bronnen, versheid, records)
-    answer.setdefault("warnings", [])
-    answer.setdefault("limitations", [])
-    answer["sources"] = [
-        {"function": m["name"], "data_source": m.get("data_source") or "postgresql",
-         "records": m.get("records")}
-        for m in calls_meta
-    ]
-    answer["data_freshness"] = freshness
-    answer["records"] = sum(int(m.get("records") or 0) for m in calls_meta)
-    if not calls_meta and status == "success":
-        answer["warnings"].append("Dit antwoord is niet onderbouwd met platformdata (geen tool-calls).")
-        answer["confidence"] = min(float(answer.get("confidence") or 0), 0.3)
-    answer["prompt_version_id"] = prompt_version_id
-    answer["prompt_version"] = prompt_version
-    for k in ANSWER_KEYS:
-        answer.setdefault(k, None)
-
-    # Belt-and-braces: ook het eindantwoord zelf wordt gescrubd vóór
-    # weergave en persistentie (het model kan PII uit de vraag echoën).
-    answer = pii_scrub(answer)
-
-    yield {"type": "answer", "answer": answer}
-    _log_call(db, user, conversation_id, purpose, provider, calls_meta, usage,
-              roundtrips, started, status, error_message,
-              prompt_version_id=prompt_version_id)
+                  usage, roundtrips, started, status, error_message,
+                  prompt_version_id=prompt_version_id, slot_date=slot_date)
 
 
 def _parse_answer(raw: str) -> dict:
@@ -602,12 +707,27 @@ def _parse_answer(raw: str) -> dict:
             "warnings": [], "links": []}
 
 
-def _log_call(db: Session, user: models.User, conversation_id: Optional[int],
-              purpose: str, provider: str, calls_meta: list[dict], usage: dict,
-              roundtrips: int, started: float, status: str,
-              error_message: Optional[str],
-              prompt_version_id: Optional[int] = None) -> None:
-    """Log de gateway-call in AiModelCall + CostUsageRecord. Faalt stil-veilig."""
+def _log_call(
+    db: Session,
+    user: models.User,
+    conversation_id: Optional[int],
+    purpose: str,
+    provider: str,
+    calls_meta: list[dict],
+    usage: dict,
+    roundtrips: int,
+    started: float,
+    status: str,
+    error_message: Optional[str],
+    prompt_version_id: Optional[int] = None,
+    slot_date: Optional[date] = None,
+    reserved_tokens: int = _UPFRONT_TOKEN_RESERVATION,
+) -> None:
+    """Log de gateway-call in AiModelCall + CostUsageRecord. Faalt stil-veilig.
+
+    reserved_tokens moet overeenkomen met het bedrag dat bij reservering is
+    geboekt. Primaire calls gebruiken _UPFRONT_TOKEN_RESERVATION; hulp-calls
+    (samenvatting, geheugen) geven _UPFRONT_AUXILIARY_RESERVATION mee."""
     duration_ms = round((time.time() - started) * 1000, 1)
     datasources = sorted({m.get("data_source") or "postgresql" for m in calls_meta}) if calls_meta else []
     try:
@@ -629,6 +749,15 @@ def _log_call(db: Session, user: models.User, conversation_id: Optional[int],
             tokens_in=usage["prompt_tokens"], tokens_out=usage["completion_tokens"],
             quantity=1.0,
         ))
+        # Reconcilieer het slot-budget met het werkelijke tokenverbruik (§34).
+        # slot_date wordt doorgegeven zodat een call die net na middernacht eindigt
+        # de reservering van de juiste dag bijwerkt.
+        # Alleen reconciliëren als er een reservering is gemaakt (slot_date is None
+        # voor interne calls zonder slot, maar hulp-calls geven altijd hun slot_date mee).
+        if slot_date is not None:
+            reconcile_budget_slot(db, user.username, usage["total_tokens"],
+                                  slot_date=slot_date,
+                                  reserved_tokens=reserved_tokens)
         db.commit()
     except Exception as exc:
         logger.warning("AI Gateway-logging mislukt: %s", exc)
@@ -637,10 +766,160 @@ def _log_call(db: Session, user: models.User, conversation_id: Optional[int],
         except Exception:
             pass
 
+def check_and_reserve_budget(
+    username: str, user_role: str
+) -> tuple[date, Optional[int]]:
+    """
+    Atomisch budgetbewaking vóór elke LLM-call (§34).
+
+    Opent een eigen kortstondige sessie (onafhankelijk van de request-sessie)
+    en gebruikt SELECT FOR UPDATE zodat parallelle verzoeken nooit tegelijk
+    doorheen glippen. Reserveert _UPFRONT_TOKEN_RESERVATION tokens per call
+    zodat het dagbudget ook niet overschreden kan worden door één grote call
+    die pas achteraf wordt geteld.
+
+    Gooit HTTPException 429 met een Nederlandse foutmelding bij overschrijding.
+    Geeft (slot_date, max_tokens) terug zodat de beller dezelfde datum en limiet
+    kan doorgeven aan run_copilot (correcte reconciliatie bij middernacht) en
+    per-ronde token-controles kan uitvoeren.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    today = date.today()
+    db = SessionLocal()
+    try:
+        # 1. Haal limieten op (niet-lockend; config wijzigt zelden)
+        max_calls, max_tokens = _get_budget_config(db, username)
+
+        # 2. Zorg dat de slot-rij voor vandaag bestaat (INSERT OR IGNORE)
+        db.execute(
+            pg_insert(models.AiBudgetSlot).values(
+                username=username, slot_date=today,
+                calls_reserved=0, tokens_reserved=0, tokens_actual=0,
+            ).on_conflict_do_nothing()
+        )
+        db.flush()
+
+        # 3. Lock de slot-rij zodat gelijktijdige verzoeken serialiseren
+        slot = db.query(models.AiBudgetSlot).filter(
+            models.AiBudgetSlot.username == username,
+            models.AiBudgetSlot.slot_date == today,
+        ).with_for_update().one()
+
+        # 4. Controleer limieten en reserveer atomisch
+        exceeded_reason: Optional[str] = None
+        if max_calls is not None and slot.calls_reserved >= max_calls:
+            exceeded_reason = (
+                f"dagelijkse call-limiet bereikt ({slot.calls_reserved}/{max_calls} calls)"
+            )
+        elif max_tokens is not None and (
+            slot.tokens_reserved + _UPFRONT_TOKEN_RESERVATION > max_tokens
+        ):
+            exceeded_reason = (
+                f"dagelijkse token-limiet bereikt ("
+                f"{slot.tokens_reserved:,} gereserveerd "
+                f"+ {_UPFRONT_TOKEN_RESERVATION:,} nodig "
+                f"> {max_tokens:,} limiet)"
+            )
+
+        if exceeded_reason:
+            db.rollback()
+            logger.warning(
+                "AI-budgetlimiet overschreden voor gebruiker '%s': %s",
+                username, exceeded_reason,
+            )
+            _log_budget_exceeded(username, user_role, exceeded_reason)
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"Je hebt je dagelijkse AI-limiet bereikt ({exceeded_reason}). "
+                    "Je kunt morgen weer vragen stellen. Neem contact op met een beheerder "
+                    "als je een hogere limiet nodig hebt."
+                ),
+            )
+
+        # 5. Reserveer atomisch (binnen de FOR UPDATE lock)
+        slot.calls_reserved += 1
+        slot.tokens_reserved += _UPFRONT_TOKEN_RESERVATION
+        db.commit()
+        return today, max_tokens
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("check_and_reserve_budget fout: %s", exc)
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _try_reserve_auxiliary_budget(username: str, user_role: str) -> Optional[date]:
+    """
+    Fail-safe budgetreservering voor interne hulp-calls (samenvatting,
+    geheugenextractie). Reserveert _UPFRONT_AUXILIARY_RESERVATION tokens.
+
+    Geeft de slot_date terug als er ruimte is, of None als het budget op is
+    (dan wordt de hulp-call overgeslagen). Gooit nooit een HTTPException.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    today = date.today()
+    db = SessionLocal()
+    try:
+        max_calls, max_tokens = _get_budget_config(db, username)
+
+        db.execute(
+            pg_insert(models.AiBudgetSlot).values(
+                username=username, slot_date=today,
+                calls_reserved=0, tokens_reserved=0, tokens_actual=0,
+            ).on_conflict_do_nothing()
+        )
+        db.flush()
+
+        slot = db.query(models.AiBudgetSlot).filter(
+            models.AiBudgetSlot.username == username,
+            models.AiBudgetSlot.slot_date == today,
+        ).with_for_update().one()
+
+        if max_calls is not None and slot.calls_reserved >= max_calls:
+            logger.info(
+                "Hulp-call overgeslagen voor '%s': call-limiet bereikt (%d/%d)",
+                username, slot.calls_reserved, max_calls,
+            )
+            db.rollback()
+            return None
+        if max_tokens is not None and (
+            slot.tokens_reserved + _UPFRONT_AUXILIARY_RESERVATION > max_tokens
+        ):
+            logger.info(
+                "Hulp-call overgeslagen voor '%s': token-limiet bereikt (%d + %d > %d)",
+                username, slot.tokens_reserved, _UPFRONT_AUXILIARY_RESERVATION, max_tokens,
+            )
+            db.rollback()
+            return None
+
+        slot.calls_reserved += 1
+        slot.tokens_reserved += _UPFRONT_AUXILIARY_RESERVATION
+        db.commit()
+        return today
+
+    except Exception as exc:
+        logger.warning("_try_reserve_auxiliary_budget fout: %s", exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return None
+    finally:
+        db.close()
+
+
 def maybe_summarize_conversation(db: Session, user: models.User,
                                  conversation_id: int) -> None:
     """Vat oudere berichten van een lang gesprek samen (i.p.v. afkappen).
-    Fail-safe: fouten worden gelogd, nooit doorgegeven."""
+    Fail-safe: fouten worden gelogd, nooit doorgegeven.
+    Controleer en reserveer budget vóór de LLM-call (§34)."""
     try:
         msgs = (db.query(models.AiMessage)
                 .filter(models.AiMessage.conversation_id == conversation_id)
@@ -653,40 +932,59 @@ def maybe_summarize_conversation(db: Session, user: models.User,
                     .first())
         if existing and existing.upto_message_id == older[-1].id:
             return  # al actueel
-        client, provider = _make_client()
-        if client is None:
+        # Budgetcontrole vóór de LLM-aanroep (fail-safe: overslaan bij overschrijding)
+        aux_slot_date = _try_reserve_auxiliary_budget(user.username, user.role)
+        if aux_slot_date is None:
+            logger.info("Gesprekssamenvatting overgeslagen: budgetlimiet bereikt voor '%s'",
+                        user.username)
             return
+        # try/finally garandeert altijd reconciliatie — ook als _make_client None geeft
+        # of de LLM-aanroep mislukt — zodat de gereserveerde tokens vrijkomen.
         started = time.time()
-        transcript = "\n".join(
-            f"{m.role}: {pii_scrub(m.content or '')[:1000]}" for m in older)[:20000]
-        prev = f"Bestaande samenvatting:\n{existing.summary}\n\n" if existing else ""
-        resp = client.chat.completions.create(
-            model=AI_MODEL, max_completion_tokens=1024,
-            messages=[
-                {"role": "system", "content":
-                 "Vat het onderstaande Copilot-gesprek beknopt samen in het Nederlands "
-                 "(max 10 zinnen): welke vragen zijn gesteld, welke conclusies en cijfers "
-                 "zijn gegeven, en welke voorkeuren toont de gebruiker. Geen opmaak."},
-                {"role": "user", "content": prev + transcript},
-            ])
-        summary = (resp.choices[0].message.content or "").strip()
-        if not summary:
-            return
-        summary = _scrub_text(summary)
-        if existing:
-            existing.summary = summary
-            existing.upto_message_id = older[-1].id
-            existing.updated_at = datetime.utcnow()
-        else:
-            db.add(models.AiConversationSummary(
-                conversation_id=conversation_id, summary=summary,
-                upto_message_id=older[-1].id))
-        db.commit()
-        usage = {"prompt_tokens": (resp.usage.prompt_tokens or 0) if resp.usage else 0,
-                 "completion_tokens": (resp.usage.completion_tokens or 0) if resp.usage else 0,
-                 "total_tokens": (resp.usage.total_tokens or 0) if resp.usage else 0}
-        _log_call(db, user, conversation_id, "conversation_summary", provider,
-                  [], usage, 1, started, "success", None)
+        usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        provider = "none"
+        status = "error"
+        error_msg: Optional[str] = None
+        try:
+            client, provider = _make_client()
+            if client is None:
+                return  # finally-blok zorgt voor reconciliatie
+            transcript = "\n".join(
+                f"{m.role}: {pii_scrub(m.content or '')[:1000]}" for m in older)[:20000]
+            prev = f"Bestaande samenvatting:\n{existing.summary}\n\n" if existing else ""
+            resp = client.chat.completions.create(
+                model=AI_MODEL, max_completion_tokens=1024,
+                messages=[
+                    {"role": "system", "content":
+                     "Vat het onderstaande Copilot-gesprek beknopt samen in het Nederlands "
+                     "(max 10 zinnen): welke vragen zijn gesteld, welke conclusies en cijfers "
+                     "zijn gegeven, en welke voorkeuren toont de gebruiker. Geen opmaak."},
+                    {"role": "user", "content": prev + transcript},
+                ])
+            summary = (resp.choices[0].message.content or "").strip()
+            usage = {"prompt_tokens": (resp.usage.prompt_tokens or 0) if resp.usage else 0,
+                     "completion_tokens": (resp.usage.completion_tokens or 0) if resp.usage else 0,
+                     "total_tokens": (resp.usage.total_tokens or 0) if resp.usage else 0}
+            if summary:
+                summary = _scrub_text(summary)
+                if existing:
+                    existing.summary = summary
+                    existing.upto_message_id = older[-1].id
+                    existing.updated_at = datetime.utcnow()
+                else:
+                    db.add(models.AiConversationSummary(
+                        conversation_id=conversation_id, summary=summary,
+                        upto_message_id=older[-1].id))
+                db.commit()
+            status = "success"
+        except Exception as exc:
+            error_msg = str(exc)
+            raise
+        finally:
+            _log_call(db, user, conversation_id, "conversation_summary", provider,
+                      [], usage, 1, started, status, error_msg,
+                      slot_date=aux_slot_date,
+                      reserved_tokens=_UPFRONT_AUXILIARY_RESERVATION)
     except Exception as exc:
         logger.warning("Gesprekssamenvatting mislukt: %s", exc)
         try:
@@ -698,7 +996,8 @@ def maybe_extract_memory(db: Session, user: models.User,
                          conversation_id: int) -> None:
     """Extraheer duurzame voorkeuren/context uit het gesprek en sla ze op als
     AiUserMemory (upsert per key). Draait elke MEMORY_EXTRACT_EVERY vragen.
-    Fail-safe: fouten worden gelogd, nooit doorgegeven."""
+    Fail-safe: fouten worden gelogd, nooit doorgegeven.
+    Controleer en reserveer budget vóór de LLM-call (§34)."""
     try:
         user_msgs = (db.query(models.AiMessage)
                      .filter(models.AiMessage.conversation_id == conversation_id,
@@ -706,57 +1005,77 @@ def maybe_extract_memory(db: Session, user: models.User,
                      .order_by(models.AiMessage.id).all())
         if not user_msgs or len(user_msgs) % MEMORY_EXTRACT_EVERY != 0:
             return
-        client, provider = _make_client()
-        if client is None:
+        # Budgetcontrole vóór de LLM-aanroep (fail-safe: overslaan bij overschrijding)
+        aux_slot_date = _try_reserve_auxiliary_budget(user.username, user.role)
+        if aux_slot_date is None:
+            logger.info("Geheugenextractie overgeslagen: budgetlimiet bereikt voor '%s'",
+                        user.username)
             return
+        # try/finally garandeert altijd reconciliatie — ook als _make_client None geeft
+        # of de LLM-aanroep mislukt — zodat de gereserveerde tokens vrijkomen.
         started = time.time()
-        recent = user_msgs[-(MEMORY_EXTRACT_EVERY * 2):]
-        transcript = "\n".join(f"- {pii_scrub(m.content or '')[:600]}" for m in recent)
-        resp = client.chat.completions.create(
-            model=AI_MODEL, max_completion_tokens=1024,
-            messages=[
-                {"role": "system", "content":
-                 "Je destilleert DUURZAME voorkeuren en vaste context van een commerciële "
-                 "gebruiker uit diens Copilot-vragen (bv. favoriete categorieën, vaste SKU's, "
-                 "KPI-definitievoorkeuren, gewenste periodes). GEEN eenmalige vragen of "
-                 "persoonsgegevens. Antwoord als JSON-array: "
-                 '[{"key": "korte_snake_case_sleutel", "value": "waarde"}]. '
-                 "Maximaal 5 items; lege array [] als er niets duurzaams is."},
-                {"role": "user", "content": transcript},
-            ])
-        raw = (resp.choices[0].message.content or "").strip()
-        if raw.startswith("```"):
-            raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
+        usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        provider = "none"
+        status = "error"
+        error_msg: Optional[str] = None
         try:
-            items = json.loads(raw)
-        except json.JSONDecodeError:
-            items = []
-        if not isinstance(items, list):
-            items = []
-        for it in items[:5]:
-            if not isinstance(it, dict):
-                continue
-            key = str(it.get("key") or "").strip()[:200]
-            value = _scrub_text(str(it.get("value") or "").strip())[:2000]
-            if not key or not value or _PII_KEY_PATTERN.search(key):
-                continue
-            row = (db.query(models.AiUserMemory)
-                   .filter(models.AiUserMemory.user_id == user.id,
-                           models.AiUserMemory.key == key).first())
-            if row:
-                row.value = value
-                row.source_conversation_id = conversation_id
-                row.updated_at = datetime.utcnow()
-            else:
-                db.add(models.AiUserMemory(
-                    user_id=user.id, key=key, value=value,
-                    source_conversation_id=conversation_id))
-        db.commit()
-        usage = {"prompt_tokens": (resp.usage.prompt_tokens or 0) if resp.usage else 0,
-                 "completion_tokens": (resp.usage.completion_tokens or 0) if resp.usage else 0,
-                 "total_tokens": (resp.usage.total_tokens or 0) if resp.usage else 0}
-        _log_call(db, user, conversation_id, "memory_extraction", provider,
-                  [], usage, 1, started, "success", None)
+            client, provider = _make_client()
+            if client is None:
+                return  # finally-blok zorgt voor reconciliatie
+            recent = user_msgs[-(MEMORY_EXTRACT_EVERY * 2):]
+            transcript = "\n".join(f"- {pii_scrub(m.content or '')[:600]}" for m in recent)
+            resp = client.chat.completions.create(
+                model=AI_MODEL, max_completion_tokens=1024,
+                messages=[
+                    {"role": "system", "content":
+                     "Je destilleert DUURZAME voorkeuren en vaste context van een commerciële "
+                     "gebruiker uit diens Copilot-vragen (bv. favoriete categorieën, vaste SKU's, "
+                     "KPI-definitievoorkeuren, gewenste periodes). GEEN eenmalige vragen of "
+                     "persoonsgegevens. Antwoord als JSON-array: "
+                     '[{"key": "korte_snake_case_sleutel", "value": "waarde"}]. '
+                     "Maximaal 5 items; lege array [] als er niets duurzaams is."},
+                    {"role": "user", "content": transcript},
+                ])
+            usage = {"prompt_tokens": (resp.usage.prompt_tokens or 0) if resp.usage else 0,
+                     "completion_tokens": (resp.usage.completion_tokens or 0) if resp.usage else 0,
+                     "total_tokens": (resp.usage.total_tokens or 0) if resp.usage else 0}
+            raw = (resp.choices[0].message.content or "").strip()
+            if raw.startswith("```"):
+                raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
+            try:
+                items = json.loads(raw)
+            except json.JSONDecodeError:
+                items = []
+            if not isinstance(items, list):
+                items = []
+            for it in items[:5]:
+                if not isinstance(it, dict):
+                    continue
+                key = str(it.get("key") or "").strip()[:200]
+                value = _scrub_text(str(it.get("value") or "").strip())[:2000]
+                if not key or not value or _PII_KEY_PATTERN.search(key):
+                    continue
+                row = (db.query(models.AiUserMemory)
+                       .filter(models.AiUserMemory.user_id == user.id,
+                               models.AiUserMemory.key == key).first())
+                if row:
+                    row.value = value
+                    row.source_conversation_id = conversation_id
+                    row.updated_at = datetime.utcnow()
+                else:
+                    db.add(models.AiUserMemory(
+                        user_id=user.id, key=key, value=value,
+                        source_conversation_id=conversation_id))
+            db.commit()
+            status = "success"
+        except Exception as exc:
+            error_msg = str(exc)
+            raise
+        finally:
+            _log_call(db, user, conversation_id, "memory_extraction", provider,
+                      [], usage, 1, started, status, error_msg,
+                      slot_date=aux_slot_date,
+                      reserved_tokens=_UPFRONT_AUXILIARY_RESERVATION)
     except Exception as exc:
         logger.warning("Geheugen-extractie mislukt: %s", exc)
         try:
@@ -836,3 +1155,83 @@ def _similarity(a: str, b: str) -> float:
     if not wa or not wb:
         return 0.0
     return len(wa & wb) / len(wa | wb)
+
+
+def reconcile_budget_slot(
+    db: Session,
+    username: str,
+    actual_tokens: int,
+    slot_date: Optional[date] = None,
+    reserved_tokens: int = _UPFRONT_TOKEN_RESERVATION,
+) -> None:
+    """
+    Werk tokens_actual bij en corrigeer de reservering (§34).
+
+    slot_date MOET de datum zijn die check_and_reserve_budget (of
+    _try_reserve_auxiliary_budget) heeft teruggegeven; anders werkt een call
+    die rond middernacht eindigt de reservering van de vorige dag bij.
+    Valt terug op date.today() als slot_date None is (backward-compat).
+
+    reserved_tokens MOET overeenkomen met het bedrag dat bij reservering is
+    geboekt (_UPFRONT_TOKEN_RESERVATION voor primaire calls,
+    _UPFRONT_AUXILIARY_RESERVATION voor hulp-calls). Hiermee berekent:
+
+    net_change = actual - reserved:
+      < 0 → release ongebruikte tokens
+      > 0 → boek overrun, zodat volgende calls de echte resterende ruimte zien
+    """
+    try:
+        effective_date = slot_date if slot_date is not None else date.today()
+        db.query(models.AiBudgetSlot).filter(
+            models.AiBudgetSlot.username == username,
+            models.AiBudgetSlot.slot_date == effective_date,
+        ).update(
+            {
+                models.AiBudgetSlot.tokens_actual:
+                    models.AiBudgetSlot.tokens_actual + actual_tokens,
+                # net_change < 0 → release | net_change > 0 → charge overrun
+                models.AiBudgetSlot.tokens_reserved:
+                    func.greatest(
+                        0,
+                        models.AiBudgetSlot.tokens_reserved
+                        + (actual_tokens - reserved_tokens),
+                    ),
+            },
+            synchronize_session=False,
+        )
+    except Exception as exc:
+        logger.warning("reconcile_budget_slot mislukt: %s", exc)
+
+def release_budget_slot_reservation(
+    db: Session, username: str, slot_date: date
+) -> None:
+    """
+    Geef een slot-reservering volledig terug als de LLM-call nooit is gestart (§34).
+
+    Wordt aangeroepen als:
+    - het opslaan van het gebruikersbericht faalt na reservering, of
+    - de SSE-generator nooit geïtereerd is (client-disconnect vóór eerste byte).
+    """
+    try:
+        db.query(models.AiBudgetSlot).filter(
+            models.AiBudgetSlot.username == username,
+            models.AiBudgetSlot.slot_date == slot_date,
+        ).update(
+            {
+                models.AiBudgetSlot.calls_reserved:
+                    func.greatest(0, models.AiBudgetSlot.calls_reserved - 1),
+                models.AiBudgetSlot.tokens_reserved:
+                    func.greatest(
+                        0,
+                        models.AiBudgetSlot.tokens_reserved - _UPFRONT_TOKEN_RESERVATION,
+                    ),
+            },
+            synchronize_session=False,
+        )
+        db.commit()
+    except Exception as exc:
+        logger.warning("release_budget_slot_reservation mislukt: %s", exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
