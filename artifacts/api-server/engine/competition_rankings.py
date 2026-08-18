@@ -33,14 +33,20 @@ def _avg(values: list[float]) -> float:
     return sum(vals) / len(vals) if vals else 0.0
 
 
-def run_competitor_rankings(db: Session, ref_date: date | None = None) -> int:
+def run_competitor_rankings(db: Session, ref_date: date | None = None,
+                             shop_id: int | None = None) -> int:
     """
     Bereken en persisteer competitor rankings (overall + per categorie).
     Retourneert het aantal geschreven ranking-rijen.
+
+    shop_id (optioneel): beperk de run tot één shop (snel bij testen/gefocuste runs).
     """
     today = ref_date or date.today()
-    shop_ids = [s for (s,) in db.query(models.DimProduct.shop_id).distinct().all()
-                if s is not None]
+    if shop_id is not None:
+        shop_ids = [shop_id]
+    else:
+        shop_ids = [s for (s,) in db.query(models.DimProduct.shop_id).distinct().all()
+                    if s is not None]
     total = 0
     for sid in shop_ids:
         total += _run_for_shop(db, today, sid)

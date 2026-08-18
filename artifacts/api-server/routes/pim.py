@@ -7,7 +7,7 @@ review-flow (PENDING → APPROVED/REJECTED; nooit automatisch toepassen).
 """
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -111,11 +111,17 @@ def list_completeness(
 
 @router.post("/recompute")
 def recompute(
+    payload: dict = Body(default={}),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.require_role(*EDIT_ROLES)),
 ):
-    """Synchroniseer DRS-attributen en herbereken completeness/quality-scores."""
-    count = pim_engine.compute_completeness(db)
+    """Synchroniseer DRS-attributen en herbereken completeness/quality-scores.
+
+    Optioneel: stuur ``{"sku_ids": ["SKU-A", "SKU-B"]}`` om de herberekening
+    te beperken tot een subset van SKU's (handig voor tests en gerichte updates).
+    """
+    sku_ids: list[str] | None = payload.get("sku_ids") or None
+    count = pim_engine.compute_completeness(db, sku_ids=sku_ids)
     return {"scores_written": count, "message": f"{count} scores herberekend."}
 
 

@@ -8,7 +8,7 @@
 - [Bash sandbox background](bash-sandbox-background.md) — nohup `&` jobs die after the tool call; `pgrep -f script.py` false-positives on its own command line. Download to disk, then process in phases.
 - [Feed ingest & refresh](feed-ingest-refresh.md) — feed is a full-catalog creator (DB starts empty); model reruns delete pending recs but preserve human decisions; scoring errors must not be swallowed.
 - [PriceShape feed shapes](priceshape-feed-shape.md) — default feed = WIDE CSV: no gtin (itemGroupId is key), competitors in vendor_N-columns; JSON variant nests vendors[]; both must be un-nested.
-- [Tests vs real feed data](test-suite-conventions.md) — after a real sync the dev DB holds 3k+ products; engine-wide tests get slow and top-N/paginated assumptions break — scope tests by entity_id or patch caps.
+- [Tests vs real feed data](test-suite-conventions.md) — after a real sync the dev DB holds 3k+ products; scope engine tests to a dedicated DimShop; never name a loop variable `shop_id` when the enclosing function already has a `shop_id` param (shadows + corrupts scoped deletes); pim_attribute_value FK blocks product teardown.
 - [Frontend global fetch timeout](frontend-global-fetch-timeout.md) — pricing-engine patches window.fetch with 15s abort; slow calls (connector test/sync) must pass their own signal or fail as false "Netwerkfout".
 - [SSRF validator ValueError trap](ssrf-valueerror-trap.md) — never raise UnsafeURLError inside an `except ValueError`; it subclasses ValueError and gets swallowed, disabling SSRF checks.
 - [Duplicate API Server workflow race](duplicate-workflow-race.md) — backend-down/login-500 is usually a bare "API Server" workflow duplicating the artifact one; remove the non-prefixed one.

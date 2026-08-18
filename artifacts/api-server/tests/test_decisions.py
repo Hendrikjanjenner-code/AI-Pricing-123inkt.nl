@@ -70,6 +70,16 @@ def _seed_signal(db, sku, shop_id=1):
     )
 
 
+def _pre_cleanup_cat(db, cat):
+    """Verwijder eventuele overgebleven categoriebeslissingen (dirty-DB guard)."""
+    cat_dids = [d.id for d in db.query(models.Decision).filter(models.Decision.entity_id == cat).all()]
+    if cat_dids:
+        db.query(models.DecisionScenario).filter(models.DecisionScenario.decision_id.in_(cat_dids)).delete(synchronize_session=False)
+        db.query(models.DecisionEvent).filter(models.DecisionEvent.decision_id.in_(cat_dids)).delete(synchronize_session=False)
+        db.query(models.Decision).filter(models.Decision.id.in_(cat_dids)).delete(synchronize_session=False)
+        db.commit()
+
+
 def _cleanup(db, skus, extra_shop_id=None):
     dids = [d.id for d in db.query(models.Decision).filter(models.Decision.entity_id.in_(skus)).all()]
     # Als er een extra shop is, verwijder ook alle beslissingen voor die shop
@@ -187,6 +197,10 @@ def test_category_decisions_derived_from_sku_signals(client, admin_headers, db):
     sku1 = f"TDEC-C1-{uuid.uuid4().hex[:6]}"
     sku2 = f"TDEC-C2-{uuid.uuid4().hex[:6]}"
     try:
+        # Verwijder eventuele overgebleven beslissingen van eerdere mislukte runs
+        # voor dezelfde categorie (validatieomgeving kan dirty state hebben).
+        _pre_cleanup_cat(db, cat)
+
         # Beide SKU's in dezelfde categorie
         for sku in (sku1, sku2):
             db.add(models.DimProduct(

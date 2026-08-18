@@ -85,11 +85,17 @@ def run_decision_engine(db: Session, shop_id: int | None = None) -> dict:
     locked_entities = {d.entity_id for d in existing if d.status not in ("draft", "proposed")}
 
     # Verwijder oude draft/proposed beslissingen van vandaag (regenereren)
-    stale = [d for d in existing if d.status in ("draft", "proposed")]
-    for d in stale:
-        db.query(models.DecisionScenario).filter(models.DecisionScenario.decision_id == d.id).delete(synchronize_session=False)
-        db.query(models.DecisionEvent).filter(models.DecisionEvent.decision_id == d.id).delete(synchronize_session=False)
-        db.delete(d)
+    stale_ids = [d.id for d in existing if d.status in ("draft", "proposed")]
+    if stale_ids:
+        db.query(models.DecisionScenario).filter(
+            models.DecisionScenario.decision_id.in_(stale_ids)
+        ).delete(synchronize_session=False)
+        db.query(models.DecisionEvent).filter(
+            models.DecisionEvent.decision_id.in_(stale_ids)
+        ).delete(synchronize_session=False)
+        db.query(models.Decision).filter(
+            models.Decision.id.in_(stale_ids)
+        ).delete(synchronize_session=False)
     db.flush()
 
     # Rangschik entiteiten op signaal-zwaarte zodat de belangrijkste eerst komen

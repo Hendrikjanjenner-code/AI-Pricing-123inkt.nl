@@ -50,18 +50,32 @@ def admin_headers(client):
 
 @pytest.fixture(scope="module")
 def seed(client):
-    """Synthetische data: 2 SKU's, 2 concurrenten, 30 dagen historie
-    met een duidelijke prijswijziging vandaag en een promo-dip."""
+    """Synthetische data in een geïsoleerde test-shop: 2 SKU's, 2 concurrenten,
+    30 dagen historie met een duidelijke prijswijziging en promo-dip.
+
+    Eigen test-shop zorgt ervoor dat engine-runs gefocust kunnen worden op
+    alleen deze SKU's, ongeacht hoeveel echte feed-data in de DB staat.
+    """
     db = SessionLocal()
     today = date.today()
+    shop_id = None
     try:
+        # Eigen test-shop aanmaken zodat de engine-run gefocust kan worden
+        shop = models.DimShop(shop_code=f"{PFX}-shop", name=f"{PFX} CI Shop",
+                               active=True)
+        db.add(shop)
+        db.flush()
+        shop_id = shop.id
+
         db.add_all([
             models.DimProduct(sku_id=SKU_A, product_name="CI Test Product A",
                               category=f"{PFX}-cat", current_price=20.0,
-                              cost_price=12.0, stock_quantity=50),
+                              cost_price=12.0, stock_quantity=50,
+                              shop_id=shop_id),
             models.DimProduct(sku_id=SKU_B, product_name="CI Test Product B",
                               category=f"{PFX}-cat", current_price=10.0,
-                              cost_price=6.0, stock_quantity=10),
+                              cost_price=6.0, stock_quantity=10,
+                              shop_id=shop_id),
         ])
         comp1 = models.DimCompetitor(competitor_name=COMP_1)
         comp2 = models.DimCompetitor(competitor_name=COMP_2)
@@ -73,20 +87,24 @@ def seed(client):
             # COMP_1 op SKU_A: stabiel 21.00, vandaag -10% → 18.90 (price event)
             p1 = 18.90 if i == 0 else 21.0
             db.add(models.FactCompetitorPriceDaily(
-                date=d, sku_id=SKU_A, competitor_name=COMP_1, price=p1))
+                date=d, sku_id=SKU_A, competitor_name=COMP_1, price=p1,
+                shop_id=shop_id))
             # COMP_2 op SKU_A: promo-dip dag 10..6 (-20%), daarna herstel
             p2 = 16.0 if 6 <= i <= 10 else 20.0
             db.add(models.FactCompetitorPriceDaily(
-                date=d, sku_id=SKU_A, competitor_name=COMP_2, price=p2))
+                date=d, sku_id=SKU_A, competitor_name=COMP_2, price=p2,
+                shop_id=shop_id))
             # COMP_1 op SKU_B (wordt straks REJECTED)
             db.add(models.FactCompetitorPriceDaily(
-                date=d, sku_id=SKU_B, competitor_name=COMP_1, price=9.5))
+                date=d, sku_id=SKU_B, competitor_name=COMP_1, price=9.5,
+                shop_id=shop_id))
             # Eigen prijs + verkoop met variatie voor elasticiteit
             own_p = 20.0 + (0.5 if i % 7 < 3 else -0.5) + (i % 5) * 0.1
             units = max(1, int(60 - 2 * own_p + (0.8 * p1) + (i % 3)))
-            db.add(models.FactPriceDaily(date=d, sku_id=SKU_A, price=own_p))
+            db.add(models.FactPriceDaily(date=d, sku_id=SKU_A, price=own_p,
+                                          shop_id=shop_id))
             db.add(models.FactSalesDaily(date=d, sku_id=SKU_A, units_sold=units,
-                                         revenue=units * own_p))
+                                          revenue=units * own_p, shop_id=shop_id))
             # Aanbod/voorraad: COMP_1 vandaag uit voorraad op SKU_A
             db.add(models.FactCompetitorOfferDaily(
                 date=d, own_sku_id=SKU_A, competitor_id=comp1.competitor_id,
@@ -109,20 +127,33 @@ def seed(client):
                                  run_date=today),
         ])
         strat = models.CompetitorStrategyResult(
-            competitor_name=COMP_1, run_date=today,
+            competitor_name=COMP_1, run_date=today, shop_id=shop_id,
             strategy_type="PRICE_FOLLOWER", strategy_label_nl="Prijsvolger",
             confidence=0.8)
         db.add(strat)
         db.commit()
-        yield
+        yield {"shop_id": shop_id}
     finally:
-        # Opruimen (FK: eerst signals/kostenrijen niet nodig — geen aparte shop)
+        # Opruimen: eerst shop-scoped rijen, dan SKU-scoped, dan global
+        for model, col in [
+            (models.IntelligenceSignal, models.IntelligenceSignal.shop_id),
+            (models.CompetitorPriceEvent, models.CompetitorPriceEvent.shop_id),
+            (models.CompetitorCoverageResult, models.CompetitorCoverageResult.shop_id),
+            (models.CompetitorAvailabilityDaily, models.CompetitorAvailabilityDaily.shop_id),
+            (models.CompetitorStrategyResult, models.CompetitorStrategyResult.shop_id),
+            (models.CompetitorProfile, models.CompetitorProfile.shop_id),
+            (models.CompetitorRanking, models.CompetitorRanking.shop_id),
+            (models.FactCompetitorPriceDaily, models.FactCompetitorPriceDaily.shop_id),
+            (models.FactSalesDaily, models.FactSalesDaily.shop_id),
+            (models.FactPriceDaily, models.FactPriceDaily.shop_id),
+            (models.CostUsageRecord, models.CostUsageRecord.shop_id),
+        ]:
+            if shop_id is not None:
+                db.query(model).filter(col == shop_id).delete(
+                    synchronize_session=False)
         for model, col in [
             (models.IntelligenceSignal, models.IntelligenceSignal.entity_id),
             (models.CompetitorPriceEvent, models.CompetitorPriceEvent.sku_id),
-            (models.FactCompetitorPriceDaily, models.FactCompetitorPriceDaily.sku_id),
-            (models.FactPriceDaily, models.FactPriceDaily.sku_id),
-            (models.FactSalesDaily, models.FactSalesDaily.sku_id),
             (models.FactCompetitorOfferDaily, models.FactCompetitorOfferDaily.own_sku_id),
             (models.AiMatchResult, models.AiMatchResult.own_sku_id),
             (models.SkuElasticity, models.SkuElasticity.sku_id),
@@ -148,13 +179,20 @@ def seed(client):
         db.query(models.DimProduct).filter(
             models.DimProduct.sku_id.in_([SKU_A, SKU_B])).delete(
             synchronize_session=False)
+        if shop_id is not None:
+            db.query(models.DimShop).filter(
+                models.DimShop.id == shop_id).delete(synchronize_session=False)
         db.commit()
         db.close()
 
 
 @pytest.fixture(scope="module")
 def run_engines(client, admin_headers, seed):
-    resp = client.post("/api/competition/intelligence/run", headers=admin_headers)
+    # Scope de engine-run tot de test-shop zodat de run snel blijft
+    # ongeacht hoeveel echte data er in de DB staat (3k+ producten).
+    resp = client.post("/api/competition/intelligence/run",
+                       json={"shop_id": seed["shop_id"]},
+                       headers=admin_headers)
     assert resp.status_code == 200, resp.text
     return resp.json()
 
@@ -167,8 +205,9 @@ def test_run_summary(run_engines):
     assert run_engines["elasticity_skus"] >= 1
 
 
-def test_price_change_event_and_signal(client, admin_headers, run_engines):
-    resp = client.get(f"/api/competition/events?event_type=PRICE_CHANGE&sku_id={SKU_A}",
+def test_price_change_event_and_signal(client, admin_headers, run_engines, seed):
+    sid = seed["shop_id"]
+    resp = client.get(f"/api/competition/events?event_type=PRICE_CHANGE&sku_id={SKU_A}&shop_id={sid}",
                       headers=admin_headers)
     assert resp.status_code == 200
     items = resp.json()["items"]
@@ -188,19 +227,21 @@ def test_price_change_event_and_signal(client, admin_headers, run_engines):
         db.close()
 
 
-def test_promo_events_detected(client, admin_headers, run_engines):
-    resp = client.get(f"/api/competition/events?sku_id={SKU_A}&event_type=PROMO_START",
+def test_promo_events_detected(client, admin_headers, run_engines, seed):
+    sid = seed["shop_id"]
+    resp = client.get(f"/api/competition/events?sku_id={SKU_A}&event_type=PROMO_START&shop_id={sid}",
                       headers=admin_headers)
     starts = [e for e in resp.json()["items"] if e["competitor_name"] == COMP_2]
     assert starts and starts[0]["promo_depth_pct"] >= 15
-    resp = client.get(f"/api/competition/events?sku_id={SKU_A}&event_type=PROMO_END",
+    resp = client.get(f"/api/competition/events?sku_id={SKU_A}&event_type=PROMO_END&shop_id={sid}",
                       headers=admin_headers)
     ends = [e for e in resp.json()["items"] if e["competitor_name"] == COMP_2]
     assert ends and ends[0]["promo_duration_days"] >= 3
 
 
-def test_coverage_excludes_rejected(client, admin_headers, run_engines):
-    resp = client.get("/api/competition/coverage", headers=admin_headers)
+def test_coverage_excludes_rejected(client, admin_headers, run_engines, seed):
+    sid = seed["shop_id"]
+    resp = client.get(f"/api/competition/coverage?shop_id={sid}", headers=admin_headers)
     assert resp.status_code == 200
     items = resp.json()["items"]
     tot_c1 = [i for i in items if i["competitor_name"] == COMP_1 and i["category"] is None]
@@ -223,13 +264,14 @@ def test_profile_real_values(run_engines):
         db.close()
 
 
-def test_availability_and_trend_api(client, admin_headers, run_engines):
-    resp = client.get(f"/api/competition/availability?competitor={COMP_1}",
+def test_availability_and_trend_api(client, admin_headers, run_engines, seed):
+    sid = seed["shop_id"]
+    resp = client.get(f"/api/competition/availability?competitor={COMP_1}&shop_id={sid}",
                       headers=admin_headers)
     assert resp.status_code == 200
     series = resp.json()["competitors"].get(COMP_1)
     assert series and series[-1]["in_stock_rate"] == 0.0  # vandaag OOS
-    resp = client.get("/api/competition/trends/price-index?days=30",
+    resp = client.get(f"/api/competition/trends/price-index?days=30&shop_id={sid}",
                       headers=admin_headers)
     assert resp.status_code == 200
     assert len(resp.json()["series"]) >= 5
@@ -249,8 +291,9 @@ def test_elasticity_persisted(run_engines):
         db.close()
 
 
-def test_match_quality_kpis(client, admin_headers, run_engines):
-    resp = client.get("/api/competition/match-quality", headers=admin_headers)
+def test_match_quality_kpis(client, admin_headers, run_engines, seed):
+    sid = seed["shop_id"]
+    resp = client.get(f"/api/competition/match-quality?shop_id={sid}", headers=admin_headers)
     assert resp.status_code == 200
     body = resp.json()
     assert body["totals"]["total"] >= 3
@@ -258,9 +301,10 @@ def test_match_quality_kpis(client, admin_headers, run_engines):
     assert "Exact" in body["by_match_type"]
 
 
-def test_simulation(client, admin_headers, run_engines):
+def test_simulation(client, admin_headers, run_engines, seed):
+    sid = seed["shop_id"]
     resp = client.post("/api/competition/simulate", headers=admin_headers,
-                       json={"sku_id": SKU_A, "change_pct": -0.05})
+                       json={"sku_id": SKU_A, "change_pct": -0.05, "shop_id": sid})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["data_available"] is True
@@ -271,7 +315,7 @@ def test_simulation(client, admin_headers, run_engines):
     # Forceer niet-volgen
     resp2 = client.post("/api/competition/simulate", headers=admin_headers,
                         json={"sku_id": SKU_A, "change_pct": -0.05,
-                              "assume_no_follow": [COMP_1, COMP_2]})
+                              "shop_id": sid, "assume_no_follow": [COMP_1, COMP_2]})
     b2 = resp2.json()
     assert all(c["follow_probability"] == 0.0 for c in b2["competitors"])
     assert b2["scenario_expected"]["units"] >= body["scenario_expected"]["units"]
@@ -279,7 +323,7 @@ def test_simulation(client, admin_headers, run_engines):
 
 def test_simulation_validation(client, admin_headers, seed):
     resp = client.post("/api/competition/simulate", headers=admin_headers,
-                       json={"sku_id": SKU_A, "change_pct": 0.9})
+                       json={"sku_id": SKU_A, "change_pct": 0.9, "shop_id": seed["shop_id"]})
     assert resp.status_code == 400
 
 
@@ -301,7 +345,7 @@ def test_rejection_survives_match_rebuild(client, admin_headers, run_engines):
         db.close()
 
 
-def test_signals_idempotent_on_rerun(client, admin_headers, run_engines):
+def test_signals_idempotent_on_rerun(client, admin_headers, run_engines, seed):
     """Een tweede run op dezelfde dag mag geen extra signalen creëren."""
     db = SessionLocal()
     try:
@@ -312,7 +356,10 @@ def test_signals_idempotent_on_rerun(client, admin_headers, run_engines):
                     ["competitor_price_change", "competitor_promo_detected",
                      "competitor_oos_opportunity"])).count()
         before = count()
-        resp = client.post("/api/competition/intelligence/run", headers=admin_headers)
+        # Scope de herrun tot de test-shop (idempotentie-check voor onze data)
+        resp = client.post("/api/competition/intelligence/run",
+                           json={"shop_id": seed["shop_id"]},
+                           headers=admin_headers)
         assert resp.status_code == 200
         db.expire_all()
         assert count() == before
@@ -320,9 +367,10 @@ def test_signals_idempotent_on_rerun(client, admin_headers, run_engines):
         db.close()
 
 
-def test_price_index_uses_historical_own_price(client, admin_headers, run_engines):
+def test_price_index_uses_historical_own_price(client, admin_headers, run_engines, seed):
     """De trend gebruikt fact_price_daily van die dag; een latere wijziging
     van current_price mag de historie niet herschrijven."""
+    sid = seed["shop_id"]
     db = SessionLocal()
     try:
         prod = db.query(models.DimProduct).filter(
@@ -330,7 +378,7 @@ def test_price_index_uses_historical_own_price(client, admin_headers, run_engine
         original = float(prod.current_price)
         prod.current_price = original * 10  # extreme wijziging
         db.commit()
-        resp = client.get("/api/competition/trends/price-index?days=30",
+        resp = client.get(f"/api/competition/trends/price-index?days=30&shop_id={sid}",
                           headers=admin_headers)
         assert resp.status_code == 200
         series = resp.json()["series"]
@@ -451,7 +499,7 @@ def test_multi_shop_isolation(client, admin_headers, run_engines):
         db.commit()
         db.close()
 
-def test_multi_shop_dashboard_profile_strategy_simulation(client, admin_headers, run_engines):
+def test_multi_shop_dashboard_profile_strategy_simulation(client, admin_headers, run_engines, seed):
     """Dashboard, CompetitorProfile, CompetitorStrategyResult en simulatie mogen
     nooit data van een andere shop laten lekken of op schrijven."""
     import uuid as _uuid
@@ -544,9 +592,10 @@ def test_multi_shop_dashboard_profile_strategy_simulation(client, admin_headers,
             "/strategies default-shop bevat strategie van shop-C-concurrent"
         )
 
-        # 6. Simulatie voor SKU_A (default shop) mag geen shop-C fact-rijen gebruiken
+        # 6. Simulatie voor SKU_A (onze test-shop) mag geen shop-C fact-rijen gebruiken
         resp_sim = client.post("/api/competition/simulate",
-                               json={"sku_id": SKU_A, "change_pct": -0.05},
+                               json={"sku_id": SKU_A, "change_pct": -0.05,
+                                     "shop_id": seed["shop_id"]},
                                headers=admin_headers)
         assert resp_sim.status_code == 200
         sim = resp_sim.json()
@@ -812,7 +861,8 @@ def test_run_all_includes_suspicious_match_signals(suspicious_seed):
     from engine.competition_intelligence import run_all
     db2 = SessionLocal()
     try:
-        result = run_all(db2, date.today())
+        # Scope de run tot de test-shop van suspicious_seed (snel)
+        result = run_all(db2, date.today(), shop_id=sid)
         assert "suspicious_match_signals" in result
         assert isinstance(result["suspicious_match_signals"], int)
     finally:
@@ -910,10 +960,10 @@ def test_elasticity_heuristic_low_confidence_when_few_data():
         db.commit()
         db.close()
 
-def test_simulation_exposes_method_label(client, admin_headers, run_engines):
+def test_simulation_exposes_method_label(client, admin_headers, run_engines, seed):
     """De simulatie toont het methodeniveau van de gebruikte elasticiteit."""
     resp = client.post("/api/competition/simulate", headers=admin_headers,
-                       json={"sku_id": SKU_A, "change_pct": -0.05})
+                       json={"sku_id": SKU_A, "change_pct": -0.05, "shop_id": seed["shop_id"]})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     eu = body.get("elasticity_used", {})

@@ -8,7 +8,7 @@ Alle eindpunten voor de Competition Intelligence module:
 """
 from typing import Optional
 from datetime import date, timedelta
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Body, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
 import models
@@ -1078,6 +1078,7 @@ def _ranking_scopes(db: Session, shop_id: Optional[int] = None) -> list[str]:
 
 @router.post("/rankings/run")
 def run_rankings(
+    payload: dict = Body(default={}),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
@@ -1087,11 +1088,25 @@ def run_rankings(
     Stap 1: bereken CIS-scores per SKU/concurrent uit de prijshistorie en
             schrijf ze naar competitor_influence_scores.
     Stap 2: bereken rankings die de CIS-scores als Influence-component lezen.
+
+    shop_id (optioneel in body): beperk de run tot één shop (sneller bij tests/gefocuste runs).
     """
     from engine.competitor_influence import run_cis_engine
     from engine.competition_rankings import run_competitor_rankings
-    cis_written = run_cis_engine(db)
-    rankings_written = run_competitor_rankings(db)
+    shop_id: Optional[int] = payload.get("shop_id")
+    if shop_id is not None:
+        sku_ids = [p.sku_id for p in
+                   db.query(models.DimProduct).filter(
+                       models.DimProduct.shop_id == shop_id).all()]
+        # Lege shop = no-op; voorkom dat een lege lijst als None behandeld wordt
+        # waardoor de volledige CIS-engine zou draaien.
+        if not sku_ids:
+            cis_written = 0
+        else:
+            cis_written = run_cis_engine(db, sku_ids=sku_ids)
+    else:
+        cis_written = run_cis_engine(db)
+    rankings_written = run_competitor_rankings(db, shop_id=shop_id)
     return {
         "status": "voltooid",
         "cis_scores_geschreven": cis_written,
@@ -1390,13 +1405,19 @@ def get_match_quality(
 
 @router.post("/intelligence/run")
 def run_competition_intelligence(
+    payload: dict = Body(default={}),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
     """Draai alle competition-intelligence stappen (dekking, events, promo's,
-    beschikbaarheid, elasticiteit, profielen)."""
+    beschikbaarheid, elasticiteit, profielen).
+
+    Optionele body-parameter:
+    - shop_id (int): beperk de run tot één shop (handig voor tests en scheduled runs).
+    """
     from engine.competition_intelligence import run_all
-    return {"status": "voltooid", **run_all(db)}
+    shop_id = payload.get("shop_id") if payload else None
+    return {"status": "voltooid", **run_all(db, shop_id=shop_id)}
 
 
 @router.post("/simulate")

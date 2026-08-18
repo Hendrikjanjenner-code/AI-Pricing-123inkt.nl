@@ -71,7 +71,7 @@ def seeded_sku():
 
 
 def test_recompute_and_completeness(client, admin_headers, seeded_sku):
-    r = client.post("/api/pim/recompute", headers=admin_headers)
+    r = client.post("/api/pim/recompute", headers=admin_headers, json={"sku_ids": [SKU, SKU2]})
     assert r.status_code == 200, r.text
     assert r.json()["scores_written"] > 0
 
@@ -217,7 +217,7 @@ def test_supplier_cannot_claim_empty_drs_field(client, admin_headers, seeded_sku
         db.commit()
     finally:
         db.close()
-    r = client.post("/api/pim/recompute", headers=admin_headers)
+    r = client.post("/api/pim/recompute", headers=admin_headers, json={"sku_ids": [SKU, SKU2]})
     assert r.status_code == 200
     r = client.get(f"/api/pim/products/{SKU2}/content", headers=admin_headers)
     attrs = {a["code"]: a for a in r.json()["attributes"]}
@@ -305,7 +305,7 @@ def _get_family_id(client, headers, code: str) -> int:
 def test_patch_attribute_required_and_weight(client, admin_headers, seeded_sku):
     """PATCH attribuutdefinitie wijzigt is_required en weight en persisteert."""
     # Zorg dat defaults bestaan via recompute
-    client.post("/api/pim/recompute", headers=admin_headers)
+    client.post("/api/pim/recompute", headers=admin_headers, json={"sku_ids": [SKU, SKU2]})
     attr_id = _get_attr_id(client, admin_headers, "usp_1")
 
     r = client.patch(f"/api/pim/attributes/{attr_id}", headers=admin_headers,
@@ -328,7 +328,7 @@ def test_patch_attribute_required_and_weight(client, admin_headers, seeded_sku):
 
 def test_patch_attribute_invalid_source_rejected(client, admin_headers, seeded_sku):
     """PATCH met ongeldige source_owner geeft HTTP 400."""
-    client.post("/api/pim/recompute", headers=admin_headers)
+    client.post("/api/pim/recompute", headers=admin_headers, json={"sku_ids": [SKU, SKU2]})
     attr_id = _get_attr_id(client, admin_headers, "color")
     r = client.patch(f"/api/pim/attributes/{attr_id}", headers=admin_headers,
                      json={"source_owner": "Onbekend"})
@@ -341,7 +341,7 @@ def test_patch_channel_threshold_persists_and_recompute_respects_it(client, admi
     recompute moet die waarde gebruiken — ook als de waarde 0 is
     (regressie: `ch.min_completeness_pct or 80.0` behandelde 0 als 80).
     """
-    client.post("/api/pim/recompute", headers=admin_headers)
+    client.post("/api/pim/recompute", headers=admin_headers, json={"sku_ids": [SKU, SKU2]})
     chan_id = _get_channel_id(client, admin_headers, "webshop")
 
     # Zet drempel op 0: elk channel-score is dan meteen "ready"
@@ -356,7 +356,7 @@ def test_patch_channel_threshold_persists_and_recompute_respects_it(client, admi
     assert ws["min_completeness_pct"] == 0.0
 
     # Na herberekening moet seeded_sku channel_ready=True zijn (drempel=0)
-    client.post("/api/pim/recompute", headers=admin_headers)
+    client.post("/api/pim/recompute", headers=admin_headers, json={"sku_ids": [SKU, SKU2]})
     r = client.get(f"/api/pim/completeness?channel=webshop&search={seeded_sku}",
                    headers=admin_headers)
     assert r.status_code == 200
@@ -380,7 +380,7 @@ def test_patch_channel_threshold_persists_and_recompute_respects_it(client, admi
 
 def test_patch_channel_unknown_attribute_code_rejected(client, admin_headers, seeded_sku):
     """PATCH channel met onbekende attribuutcode geeft HTTP 400."""
-    client.post("/api/pim/recompute", headers=admin_headers)
+    client.post("/api/pim/recompute", headers=admin_headers, json={"sku_ids": [SKU, SKU2]})
     chan_id = _get_channel_id(client, admin_headers, "webshop")
     r = client.patch(f"/api/pim/channels/{chan_id}", headers=admin_headers,
                      json={"required_attribute_codes": ["bestaat_niet"]})
@@ -389,7 +389,7 @@ def test_patch_channel_unknown_attribute_code_rejected(client, admin_headers, se
 
 def test_patch_family_name_and_patterns(client, admin_headers, seeded_sku):
     """PATCH familie wijzigt naam en categoriepatronen en persisteert."""
-    client.post("/api/pim/recompute", headers=admin_headers)
+    client.post("/api/pim/recompute", headers=admin_headers, json={"sku_ids": [SKU, SKU2]})
     fam_id = _get_family_id(client, admin_headers, "papier")
 
     r = client.patch(f"/api/pim/families/{fam_id}", headers=admin_headers,

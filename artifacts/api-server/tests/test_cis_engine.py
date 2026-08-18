@@ -56,23 +56,34 @@ def admin_headers(client):
 @pytest.fixture(scope="module")
 def seed_data():
     """
-    Minimale seeddata: 2 SKU's + 2 concurrenten met 20 dagen prijshistorie,
-    een PCIS-score per SKU en een concurrentprofiel voor COMP_1.
+    Minimale seeddata in een geïsoleerde test-shop: 2 SKU's + 2 concurrenten
+    met 20 dagen prijshistorie, een PCIS-score per SKU en een profiel voor COMP_1.
+
+    Eigen shop zorgt ervoor dat run_cis_engine(sku_ids=...) gefocust kan worden
+    op alleen deze SKU's, zodat tests snel blijven bij een volle DB.
     """
     db = SessionLocal()
     today = date.today()
+    shop_id = None
     try:
-        # Producten
+        # Eigen test-shop aanmaken
+        shop = models.DimShop(shop_code=f"{PFX}-cis-shop", name=f"{PFX} CIS Shop",
+                               active=True)
+        db.add(shop)
+        db.flush()
+        shop_id = shop.id
+
+        # Producten (in eigen shop)
         db.add_all([
             models.DimProduct(
                 sku_id=SKU_A, product_name="CIS Test Product A",
                 category=CAT, current_price=25.0, cost_price=15.0,
-                stock_quantity=100,
+                stock_quantity=100, shop_id=shop_id,
             ),
             models.DimProduct(
                 sku_id=SKU_B, product_name="CIS Test Product B",
                 category=CAT, current_price=10.0, cost_price=6.0,
-                stock_quantity=50,
+                stock_quantity=50, shop_id=shop_id,
             ),
         ])
         db.flush()
@@ -89,6 +100,7 @@ def seed_data():
                             competitor_name=comp,
                             price=base + delta,
                             source="test",
+                            shop_id=shop_id,
                         )
                     )
         db.add_all(price_rows)
@@ -121,10 +133,10 @@ def seed_data():
             ),
         ])
 
-        # Concurrentprofiel voor COMP_1
+        # Concurrentprofiel voor COMP_1 (in eigen shop)
         db.add(models.CompetitorProfile(
             competitor_name=COMP_1,
-            shop_id=1,
+            shop_id=shop_id,
             run_date=today,
             avg_delivery_days=2,
             in_stock_rate=0.92,
@@ -135,24 +147,46 @@ def seed_data():
         ))
 
         db.commit()
-        yield {"today": today}
+        yield {"today": today, "shop_id": shop_id}
     finally:
-        # Cleanup
-        db.query(models.CompetitorInfluenceScore).filter(
-            models.CompetitorInfluenceScore.sku_id.in_([SKU_A, SKU_B])
-        ).delete(synchronize_session=False)
-        db.query(models.SkuCompetitionScore).filter(
-            models.SkuCompetitionScore.sku_id.in_([SKU_A, SKU_B])
-        ).delete(synchronize_session=False)
-        db.query(models.FactCompetitorPriceDaily).filter(
-            models.FactCompetitorPriceDaily.sku_id.in_([SKU_A, SKU_B])
-        ).delete(synchronize_session=False)
-        db.query(models.DimProduct).filter(
-            models.DimProduct.sku_id.in_([SKU_A, SKU_B])
-        ).delete(synchronize_session=False)
+        # Cleanup: shop-scoped rijen eerst, daarna SKU-scoped
+        # Verwijder FK-afhankelijke PIM-tabellen vóór dim_product
+        for pim_model, pim_col in [
+            (models.PimAttributeValue, models.PimAttributeValue.sku_id),
+        ]:
+            db.query(pim_model).filter(
+                pim_col.in_([SKU_A, SKU_B])
+            ).delete(synchronize_session=False)
+
+        for model, col in [
+            (models.CompetitorInfluenceScore, models.CompetitorInfluenceScore.sku_id),
+            (models.SkuCompetitionScore, models.SkuCompetitionScore.sku_id),
+            (models.FactCompetitorPriceDaily, models.FactCompetitorPriceDaily.sku_id),
+            (models.DimProduct, models.DimProduct.sku_id),
+        ]:
+            db.query(model).filter(
+                col.in_([SKU_A, SKU_B])
+            ).delete(synchronize_session=False)
         db.query(models.CompetitorProfile).filter(
-            models.CompetitorProfile.competitor_name == COMP_1
+            models.CompetitorProfile.competitor_name == COMP_1,
+            models.CompetitorProfile.shop_id == shop_id,
         ).delete(synchronize_session=False)
+        if shop_id is not None:
+            for model, col in [
+                (models.CompetitorRanking, models.CompetitorRanking.shop_id),
+                (models.CompetitorInfluenceScore, models.CompetitorInfluenceScore.sku_id),
+                (models.CostUsageRecord, models.CostUsageRecord.shop_id),
+            ]:
+                if col == models.CompetitorInfluenceScore.sku_id:
+                    db.query(model).filter(
+                        col.in_([SKU_A, SKU_B])
+                    ).delete(synchronize_session=False)
+                else:
+                    db.query(model).filter(col == shop_id).delete(
+                        synchronize_session=False)
+            db.query(models.DimShop).filter(
+                models.DimShop.id == shop_id,
+            ).delete(synchronize_session=False)
         db.commit()
         db.close()
 
@@ -186,7 +220,9 @@ def test_run_cis_engine_writes_rows(seed_data):
     """run_cis_engine retourneert >0 en schrijft rijen voor de test-SKU's."""
     db = SessionLocal()
     try:
-        written = run_cis_engine(db, ref_date=seed_data["today"])
+        # Scope tot test-SKU's: snel ongeacht hoeveel echte data in de DB staat
+        written = run_cis_engine(db, ref_date=seed_data["today"],
+                                 sku_ids=[SKU_A, SKU_B])
         assert written > 0, "Geen CIS-rijen geschreven terwijl prijsdata aanwezig is"
 
         rows = db.query(models.CompetitorInfluenceScore).filter(
@@ -279,14 +315,14 @@ def test_idempotent_rerun(seed_data):
     """Een tweede engine-run vervangt de rijen (delete-then-insert, geen duplicaten)."""
     db = SessionLocal()
     try:
-        run_cis_engine(db, ref_date=seed_data["today"])
+        run_cis_engine(db, ref_date=seed_data["today"], sku_ids=[SKU_A, SKU_B])
         count = db.query(models.CompetitorInfluenceScore).filter(
             models.CompetitorInfluenceScore.sku_id.in_([SKU_A, SKU_B]),
             models.CompetitorInfluenceScore.run_date == seed_data["today"],
         ).count()
         # Moet exact gelijk zijn (geen extra rijen door herrun)
         first_count = count
-        run_cis_engine(db, ref_date=seed_data["today"])
+        run_cis_engine(db, ref_date=seed_data["today"], sku_ids=[SKU_A, SKU_B])
         count_after = db.query(models.CompetitorInfluenceScore).filter(
             models.CompetitorInfluenceScore.sku_id.in_([SKU_A, SKU_B]),
             models.CompetitorInfluenceScore.run_date == seed_data["today"],
@@ -302,7 +338,9 @@ def test_idempotent_rerun(seed_data):
 
 def test_rankings_run_returns_cis_count(client, admin_headers, seed_data):
     """POST /api/competition/rankings/run retourneert cis_scores_geschreven > 0."""
-    resp = client.post("/api/competition/rankings/run", headers=admin_headers)
+    sid = seed_data["shop_id"]
+    resp = client.post("/api/competition/rankings/run", headers=admin_headers,
+                       json={"shop_id": sid})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert "cis_scores_geschreven" in body, "Ontbrekend veld cis_scores_geschreven"
@@ -317,12 +355,15 @@ def test_rankings_influence_score_nonzero_after_run(client, admin_headers, seed_
     Na een rankings/run bevat minstens één ranking een niet-nul influence_score,
     en de explanation vermeldt het aantal SKU-invloedscores.
     """
-    # Trigger de run
-    resp = client.post("/api/competition/rankings/run", headers=admin_headers)
+    sid = seed_data["shop_id"]
+    # Trigger de run — scope tot de test-shop (snel + bevat onze CIS-data)
+    resp = client.post("/api/competition/rankings/run", headers=admin_headers,
+                       json={"shop_id": sid})
     assert resp.status_code == 200, resp.text
 
-    # Lees de rankings op
-    resp = client.get("/api/competition/rankings?scope=overall", headers=admin_headers)
+    # Lees de rankings op voor dezelfde test-shop
+    resp = client.get(f"/api/competition/rankings?scope=overall&shop_id={sid}",
+                      headers=admin_headers)
     assert resp.status_code == 200, resp.text
     body = resp.json()
     rankings = body.get("rankings", [])

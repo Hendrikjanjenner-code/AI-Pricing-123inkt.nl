@@ -121,10 +121,14 @@ def get_layer_label(layer: str) -> str:
 _WINDOW_DAYS = 30   # aantal dagen prijshistorie om op te baseren
 
 
-def run_cis_engine(db, ref_date: date | None = None) -> int:
+def run_cis_engine(db, ref_date: date | None = None,
+                   sku_ids: Optional[list[str]] = None) -> int:
     """
     Bereken CIS-scores per (sku_id, competitor_name) en schrijf ze naar
     competitor_influence_scores.  Retourneert het aantal geschreven rijen.
+
+    sku_ids (optioneel): beperk de berekening tot deze SKU's zodat tests
+    snel blijven ook als de DB duizenden producten bevat.
 
     Databronnen:
     - fact_competitor_price_daily  → beschikbaarheid + prijsvolatiliteit (CSRS/CSS)
@@ -138,7 +142,7 @@ def run_cis_engine(db, ref_date: date | None = None) -> int:
     since = today - timedelta(days=_WINDOW_DAYS)
 
     # ── 1. Concurrentprijshistorie per (sku, concurrent) ──────────────────
-    price_rows = (
+    price_q = (
         db.query(
             models.FactCompetitorPriceDaily.sku_id,
             models.FactCompetitorPriceDaily.competitor_name,
@@ -150,8 +154,10 @@ def run_cis_engine(db, ref_date: date | None = None) -> int:
             models.FactCompetitorPriceDaily.date <= today,
             models.FactCompetitorPriceDaily.price.isnot(None),
         )
-        .all()
     )
+    if sku_ids is not None:
+        price_q = price_q.filter(models.FactCompetitorPriceDaily.sku_id.in_(sku_ids))
+    price_rows = price_q.all()
 
     if not price_rows:
         return 0
@@ -183,16 +189,33 @@ def run_cis_engine(db, ref_date: date | None = None) -> int:
         if row.sku_id not in pcis_by_sku:
             pcis_by_sku[row.sku_id] = row
 
-    # Concurrentprofielen
+    # Concurrentprofielen — scope tot de shops die de geselecteerde SKU's bezitten
+    # zodat een scoped run nooit profielen van andere shops gebruikt (§shop-isolatie)
+    profiles_q = db.query(models.CompetitorProfile)
+    if sku_ids is not None:
+        scoped_shop_ids = list({
+            r[0] for r in
+            db.query(models.DimProduct.shop_id)
+            .filter(models.DimProduct.sku_id.in_(sku_ids))
+            .distinct().all()
+            if r[0] is not None
+        })
+        if scoped_shop_ids:
+            profiles_q = profiles_q.filter(
+                models.CompetitorProfile.shop_id.in_(scoped_shop_ids))
     profiles: dict[str, models.CompetitorProfile] = {
         p.competitor_name: p
-        for p in db.query(models.CompetitorProfile).all()
+        for p in profiles_q.all()
     }
 
     # ── 3. Verwijder vandaag's bestaande rijen (herrun = delete-then-insert)
-    db.query(models.CompetitorInfluenceScore).filter(
+    del_cis_q = db.query(models.CompetitorInfluenceScore).filter(
         models.CompetitorInfluenceScore.run_date == today
-    ).delete(synchronize_session=False)
+    )
+    if sku_ids is not None:
+        del_cis_q = del_cis_q.filter(
+            models.CompetitorInfluenceScore.sku_id.in_(sku_ids))
+    del_cis_q.delete(synchronize_session=False)
 
     # ── 4. Bereken per paar en schrijf ────────────────────────────────────
     written = 0
