@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2, UserPlus, AlertTriangle, Database, History, Download, RefreshCw } from "lucide-react";
+import { Trash2, UserPlus, AlertTriangle, Database, History, Download, RefreshCw, WifiOff } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getAuthToken } from "@/lib/auth";
 
@@ -154,6 +154,17 @@ export default function Instellingen() {
       laadMigraties();
       laadProvider();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.role]);
+
+  // Peil automatisch elke 5 minuten opnieuw zodat de waarschuwingsbanner
+  // verdwijnt zodra de verbinding hersteld is, zonder handmatig vernieuwen.
+  useEffect(() => {
+    if (user?.role !== "admin") return;
+    const interval = setInterval(() => {
+      laadProvider();
+    }, 5 * 60 * 1000);
+    return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role]);
 
@@ -340,6 +351,29 @@ export default function Instellingen() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Waarschuwingsbanner: actieve provider onbereikbaar */}
+            {providerInfo?.providers?.some((p: any) => p.active && p.reachable === false) && (() => {
+              const activeProvider = providerInfo.providers.find((p: any) => p.active && p.reachable === false);
+              return (
+                <div className="flex items-start gap-3 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900">
+                  <WifiOff className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+                  <div className="flex-1 text-sm">
+                    <p className="font-semibold">AI-verbinding verbroken — Copilot werkt in fail-safe modus</p>
+                    <p className="mt-0.5 text-amber-800">
+                      De actieve provider <strong>{activeProvider?.label}</strong> is niet bereikbaar.
+                      De Copilot geeft tijdelijk een gestructureerd foutantwoord. De rest van de applicatie
+                      is niet beïnvloed.
+                    </p>
+                    {activeProvider?.error && (
+                      <p className="mt-1 font-mono text-xs break-all text-amber-700">{activeProvider.error}</p>
+                    )}
+                    <p className="mt-1 text-xs text-amber-700">
+                      Controleer de API-sleutel of omgevingsvariabelen. Deze banner verdwijnt zodra de verbinding hersteld is.
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
             {providerLaden && !providerInfo ? (
               <Skeleton className="h-24 w-full" />
             ) : providerInfo ? (

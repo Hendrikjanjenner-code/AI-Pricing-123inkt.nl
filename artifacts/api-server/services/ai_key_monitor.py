@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger("uvicorn.error")
 
-DEFAULT_INTERVAL_SECONDS = 10 * 60  # 10 minuten
+DEFAULT_INTERVAL_SECONDS = 5 * 60  # 5 minuten
 _ALERT_MARKER = "[ai-key-monitor]"
 _MODULE_KEY = "ai_gateway"
 
