@@ -630,6 +630,133 @@ class TestFailedImports:
             db.close()
 
 
+class TestFeedUnreachable:
+    """FEED_UNREACHABLE verschijnt als de meest recente api_sync_priceshape
+    job is mislukt met een netwerk-/verbindingsfout.  Een nieuwe succesvolle
+    job verbergt het issue (meest-recente-job-semantiek)."""
+
+    def _make_ps_job(self, db, status, error_message=None, delta_seconds=0):
+        """Hulp: maak een api_sync_priceshape ImportJob en geef het id terug."""
+        from engine.import_engine import new_batch_id
+        job = models.ImportJob(
+            batch_id=new_batch_id(),
+            upload_type="api_sync_priceshape",
+            filename="handmatige-sync-priceshape",
+            source="API-Sync",
+            status=status,
+            rows_processed=0,
+            rows_failed=0,
+            rows_duplicates=0,
+            error_message=error_message,
+            error_log=([{"rij": None, "veld": None, "bericht": error_message}]
+                       if error_message else []),
+            created_at=datetime.utcnow() + timedelta(seconds=delta_seconds),
+            completed_at=datetime.utcnow() + timedelta(seconds=delta_seconds),
+        )
+        db.add(job)
+        db.commit()
+        return job.id
+
+    def _cleanup(self, db, *job_ids):
+        db.query(models.ImportJob).filter(
+            models.ImportJob.id.in_(list(job_ids))).delete(synchronize_session=False)
+        # Verwijder de FEED_UNREACHABLE rij uit het issue-register zodat
+        # volgende tests een schone lei hebben.
+        db.query(models.DataQualityIssue).filter(
+            models.DataQualityIssue.issue_code == "FEED_UNREACHABLE").delete(
+            synchronize_session=False)
+        db.commit()
+        db.close()
+
+    def test_network_error_triggers_feed_unreachable(self, client, auth):
+        """ConnectorError 'niet bereikbaar' → FEED_UNREACHABLE (error)."""
+        db = SessionLocal()
+        job_id = self._make_ps_job(
+            db, "fout",
+            error_message="PriceShape feed niet bereikbaar: [Errno -2] Name or service not known")
+        try:
+            total_skus = db.query(models.DimProduct).count()
+            detected = _detect_issues(db, total_skus)
+            codes = {d["issue_code"] for d in detected}
+            assert "FEED_UNREACHABLE" in codes, (
+                "FEED_UNREACHABLE moet zichtbaar zijn als de meest recente "
+                "api_sync_priceshape job is mislukt met een netwerk-/verbindingsfout")
+            issue = next(d for d in detected if d["issue_code"] == "FEED_UNREACHABLE")
+            assert issue["severity"] == "error"
+            assert issue["affected_count"] == 1
+        finally:
+            self._cleanup(db, job_id)
+
+    def test_empty_feed_guard_triggers_feed_unreachable(self, client, auth):
+        """Lege-feed-guard (0 producten en 0 concurrentprijzen) triggert ook FEED_UNREACHABLE."""
+        db = SessionLocal()
+        job_id = self._make_ps_job(
+            db, "fout",
+            error_message=(
+                "PriceShape feed leverde 0 producten en 0 concurrentprijzen op — "
+                "sync afgebroken om bestaande data te beschermen (laatst-goede data blijft staan)."
+            ))
+        try:
+            total_skus = db.query(models.DimProduct).count()
+            detected = _detect_issues(db, total_skus)
+            codes = {d["issue_code"] for d in detected}
+            assert "FEED_UNREACHABLE" in codes, (
+                "FEED_UNREACHABLE moet zichtbaar zijn als de lege-feed-guard de sync heeft afgebroken")
+        finally:
+            self._cleanup(db, job_id)
+
+    def test_config_missing_does_not_trigger_feed_unreachable(self, client, auth):
+        """Een 'niet geconfigureerd'-fout persisteert als status 'nieuw', niet 'fout',
+        en mag FEED_UNREACHABLE niet triggeren."""
+        db = SessionLocal()
+        # Simuleer de ImportJob die _run_sync maakt voor not_configured: status = "nieuw"
+        from engine.import_engine import new_batch_id
+        job = models.ImportJob(
+            batch_id=new_batch_id(),
+            upload_type="api_sync_priceshape",
+            filename="handmatige-sync-priceshape",
+            source="API-Sync",
+            status="nieuw",   # not_configured → nieuw
+            rows_processed=0,
+            error_message="PriceShape feed-URL niet geconfigureerd.",
+            created_at=datetime.utcnow(),
+            completed_at=datetime.utcnow(),
+        )
+        db.add(job)
+        db.commit()
+        job_id = job.id
+        try:
+            total_skus = db.query(models.DimProduct).count()
+            detected = _detect_issues(db, total_skus)
+            codes = {d["issue_code"] for d in detected}
+            assert "FEED_UNREACHABLE" not in codes, (
+                "Een 'niet geconfigureerd'-job (status=nieuw) mag FEED_UNREACHABLE "
+                "niet triggeren — alleen 'fout'/'failed' jobs doen dat")
+        finally:
+            self._cleanup(db, job_id)
+
+    def test_successful_sync_after_failure_clears_issue(self, client, auth):
+        """Een recente succesvolle sync verbergt FEED_UNREACHABLE,
+        ook als er eerder een mislukte job is (meest-recente-job-semantiek)."""
+        db = SessionLocal()
+        # Oudere mislukte job
+        fail_id = self._make_ps_job(
+            db, "fout",
+            error_message="PriceShape feed niet bereikbaar: connection refused",
+            delta_seconds=-10)
+        # Nieuwere succesvolle job
+        ok_id = self._make_ps_job(db, "geimporteerd", delta_seconds=0)
+        try:
+            total_skus = db.query(models.DimProduct).count()
+            detected = _detect_issues(db, total_skus)
+            codes = {d["issue_code"] for d in detected}
+            assert "FEED_UNREACHABLE" not in codes, (
+                "FEED_UNREACHABLE mag niet verschijnen als de meest recente "
+                "api_sync_priceshape job succesvol is (meest-recente-job-semantiek)")
+        finally:
+            self._cleanup(db, fail_id, ok_id)
+
+
 class TestLowConfidenceMatches:
     def test_ai_match_triggers(self, client, auth):
         db = SessionLocal()

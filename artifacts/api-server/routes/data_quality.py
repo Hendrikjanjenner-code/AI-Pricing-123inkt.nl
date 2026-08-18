@@ -252,6 +252,43 @@ def _detect_issues(db: Session, total_skus: int) -> list[dict]:  # noqa: C901
             "Prijzen worden vergeleken tussen ongelijke verpakkingen; de prijsindex is dan misleidend.",
             "Beoordeel deze matches en normaliseer naar prijs per eenheid of keur de match af."))
 
+    # ── Feed onbereikbaar (netwerkniveau) ────────────────────────────────
+    # Kijk of de meest recente PriceShape feed-sync is mislukt door een
+    # netwerk- of verbindingsfout (ConnectorError "niet bereikbaar").
+    # Lege-feed-fouten (0 producten) worden ook meegenomen: die beschermen
+    # de last-known-good data maar moeten wél zichtbaar zijn.
+    last_ps_job = (
+        db.query(models.ImportJob)
+        .filter(models.ImportJob.upload_type == "api_sync_priceshape")
+        .order_by(models.ImportJob.created_at.desc())
+        .first()
+    )
+    if last_ps_job and last_ps_job.status in ("fout", "failed"):
+        err_lower = (last_ps_job.error_message or "").lower()
+        # Netwerkniveau: ConnectorError "niet bereikbaar" of generieke
+        # connectiefouten (timeout, DNS, refused).
+        _NETWORK_KEYWORDS = (
+            "niet bereikbaar", "unreachable", "connecterror",
+            "connection", "timeout", "network", "name or service",
+            "0 producten en 0 concurrentprijzen",  # empty-feed guard
+        )
+        is_network = any(kw in err_lower for kw in _NETWORK_KEYWORDS)
+        if is_network:
+            issues.append(_issue(
+                "FEED_UNREACHABLE", "error",
+                "PriceShape feed niet bereikbaar",
+                (
+                    f"De laatste feed-sync is mislukt: "
+                    f"{last_ps_job.error_message or 'onbekende fout'}"
+                ),
+                1,
+                "PriceShape", "Connectoren",
+                "Concurrentprijzen worden niet bijgewerkt; prijsbeslissingen draaien op "
+                "verouderde data totdat de verbinding hersteld is.",
+                "Controleer de feed-URL in de PriceShape-connectorinstellingen en start "
+                "een handmatige sync om de verbinding te herstellen.",
+            ))
+
     # ── Mislukte imports ─────────────────────────────────────────────────
     cutoff = datetime.utcnow() - timedelta(days=FAILED_IMPORT_WINDOW_DAYS)
     failed_imports = db.query(models.ImportJob).filter(

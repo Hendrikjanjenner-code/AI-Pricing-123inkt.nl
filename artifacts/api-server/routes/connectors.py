@@ -671,8 +671,18 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
                 message = f"Microsoft Ads sync voltooid: {len(rows)} campagne-kostenrijen opgehaald."
 
         except Exception as exc:
-            status = "error" if "ConnectorError" not in type(exc).__name__ else "not_configured"
-            message = str(exc)[:300]
+            exc_msg = str(exc)
+            if "ConnectorError" not in type(exc).__name__:
+                # Echte runtime-fout (ValueError, NetworkError, …) → fout
+                status = "error"
+            elif "niet geconfigureerd" in exc_msg.lower():
+                # Configuratie ontbreekt volledig — geen actie nodig, geen fout-importjob
+                status = "not_configured"
+            else:
+                # Runtime ConnectorError: netwerk onbereikbaar, HTTP-fout, auth-weigering,
+                # lege feed, … → persisteer als 'fout' zodat detectie FEED_UNREACHABLE kan vuren
+                status = "error"
+            message = exc_msg[:300]
 
         # Persisteer een ImportJob zodat de sync zichtbaar is in de importgeschiedenis
         try:

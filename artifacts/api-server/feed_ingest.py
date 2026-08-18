@@ -460,7 +460,17 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
     today = date.today()
     from services import import_settings as imps
     settings = imps.get_settings(db, "priceshape")
-    catalog, comp_rows = _read_feed(db, content=content, content_type=content_type)
+    try:
+        catalog, comp_rows = _read_feed(db, content=content, content_type=content_type)
+    except Exception as _feed_exc:
+        from connectors.priceshape_connector import ConnectorError as _ConnectorError
+        if isinstance(_feed_exc, _ConnectorError):
+            logger.error(
+                "PriceShape feed niet bereikbaar of onleesbaar — sync afgebroken, "
+                "bestaande catalogus en concurrentprijzen blijven intact "
+                "(last-known-good). Fout: %s", _feed_exc
+            )
+        raise
 
     # Importselectie (aan/uitvinken): uitgevinkte concurrenten overslaan.
     # Bestaande data wordt hierdoor NIET gewist (zie last-known-good hieronder):
@@ -496,6 +506,11 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
     # concurrentprijzen breken we af vóór welke delete dan ook, zodat de app
     # blijft draaien op de laatst-goede data ("never break").
     if not catalog and not comp_rows:
+        logger.error(
+            "PriceShape feed leverde 0 producten en 0 concurrentprijzen op — "
+            "sync afgebroken om bestaande catalogus en concurrentprijzen te beschermen "
+            "(last-known-good: bestaande data blijft ongewijzigd staan)."
+        )
         raise ValueError(
             "PriceShape feed leverde 0 producten en 0 concurrentprijzen op — "
             "sync afgebroken om bestaande data te beschermen (laatst-goede data blijft staan)."
