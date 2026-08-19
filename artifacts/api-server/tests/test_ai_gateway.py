@@ -46,6 +46,32 @@ class TestPiiScrub(unittest.TestCase):
         self.assertIn("[e-mail verwijderd]", s)
         self.assertIn("[telefoonnummer verwijderd]", s)
 
+    def test_iso_datetimes_not_masked_as_phone(self):
+        # Regressie: PII-scrubber verminkte timestamps in data_freshness
+        # ("2[telefoonnummer verwijderd]:59:17.901630").
+        for ts in (
+            "2026-08-19 02:59:17.901630",
+            "2026-08-19T02:59:17.901630",
+            "laatste sync: 2026-08-19 02:59:17",
+            "signals: 2025-12-01 00:08:09.123456",
+            "2026-08-19",
+        ):
+            s = ai_gateway.pii_scrub(ts)
+            self.assertEqual(s, ts, ts)
+            self.assertNotIn("[telefoonnummer verwijderd]", s)
+
+    def test_real_phone_numbers_still_masked(self):
+        for txt in (
+            "bel 0612345678",
+            "bel 06-12345678",
+            "bel 06 12 34 56 78",
+            "bel +31612345678",
+            "bel 0031612345678",
+            "vast nummer 010-1234567",
+        ):
+            s = ai_gateway.pii_scrub(txt)
+            self.assertIn("[telefoonnummer verwijderd]", s, txt)
+
     def test_iban_masked(self):
         s = ai_gateway.pii_scrub("mijn rekening is NL91ABNA0417164300 graag")
         self.assertNotIn("NL91ABNA0417164300", s)

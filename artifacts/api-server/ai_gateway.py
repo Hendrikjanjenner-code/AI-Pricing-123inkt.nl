@@ -403,7 +403,10 @@ _PII_KEY_PATTERN = re.compile(
 # BSN (met elfproef), NL-postcodes, straat+huisnummer en via aanhef/zelf-
 # introductie herkenbare persoonsnamen gemaskeerd (§31).
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-_PHONE_RE = re.compile(r"(\+31|0031|0)[\s-]?\d[\s-]?(\d[\s-]?){7,9}")
+# (?<!\d): start nooit midden in een cijferreeks — voorkomt dat ISO-datetimes
+# zoals "2026-08-19 02:59:17" gedeeltelijk als telefoonnummer worden gemaskeerd.
+# (?!\d): eindig niet midden in een langere cijferreeks (geen telefoonnummer).
+_PHONE_RE = re.compile(r"(?<!\d)(\+31|0031|0)[\s-]?\d[\s-]?(\d[\s-]?){7,9}(?!\d)")
 _IBAN_RE = re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{8,30}\b")
 _POSTCODE_RE = re.compile(r"\b\d{4}\s?[A-Z]{2}\b")
 _STREET_RE = re.compile(
