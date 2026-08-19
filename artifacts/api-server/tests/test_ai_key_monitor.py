@@ -472,5 +472,112 @@ class TestStartupInvalidKeyLifecycle(unittest.TestCase):
         mock_alert.assert_called_once_with(True, None)
 
 
+# ─── Tests voor push-notificaties (e-mail/webhook) bij statuswijziging ────────
+
+class TestPushNotifications(unittest.TestCase):
+    def _make_db_mock(self, existing_open=None):
+        db = MagicMock()
+        query_chain = MagicMock()
+        query_chain.filter.return_value = query_chain
+        query_chain.first.return_value = existing_open
+        db.query.return_value = query_chain
+        return db
+
+    def test_notification_sent_on_new_outage(self):
+        """Bij transitie naar onbereikbaar wordt send_ai_key_alert(reachable=False) aangeroepen."""
+        from services.ai_key_monitor import _emit_alert
+        db = self._make_db_mock(existing_open=None)
+        with patch("database.SessionLocal", return_value=db), \
+             patch("services.health_notifier.send_ai_key_alert") as mock_notify:
+            _emit_alert(False, "401 Unauthorized")
+        mock_notify.assert_called_once()
+        _, kwargs = mock_notify.call_args
+        self.assertFalse(kwargs["reachable"])
+        self.assertEqual(kwargs["error"], "401 Unauthorized")
+
+    def test_no_notification_when_alert_already_open(self):
+        """Geen dubbele notificatie zolang het alert al open staat (anti-spam)."""
+        from services.ai_key_monitor import _emit_alert
+        existing = MagicMock()
+        existing.status = "open"
+        existing.description = "[ai-key-monitor] bestaand"
+        db = self._make_db_mock(existing_open=existing)
+        with patch("database.SessionLocal", return_value=db), \
+             patch("services.health_notifier.send_ai_key_alert") as mock_notify:
+            _emit_alert(False, "opnieuw fout")
+        mock_notify.assert_not_called()
+
+    def test_recovery_notification_sent_when_alert_was_open(self):
+        """Bij herstel met een open alert wordt een herstelmelding verstuurd."""
+        from services.ai_key_monitor import _emit_alert
+        existing = MagicMock()
+        existing.status = "open"
+        existing.description = "[ai-key-monitor] bestaand"
+        existing.updated_at = None
+        db = self._make_db_mock(existing_open=existing)
+        with patch("database.SessionLocal", return_value=db), \
+             patch("services.health_notifier.send_ai_key_alert") as mock_notify:
+            _emit_alert(True, None)
+        mock_notify.assert_called_once()
+        _, kwargs = mock_notify.call_args
+        self.assertTrue(kwargs["reachable"])
+
+    def test_no_recovery_notification_without_open_alert(self):
+        """Geen herstelmelding bij een gezonde start zonder eerder open alert."""
+        from services.ai_key_monitor import _emit_alert
+        db = self._make_db_mock(existing_open=None)
+        with patch("database.SessionLocal", return_value=db), \
+             patch("services.health_notifier.send_ai_key_alert") as mock_notify:
+            _emit_alert(True, None)
+        mock_notify.assert_not_called()
+
+    def test_notification_failure_does_not_break_alert(self):
+        """Een falende notificatie laat het BacklogItem-alert intact."""
+        from services.ai_key_monitor import _emit_alert
+        db = self._make_db_mock(existing_open=None)
+        with patch("database.SessionLocal", return_value=db), \
+             patch("services.health_notifier.send_ai_key_alert", side_effect=Exception("smtp kapot")):
+            _emit_alert(False, "401")
+        db.add.assert_called_once()
+        db.commit.assert_called()
+
+    def test_send_ai_key_alert_uses_admin_recipients_and_channels(self):
+        """send_ai_key_alert mailt admins en post naar de webhook."""
+        from services import health_notifier
+        db = MagicMock()
+        with patch.object(health_notifier, "get_alert_recipients", return_value=["a@x.nl"]) as mock_rcpt, \
+             patch.object(health_notifier, "_send_email", return_value=True) as mock_mail, \
+             patch.object(health_notifier, "_send_webhook", return_value=True) as mock_hook:
+            ok = health_notifier.send_ai_key_alert(db, reachable=False, error="401")
+        self.assertTrue(ok)
+        mock_rcpt.assert_called_once_with(db, roles=("admin",))
+        subject = mock_mail.call_args[0][1]
+        self.assertIn("ONBEREIKBAAR", subject)
+        payload = mock_hook.call_args[0][2]
+        self.assertEqual(payload["event"], "down")
+        self.assertEqual(payload["source"], "ai_key_monitor")
+
+    def test_send_ai_key_alert_recovery_subject(self):
+        """Herstelmelding heeft een duidelijk herstel-onderwerp en event."""
+        from services import health_notifier
+        db = MagicMock()
+        with patch.object(health_notifier, "get_alert_recipients", return_value=[]), \
+             patch.object(health_notifier, "_send_email", return_value=False) as mock_mail, \
+             patch.object(health_notifier, "_send_webhook", return_value=True) as mock_hook:
+            ok = health_notifier.send_ai_key_alert(db, reachable=True)
+        self.assertTrue(ok)
+        self.assertIn("hersteld", mock_mail.call_args[0][1])
+        self.assertEqual(mock_hook.call_args[0][2]["event"], "recovered")
+
+    def test_alert_email_env_alias_included(self):
+        """ALERT_EMAIL (alias) wordt meegenomen in de ontvangerslijst."""
+        from services import health_notifier
+        db = MagicMock()
+        db.query.side_effect = Exception("geen db")
+        with patch.dict(os.environ, {"ALERT_EMAIL": "beheer@voorbeeld.nl", "ALERT_EMAIL_TO": ""}):
+            recipients = health_notifier.get_alert_recipients(db, roles=("admin",))
+        self.assertIn("beheer@voorbeeld.nl", recipients)
+
+
 if __name__ == "__main__":
     unittest.main()

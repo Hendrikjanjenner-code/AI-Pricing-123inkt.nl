@@ -46,8 +46,10 @@ def _emit_alert(reachable: bool, error: str | None) -> None:
     """
     from database import SessionLocal
     import models
+    from services import health_notifier
 
     db = SessionLocal()
+    notify_recovery = False
     try:
         existing = (
             db.query(models.BacklogItem)
@@ -66,6 +68,15 @@ def _emit_alert(reachable: bool, error: str | None) -> None:
                 existing.updated_at = datetime.now(timezone.utc)
                 db.commit()
                 logger.info("AI-sleutel monitor: open alert gesloten (herstel).")
+                # Alleen een herstelmelding sturen als er daadwerkelijk een
+                # open alert was (echte transitie onbereikbaar → bereikbaar);
+                # voorkomt spam bij elke opstart met een gezonde sleutel.
+                notify_recovery = True
+            if notify_recovery:
+                try:
+                    health_notifier.send_ai_key_alert(db, reachable=True)
+                except Exception as exc:  # noqa: BLE001 — melding mag niets stoppen
+                    logger.error("AI-sleutel monitor: herstelmelding versturen mislukt: %s", exc)
             return
 
         # Onbereikbaar: maak een nieuw alert aan als er nog geen open is
@@ -95,6 +106,10 @@ def _emit_alert(reachable: bool, error: str | None) -> None:
         )
         db.commit()
         logger.warning("AI-sleutel monitor: beheerder-alert aangemaakt (provider onbereikbaar).")
+        try:
+            health_notifier.send_ai_key_alert(db, reachable=False, error=error)
+        except Exception as exc:  # noqa: BLE001 — melding mag niets stoppen
+            logger.error("AI-sleutel monitor: uitval-melding versturen mislukt: %s", exc)
     except Exception as exc:
         logger.error("AI-sleutel monitor: alert aanmaken mislukt: %s", exc)
         try:

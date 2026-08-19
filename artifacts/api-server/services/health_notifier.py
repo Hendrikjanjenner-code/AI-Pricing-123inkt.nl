@@ -36,11 +36,11 @@ def _bool_env(name: str, default: bool = False) -> bool:
     return val.strip().lower() in ("1", "true", "yes", "on")
 
 
-def get_alert_recipients(db) -> list[str]:
+def get_alert_recipients(db, roles: tuple[str, ...] = ALERT_ROLES) -> list[str]:
     """
-    Verzamel de e-mailadressen van analisten (en pricing managers / admins)
-    plus eventuele extra adressen uit ALERT_EMAIL_TO. Dubbele adressen worden
-    ontdubbeld met behoud van volgorde.
+    Verzamel de e-mailadressen van gebruikers met een van de opgegeven rollen
+    plus eventuele extra adressen uit ALERT_EMAIL_TO / ALERT_EMAIL. Dubbele
+    adressen worden ontdubbeld met behoud van volgorde.
     """
     recipients: list[str] = []
 
@@ -50,7 +50,7 @@ def get_alert_recipients(db) -> list[str]:
             db.query(models.User)
             .filter(
                 models.User.is_active == True,
-                models.User.role.in_(ALERT_ROLES),
+                models.User.role.in_(roles),
             )
             .all()
         )
@@ -60,11 +60,14 @@ def get_alert_recipients(db) -> list[str]:
     except Exception as exc:  # noqa: BLE001 — nooit crashen op ontvangers-ophalen
         logger.warning("Kon alert-ontvangers niet ophalen uit DB: %s", exc)
 
-    extra = os.environ.get("ALERT_EMAIL_TO", "")
-    for addr in extra.split(","):
-        addr = addr.strip()
-        if addr:
-            recipients.append(addr)
+    # ALERT_EMAIL_TO is de primaire variabele; ALERT_EMAIL wordt als alias
+    # ondersteund zodat een eenvoudige configuratie ook werkt.
+    for env_name in ("ALERT_EMAIL_TO", "ALERT_EMAIL"):
+        extra = os.environ.get(env_name, "")
+        for addr in extra.split(","):
+            addr = addr.strip()
+            if addr:
+                recipients.append(addr)
 
     # Ontdubbelen, volgorde behouden
     seen: set[str] = set()
@@ -180,6 +183,61 @@ def send_connector_alert(
             "meldingskanaal geconfigureerd (SMTP_HOST / ALERT_WEBHOOK_URL). "
             "Melding: %s",
             connector_label, status, message,
+        )
+        return False
+    return True
+
+
+def send_ai_key_alert(
+    db,
+    *,
+    reachable: bool,
+    error: Optional[str] = None,
+) -> bool:
+    """
+    Verstuur een melding naar beheerders (admins) wanneer de AI-provider
+    onbereikbaar wordt (reachable=False) of herstelt (reachable=True).
+
+    Geeft True als minstens één kanaal de melding heeft afgeleverd, anders
+    False (in dat geval is de melding alleen gelogd).
+    """
+    recipients = get_alert_recipients(db, roles=("admin",))
+
+    if reachable:
+        subject = "[AI Pricing] AI-provider hersteld — Copilot weer beschikbaar"
+        body = (
+            "De verbinding met de geconfigureerde LLM-provider is hersteld.\n\n"
+            "De Copilot werkt weer normaal; de fail-safe modus is opgeheven.\n\n"
+            "Deze melding is automatisch gegenereerd door de AI-sleutel monitor.\n"
+        )
+    else:
+        subject = "[AI Pricing] AI-provider ONBEREIKBAAR — Copilot in fail-safe modus"
+        body = (
+            "De geconfigureerde LLM-provider is niet bereikbaar.\n\n"
+            f"Foutmelding: {error or '(onbekend)'}\n\n"
+            "Controleer de OPENAI_API_KEY of AI_INTEGRATIONS_OPENAI_API_KEY/"
+            "BASE_URL in de omgevingsvariabelen en vervang de sleutel indien "
+            "verlopen of ongeldig. De Copilot geeft zolang een gestructureerd "
+            "foutantwoord (fail-safe modus); de rest van de applicatie is niet "
+            "beïnvloed.\n\n"
+            "Deze melding is automatisch gegenereerd door de AI-sleutel monitor.\n"
+        )
+
+    payload = {
+        "source": "ai_key_monitor",
+        "event": "recovered" if reachable else "down",
+        "reachable": reachable,
+        "error": error,
+    }
+
+    emailed = _send_email(recipients, subject, body)
+    hooked = _send_webhook(subject, body, payload)
+
+    if not emailed and not hooked:
+        logger.warning(
+            "AI-provider statuswijziging (%s), maar er is geen meldingskanaal "
+            "geconfigureerd (SMTP_HOST / ALERT_WEBHOOK_URL).",
+            "hersteld" if reachable else "onbereikbaar",
         )
         return False
     return True
