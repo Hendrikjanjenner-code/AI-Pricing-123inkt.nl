@@ -11,6 +11,19 @@
  */
 const DEFAULT_GLOBAL_FETCH_TIMEOUT_MS = 15_000;
 
+/**
+ * Timeout for known long-running synchronous requests (engine "run"
+ * endpoints such as basket/promotion/forecast/opportunity recalculation).
+ * These can legitimately take minutes on a large catalog; pass
+ * `signal: longRunSignal()` on those fetches so they bypass the global
+ * 15s safety net without hanging forever.
+ */
+export const LONG_RUN_FETCH_TIMEOUT_MS = 5 * 60_000;
+
+export function longRunSignal(timeoutMs: number = LONG_RUN_FETCH_TIMEOUT_MS): AbortSignal {
+  return AbortSignal.timeout(timeoutMs);
+}
+
 let installed = false;
 
 export function installGlobalFetchTimeout(timeoutMs: number = DEFAULT_GLOBAL_FETCH_TIMEOUT_MS): void {

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ShoppingCart, Link2, Euro, RefreshCw } from "lucide-react";
 import { getAuthHeaders } from "@/lib/auth";
+import { longRunSignal } from "@/lib/fetch-timeout";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -61,7 +62,7 @@ export default function BasketIntelligenceDashboard() {
 
   const runMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`${BASE}/api/basket/run`, { method: "POST", headers: getAuthHeaders() });
+      const res = await fetch(`${BASE}/api/basket/run`, { method: "POST", headers: getAuthHeaders(), signal: longRunSignal() });
       if (!res.ok) throw new Error("Run mislukt");
       return res.json();
     },
