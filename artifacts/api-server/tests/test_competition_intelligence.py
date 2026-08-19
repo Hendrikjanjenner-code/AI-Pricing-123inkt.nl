@@ -1230,6 +1230,7 @@ def test_slow_full_run_publishes_engine_slow_run_signal(monkeypatch):
     monkeypatch.setattr(ci, "run_strategies", lambda db, rd, shop_id=None: 0)
     monkeypatch.setattr(ci, "warn_suspicious_matches", lambda db, rd, shop_id=None: 0)
     monkeypatch.setattr(ci, "warn_elasticity_degradation", lambda db, rd, shop_id=None: 0)
+    monkeypatch.setattr(ci, "warn_heuristic_share_spike", lambda db, rd, shop_id=None: 0)
     monkeypatch.setattr(competitor_profiling, "build_all_profiles",
                         lambda db, shop_id=None: [])
     # Drempel praktisch op nul: elke run is dan "te traag"
@@ -1255,6 +1256,9 @@ def test_slow_full_run_publishes_engine_slow_run_signal(monkeypatch):
         ).delete(synchronize_session=False)
         db.commit()
         db.close()
+
+ED_PFX = f"ED{uuid.uuid4().hex[:6]}"
+
 
 @pytest.fixture(scope="module")
 def elast_degradation_seed(client):
@@ -1533,3 +1537,244 @@ def test_elasticity_degradation_idempotent(elast_degradation_seed):
         assert count == 1, f"Verwacht 1 actief signaal, kreeg {count}"
     finally:
         db.close()
+
+
+# ── Winkelbrede heuristiek-aandeel-spike ─────────────────────────────────────
+
+@pytest.fixture()
+def heuristic_share_seed(client):
+    """Shop met 10 SKU's: vorige run 20% heuristiek, huidige run 80% —
+    een stijging van 60pp, ruim boven de default-drempel van 15pp."""
+    pfx = f"HSS{uuid.uuid4().hex[:6]}"
+    db = SessionLocal()
+    today = date.today()
+    sid = None
+    skus = []
+    try:
+        shop = models.DimShop(shop_code=pfx, name=f"{pfx}-shop", active=True)
+        db.add(shop)
+        db.flush()
+        sid = shop.id
+        for i in range(10):
+            sku = f"{pfx}-SKU{i}"
+            skus.append(sku)
+            db.add(models.DimProduct(sku_id=sku, product_name=f"HSS {i}",
+                                     current_price=10.0, shop_id=sid))
+        db.flush()
+
+        def add(sku, days_ago, method):
+            db.add(models.SkuElasticity(
+                sku_id=sku, run_date=today - timedelta(days=days_ago),
+                own_price_elasticity=-1.0, cross_elasticity=0.2,
+                competitive_elasticity=0.4,
+                internal_substitution_elasticity=0.1,
+                elasticity_confidence_score=0.6,
+                confidence_class="bruikbaar",
+                method_label=method,
+                regression_r2=0.5 if method == "regressie" else None))
+
+        # Vorige run: 2/10 heuristiek (20%)
+        for i, sku in enumerate(skus):
+            add(sku, 1, "heuristiek" if i < 2 else "regressie")
+        # Huidige run: 8/10 heuristiek (80%)
+        for i, sku in enumerate(skus):
+            add(sku, 0, "heuristiek" if i < 8 else "regressie")
+        db.commit()
+        yield sid, skus
+    finally:
+        if skus:
+            db.query(models.SkuElasticity).filter(
+                models.SkuElasticity.sku_id.in_(skus),
+            ).delete(synchronize_session=False)
+        if sid is not None:
+            db.query(models.IntelligenceSignal).filter(
+                models.IntelligenceSignal.shop_id == sid).delete(
+                synchronize_session=False)
+            db.query(models.CostUsageRecord).filter(
+                models.CostUsageRecord.shop_id == sid).delete(
+                synchronize_session=False)
+        if skus:
+            db.query(models.DimProduct).filter(
+                models.DimProduct.sku_id.in_(skus),
+            ).delete(synchronize_session=False)
+        if sid is not None:
+            db.query(models.DimShop).filter(
+                models.DimShop.id == sid).delete(synchronize_session=False)
+        db.commit()
+        db.close()
+
+
+def test_heuristic_share_spike_signal(heuristic_share_seed):
+    """Stijging 20% → 80% heuristiek → precies één shop-niveau signaal."""
+    from engine.competition_intelligence import warn_heuristic_share_spike
+    sid, _skus = heuristic_share_seed
+    db = SessionLocal()
+    try:
+        n = warn_heuristic_share_spike(db, date.today(), shop_id=sid)
+        assert n == 1, f"Verwacht 1 signaal, kreeg {n}"
+        sig = db.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.signal_type == "elasticity_heuristic_share_spiked",
+            models.IntelligenceSignal.shop_id == sid,
+            models.IntelligenceSignal.status == "active",
+        ).one()
+        assert sig.entity_type == "shop"
+        assert sig.entity_id == "elasticity-method-mix"
+        assert sig.current_value == pytest.approx(80.0)
+        assert sig.previous_value == pytest.approx(20.0)
+        ev = sig.evidence or {}
+        assert ev.get("increase_pp") == pytest.approx(60.0)
+        assert ev.get("spike_threshold_pp") == pytest.approx(15.0)
+        assert ev.get("current_sku_count") == 10
+        assert sig.sources and "sku_elasticity" in sig.sources
+        assert sig.explanation and "heuristi" in sig.explanation.lower()
+    finally:
+        db.close()
+
+
+def test_heuristic_share_spike_idempotent(heuristic_share_seed):
+    """Rerun op dezelfde run_date maakt geen tweede signaal aan."""
+    from engine.competition_intelligence import warn_heuristic_share_spike
+    sid, _skus = heuristic_share_seed
+    db = SessionLocal()
+    try:
+        assert warn_heuristic_share_spike(db, date.today(), shop_id=sid) == 1
+        assert warn_heuristic_share_spike(db, date.today(), shop_id=sid) == 0
+        count = db.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.signal_type == "elasticity_heuristic_share_spiked",
+            models.IntelligenceSignal.shop_id == sid,
+            models.IntelligenceSignal.status == "active",
+        ).count()
+        assert count == 1
+    finally:
+        db.close()
+
+
+def test_heuristic_share_spike_threshold_configurable(monkeypatch, heuristic_share_seed):
+    """Met een geconfigureerde drempel van 70pp triggert een stijging van
+    60pp géén signaal."""
+    from engine import competition_intelligence as ci
+    sid, _skus = heuristic_share_seed
+    db = SessionLocal()
+    try:
+        monkeypatch.setattr(ci, "_cfg", lambda db: dict(
+            ci.DEFAULTS, heuristic_share_spike_pp=70.0))
+        n = ci.warn_heuristic_share_spike(db, date.today(), shop_id=sid)
+        assert n == 0, "Signaal ondanks hogere geconfigureerde drempel"
+    finally:
+        db.close()
+
+
+def test_heuristic_share_no_signal_without_previous_run(client):
+    """Eerste run ooit (geen vorige run om mee te vergelijken) → geen signaal."""
+    from engine.competition_intelligence import warn_heuristic_share_spike
+    pfx = f"HSF{uuid.uuid4().hex[:6]}"
+    db = SessionLocal()
+    today = date.today()
+    sid = None
+    skus = []
+    try:
+        shop = models.DimShop(shop_code=pfx, name=f"{pfx}-shop", active=True)
+        db.add(shop)
+        db.flush()
+        sid = shop.id
+        for i in range(12):
+            sku = f"{pfx}-SKU{i}"
+            skus.append(sku)
+            db.add(models.DimProduct(sku_id=sku, product_name=f"HSF {i}",
+                                     current_price=10.0, shop_id=sid))
+        db.flush()
+        for sku in skus:
+            db.add(models.SkuElasticity(
+                sku_id=sku, run_date=today,
+                own_price_elasticity=-1.0, cross_elasticity=0.2,
+                competitive_elasticity=0.4,
+                internal_substitution_elasticity=0.1,
+                elasticity_confidence_score=0.6,
+                confidence_class="bruikbaar",
+                method_label="heuristiek", regression_r2=None))
+        db.commit()
+
+        n = warn_heuristic_share_spike(db, today, shop_id=sid)
+        assert n == 0, "Signaal zonder vorige run om mee te vergelijken"
+    finally:
+        db.query(models.SkuElasticity).filter(
+            models.SkuElasticity.sku_id.in_(skus)).delete(synchronize_session=False)
+        if sid is not None:
+            db.query(models.IntelligenceSignal).filter(
+                models.IntelligenceSignal.shop_id == sid).delete(
+                synchronize_session=False)
+            db.query(models.CostUsageRecord).filter(
+                models.CostUsageRecord.shop_id == sid).delete(
+                synchronize_session=False)
+        db.query(models.DimProduct).filter(
+            models.DimProduct.sku_id.in_(skus)).delete(synchronize_session=False)
+        if sid is not None:
+            db.query(models.DimShop).filter(
+                models.DimShop.id == sid).delete(synchronize_session=False)
+        db.commit()
+        db.close()
+
+
+def test_heuristic_share_min_skus_guard(monkeypatch, client):
+    """Onder heuristic_share_min_skus SKU's in de huidige run → geen signaal."""
+    from engine import competition_intelligence as ci
+    pfx = f"HSM{uuid.uuid4().hex[:6]}"
+    db = SessionLocal()
+    today = date.today()
+    sid = None
+    skus = []
+    try:
+        shop = models.DimShop(shop_code=pfx, name=f"{pfx}-shop", active=True)
+        db.add(shop)
+        db.flush()
+        sid = shop.id
+        for i in range(3):
+            sku = f"{pfx}-SKU{i}"
+            skus.append(sku)
+            db.add(models.DimProduct(sku_id=sku, product_name=f"HSM {i}",
+                                     current_price=10.0, shop_id=sid))
+        db.flush()
+        for days_ago, method_by_i in [(1, {0: "regressie", 1: "regressie", 2: "regressie"}),
+                                      (0, {0: "heuristiek", 1: "heuristiek", 2: "heuristiek"})]:
+            for i, sku in enumerate(skus):
+                db.add(models.SkuElasticity(
+                    sku_id=sku, run_date=today - timedelta(days=days_ago),
+                    own_price_elasticity=-1.0, cross_elasticity=0.2,
+                    competitive_elasticity=0.4,
+                    internal_substitution_elasticity=0.1,
+                    elasticity_confidence_score=0.6,
+                    confidence_class="bruikbaar",
+                    method_label=method_by_i[i],
+                    regression_r2=0.5 if method_by_i[i] == "regressie" else None))
+        db.commit()
+
+        n = ci.warn_heuristic_share_spike(db, today, shop_id=sid)
+        assert n == 0, "Signaal ondanks te weinig SKU's voor betekenisvol aandeel"
+
+        # Met verlaagde min_skus triggert dezelfde data wél
+        monkeypatch.setattr(ci, "_cfg", lambda db: dict(
+            ci.DEFAULTS, heuristic_share_min_skus=3))
+        n = ci.warn_heuristic_share_spike(db, today, shop_id=sid)
+        assert n == 1
+    finally:
+        db.query(models.SkuElasticity).filter(
+            models.SkuElasticity.sku_id.in_(skus)).delete(synchronize_session=False)
+        if sid is not None:
+            db.query(models.IntelligenceSignal).filter(
+                models.IntelligenceSignal.shop_id == sid).delete(
+                synchronize_session=False)
+            db.query(models.CostUsageRecord).filter(
+                models.CostUsageRecord.shop_id == sid).delete(
+                synchronize_session=False)
+        db.query(models.DimProduct).filter(
+            models.DimProduct.sku_id.in_(skus)).delete(synchronize_session=False)
+        if sid is not None:
+            db.query(models.DimShop).filter(
+                models.DimShop.id == sid).delete(synchronize_session=False)
+        db.commit()
+        db.close()
+
+
+def test_run_all_includes_heuristic_share_spike(run_engines):
+    """run_all rapporteert de winkelbrede spike-stap in het resultaat."""
+    assert "heuristic_share_spike_signals" in run_engines

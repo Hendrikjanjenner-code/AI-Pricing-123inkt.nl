@@ -76,6 +76,13 @@ DEFAULTS = {
     # Elasticiteitsdegradatie: minimale R²-daling t.o.v. de vorige
     # regressie-run die een signaal triggert
     "elasticity_r2_drop_threshold": 0.15,
+    # Winkelbrede degradatie: minimale stijging (procentpunten) van het
+    # aandeel SKU's op "heuristiek" t.o.v. de vorige run voor één
+    # shop-niveau signaal
+    "heuristic_share_spike_pp": 15.0,
+    # Winkelbrede degradatie: minimaal aantal SKU's in de huidige run
+    # voordat het aandeel betekenisvol is
+    "heuristic_share_min_skus": 10,
 }
 
 
@@ -949,6 +956,109 @@ def warn_elasticity_degradation(db: Session, run_date: Optional[date] = None,
 
     db.commit()
     return n_signals
+
+
+def warn_heuristic_share_spike(db: Session, run_date: Optional[date] = None,
+                               shop_id: Optional[int] = None) -> int:
+    """Bewaak winkelbrede degradatie: het aandeel SKU's dat in de huidige
+    elasticiteitsrun op "heuristiek" draait, vergeleken met de vorige run.
+
+    Stijgt dat aandeel met meer dan heuristic_share_spike_pp procentpunten
+    (model_governance-config 'competition_intelligence'), dan wordt per shop
+    één signaal elasticity_heuristic_share_spiked gepubliceerd — één
+    aggregaat in plaats van honderden losse SKU-signalen bij een breed
+    dataprobleem (bv. een feed die dagenlang leeg blijft).
+
+    Idempotent bij reruns: per shop per run_date maximaal één actief signaal.
+    """
+    rd = run_date or date.today()
+    cfg = _cfg(db)
+    spike_pp = float(cfg.get("heuristic_share_spike_pp",
+                             DEFAULTS["heuristic_share_spike_pp"]))
+    min_skus = int(cfg.get("heuristic_share_min_skus",
+                           DEFAULTS["heuristic_share_min_skus"]))
+
+    shop_q = db.query(models.DimShop.id, models.DimShop.name)
+    if shop_id is not None:
+        shop_q = shop_q.filter(models.DimShop.id == shop_id)
+    shops = shop_q.all()
+
+    n_signals = 0
+    for sid, shop_name in shops:
+        rows = (
+            db.query(models.SkuElasticity.run_date,
+                     models.SkuElasticity.method_label)
+            .join(models.DimProduct,
+                  models.DimProduct.sku_id == models.SkuElasticity.sku_id)
+            .filter(models.DimProduct.shop_id == sid,
+                    models.SkuElasticity.run_date <= rd)
+            .all()
+        )
+        per_run: dict[date, list[str]] = {}
+        for r in rows:
+            per_run.setdefault(r.run_date, []).append(r.method_label)
+        if rd not in per_run:
+            continue  # geen resultaat in de huidige run voor deze shop
+        prev_dates = sorted(d for d in per_run if d < rd)
+        if not prev_dates:
+            continue  # geen vorige run om mee te vergelijken
+        prev_rd = prev_dates[-1]
+
+        cur = per_run[rd]
+        prev = per_run[prev_rd]
+        if len(cur) < min_skus or not prev:
+            continue
+        cur_share = 100.0 * sum(1 for m in cur if m == "heuristiek") / len(cur)
+        prev_share = 100.0 * sum(1 for m in prev if m == "heuristiek") / len(prev)
+        increase_pp = cur_share - prev_share
+        if increase_pp <= spike_pp:
+            continue
+
+        if _already_signaled(db, "elasticity_heuristic_share_spiked",
+                             "elasticity-method-mix", sid, "run_date", str(rd)):
+            continue
+        publish_signal(
+            db, engine="competition",
+            signal_type="elasticity_heuristic_share_spiked",
+            entity_type="shop", entity_id="elasticity-method-mix",
+            entity_name=shop_name or f"Shop {sid}",
+            severity="high", direction="negative",
+            metric="heuristic_share_pct",
+            current_value=round(cur_share, 2),
+            previous_value=round(prev_share, 2),
+            change_pct=round(increase_pp, 2),
+            confidence=0.95,
+            explanation=(
+                f"Het aandeel SKU's op de heuristische elasticiteitsschatting "
+                f"steeg winkelbreed van {prev_share:.1f}% ({prev_rd}) naar "
+                f"{cur_share:.1f}% ({rd}) — een stijging van "
+                f"{increase_pp:.1f} procentpunten, boven de drempel van "
+                f"{spike_pp:.0f}. Zo'n plotselinge verschuiving wijst op een "
+                f"structurele oorzaak (bv. een lege of onvolledige feed) in "
+                f"plaats van losse SKU-problemen."),
+            evidence={
+                "run_date": str(rd),
+                "previous_run_date": str(prev_rd),
+                "current_heuristic_share_pct": round(cur_share, 2),
+                "previous_heuristic_share_pct": round(prev_share, 2),
+                "increase_pp": round(increase_pp, 2),
+                "spike_threshold_pp": spike_pp,
+                "current_sku_count": len(cur),
+                "previous_sku_count": len(prev),
+            },
+            sources=["sku_elasticity"],
+            suggested_action=(
+                "Controleer de feed- en datapijplijn (verkoop-, prijs- en "
+                "concurrentprijshistorie); een breed datprobleem raakt alle "
+                "SKU's tegelijk"),
+            model_version=MODEL_VERSION, shop_id=sid,
+        )
+        n_signals += 1
+
+    db.commit()
+    return n_signals
+
+
 def warn_suspicious_matches(db: Session, run_date: Optional[date] = None,
                              shop_id: Optional[int] = None) -> int:
     """Publiceer een waarschuwingssignaal per shop als het aantal verdachte
@@ -1174,6 +1284,7 @@ def run_all(db: Session, run_date: Optional[date] = None,
         "profiles": profiles_count,
         "suspicious_match_signals": _timed("suspicious_matches", lambda: warn_suspicious_matches(db, rd, shop_id=shop_id)),
         "elasticity_degradation_signals": _timed("elasticity_degradation", lambda: warn_elasticity_degradation(db, rd, shop_id=shop_id)),
+        "heuristic_share_spike_signals": _timed("heuristic_share_spike", lambda: warn_heuristic_share_spike(db, rd, shop_id=shop_id)),
         "model_version": MODEL_VERSION,
     }
 
