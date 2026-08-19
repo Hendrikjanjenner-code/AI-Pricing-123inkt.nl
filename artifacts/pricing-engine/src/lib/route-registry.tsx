@@ -68,6 +68,8 @@ import CompetitionManagement from "@/pages/competition-management";
 import CompetitionDiscoveryLog from "@/pages/competition-discovery-log";
 import CompetitionSettings from "@/pages/competition-settings";
 import CompetitionTrends from "@/pages/competition-trends";
+import CompetitionCompare from "@/pages/competition-compare";
+import CompetitionLandscape from "@/pages/competition-landscape";
 import ConcurrentieMonitoring from "@/pages/concurrentie-monitoring";
 import Uitvoering from "@/pages/uitvoering";
 import AuditLogPage from "@/pages/audit-log";
@@ -264,6 +266,8 @@ export const ROUTES: RouteDef[] = [
   r("/competition/competitors/:id", "Concurrent-detail", "concurrentie", CompetitorDetail, 3.1, { inSidebar: false, department: "catman", breadcrumbParent: "/competition/competitors" }),
   r("/competition/categories", "Categorie-analyse", "concurrentie", CompetitionCategories, 4, { icon: Map, department: "catman", breadcrumbParent: "/competition" }),
   r("/competition/categories/:category_name", "Categorie-detail", "concurrentie", CompetitionCategories, 4.1, { inSidebar: false, department: "catman", breadcrumbParent: "/competition/categories" }),
+  r("/competition/compare", "Vergelijking", "concurrentie", CompetitionCompare, 3.2, { icon: Scale, department: "catman", breadcrumbParent: "/competition/competitors" }),
+  r("/competition/landscape", "Concurrent Landscape", "concurrentie", CompetitionLandscape, 3.3, { icon: LayoutGrid, department: "catman", breadcrumbParent: "/competition" }),
   r("/competition/trends", "Trends & Events", "concurrentie", CompetitionTrends, 5, { icon: TrendingUp, department: "catman", breadcrumbParent: "/competition" }),
   r("/competition/ai-matching", "AI Matching", "concurrentie", CompetitionAiMatching, 6, { icon: BrainCircuit, department: "catman", breadcrumbParent: "/competition" }),
   r("/competition/assortment-gap", "Assortiment Gap", "concurrentie", CompetitionAssortmentGap, 7, { icon: PackageSearch, department: "catman", breadcrumbParent: "/competition" }),

@@ -663,12 +663,137 @@ def get_evolution_timeline(
     } for r in rows], "total": total, "limit": limit, "offset": offset}
 
 
+# ── Vergelijking (2–5 concurrenten) ─────────────────────────────────────────
+
+def _latest_ranking_by_name(db: Session, sid: int) -> dict:
+    """Meest recente overall-ranking-rij per concurrent."""
+    from sqlalchemy import func as _func
+    latest = db.query(_func.max(models.CompetitorRanking.run_date)).filter(
+        models.CompetitorRanking.scope == "overall",
+        models.CompetitorRanking.shop_id == sid).scalar()
+    if not latest:
+        return {}
+    rows = db.query(models.CompetitorRanking).filter(
+        models.CompetitorRanking.scope == "overall",
+        models.CompetitorRanking.shop_id == sid,
+        models.CompetitorRanking.run_date == latest).all()
+    return {r.competitor_name: r for r in rows}
+
+
+def _ranking_out(r) -> Optional[dict]:
+    if r is None:
+        return None
+    return {
+        "rank": r.rank,
+        "competition_relevance_score": round(float(r.competition_relevance_score or 0), 4),
+        "price_relevance_score": round(float(r.price_relevance_score or 0), 4),
+        "influence_score": round(float(r.influence_score or 0), 4),
+        "combined_score": round(float(r.combined_score or 0), 4),
+        "run_date": str(r.run_date),
+    }
+
+
+def _profile_summary_for(db: Session, sid: int, name: str, rules: dict) -> dict:
+    """Compacte profielsamenvatting voor de vergelijkings-view."""
+    business = db.query(models.CompetitorBusinessProfile).filter(
+        models.CompetitorBusinessProfile.shop_id == sid,
+        models.CompetitorBusinessProfile.competitor_name == name).first()
+    fulfilment = db.query(models.CompetitorFulfilmentProfile).filter(
+        models.CompetitorFulfilmentProfile.shop_id == sid,
+        models.CompetitorFulfilmentProfile.competitor_name == name).first()
+    financials = db.query(models.CompetitorFinancialObservation).filter(
+        models.CompetitorFinancialObservation.shop_id == sid,
+        models.CompetitorFinancialObservation.competitor_name == name).all()
+    roles = db.query(models.CompetitorMarketRole).filter(
+        models.CompetitorMarketRole.shop_id == sid,
+        models.CompetitorMarketRole.competitor_name == name,
+        models.CompetitorMarketRole.valid_to.is_(None)).all()
+    geo = db.query(models.CompetitorGeographicPresence).filter(
+        models.CompetitorGeographicPresence.shop_id == sid,
+        models.CompetitorGeographicPresence.competitor_name == name,
+        models.CompetitorGeographicPresence.valid_to.is_(None)).all()
+    legacy = db.query(models.CompetitorProfile).filter(
+        models.CompetitorProfile.shop_id == sid,
+        models.CompetitorProfile.competitor_name == name).first()
+    return {
+        "competitor_name": name,
+        "business": _singleton_out(business, cp.BUSINESS_FIELDS),
+        "fulfilment": _singleton_out(fulfilment, cp.FULFILMENT_FIELDS),
+        "financials": [_row_out(r, ["fiscal_year", "metric", "value_min",
+                                    "value_max", "currency", "is_unknown",
+                                    "as_of_date"]) for r in financials],
+        "market_roles": [_row_out(r, ["role", "ai_assigned", "human_validated"])
+                         for r in roles],
+        "countries": sorted({g.country_code for g in geo if g.country_code}),
+        "assortment_size": legacy.assortment_size if legacy else None,
+        "price_segment": legacy.price_segment if legacy else None,
+        "completeness": {
+            "business": cp.section_completeness(business, cp.BUSINESS_FIELDS, rules),
+            "fulfilment": cp.section_completeness(fulfilment, cp.FULFILMENT_FIELDS, rules),
+        },
+    }
+
+
+@router.get("/compare")
+def compare_competitors(
+    names: str = Query(..., description="Komma-gescheiden lijst van 2–5 concurrentnamen"),
+    shop_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """Vergelijking van 2–5 concurrenten: profiel, fulfilment, financieel,
+    landen, marktrollen en alle scores naast elkaar. Onbekend blijft null."""
+    sid = _scope(db, shop_id)
+    name_list = [n.strip() for n in names.split(",") if n.strip()]
+    if not (2 <= len(name_list) <= 5):
+        raise HTTPException(400, "Kies 2 tot 5 concurrenten om te vergelijken")
+    for n in name_list:
+        _require_competitor(db, sid, n)
+    rules = cp.get_freshness_rules(db, sid)
+    from engine.competitor_scores import latest_scores_by_competitor
+    scores = latest_scores_by_competitor(db, sid)
+    rankings = _latest_ranking_by_name(db, sid)
+    items = []
+    for n in name_list:
+        item = _profile_summary_for(db, sid, n, rules)
+        s = scores.get(n)
+        item["scores"] = _score_summary_out(s) if s is not None else None
+        item["ranking"] = _ranking_out(rankings.get(n))
+        items.append(item)
+    return {"shop_id": sid, "items": items, "total": len(items)}
+
+
+def _score_summary_out(r) -> dict:
+    return {
+        "run_date": str(r.run_date),
+        "company_size_class": r.company_size_class,
+        "company_size_confidence": r.company_size_confidence,
+        "geographic_scale_class": r.geographic_scale_class,
+        "geographic_scale_confidence": r.geographic_scale_confidence,
+        "fulfilment_model_class": r.fulfilment_model_class,
+        "fulfilment_model_confidence": r.fulfilment_model_confidence,
+        "operational_strength_score": r.operational_strength_score,
+        "financial_health_score": r.financial_health_score,
+        "financial_health_status": r.financial_health_status,
+        "financial_data_confidence": r.financial_data_confidence,
+        "business_strength_score": r.business_strength_score,
+        "procurement_power_score": r.procurement_power_score,
+        "future_threat_score": r.future_threat_score,
+        "data_completeness_pct": r.data_completeness_pct,
+        "model_version": r.model_version,
+    }
+
+
 # ── Volledig profiel + completeness/freshness ───────────────────────────────
 
 @router.get("/{competitor_name}")
 def get_full_profile(
     competitor_name: str,
     shop_id: Optional[int] = Query(None),
+    include_scores: bool = Query(False, description="Voeg de acht scorecards (incl. factoren/gewichten) en de relevantiescores toe"),
+    include_timeline: bool = Query(False, description="Voeg de eerste pagina van de evolution-timeline toe"),
+    include_evidence: bool = Query(False, description="Voeg evidence-referenties toe"),
+    timeline_limit: int = Query(20, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -698,7 +823,44 @@ def get_full_profile(
     active_roles = [r for r in roles if r.valid_to is None]
     active_geo = [g for g in geography if g.valid_to is None]
 
+    extra: dict = {}
+    if include_scores:
+        row = (db.query(models.CompetitorScoreResult)
+               .filter(models.CompetitorScoreResult.shop_id == sid,
+                       models.CompetitorScoreResult.competitor_name == competitor_name)
+               .order_by(models.CompetitorScoreResult.run_date.desc())
+               .first())
+        extra["scores"] = (
+            {**_score_summary_out(row), "details": row.details or {}}
+            if row is not None else None)
+        extra["ranking"] = _ranking_out(
+            _latest_ranking_by_name(db, sid).get(competitor_name))
+    if include_evidence:
+        ev = (db.query(models.CompetitionEvidence)
+              .filter(models.CompetitionEvidence.shop_id == sid,
+                      models.CompetitionEvidence.competitor_name == competitor_name)
+              .order_by(models.CompetitionEvidence.created_at.desc())
+              .all())
+        extra["evidence"] = {"items": [_evidence_out(e) for e in ev],
+                             "total": len(ev)}
+    if include_timeline:
+        tq = db.query(models.CompetitorEvolutionEvent).filter(
+            models.CompetitorEvolutionEvent.shop_id == sid,
+            models.CompetitorEvolutionEvent.competitor_name == competitor_name)
+        t_total = tq.count()
+        t_rows = (tq.order_by(models.CompetitorEvolutionEvent.occurred_at.desc(),
+                              models.CompetitorEvolutionEvent.id.desc())
+                  .limit(timeline_limit).all())
+        extra["timeline"] = {"items": [{
+            "id": r.id, "section": r.section, "field_name": r.field_name,
+            "event_type": r.event_type, "old_value": r.old_value,
+            "new_value": r.new_value, "change_source": r.change_source,
+            "changed_by": r.changed_by, "evidence_id": r.evidence_id,
+            "occurred_at": r.occurred_at.isoformat() if r.occurred_at else None,
+        } for r in t_rows], "total": t_total, "limit": timeline_limit}
+
     return {
+        **extra,
         "shop_id": sid,
         "competitor_name": competitor_name,
         "business": _singleton_out(business, cp.BUSINESS_FIELDS),

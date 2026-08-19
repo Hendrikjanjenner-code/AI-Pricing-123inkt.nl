@@ -23,6 +23,8 @@ import type {
   Category,
   CategoryMarginItem,
   CategoryStrategy,
+  CompareCompetitorProfiles200,
+  CompareCompetitorProfilesParams,
   CompetitorScoreDetail,
   CompetitorScoreRankings,
   CompetitorScoresList,
@@ -47,6 +49,12 @@ import type {
   ExportRecommendationsParams,
   ExportResult,
   FileUploadRequest,
+  GetCompetitorFullProfile200,
+  GetCompetitorFullProfileParams,
+  GetCompetitorLandscape200,
+  GetCompetitorLandscapeParams,
+  GetCompetitorRankings200,
+  GetCompetitorRankingsParams,
   GetCompetitorScoreDetailParams,
   GetCompetitorScoreRankingsParams,
   GetExportHistoryParams,
@@ -5909,6 +5917,445 @@ export function useGetCompetitorScoreDetail<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetCompetitorScoreDetailQueryOptions(
+    competitorName,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Concurrentrankings met server-side profiel- en scorefilters
+ */
+export const getGetCompetitorRankingsUrl = (
+  params?: GetCompetitorRankingsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/competition/rankings?${stringifiedParams}`
+    : `/api/competition/rankings`;
+};
+
+export const getCompetitorRankings = async (
+  params?: GetCompetitorRankingsParams,
+  options?: RequestInit,
+): Promise<GetCompetitorRankings200> => {
+  return customFetch<GetCompetitorRankings200>(
+    getGetCompetitorRankingsUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetCompetitorRankingsQueryKey = (
+  params?: GetCompetitorRankingsParams,
+) => {
+  return [`/api/competition/rankings`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetCompetitorRankingsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCompetitorRankings>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetCompetitorRankingsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCompetitorRankings>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetCompetitorRankingsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getCompetitorRankings>>
+  > = ({ signal }) =>
+    getCompetitorRankings(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCompetitorRankings>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetCompetitorRankingsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCompetitorRankings>>
+>;
+export type GetCompetitorRankingsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Concurrentrankings met server-side profiel- en scorefilters
+ */
+
+export function useGetCompetitorRankings<
+  TData = Awaited<ReturnType<typeof getCompetitorRankings>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetCompetitorRankingsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCompetitorRankings>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetCompetitorRankingsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Management-bubblematrix (relevance × strength / future threat)
+ */
+export const getGetCompetitorLandscapeUrl = (
+  params?: GetCompetitorLandscapeParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/competition/landscape?${stringifiedParams}`
+    : `/api/competition/landscape`;
+};
+
+export const getCompetitorLandscape = async (
+  params?: GetCompetitorLandscapeParams,
+  options?: RequestInit,
+): Promise<GetCompetitorLandscape200> => {
+  return customFetch<GetCompetitorLandscape200>(
+    getGetCompetitorLandscapeUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetCompetitorLandscapeQueryKey = (
+  params?: GetCompetitorLandscapeParams,
+) => {
+  return [`/api/competition/landscape`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetCompetitorLandscapeQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCompetitorLandscape>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetCompetitorLandscapeParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCompetitorLandscape>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetCompetitorLandscapeQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getCompetitorLandscape>>
+  > = ({ signal }) =>
+    getCompetitorLandscape(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCompetitorLandscape>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetCompetitorLandscapeQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCompetitorLandscape>>
+>;
+export type GetCompetitorLandscapeQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Management-bubblematrix (relevance × strength / future threat)
+ */
+
+export function useGetCompetitorLandscape<
+  TData = Awaited<ReturnType<typeof getCompetitorLandscape>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetCompetitorLandscapeParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCompetitorLandscape>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetCompetitorLandscapeQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Vergelijking van 2–5 concurrenten (profiel, scores, ranking)
+ */
+export const getCompareCompetitorProfilesUrl = (
+  params: CompareCompetitorProfilesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/competition/competitor-profile/compare?${stringifiedParams}`
+    : `/api/competition/competitor-profile/compare`;
+};
+
+export const compareCompetitorProfiles = async (
+  params: CompareCompetitorProfilesParams,
+  options?: RequestInit,
+): Promise<CompareCompetitorProfiles200> => {
+  return customFetch<CompareCompetitorProfiles200>(
+    getCompareCompetitorProfilesUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getCompareCompetitorProfilesQueryKey = (
+  params?: CompareCompetitorProfilesParams,
+) => {
+  return [
+    `/api/competition/competitor-profile/compare`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getCompareCompetitorProfilesQueryOptions = <
+  TData = Awaited<ReturnType<typeof compareCompetitorProfiles>>,
+  TError = ErrorType<void>,
+>(
+  params: CompareCompetitorProfilesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof compareCompetitorProfiles>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getCompareCompetitorProfilesQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof compareCompetitorProfiles>>
+  > = ({ signal }) =>
+    compareCompetitorProfiles(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof compareCompetitorProfiles>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type CompareCompetitorProfilesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof compareCompetitorProfiles>>
+>;
+export type CompareCompetitorProfilesQueryError = ErrorType<void>;
+
+/**
+ * @summary Vergelijking van 2–5 concurrenten (profiel, scores, ranking)
+ */
+
+export function useCompareCompetitorProfiles<
+  TData = Awaited<ReturnType<typeof compareCompetitorProfiles>>,
+  TError = ErrorType<void>,
+>(
+  params: CompareCompetitorProfilesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof compareCompetitorProfiles>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getCompareCompetitorProfilesQueryOptions(
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Volledig concurrentprofiel incl. optionele scores, evidence en timeline
+ */
+export const getGetCompetitorFullProfileUrl = (
+  competitorName: string,
+  params?: GetCompetitorFullProfileParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/competition/competitor-profile/${competitorName}?${stringifiedParams}`
+    : `/api/competition/competitor-profile/${competitorName}`;
+};
+
+export const getCompetitorFullProfile = async (
+  competitorName: string,
+  params?: GetCompetitorFullProfileParams,
+  options?: RequestInit,
+): Promise<GetCompetitorFullProfile200> => {
+  return customFetch<GetCompetitorFullProfile200>(
+    getGetCompetitorFullProfileUrl(competitorName, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetCompetitorFullProfileQueryKey = (
+  competitorName: string,
+  params?: GetCompetitorFullProfileParams,
+) => {
+  return [
+    `/api/competition/competitor-profile/${competitorName}`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetCompetitorFullProfileQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCompetitorFullProfile>>,
+  TError = ErrorType<void>,
+>(
+  competitorName: string,
+  params?: GetCompetitorFullProfileParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCompetitorFullProfile>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetCompetitorFullProfileQueryKey(competitorName, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getCompetitorFullProfile>>
+  > = ({ signal }) =>
+    getCompetitorFullProfile(competitorName, params, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!competitorName,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCompetitorFullProfile>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetCompetitorFullProfileQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCompetitorFullProfile>>
+>;
+export type GetCompetitorFullProfileQueryError = ErrorType<void>;
+
+/**
+ * @summary Volledig concurrentprofiel incl. optionele scores, evidence en timeline
+ */
+
+export function useGetCompetitorFullProfile<
+  TData = Awaited<ReturnType<typeof getCompetitorFullProfile>>,
+  TError = ErrorType<void>,
+>(
+  competitorName: string,
+  params?: GetCompetitorFullProfileParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCompetitorFullProfile>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetCompetitorFullProfileQueryOptions(
     competitorName,
     params,
     options,

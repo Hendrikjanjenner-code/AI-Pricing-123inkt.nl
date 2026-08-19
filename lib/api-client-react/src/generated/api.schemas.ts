@@ -1167,3 +1167,120 @@ export type GetCompetitorScoreDetailParams = {
    */
   shop_id?: number | null;
 };
+
+export type GetCompetitorRankingsParams = {
+  scope?: string;
+  /**
+   * @nullable
+   */
+  shop_id?: number | null;
+  /**
+   * @nullable
+   */
+  company_size?: string | null;
+  /**
+   * @nullable
+   */
+  geographic_scale?: string | null;
+  /**
+   * @nullable
+   */
+  country?: string | null;
+  /**
+   * @nullable
+   */
+  customer_model?: string | null;
+  /**
+   * @nullable
+   */
+  market_role?: string | null;
+  /**
+   * @nullable
+   */
+  fulfilment_model?: string | null;
+  /**
+   * @nullable
+   */
+  financial_health?: string | null;
+  /**
+   * @minimum 0
+   * @maximum 100
+   * @nullable
+   */
+  min_business_strength?: number | null;
+  /**
+   * @minimum 0
+   * @maximum 100
+   * @nullable
+   */
+  min_procurement_power?: number | null;
+  /**
+   * @minimum 0
+   * @maximum 100
+   * @nullable
+   */
+  min_data_completeness?: number | null;
+};
+
+export type GetCompetitorRankings200RankingsItem = { [key: string]: unknown };
+
+export type GetCompetitorRankings200 = {
+  scope?: string;
+  /** @nullable */
+  run_date?: string | null;
+  total?: number;
+  rankings?: GetCompetitorRankings200RankingsItem[];
+};
+
+export type GetCompetitorLandscapeParams = {
+  /**
+   * @nullable
+   */
+  shop_id?: number | null;
+};
+
+export type GetCompetitorLandscape200ItemsItem = { [key: string]: unknown };
+
+export type GetCompetitorLandscape200 = {
+  shop_id?: number;
+  /** @nullable */
+  run_date?: string | null;
+  total?: number;
+  items?: GetCompetitorLandscape200ItemsItem[];
+};
+
+export type CompareCompetitorProfilesParams = {
+  /**
+   * Komma-gescheiden lijst van 2–5 concurrentnamen
+   */
+  names: string;
+  /**
+   * @nullable
+   */
+  shop_id?: number | null;
+};
+
+export type CompareCompetitorProfiles200ItemsItem = { [key: string]: unknown };
+
+export type CompareCompetitorProfiles200 = {
+  shop_id?: number;
+  total?: number;
+  items?: CompareCompetitorProfiles200ItemsItem[];
+};
+
+export type GetCompetitorFullProfileParams = {
+  /**
+   * @nullable
+   */
+  shop_id?: number | null;
+  include_scores?: boolean;
+  include_timeline?: boolean;
+  include_evidence?: boolean;
+  /**
+   * @minimum 1
+   * @maximum 200
+   */
+  timeline_limit?: number;
+};
+
+export type GetCompetitorFullProfile200 = { [key: string]: unknown };

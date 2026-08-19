@@ -1416,6 +1416,159 @@ paths:
         "404":
           description: Geen scores voor deze concurrent in deze shop
 
+  /competition/rankings:
+    get:
+      operationId: getCompetitorRankings
+      tags: [competition]
+      summary: Concurrentrankings met server-side profiel- en scorefilters
+      parameters:
+        - name: scope
+          in: query
+          schema: { type: string, default: overall }
+        - name: shop_id
+          in: query
+          schema: { type: ["integer", "null"] }
+        - name: company_size
+          in: query
+          schema: { type: ["string", "null"] }
+        - name: geographic_scale
+          in: query
+          schema: { type: ["string", "null"] }
+        - name: country
+          in: query
+          schema: { type: ["string", "null"] }
+        - name: customer_model
+          in: query
+          schema: { type: ["string", "null"] }
+        - name: market_role
+          in: query
+          schema: { type: ["string", "null"] }
+        - name: fulfilment_model
+          in: query
+          schema: { type: ["string", "null"] }
+        - name: financial_health
+          in: query
+          schema: { type: ["string", "null"] }
+        - name: min_business_strength
+          in: query
+          schema: { type: ["number", "null"], minimum: 0, maximum: 100 }
+        - name: min_procurement_power
+          in: query
+          schema: { type: ["number", "null"], minimum: 0, maximum: 100 }
+        - name: min_data_completeness
+          in: query
+          schema: { type: ["number", "null"], minimum: 0, maximum: 100 }
+      responses:
+        "200":
+          description: Gefilterde rankinglijst met correcte totalen
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  scope: { type: string }
+                  run_date: { type: ["string", "null"] }
+                  total: { type: integer }
+                  rankings:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+
+  /competition/landscape:
+    get:
+      operationId: getCompetitorLandscape
+      tags: [competition]
+      summary: Management-bubblematrix (relevance × strength / future threat)
+      parameters:
+        - name: shop_id
+          in: query
+          schema: { type: ["integer", "null"] }
+      responses:
+        "200":
+          description: Landscape-punten per concurrent; onbekende assen blijven null
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shop_id: { type: integer }
+                  run_date: { type: ["string", "null"] }
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+
+  /competition/competitor-profile/compare:
+    get:
+      operationId: compareCompetitorProfiles
+      tags: [competition]
+      summary: Vergelijking van 2–5 concurrenten (profiel, scores, ranking)
+      parameters:
+        - name: names
+          in: query
+          required: true
+          schema: { type: string }
+          description: Komma-gescheiden lijst van 2–5 concurrentnamen
+        - name: shop_id
+          in: query
+          schema: { type: ["integer", "null"] }
+      responses:
+        "200":
+          description: Vergelijkingsdata per concurrent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shop_id: { type: integer }
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+        "400":
+          description: Ongeldig aantal concurrenten (kies 2–5)
+
+  /competition/competitor-profile/{competitor_name}:
+    get:
+      operationId: getCompetitorFullProfile
+      tags: [competition]
+      summary: Volledig concurrentprofiel incl. optionele scores, evidence en timeline
+      parameters:
+        - name: competitor_name
+          in: path
+          required: true
+          schema: { type: string }
+        - name: shop_id
+          in: query
+          schema: { type: ["integer", "null"] }
+        - name: include_scores
+          in: query
+          schema: { type: boolean, default: false }
+        - name: include_timeline
+          in: query
+          schema: { type: boolean, default: false }
+        - name: include_evidence
+          in: query
+          schema: { type: boolean, default: false }
+        - name: timeline_limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 20 }
+      responses:
+        "200":
+          description: Samenhangend profiel met completeness en optionele secties
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404":
+          description: Concurrent niet gevonden voor deze winkel
+
 components:
   schemas:
     CompetitorScoreSummary:

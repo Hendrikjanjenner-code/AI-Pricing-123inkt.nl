@@ -1826,3 +1826,116 @@ export const GetCompetitorScoreDetailResponse = zod
       details: zod.unknown().optional(),
     }),
   );
+
+/**
+ * @summary Concurrentrankings met server-side profiel- en scorefilters
+ */
+export const getCompetitorRankingsQueryScopeDefault = `overall`;
+export const getCompetitorRankingsQueryMinBusinessStrengthMin = 0;
+export const getCompetitorRankingsQueryMinBusinessStrengthMax = 100;
+
+export const getCompetitorRankingsQueryMinProcurementPowerMin = 0;
+export const getCompetitorRankingsQueryMinProcurementPowerMax = 100;
+
+export const getCompetitorRankingsQueryMinDataCompletenessMin = 0;
+export const getCompetitorRankingsQueryMinDataCompletenessMax = 100;
+
+export const GetCompetitorRankingsQueryParams = zod.object({
+  scope: zod.coerce.string().default(getCompetitorRankingsQueryScopeDefault),
+  shop_id: zod.coerce.number().nullish(),
+  company_size: zod.coerce.string().nullish(),
+  geographic_scale: zod.coerce.string().nullish(),
+  country: zod.coerce.string().nullish(),
+  customer_model: zod.coerce.string().nullish(),
+  market_role: zod.coerce.string().nullish(),
+  fulfilment_model: zod.coerce.string().nullish(),
+  financial_health: zod.coerce.string().nullish(),
+  min_business_strength: zod.coerce
+    .number()
+    .min(getCompetitorRankingsQueryMinBusinessStrengthMin)
+    .max(getCompetitorRankingsQueryMinBusinessStrengthMax)
+    .nullish(),
+  min_procurement_power: zod.coerce
+    .number()
+    .min(getCompetitorRankingsQueryMinProcurementPowerMin)
+    .max(getCompetitorRankingsQueryMinProcurementPowerMax)
+    .nullish(),
+  min_data_completeness: zod.coerce
+    .number()
+    .min(getCompetitorRankingsQueryMinDataCompletenessMin)
+    .max(getCompetitorRankingsQueryMinDataCompletenessMax)
+    .nullish(),
+});
+
+export const GetCompetitorRankingsResponse = zod.object({
+  scope: zod.string().optional(),
+  run_date: zod.string().nullish(),
+  total: zod.number().optional(),
+  rankings: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+});
+
+/**
+ * @summary Management-bubblematrix (relevance × strength / future threat)
+ */
+export const GetCompetitorLandscapeQueryParams = zod.object({
+  shop_id: zod.coerce.number().nullish(),
+});
+
+export const GetCompetitorLandscapeResponse = zod.object({
+  shop_id: zod.number().optional(),
+  run_date: zod.string().nullish(),
+  total: zod.number().optional(),
+  items: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+});
+
+/**
+ * @summary Vergelijking van 2–5 concurrenten (profiel, scores, ranking)
+ */
+export const CompareCompetitorProfilesQueryParams = zod.object({
+  names: zod.coerce
+    .string()
+    .describe("Komma-gescheiden lijst van 2–5 concurrentnamen"),
+  shop_id: zod.coerce.number().nullish(),
+});
+
+export const CompareCompetitorProfilesResponse = zod.object({
+  shop_id: zod.number().optional(),
+  total: zod.number().optional(),
+  items: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+});
+
+/**
+ * @summary Volledig concurrentprofiel incl. optionele scores, evidence en timeline
+ */
+export const GetCompetitorFullProfileParams = zod.object({
+  competitor_name: zod.coerce.string(),
+});
+
+export const getCompetitorFullProfileQueryIncludeScoresDefault = false;
+export const getCompetitorFullProfileQueryIncludeTimelineDefault = false;
+export const getCompetitorFullProfileQueryIncludeEvidenceDefault = false;
+export const getCompetitorFullProfileQueryTimelineLimitDefault = 20;
+export const getCompetitorFullProfileQueryTimelineLimitMax = 200;
+
+export const GetCompetitorFullProfileQueryParams = zod.object({
+  shop_id: zod.coerce.number().nullish(),
+  include_scores: zod.coerce
+    .boolean()
+    .default(getCompetitorFullProfileQueryIncludeScoresDefault),
+  include_timeline: zod.coerce
+    .boolean()
+    .default(getCompetitorFullProfileQueryIncludeTimelineDefault),
+  include_evidence: zod.coerce
+    .boolean()
+    .default(getCompetitorFullProfileQueryIncludeEvidenceDefault),
+  timeline_limit: zod.coerce
+    .number()
+    .min(1)
+    .max(getCompetitorFullProfileQueryTimelineLimitMax)
+    .default(getCompetitorFullProfileQueryTimelineLimitDefault),
+});
+
+export const GetCompetitorFullProfileResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);

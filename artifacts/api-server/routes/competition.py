@@ -1128,17 +1128,99 @@ def _run_out(r: models.CompetitorDiscoveryRun) -> dict:
 
 # ── NIEUW: Rankings (§9 + §11) ───────────────────────────────────────────────
 
+def _ranking_filter_context(db: Session, sid: int, names: list[str]) -> dict:
+    """Profieldata per concurrent voor server-side rankingfilters."""
+    from engine.competitor_scores import latest_scores_by_competitor
+    scores = latest_scores_by_competitor(db, sid)
+    business = {b.competitor_name: b for b in
+                db.query(models.CompetitorBusinessProfile).filter(
+                    models.CompetitorBusinessProfile.shop_id == sid,
+                    models.CompetitorBusinessProfile.competitor_name.in_(names)).all()}
+    fulfilment = {f.competitor_name: f for f in
+                  db.query(models.CompetitorFulfilmentProfile).filter(
+                      models.CompetitorFulfilmentProfile.shop_id == sid,
+                      models.CompetitorFulfilmentProfile.competitor_name.in_(names)).all()}
+    roles: dict = {}
+    for r in db.query(models.CompetitorMarketRole).filter(
+            models.CompetitorMarketRole.shop_id == sid,
+            models.CompetitorMarketRole.competitor_name.in_(names),
+            models.CompetitorMarketRole.valid_to.is_(None)).all():
+        roles.setdefault(r.competitor_name, set()).add(r.role)
+    countries: dict = {}
+    for g in db.query(models.CompetitorGeographicPresence).filter(
+            models.CompetitorGeographicPresence.shop_id == sid,
+            models.CompetitorGeographicPresence.competitor_name.in_(names),
+            models.CompetitorGeographicPresence.valid_to.is_(None)).all():
+        if g.country_code:
+            countries.setdefault(g.competitor_name, set()).add(g.country_code.upper())
+    return {"scores": scores, "business": business, "fulfilment": fulfilment,
+            "roles": roles, "countries": countries}
+
+
+def _ranking_passes_filters(name: str, ctx: dict, *, company_size, geographic_scale,
+                            country, customer_model, market_role, fulfilment_model,
+                            financial_health, min_business_strength,
+                            min_procurement_power, min_data_completeness) -> bool:
+    s = ctx["scores"].get(name)
+    b = ctx["business"].get(name)
+    f = ctx["fulfilment"].get(name)
+    if company_size and not (
+            (s and s.company_size_class == company_size)
+            or (b and b.size_class == company_size)):
+        return False
+    if geographic_scale and not (
+            (s and s.geographic_scale_class == geographic_scale)
+            or (b and b.geographic_scale == geographic_scale)):
+        return False
+    if country and country.upper() not in ctx["countries"].get(name, set()):
+        return False
+    if customer_model and not (b and b.customer_model == customer_model):
+        return False
+    if market_role and market_role not in ctx["roles"].get(name, set()):
+        return False
+    if fulfilment_model and not (
+            (s and s.fulfilment_model_class == fulfilment_model)
+            or (f and f.inventory_model == fulfilment_model)):
+        return False
+    if financial_health and not (s and s.financial_health_status == financial_health):
+        return False
+    if min_business_strength is not None and not (
+            s and s.business_strength_score is not None
+            and float(s.business_strength_score) >= min_business_strength):
+        return False
+    if min_procurement_power is not None and not (
+            s and s.procurement_power_score is not None
+            and float(s.procurement_power_score) >= min_procurement_power):
+        return False
+    if min_data_completeness is not None and not (
+            s and s.data_completeness_pct is not None
+            and float(s.data_completeness_pct) >= min_data_completeness):
+        return False
+    return True
+
+
 @router.get("/rankings")
 def get_competitor_rankings(
     scope: str = Query("overall"),
     shop_id: Optional[int] = Query(None),
+    company_size: Optional[str] = Query(None),
+    geographic_scale: Optional[str] = Query(None),
+    country: Optional[str] = Query(None),
+    customer_model: Optional[str] = Query(None, description="B2C / B2B / hybride"),
+    market_role: Optional[str] = Query(None, description="Competition DNA-rol"),
+    fulfilment_model: Optional[str] = Query(None, description="stockholding / dropship / hybrid / marketplace"),
+    financial_health: Optional[str] = Query(None, description="gezond / aandacht / zwak / unknown"),
+    min_business_strength: Optional[float] = Query(None, ge=0.0, le=100.0),
+    min_procurement_power: Optional[float] = Query(None, ge=0.0, le=100.0),
+    min_data_completeness: Optional[float] = Query(None, ge=0.0, le=100.0),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     """
     Concurrentrankings met de drie gestandaardiseerde scores (§9):
     Competition Relevance, Price Relevance en Influence — plus rank,
-    vorige rank en trend (§11).
+    vorige rank en trend (§11). Server-side filterbaar op profielkenmerken
+    en scoreklassen (taak #248); totalen kloppen met de filters.
     """
     from sqlalchemy import func as _func
     sid = _scope(db, shop_id)
@@ -1148,7 +1230,7 @@ def get_competitor_rankings(
     ).scalar()
     last_sync_at = _last_feed_sync_at(db)
     if not latest:
-        return {"scope": scope, "run_date": None, "rankings": [],
+        return {"scope": scope, "run_date": None, "rankings": [], "total": 0,
                 "computed_at": None,
                 "last_feed_sync_at": last_sync_at.isoformat() if last_sync_at else None,
                 "stale": last_sync_at is not None,
@@ -1163,6 +1245,21 @@ def get_competitor_rankings(
         .order_by(models.CompetitorRanking.rank)
         .all()
     )
+    filters_active = any(v is not None for v in (
+        company_size, geographic_scale, country, customer_model, market_role,
+        fulfilment_model, financial_health, min_business_strength,
+        min_procurement_power, min_data_completeness))
+    if filters_active:
+        ctx = _ranking_filter_context(db, sid, [r.competitor_name for r in rows])
+        rows = [r for r in rows if _ranking_passes_filters(
+            r.competitor_name, ctx,
+            company_size=company_size, geographic_scale=geographic_scale,
+            country=country, customer_model=customer_model,
+            market_role=market_role, fulfilment_model=fulfilment_model,
+            financial_health=financial_health,
+            min_business_strength=min_business_strength,
+            min_procurement_power=min_procurement_power,
+            min_data_completeness=min_data_completeness)]
     # Versheid: wanneer zijn deze rankings berekend, en is er sindsdien een
     # nieuwe feed-sync geweest (dan zijn ze "verouderd")?
     computed_at = max((r.created_at for r in rows if r.created_at), default=None)
@@ -1180,6 +1277,7 @@ def get_competitor_rankings(
         "last_feed_sync_at": last_sync_at.isoformat() if last_sync_at else None,
         "stale": stale,
         "changed": changed,
+        "total": len(rows),
         "scopes": _ranking_scopes(db, sid),
         "rankings": [
             {
@@ -1843,3 +1941,69 @@ def get_competitor_score_detail(
         raise HTTPException(status_code=404,
                             detail="Geen concurrentscores voor deze concurrent in deze shop")
     return {**_score_row_summary(row), "shop_id": sid, "details": row.details}
+
+
+# ── NIEUW: Concurrent Landscape — managementmatrix (taak #248) ───────────────
+
+@router.get("/landscape")
+def get_competitor_landscape(
+    shop_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """
+    Management-bubblematrix: per concurrent Competition Relevance,
+    Business Strength en Future Threat, plus company-scale (bubbelgrootte)
+    en Competition DNA-rollen (kleur/type). Concurrenten zonder waarde op
+    een as worden apart teruggegeven als 'unknown' — nooit als 0 geplot.
+    """
+    from engine.competitor_scores import latest_scores_by_competitor
+    from sqlalchemy import func as _func
+    sid = _scope(db, shop_id)
+
+    latest = db.query(_func.max(models.CompetitorRanking.run_date)).filter(
+        models.CompetitorRanking.scope == "overall",
+        models.CompetitorRanking.shop_id == sid).scalar()
+    rankings = {}
+    if latest:
+        rankings = {r.competitor_name: r for r in
+                    db.query(models.CompetitorRanking).filter(
+                        models.CompetitorRanking.scope == "overall",
+                        models.CompetitorRanking.shop_id == sid,
+                        models.CompetitorRanking.run_date == latest).all()}
+    scores = latest_scores_by_competitor(db, sid)
+    names = sorted(set(rankings) | set(scores))
+    roles: dict = {}
+    if names:
+        for r in db.query(models.CompetitorMarketRole).filter(
+                models.CompetitorMarketRole.shop_id == sid,
+                models.CompetitorMarketRole.competitor_name.in_(names),
+                models.CompetitorMarketRole.valid_to.is_(None)).all():
+            roles.setdefault(r.competitor_name, []).append(r.role)
+
+    items = []
+    for n in names:
+        rk = rankings.get(n)
+        sc = scores.get(n)
+        items.append({
+            "competitor_name": n,
+            "competition_relevance_score": (
+                round(float(rk.competition_relevance_score), 4)
+                if rk and rk.competition_relevance_score is not None else None),
+            "business_strength_score": (
+                float(sc.business_strength_score)
+                if sc and sc.business_strength_score is not None else None),
+            "future_threat_score": (
+                float(sc.future_threat_score)
+                if sc and sc.future_threat_score is not None else None),
+            "company_size_class": sc.company_size_class if sc else None,
+            "market_roles": sorted(roles.get(n, [])),
+            "data_completeness_pct": sc.data_completeness_pct if sc else None,
+            "rank": rk.rank if rk else None,
+        })
+    return {
+        "shop_id": sid,
+        "run_date": str(latest) if latest else None,
+        "items": items,
+        "total": len(items),
+    }

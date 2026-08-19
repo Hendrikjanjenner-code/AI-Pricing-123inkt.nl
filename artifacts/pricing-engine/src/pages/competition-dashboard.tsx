@@ -101,11 +101,20 @@ export default function CompetitionDashboard() {
   });
 
   const [rankScope, setRankScope] = useState("overall");
+  const [rankFilters, setRankFilters] = useState<Record<string, string>>({});
+  const setRankFilter = (key: string, value: string) =>
+    setRankFilters(f => {
+      const next = { ...f };
+      if (!value || value === "__all__") delete next[key];
+      else next[key] = value;
+      return next;
+    });
   const { data: rankData, isLoading: rankLoading } = useQuery({
-    queryKey: ["competition-rankings", rankScope, shopId],
+    queryKey: ["competition-rankings", rankScope, shopId, rankFilters],
     queryFn: () => {
       const p = new URLSearchParams({ scope: rankScope });
       if (shopId !== undefined) p.set("shop_id", String(shopId));
+      Object.entries(rankFilters).forEach(([k, v]) => p.set(k, v));
       return apiFetch(`/api/competition/rankings?${p}`);
     },
   });
@@ -251,6 +260,41 @@ export default function CompetitionDashboard() {
               De ranking is gewijzigd t.o.v. de vorige berekening — verschuivingen zijn per concurrent gemarkeerd (▲ omhoog, ▼ omlaag, ✦ nieuw).
             </div>
           )}
+          {/* Server-side rankingfilters (taak #248) */}
+          <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="rankings-filters">
+            {([
+              ["company_size", "Bedrijfsomvang", ["micro", "klein", "midden", "groot", "enterprise"]],
+              ["geographic_scale", "Geografische schaal", ["lokaal", "nationaal", "regionaal_eu", "europees", "globaal"]],
+              ["country", "Land", ["NL", "BE", "DE", "FR", "UK"]],
+              ["customer_model", "Klantfocus", ["B2C", "B2B", "hybride"]],
+              ["market_role", "Competition DNA", ["prijsagressor", "assortimentsbreedte", "servicekampioen", "nichespecialist", "marketplace", "premiummerk"]],
+              ["fulfilment_model", "Fulfilment", ["stockholding", "dropship", "hybrid", "marketplace"]],
+              ["financial_health", "Financial health", ["gezond", "aandacht", "zwak", "unknown"]],
+              ["min_business_strength", "Min. business strength", ["25", "50", "75"]],
+              ["min_procurement_power", "Min. procurement power", ["25", "50", "75"]],
+              ["min_data_completeness", "Min. data confidence %", ["25", "50", "75"]],
+            ] as [string, string, string[]][]).map(([key, label, opts]) => (
+              <Select key={key} value={rankFilters[key] || "__all__"} onValueChange={v => setRankFilter(key, v)}>
+                <SelectTrigger className="h-7 w-auto min-w-36 text-xs" data-testid={`filter-${key}`}>
+                  <SelectValue placeholder={label} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">{label}: alle</SelectItem>
+                  {opts.map(o => <SelectItem key={o} value={o}>{label.startsWith("Min.") ? `≥ ${o}` : o}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            ))}
+            {Object.keys(rankFilters).length > 0 && (
+              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setRankFilters({})} data-testid="button-clear-rank-filters">
+                Wis filters
+              </Button>
+            )}
+            {rankData?.total != null && (
+              <span className="text-xs text-muted-foreground ml-auto" data-testid="text-rankings-total">
+                {rankData.total} concurrent{rankData.total === 1 ? "" : "en"}
+              </span>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <div className="border-t">
