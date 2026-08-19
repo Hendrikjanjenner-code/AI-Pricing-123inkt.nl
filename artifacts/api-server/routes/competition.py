@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 import models
 import auth as auth_utils
+from engine import competition_intelligence
 
 router = APIRouter(prefix="/api/competition", tags=["competition"])
 
@@ -626,13 +627,14 @@ def list_ai_matches(
         q = q.filter(models.AiMatchResult.status == status)
     if sku_id:
         q = q.filter(models.AiMatchResult.own_sku_id == sku_id)
+    suspect_threshold = competition_intelligence.suspicious_match_threshold_pct(db)
     if suspect:
-        # Verdachte matches: |prijsverschil| > 40% en nog PENDING
+        # Verdachte matches: |prijsverschil| > drempel en nog PENDING
         q = q.filter(
             models.AiMatchResult.status == "PENDING",
             models.AiMatchResult.price_diff_pct.isnot(None),
-            (models.AiMatchResult.price_diff_pct > 40)
-            | (models.AiMatchResult.price_diff_pct < -40),
+            (models.AiMatchResult.price_diff_pct > suspect_threshold)
+            | (models.AiMatchResult.price_diff_pct < -suspect_threshold),
         )
 
     total = q.count()
@@ -653,6 +655,7 @@ def list_ai_matches(
     return {
         "items": [_match_out(m, products.get(m.own_sku_id)) for m in items],
         "total": total, "page": page, "page_size": page_size,
+        "suspect_threshold_pct": suspect_threshold,
     }
 
 
@@ -1414,6 +1417,7 @@ def get_match_quality(
             feed_linked += cnt
 
     # Verdachte matches: hoge confidence maar extreem prijsverschil
+    suspect_threshold = competition_intelligence.suspicious_match_threshold_pct(db)
     suspects = (
         db.query(models.AiMatchResult)
         .join(models.DimProduct,
@@ -1421,8 +1425,8 @@ def get_match_quality(
         .filter(models.DimProduct.shop_id == sid,
                 models.AiMatchResult.status == "PENDING",
                 models.AiMatchResult.price_diff_pct.isnot(None))
-        .filter((models.AiMatchResult.price_diff_pct > 40)
-                | (models.AiMatchResult.price_diff_pct < -40))
+        .filter((models.AiMatchResult.price_diff_pct > suspect_threshold)
+                | (models.AiMatchResult.price_diff_pct < -suspect_threshold))
         .order_by(models.AiMatchResult.confidence.desc())
         .limit(25).all()
     )
@@ -1448,7 +1452,9 @@ def get_match_quality(
             "price_diff_pct": m.price_diff_pct,
             "explanation": m.explanation_nl,
         } for m in suspects],
-        "note": "Verdachte matches: |prijsverschil| > 40% bij status PENDING — kandidaat voor review.",
+        "suspect_threshold_pct": suspect_threshold,
+        "note": (f"Verdachte matches: |prijsverschil| > {suspect_threshold:g}% "
+                 "bij status PENDING — kandidaat voor review."),
     }
 
 

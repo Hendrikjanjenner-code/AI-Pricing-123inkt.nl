@@ -190,7 +190,9 @@ export default function CompetitionAiMatching() {
             <CardContent className="py-3 px-4">
               <p className="text-xs text-muted-foreground">Verdachte matches</p>
               <p className="text-xl font-bold tabular-nums">{quality.suspect_matches?.length ?? 0}</p>
-              <p className="text-xs text-muted-foreground">|prijsverschil| &gt; 40%, nog PENDING</p>
+              <p className="text-xs text-muted-foreground">
+                |prijsverschil| &gt; {quality.suspect_threshold_pct ?? data?.suspect_threshold_pct ?? "—"}%, nog PENDING
+              </p>
             </CardContent>
           </Card>
         </div>

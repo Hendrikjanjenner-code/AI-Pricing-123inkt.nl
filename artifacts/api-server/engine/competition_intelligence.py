@@ -89,7 +89,12 @@ DEFAULTS = {
 def _cfg(db: Session) -> dict:
     return get_active_config(db, MODEL_NAME, DEFAULTS)
 
-
+def suspicious_match_threshold_pct(db: Session) -> float:
+    """De gedeelde drempel (%) waarboven |prijsverschil| een match verdacht
+    maakt. Eén bron voor het suspect-filter, match-quality en de nachtelijke
+    signaaldetectie — wijzig 'suspicious_match_price_diff_pct' in de
+    modelconfiguratie, nooit een hardcoded 40 elders."""
+    return float(_cfg(db)["suspicious_match_price_diff_pct"])
 def _already_signaled(db: Session, signal_type: str, entity_id: str,
                       shop_id: Optional[int], evidence_key: str,
                       evidence_val) -> bool:
@@ -1073,7 +1078,7 @@ def warn_suspicious_matches(db: Session, run_date: Optional[date] = None,
 
     rd = run_date or date.today()
     cfg = _cfg(db)
-    price_diff_threshold = float(cfg["suspicious_match_price_diff_pct"])
+    price_diff_threshold = suspicious_match_threshold_pct(db)
     min_count = int(cfg["suspicious_match_min_count"])
 
     # Tel verdachte PENDING-matches per shop
