@@ -13,6 +13,9 @@ import {
   Loader2, RefreshCw, ShieldAlert, UserCircle2, XCircle,
 } from "lucide-react";
 import { getAuthHeaders } from "@/lib/auth";
+import {
+  ResponsiveContainer, ComposedChart, Line, XAxis, YAxis, Tooltip, CartesianGrid,
+} from "recharts";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -50,6 +53,19 @@ interface QualityReport {
     signals_published?: number;
 
   } | null;
+}
+
+interface ScanRun {
+  id: number;
+  started_at?: string | null;
+  finished_at?: string | null;
+  triggered_by?: string;
+  status?: string;
+  issues_total?: number;
+  error_issues?: number;
+  warning_issues?: number;
+  new_or_worse_errors?: number;
+  signals_published?: number;
 }
 
 function formatScanTijd(iso?: string | null): string {
@@ -182,6 +198,7 @@ function IssueRij({ issue, onUpdate }: { issue: QualityIssue; onUpdate: (id: num
 
 export default function DataQuality() {
   const [report, setReport] = useState<QualityReport | null>(null);
+  const [scans, setScans] = useState<ScanRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [fout, setFout] = useState<string | null>(null);
   const [severityFilter, setSeverityFilter] = useState("alle");
@@ -202,6 +219,21 @@ export default function DataQuality() {
       setFout(e?.message ?? "Onbekende fout");
     } finally {
       setLoading(false);
+    }
+    // Scan-historie apart laden: falen hiervan mag het rapport niet blokkeren.
+    try {
+      // status=geslaagd: server filtert vóór de limit, zodat mislukte runs
+      // de 30 geslaagde trend-datapoints niet verdringen.
+      const resp = await fetch(`${BASE}/api/data-quality/scans?limit=30&status=geslaagd`, {
+        headers: getAuthHeaders(),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        setScans(Array.isArray(data?.scans) ? data.scans : []);
+      }
+    } catch {
+      // stil: trendkaart toont dan gewoon geen historie
     }
   }, []);
 
@@ -232,6 +264,21 @@ export default function DataQuality() {
     if (statusFilter !== "alle" && statusFilter !== "actief" && i.status !== statusFilter) return false;
     return true;
   });
+
+  // Trenddata: chronologisch (oudste eerst), alleen afgeronde geslaagde runs
+  const trendData = useMemo(() => (
+    scans
+      .filter((s) => s.status === "geslaagd")
+      .slice()
+      .reverse()
+      .map((s) => ({
+        id: s.id,
+        tijd: formatScanTijd(s.finished_at ?? s.started_at),
+        fouten: s.error_issues ?? 0,
+        waarschuwingen: s.warning_issues ?? 0,
+        totaal: s.issues_total ?? 0,
+      }))
+  ), [scans]);
 
   const errors = issues.filter((i) => i.severity === "error" && i.status !== "opgelost" && i.status !== "genegeerd").length;
   const warns = issues.filter((i) => i.severity === "warning" && i.status !== "opgelost" && i.status !== "genegeerd").length;
@@ -294,6 +341,36 @@ export default function DataQuality() {
           <CardContent><div className="text-3xl font-bold text-blue-600">{issues.filter((i) => i.status === "in_behandeling").length}</div></CardContent>
         </Card>
       </div>
+
+      {trendData.length >= 2 && (
+        <Card data-testid="card-scan-trend">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Scan-historie</CardTitle>
+            <CardDescription>
+              Trend van fouten en waarschuwingen over de laatste {trendData.length} geslaagde scans.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="h-40">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={trendData} margin={{ top: 5, right: 10, bottom: 0, left: -20 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-muted" />
+                  <XAxis dataKey="tijd" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                  <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+                  <Tooltip
+                    formatter={(value: any, name: any) => [value, name]}
+                    labelFormatter={(label) => `Scan: ${label}`}
+                    contentStyle={{ fontSize: 12 }}
+                  />
+                  <Line type="monotone" dataKey="fouten" name="Fouten" stroke="#dc2626" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="waarschuwingen" name="Waarschuwingen" stroke="#d97706" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="totaal" name="Totaal issues" stroke="#64748b" strokeWidth={1.5} strokeDasharray="4 3" dot={false} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

@@ -641,6 +641,23 @@ def get_data_quality(
     }
 
 
+@router.get("/data-quality/scans")
+def list_scan_runs(
+    limit: int = 30,
+    status: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """Recente scan-runs (nieuwste eerst) voor de trendweergave in het dashboard.
+
+    Met ``status=geslaagd`` filtert de server vóór de limit, zodat de trend
+    altijd de laatste N geslaagde scans bevat, ook als er recent runs faalden.
+    """
+    from services.data_quality_scan import recent_scan_runs
+    limit = max(1, min(limit, 100))
+    return {"scans": recent_scan_runs(db, limit=limit, status=status)}
+
+
 @router.get("/data-quality/issues")
 def list_quality_issues(
     status: str | None = None,

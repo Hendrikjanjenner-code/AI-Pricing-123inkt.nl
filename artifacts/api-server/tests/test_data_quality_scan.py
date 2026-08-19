@@ -241,6 +241,78 @@ def test_dashboard_report_includes_last_scan(client, auth):
     assert body["last_scan"]["finished_at"]
 
 
+def test_scan_history_endpoint(client, auth, db):
+    """GET /api/data-quality/scans geeft recente runs terug, nieuwste eerst."""
+    # Zorg dat er minimaal 2 runs zijn (de dashboard-test hierboven maakte er al 1)
+    with patch.object(dq_module, "_detect_issues", side_effect=_detect_plus([])), \
+         patch("services.data_quality_scan_scheduler._notify_issue"):
+        run_quality_scan(db, triggered_by="scheduler")
+
+    resp = client.get("/api/data-quality/scans", headers=auth)
+    assert resp.status_code == 200, resp.text
+    scans = resp.json()["scans"]
+    assert len(scans) >= 2
+    # Nieuwste eerst
+    starts = [s["started_at"] for s in scans if s["started_at"]]
+    assert starts == sorted(starts, reverse=True)
+    # Velden voor de trendweergave aanwezig
+    for veld in ("id", "started_at", "status", "issues_total",
+                 "error_issues", "warning_issues", "new_or_worse_errors"):
+        assert veld in scans[0]
+
+    # Limit wordt gerespecteerd (en geklemd op minimaal 1)
+    resp = client.get("/api/data-quality/scans?limit=1", headers=auth)
+    assert resp.status_code == 200
+    assert len(resp.json()["scans"]) == 1
+
+    # Zonder auth: geweigerd
+    assert client.get("/api/data-quality/scans").status_code in (401, 403)
+
+
+def test_scan_history_status_filter_before_limit(client, auth, db):
+    """status=geslaagd filtert vóór de limit: mislukte runs verdringen de
+    geslaagde trend-datapoints niet."""
+    from datetime import datetime, timedelta
+    base = datetime.utcnow()
+    made: list[int] = []
+    try:
+        # 3 geslaagde runs, daarna (recenter) 4 mislukte runs
+        for i in range(3):
+            r = models.DataQualityScanRun(
+                started_at=base - timedelta(minutes=30 - i), finished_at=base,
+                triggered_by="scheduler", status="geslaagd", issues_total=i)
+            db.add(r); made.append(r)
+        for i in range(4):
+            r = models.DataQualityScanRun(
+                started_at=base - timedelta(minutes=10 - i), finished_at=base,
+                triggered_by="scheduler", status="fout", error_message="x")
+            db.add(r); made.append(r)
+        db.commit()
+        made = [r.id for r in made]
+
+        # Zonder filter met kleine limit: mislukte runs domineren
+        resp = client.get("/api/data-quality/scans?limit=4", headers=auth)
+        assert resp.status_code == 200
+        assert all(s["status"] == "fout" for s in resp.json()["scans"][:4]
+                   if s["id"] in made)
+
+        # Met status-filter: precies de nieuwste geslaagde runs, nieuwste eerst
+        resp = client.get("/api/data-quality/scans?limit=2&status=geslaagd",
+                          headers=auth)
+        assert resp.status_code == 200
+        scans = resp.json()["scans"]
+        assert len(scans) == 2
+        assert all(s["status"] == "geslaagd" for s in scans)
+        eigen = [s for s in scans if s["id"] in made]
+        # Onze nieuwste geslaagde run (issues_total=2) staat vooraan van de eigen rijen
+        if eigen:
+            assert eigen[0]["issues_total"] == 2
+    finally:
+        db.query(models.DataQualityScanRun).filter(
+            models.DataQualityScanRun.id.in_(made)).delete(synchronize_session=False)
+        db.commit()
+
+
 # ─── Scheduler helpers ───────────────────────────────────────────────────────
 
 def test_run_scan_once_never_raises_and_reports_failure():

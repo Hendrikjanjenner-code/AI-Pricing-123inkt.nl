@@ -173,6 +173,40 @@ def run_quality_scan(db: Session, triggered_by: str = "scheduler") -> dict:
         raise
 
 
+def _scan_run_dict(run: "models.DataQualityScanRun") -> dict:
+    return {
+        "id": run.id,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+        "triggered_by": run.triggered_by,
+        "status": run.status,
+        "issues_total": run.issues_total,
+        "error_issues": run.error_issues,
+        "warning_issues": run.warning_issues,
+        "new_or_worse_errors": run.new_or_worse_errors,
+        "signals_published": run.signals_published,
+        "error_message": run.error_message,
+    }
+
+
+def recent_scan_runs(db: Session, limit: int = 30,
+                     status: str | None = None) -> list[dict]:
+    """Recente scan-runs (nieuwste eerst) voor de historie/trendweergave.
+
+    Met ``status`` (bv. "geslaagd") wordt vóór de limit gefilterd, zodat de
+    trend altijd de laatste N runs met díe status toont — mislukte runs
+    verdringen de geslaagde datapoints dan niet.
+    """
+    q = db.query(models.DataQualityScanRun)
+    if status:
+        q = q.filter(models.DataQualityScanRun.status == status)
+    runs = (q.order_by(models.DataQualityScanRun.started_at.desc(),
+                       models.DataQualityScanRun.id.desc())
+            .limit(limit)
+            .all())
+    return [_scan_run_dict(r) for r in runs]
+
+
 def last_scan_info(db: Session) -> dict | None:
     """Metadata van de meest recente (afgeronde of lopende) scan voor de UI."""
     run = (db.query(models.DataQualityScanRun)
