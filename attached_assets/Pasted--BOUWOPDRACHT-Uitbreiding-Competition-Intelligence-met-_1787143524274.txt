@@ -1,0 +1,1494 @@
+# BOUWOPDRACHT
+
+## Uitbreiding Competition Intelligence met volledig Concurrentprofiel, Concurrentierol, Schaal, Fulfilmentmodel en Financiële Kracht
+
+Breid de bestaande **Competition Intelligence Module** uit met een veel completer bedrijfs- en marktprofiel per concurrent.
+
+Doel:
+
+Niet alleen vaststellen **of** een partij relevant is als concurrent, maar ook begrijpen:
+
+* wat voor soort concurrent het is;
+* hoe groot de organisatie is;
+* in hoeveel landen deze actief is;
+* welke klanten worden bediend;
+* hoe de logistiek en fulfilment zijn ingericht;
+* of de partij werkt met eigen voorraad, dropshipment of een combinatie;
+* hoe sterk de organisatie financieel en structureel is;
+* hoe groot de mogelijke inkoopmacht is;
+* hoe deze positie zich door de tijd ontwikkelt;
+* wat dit betekent voor de concurrentierelevantie voor 123inkt.
+
+Deze uitbreiding moet volledig onderdeel worden van de bestaande Competition Intelligence Module.
+
+Bouw GEEN losse nieuwe concurrentieapp.
+
+Alle nieuwe informatie moet gekoppeld worden aan:
+
+* Competitor Detail;
+* Competition Relevance Score;
+* Price Relevance Score;
+* Influence Score;
+* Competition DNA;
+* Competitor Rankings;
+* Future Threat Ranking;
+* Procurement Power Ranking;
+* Commercial AI Copilot;
+* Commercial Decision & Impact Engine.
+
+==================================================
+
+1. BELANGRIJK UITGANGSPUNT
+   ==================================================
+
+Maak strikt onderscheid tussen vier informatielagen:
+
+1. FEIT
+
+Objectief vastgestelde informatie uit een betrouwbare bron.
+
+2. SCHATTING
+
+Een betrouwbare bandbreedte of externe estimate.
+
+3. AFGELEID SIGNAAL
+
+Een conclusie die uit meerdere feiten is afgeleid.
+
+4. HYPOTHESE
+
+Een mogelijke verklaring waarvoor nog onvoldoende bewijs bestaat.
+
+Toon dit duidelijk in de UI.
+
+Voorbeeld:
+
+Medewerkers:
+500–750
+
+Type:
+Schatting
+
+Bron:
+LinkedIn / jaarverslag / bedrijfswebsite
+
+Peildatum:
+2026-07-01
+
+Confidence:
+78%
+
+Gebruik NOOIT onzekere schattingen alsof dit harde feiten zijn.
+
+==================================================
+2. CONCURRENT BUSINESS PROFILE
+==============================
+
+Maak één centraal:
+
+**Competitor Business Profile**
+
+Per concurrent moeten waar beschikbaar minimaal onderstaande gegevens worden opgeslagen.
+
+### IDENTITEIT
+
+* officiële bedrijfsnaam;
+* handelsnamen;
+* domeinen;
+* hoofdwebsite;
+* land hoofdkantoor;
+* vestigingsplaats;
+* oprichtingsjaar;
+* bestaansduur;
+* juridische entiteit indien relevant;
+* moederbedrijf;
+* moederbedrijf land;
+* dochterbedrijven;
+* groep / holding;
+* ownership type;
+* public / private indien betrouwbaar bekend.
+
+### OMVANG
+
+* company size class;
+* employee_count_min;
+* employee_count_max;
+* employee_estimate;
+* revenue_min;
+* revenue_max;
+* revenue_estimate;
+* revenue_currency;
+* units / volume estimate indien betrouwbaar;
+* aantal vestigingen;
+* aantal winkels;
+* aantal magazijnen;
+* aantal landen;
+* actieve landen;
+* geografische dekking.
+
+### KLANTMODEL
+
+* B2B;
+* B2C;
+* hybrid B2B/B2C;
+* small business;
+* medium business;
+* large business;
+* enterprise;
+* government;
+* education;
+* contract business;
+* account management;
+* tender driven;
+* framework agreements;
+* client specific pricing.
+
+==================================================
+3. SCALE CLASSIFICATION
+=======================
+
+Maak een aparte schaalclassificatie.
+
+### COMPANY SIZE
+
+Ondersteun minimaal:
+
+* Micro
+* Small
+* Medium
+* Large
+* Enterprise
+
+Maak thresholds configureerbaar.
+
+Gebruik bij voorkeur meerdere signalen:
+
+* omzet;
+* werknemers;
+* geografische dekking;
+* vestigingen;
+* ordervolume indien beschikbaar.
+
+Geen enkel datapunt mag automatisch de volledige classificatie bepalen wanneer andere signalen dit tegenspreken.
+
+==================================================
+4. GEOGRAPHIC SCALE
+===================
+
+Classificeer geografische rol afzonderlijk.
+
+Ondersteun:
+
+* Local Player
+* Regional Player
+* National Player
+* Multi-country Player
+* International Player
+* Global Player
+
+Bewaar:
+
+* aantal actieve landen;
+* lijst actieve landen;
+* belangrijkste markten;
+* hoofdkantoor;
+* internationale webshop(s);
+* lokale entiteiten;
+* lokale magazijnen indien bekend.
+
+Toon expliciet verschil tussen:
+
+“verzendt naar 10 landen”
+
+en:
+
+“operationeel actief in 10 landen”.
+
+==================================================
+5. FULFILMENT & INVENTORY MODEL
+===============================
+
+Maak fulfilment een eigen profielonderdeel.
+
+Ondersteun minimaal:
+
+* Stockholding Retailer
+* Dropship Retailer
+* Hybrid Fulfilment
+* Marketplace Seller
+* Marketplace Operator
+* Manufacturer Direct
+* Wholesaler-backed
+* External Fulfilment
+* Omnichannel
+
+Leg waar beschikbaar vast:
+
+* eigen voorraad ja/nee;
+* eigen magazijn(en);
+* aantal magazijnen;
+* locaties;
+* warehouse model;
+* dropshipment ja/nee;
+* geschat dropship-aandeel;
+* geschat voorraad-aandeel;
+* fulfilment partner;
+* external fulfilment;
+* marketplace role;
+* voorraadindicatie online;
+* backordergedrag;
+* levertijden;
+* next day capability;
+* same day capability;
+* cut-off tijd;
+* click & collect;
+* fysieke voorraad;
+* centrale voorraad;
+* lokale voorraad.
+
+Maak een:
+
+**Fulfilment Model Classification**
+
+Bijvoorbeeld:
+
+Eigen voorraad:
+70%
+
+Dropship:
+30%
+
+Model:
+Hybrid Fulfilment
+
+Confidence:
+72%
+
+Wanneer percentages niet betrouwbaar bekend zijn:
+
+toon geen fictief percentage.
+
+Gebruik dan bijvoorbeeld:
+
+Eigen voorraad:
+Bevestigd
+
+Dropship:
+Bevestigd
+
+Verdeling:
+Onbekend.
+
+==================================================
+6. OPERATIONAL STRENGTH
+=======================
+
+Maak een:
+
+**Operational Strength Score**
+
+0–100.
+
+Gebruik configureerbare dimensies zoals:
+
+* fulfilment infrastructure;
+* voorraadmodel;
+* leveringssnelheid;
+* aantal magazijnen;
+* geografische dekking;
+* beschikbaarheid;
+* omnichannel capaciteit;
+* schaalbaarheid;
+* marketplace presence.
+
+Toon altijd:
+
+* score;
+* factoren;
+* gewichten;
+* bronnen;
+* confidence.
+
+==================================================
+7. FINANCIAL HEALTH
+===================
+
+Voeg financiële gezondheid toe wanneer betrouwbare gegevens beschikbaar zijn.
+
+Maak geen financieel oordeel wanneer bronnen onvoldoende zijn.
+
+Ondersteun waar beschikbaar:
+
+* revenue;
+* revenue growth;
+* operating profit;
+* EBITDA;
+* net result;
+* equity;
+* solvency;
+* liquidity;
+* debt;
+* credit rating;
+* filing status;
+* recent losses;
+* restructuring;
+* bankruptcy signals;
+* late filings;
+* acquisition activity.
+
+Maak drie outputs:
+
+### FINANCIAL HEALTH STATUS
+
+Bijvoorbeeld:
+
+* Strong
+* Stable
+* Neutral
+* Weak
+* Distressed
+* Unknown
+
+### FINANCIAL HEALTH SCORE
+
+0–100, alleen wanneer voldoende data beschikbaar is.
+
+### FINANCIAL DATA CONFIDENCE
+
+0–100.
+
+Een lage confidence moet voorkomen dat de score zwaar wordt gebruikt in andere modellen.
+
+==================================================
+8. BRONBETROUWBAARHEID FINANCIËLE DATA
+======================================
+
+Gebruik bronprioriteit.
+
+Bijvoorbeeld:
+
+1. officiële jaarrekening;
+2. Kamer van Koophandel / officiële bedrijfsregistratie;
+3. gepubliceerd jaarverslag;
+4. beursinformatie;
+5. officiële investor relations;
+6. betrouwbare bedrijfsdatabase;
+7. kredietinformatiedienst;
+8. bedrijfswebsite;
+9. betrouwbare nieuwsbron;
+10. andere externe estimate.
+
+Social media of niet-gecontroleerde websites mogen nooit de enige basis zijn voor een sterke financiële conclusie.
+
+==================================================
+9. GEEN LAND-INFERENTIES
+========================
+
+Zeer belangrijk.
+
+Gebruik het land van:
+
+* hoofdkantoor;
+* moederbedrijf;
+* holding;
+* warehouse
+
+niet automatisch als bewijs voor:
+
+* belastingvoordeel;
+* lagere arbeidskosten;
+* financieringsvoordeel;
+* betere inkoopcondities;
+* logistiek voordeel.
+
+Als een dergelijk voordeel wordt weergegeven, moet daarvoor aparte betrouwbare evidence bestaan.
+
+Toon anders:
+
+“Niet vastgesteld”.
+
+==================================================
+10. BUSINESS STRENGTH SCORE
+===========================
+
+Maak een aparte:
+
+**Business Strength Score**
+
+0–100.
+
+Deze meet de structurele kracht van de concurrent.
+
+Gebruik bijvoorbeeld configureerbare onderdelen:
+
+* company scale;
+* financial health;
+* geographic reach;
+* operational infrastructure;
+* market longevity;
+* brand recognition;
+* procurement strength;
+* ownership strength.
+
+Belangrijk:
+
+Business Strength Score ≠ Competition Relevance Score.
+
+Een groot en financieel sterk bedrijf kan binnen een specifieke categorie nauwelijks relevant zijn.
+
+Daarom mag Business Strength slechts een ondersteunend signaal zijn.
+
+==================================================
+11. PROCUREMENT POWER
+=====================
+
+Breid Procurement Power uit.
+
+Analyseer waar beschikbaar:
+
+* directe fabrikantrelaties;
+* wholesaler;
+* buying group;
+* purchasing cooperative;
+* shared procurement;
+* private label;
+* eigen import;
+* global sourcing;
+* supplier overlap;
+* purchasing volume;
+* group purchasing;
+* parent company scale;
+* exclusive agreements;
+* distribution rights.
+
+Maak een:
+
+**Procurement Power Score**
+
+0–100.
+
+Toon:
+
+* score;
+* factoren;
+* bronnen;
+* confidence.
+
+==================================================
+12. SUPPLIER RELATIONSHIP PROFILE
+=================================
+
+Leg waar mogelijk vast:
+
+* belangrijke leveranciers;
+* fabrikantrelaties;
+* distributierelaties;
+* wholesale partner;
+* buying group;
+* supplier overlap met 123inkt;
+* direct manufacturer;
+* direct import;
+* exclusive supplier;
+* private label manufacturer.
+
+Toon supplier overlap bijvoorbeeld als:
+
+High
+
+Medium
+
+Low
+
+Unknown.
+
+Bereken alleen percentage-overlap wanneer voldoende betrouwbare leveranciersdata beschikbaar is.
+
+==================================================
+13. OWNERSHIP & CORPORATE STRUCTURE
+===================================
+
+Maak een duidelijk corporate structure onderdeel.
+
+Bewaar:
+
+* competitor;
+* parent company;
+* ultimate parent;
+* subsidiaries;
+* sister companies;
+* brand ownership;
+* group relationships;
+* acquisition history.
+
+Visualiseer waar mogelijk:
+
+Ultimate Parent
+↓
+Holding
+↓
+Competitor
+↓
+Subsidiaries / brands
+
+Dit helpt begrijpen of verschillende webshops feitelijk onderdeel zijn van dezelfde groep.
+
+==================================================
+14. MARKET ROLE
+===============
+
+Maak naast Competition DNA een expliciete:
+
+**Market Role Classification**
+
+Ondersteun meerdere rollen tegelijk.
+
+Voorbeelden:
+
+* Market Leader
+* Challenger
+* Price Challenger
+* Category Specialist
+* Generalist
+* Niche Specialist
+* Marketplace
+* Wholesale-led Player
+* Contract-led Player
+* Convenience Player
+* Traffic Player
+* Premium Player
+* Private Label Player
+* International Scale Player
+* Regional Player.
+
+Iedere rol bevat:
+
+* role;
+* confidence;
+* evidence;
+* assigned by;
+* model version;
+* validated by human.
+
+==================================================
+15. COMPETITION DNA
+===================
+
+Behoud bestaande Competition DNA en breid deze waar nodig uit.
+
+Ondersteun minimaal:
+
+* Category Specialist
+* Office Specialist
+* Marketplace
+* Price Fighter
+* OEM Specialist
+* Private Label Leader
+* Premium Retailer
+* B2B Specialist
+* B2C Specialist
+* Traffic Competitor
+* Convenience Player
+* Innovation Leader
+* International Player
+* Regional Player
+* Wholesaler
+* Generalist
+* Contract Stationer
+* Contract Supplier
+* Buying Group Member
+* Wholesaler-backed Retailer
+* Stockholding Retailer
+* Dropship Retailer
+* Hybrid Fulfilment Player
+* Omnichannel Retailer
+* Offline Specialist
+* International Group
+* Loyalty-led Competitor
+* Enterprise Account Specialist
+* Tender-driven Competitor.
+
+Een concurrent mag meerdere typen hebben.
+
+==================================================
+16. COMPETITOR PROFILE SUMMARY
+==============================
+
+Maak bovenaan Competitor Detail een duidelijke managementsamenvatting.
+
+Voorbeeld:
+
+CONCURRENT X
+
+Market Role:
+International Office Specialist
+
+Competition DNA:
+Contract Stationer
+Stockholding Retailer
+Private Label Player
+
+Company Size:
+Large
+
+Employees:
+500–1.000
+
+Revenue:
+€100–150 mln estimate
+
+Geographic:
+7 active countries
+
+Customer Focus:
+Primarily B2B
+SMB + Enterprise
+
+Fulfilment:
+Hybrid
+Own stock + dropship
+
+Financial Health:
+Strong
+
+Financial Confidence:
+82%
+
+Procurement Power:
+High
+
+Business Strength:
+85/100
+
+Competition Relevance:
+88/100
+
+Price Relevance:
+73/100
+
+Influence:
+69/100.
+
+Gebruik alleen echte gegevens of duidelijk gemarkeerde demo/estimate waarden.
+
+==================================================
+17. SCORECARDS
+==============
+
+Toon per concurrent minimaal afzonderlijk:
+
+### Competition Relevance Score
+
+Hoe relevant is de concurrent binnen een categorie?
+
+### Price Relevance Score
+
+Hoe bruikbaar is deze partij voor prijsvergelijking?
+
+### Influence Score
+
+Hoeveel meetbare commerciële invloed zien we?
+
+### Business Strength Score
+
+Hoe sterk is de onderneming structureel?
+
+### Operational Strength Score
+
+Hoe sterk is operationele infrastructuur?
+
+### Procurement Power Score
+
+Hoe groot is mogelijke inkoopmacht?
+
+### Financial Health Score
+
+Hoe sterk is financiële positie?
+
+### Data Confidence
+
+Hoe betrouwbaar is het totale concurrentprofiel?
+
+Combineer deze scores NIET tot één onbegrijpelijke black-box score.
+
+==================================================
+18. CATEGORY SPECIFIC RELEVANCE
+===============================
+
+Het algemene bedrijfsprofiel is concurrentbreed.
+
+Competition Relevance blijft categorie-afhankelijk.
+
+Voorbeeld:
+
+Concurrent X
+
+Business Strength:
+90
+
+Office Food Relevance:
+84
+
+Markers Relevance:
+37
+
+Office Notes Relevance:
+69.
+
+Gebruik daarom:
+
+competitor-level data
+
+plus:
+
+competitor-category data.
+
+==================================================
+19. NIEUWE DATABASESTRUCTUUR
+============================
+
+Breid bestaande tabellen uit waar logisch.
+
+Maak geen duplicaten wanneer bestaande modellen dezelfde functie hebben.
+
+Voeg indien nodig minimaal toe:
+
+### competitor_business_profiles
+
+* competitor_id
+* founded_year
+* headquarters_country
+* headquarters_city
+* company_size_class
+* employee_count_min
+* employee_count_max
+* revenue_min
+* revenue_max
+* revenue_currency
+* geographic_scale
+* active_countries_json
+* parent_company_id nullable
+* ultimate_parent_id nullable
+* ownership_type
+* public_private_status
+* business_strength_score
+* operational_strength_score
+* procurement_power_score
+* financial_health_score
+* financial_health_status
+* profile_confidence
+* last_verified_at
+
+### competitor_fulfilment_profiles
+
+* competitor_id
+* inventory_model
+* own_stock
+* dropship
+* hybrid
+* own_warehouses
+* warehouse_count
+* warehouse_locations_json
+* external_fulfilment
+* marketplace_role
+* next_day_capability
+* same_day_capability
+* stock_visibility
+* delivery_reliability_score
+* fulfilment_confidence
+* last_verified_at
+
+### competitor_financial_observations
+
+* competitor_id
+* observation_year
+* revenue
+* revenue_growth
+* operating_profit
+* EBITDA
+* net_result
+* equity
+* solvency
+* liquidity
+* debt
+* credit_rating
+* financial_status
+* source_id
+* confidence
+* observed_at
+
+### competitor_market_roles
+
+* competitor_id
+* role_type
+* confidence
+* evidence_id
+* ai_assigned
+* human_validated
+* valid_from
+* valid_until
+
+### competitor_geographic_presence
+
+* competitor_id
+* country_code
+* presence_type
+* webshop
+* local_entity
+* warehouse
+* physical_stores
+* active
+* confidence
+* source_id
+
+### competitor_corporate_relationships
+
+* competitor_id
+* related_competitor_id nullable
+* related_company_name
+* relationship_type
+* ownership_percentage nullable
+* valid_from
+* valid_until
+* source_id
+* confidence.
+
+==================================================
+20. EVIDENCE MODEL
+==================
+
+Alle relevante gegevens moeten naar Competition Evidence kunnen verwijzen.
+
+Bewaar minimaal:
+
+* source URL / source reference;
+* source type;
+* title;
+* observed date;
+* fetched date;
+* reliability;
+* evidence status;
+* confidence;
+* extracted fact;
+* human validated;
+* expiry / review date.
+
+==================================================
+21. DATA FRESHNESS
+==================
+
+Niet alle bedrijfsgegevens veranderen even snel.
+
+Gebruik verschillende freshnessregels.
+
+Voorbeeld:
+
+Competitor price:
+uren/dagen.
+
+Stock:
+uren/dagen.
+
+Employees:
+6–12 maanden.
+
+Revenue:
+jaarlijks.
+
+Ownership:
+6–12 maanden of bij signaal.
+
+Countries:
+3–6 maanden.
+
+Fulfilment:
+3–6 maanden.
+
+Financial health:
+na nieuwe jaarrekening of relevante gebeurtenis.
+
+Maak freshness configureerbaar.
+
+==================================================
+22. HISTORISCHE ONTWIKKELING
+============================
+
+Bewaar historie.
+
+We willen kunnen zien:
+
+* omzetgroei;
+* medewerkersgroei;
+* nieuwe landen;
+* nieuwe magazijnen;
+* acquisities;
+* veranderd fulfilmentmodel;
+* nieuwe marketplaceactiviteiten;
+* gewijzigd private-label aanbod;
+* financiële verslechtering;
+* financiële verbetering;
+* gewijzigd Market Role;
+* gewijzigd Competition DNA.
+
+Maak:
+
+**Competitor Evolution Timeline**
+
+==================================================
+23. FUTURE THREAT
+=================
+
+Gebruik veranderingen ook in Future Threat Ranking.
+
+Signalen kunnen zijn:
+
+* snelle omzetgroei;
+* sterke werknemersgroei;
+* uitbreiding landen;
+* overname;
+* nieuw magazijn;
+* uitbreiding assortiment;
+* private label introductie;
+* hogere organic visibility;
+* agressievere pricing;
+* sterker B2B-contractmodel;
+* verhoogde supplier overlap.
+
+Maak een:
+
+**Future Threat Score**
+
+maar toon altijd welke signalen hiervoor verantwoordelijk zijn.
+
+==================================================
+24. GEEN DUBBELE TELLING
+========================
+
+Voorkom dat hetzelfde feit meerdere keren buitensporig zwaar meeweegt.
+
+Voorbeeld:
+
+“7 landen actief”
+
+mag ondersteunen:
+
+* Geographic Scale;
+* Business Strength.
+
+Maar dit mag niet onafhankelijk 5 verschillende scores extreem verhogen.
+
+Documenteer feature dependencies.
+
+==================================================
+25. COMPETITOR DETAIL – NIEUWE TABSTRUCTUUR
+===========================================
+
+Maak Competitor Detail overzichtelijk.
+
+Gebruik bijvoorbeeld tabs:
+
+### Overzicht
+
+Management summary en belangrijkste scores.
+
+### Bedrijfsprofiel
+
+* grootte;
+* medewerkers;
+* omzet;
+* bestaansduur;
+* corporate structure.
+
+### Markt & Geografie
+
+* landen;
+* kanalen;
+* doelgroep;
+* marktrol.
+
+### Assortiment & Merken
+
+* categorieën;
+* OEM;
+* private label;
+* merkportfolio.
+
+### Pricing
+
+* prijspositie;
+* Price Relevance;
+* price observations.
+
+### Fulfilment
+
+* voorraad;
+* dropship;
+* warehouses;
+* levering.
+
+### Inkoop & Leveranciers
+
+* buying groups;
+* wholesale;
+* supplier overlap;
+* Procurement Power.
+
+### Financieel
+
+* revenue;
+* profitability;
+* solvency;
+* health;
+* trends.
+
+### Service & Loyalty
+
+* service;
+* loyalty;
+* returns;
+* subscriptions.
+
+### Competition DNA
+
+* roles;
+* classifications;
+* confidence.
+
+### Evidence
+
+* sources;
+* dates;
+* confidence.
+
+### Historie
+
+* profielwijzigingen;
+* scores;
+* threat evolution.
+
+==================================================
+26. COMPETITOR COMPARISON
+=========================
+
+Maak mogelijkheid om 2–5 concurrenten te vergelijken.
+
+Vergelijk:
+
+* company size;
+* employees;
+* revenue;
+* countries;
+* market role;
+* fulfilment;
+* inventory;
+* dropship;
+* financial health;
+* procurement power;
+* service;
+* loyalty;
+* assortment;
+* pricing;
+* Competition Relevance;
+* Price Relevance;
+* Influence.
+
+==================================================
+27. FILTERS
+===========
+
+Maak Competition Ranking filterbaar op:
+
+* producthiërarchie;
+* category;
+* company size;
+* geographic scale;
+* country;
+* B2B/B2C;
+* market role;
+* Competition DNA;
+* stockholding;
+* dropship;
+* hybrid fulfilment;
+* marketplace;
+* contract stationer;
+* financial health;
+* procurement power;
+* business strength;
+* data confidence.
+
+==================================================
+28. COMMERCIAL AI COPILOT
+=========================
+
+Breid Competition Copilot uit.
+
+Voorbeelden:
+
+“Welke grote internationale concurrenten zijn actief binnen Office Food?”
+
+“Welke concurrenten werken voornamelijk met eigen voorraad?”
+
+“Welke relevante concurrenten zijn dropshipspelers?”
+
+“Welke concurrent heeft de grootste operationele schaal?”
+
+“Welke concurrent heeft de hoogste Procurement Power?”
+
+“Welke concurrenten zijn financieel sterk maar voor Markers weinig relevant?”
+
+“Welke concurrent breidt internationaal het snelst uit?”
+
+“Welke concurrent lijkt de grootste toekomstige bedreiging?”
+
+“Welke concurrenten zijn onderdeel van dezelfde groep?”
+
+“Hoe betrouwbaar is onze informatie over concurrent X?”
+
+“Welke concurrentprofielen moeten opnieuw worden gecontroleerd?”
+
+Copilot gebruikt approved semantic functions.
+
+Geen willekeurige vrije SQL.
+
+==================================================
+29. NIEUWE SEMANTIC FUNCTIONS
+=============================
+
+Maak waar passend functies zoals:
+
+get_competitor_business_profile()
+
+get_competitor_company_size()
+
+get_competitor_geographic_presence()
+
+get_competitor_fulfilment_profile()
+
+get_competitor_financial_health()
+
+get_competitor_procurement_power()
+
+get_competitor_market_roles()
+
+get_competitor_corporate_structure()
+
+get_competitor_evolution()
+
+compare_competitor_profiles()
+
+get_future_threat_signals()
+
+get_profile_data_quality().
+
+==================================================
+30. DATA QUALITY
+================
+
+Voeg nieuwe Competition Data Quality checks toe.
+
+Detecteer:
+
+* onbekende company size;
+* ontbrekend founding year;
+* verouderd employee estimate;
+* verouderde revenue estimate;
+* onbekend fulfilmentmodel;
+* onbekende actieve landen;
+* geen corporate ownership info;
+* financiële data te oud;
+* conflicterende financiële bronnen;
+* ontbrekende source;
+* lage confidence;
+* onbekend dropshipmodel;
+* inconsistente parent relationship.
+
+==================================================
+31. MANUELE VALIDATIE
+=====================
+
+Category Manager of Competition Analyst moet waarden kunnen:
+
+* bevestigen;
+* corrigeren;
+* blokkeren;
+* als unknown markeren;
+* opnieuw laten onderzoeken.
+
+Bewaar:
+
+* AI value;
+* human value;
+* reason;
+* reviewer;
+* timestamp.
+
+Menselijke correctie overschrijft AI-operationeel, maar verwijder oorspronkelijke AI-uitkomst niet.
+
+==================================================
+32. RANKING IMPACT
+==================
+
+Business Strength mag Competition Ranking ondersteunen maar nooit domineren.
+
+Gebruik bijvoorbeeld:
+
+Competition Relevance
+
+primair gebaseerd op categorie-relevantie.
+
+Business Strength
+
+als context / ondersteunende dimensie.
+
+Future Threat
+
+mag Business Strength en groei zwaarder meewegen.
+
+Procurement Power Ranking
+
+mag sourcing- en schaalfactoren zwaarder meewegen.
+
+Price Ranking
+
+mag financiële grootte nauwelijks meewegen tenzij aantoonbaar relevant voor prijsstrategie.
+
+==================================================
+33. MANAGEMENT VIEW
+===================
+
+Maak een managementvisualisatie:
+
+**Concurrent Landscape**
+
+Bijvoorbeeld matrix:
+
+X-as:
+Competition Relevance
+
+Y-as:
+Business Strength
+
+Bubble size:
+Estimated Company Scale
+
+Bubble type:
+Competition DNA
+
+Bubble label:
+Competitor.
+
+Alternatieve matrix:
+
+X:
+Current Relevance
+
+Y:
+Future Threat.
+
+Hierdoor wordt zichtbaar:
+
+* grote relevante spelers;
+* kleine gevaarlijke nichespecialisten;
+* sterke maar niet-relevante ondernemingen;
+* snelgroeiende toekomstige bedreigingen.
+
+==================================================
+34. RISICO VAN ONBEKENDE DATA
+=============================
+
+Unknown is een geldige waarde.
+
+Geen data mag nooit automatisch score 0 betekenen.
+
+Gebruik:
+
+Unknown
+
+plus:
+
+Data Completeness.
+
+Voorbeeld:
+
+Financial Health:
+Unknown
+
+Financial Data Completeness:
+18%.
+
+Niet:
+
+Financial Health = 0.
+
+==================================================
+35. SECURITY
+============
+
+Gebruik alleen openbare, gelicentieerde of geautoriseerde bedrijfsgegevens.
+
+Verzamel geen persoonsgegevens van werknemers behalve waar expliciet nodig en toegestaan.
+
+Gebruik bij employee count alleen geaggregeerde aantallen/bandbreedtes.
+
+Sla geen individuele werknemersprofielen op voor dit doel.
+
+Respecteer:
+
+* terms of use;
+* robots.txt waar relevant;
+* rate limits;
+* licenties;
+* privacyregels.
+
+Omzeil geen anti-bot systemen.
+
+==================================================
+36. TESTS
+=========
+
+Schrijf minimaal tests voor:
+
+* company size classification;
+* geographic scale;
+* fulfilment classification;
+* stockholding;
+* dropship;
+* hybrid;
+* financial status unknown;
+* financial score sufficient data;
+* financial score insufficient data;
+* business strength;
+* procurement power;
+* parent company mapping;
+* active countries;
+* evidence;
+* confidence;
+* historical versioning;
+* Future Threat;
+* filtering;
+* RBAC;
+* Copilot permissions.
+
+==================================================
+37. END-TO-END TEST
+===================
+
+Neem één bestaande concurrent.
+
+Verrijk profiel.
+
+Toon:
+
+* business size;
+* geographic scale;
+* employee estimate;
+* revenue estimate;
+* fulfilment;
+* stock/dropship;
+* parent company;
+* financial health;
+* procurement power;
+* Competition DNA.
+
+Koppel aan:
+
+Office Food.
+
+Bereken:
+
+Competition Relevance.
+
+Toon vervolgens dezelfde concurrent binnen:
+
+Markers.
+
+Controleer dat:
+
+Business Profile gelijk blijft,
+
+maar:
+
+Competition Relevance categorie-afhankelijk verandert.
+
+==================================================
+38. ACCEPTANCE CRITERIA
+=======================
+
+De uitbreiding is pas gereed wanneer:
+
+1. Concurrenten een volwaardig bedrijfsprofiel hebben.
+
+2. Omvang en geografische schaal afzonderlijk worden opgeslagen.
+
+3. Actieve landen zichtbaar zijn.
+
+4. Employee ranges worden ondersteund.
+
+5. Revenue ranges worden ondersteund.
+
+6. Eigen voorraad / dropship / hybrid wordt onderscheiden.
+
+7. Marketplace role wordt onderscheiden.
+
+8. Financiële gezondheid kan worden opgeslagen wanneer betrouwbaar beschikbaar.
+
+9. Unknown correct wordt behandeld.
+
+10. Business Strength is apart van Competition Relevance.
+
+11. Procurement Power is apart beschikbaar.
+
+12. Operational Strength is beschikbaar.
+
+13. Corporate structure zichtbaar is.
+
+14. Competition DNA meerdere rollen ondersteunt.
+
+15. Market Role apart beschikbaar is.
+
+16. Evidence + source + date + confidence zichtbaar zijn.
+
+17. Historische profielontwikkeling wordt bewaard.
+
+18. Future Threat hiervan gebruik kan maken.
+
+19. Ranking per productcategorie blijft categorie-afhankelijk.
+
+20. Copilot deze informatie veilig kan bevragen.
+
+==================================================
+39. PLAN MODE
+=============
+
+Gebruik deze opdracht eerst in Replit Plan Mode.
+
+Controleer:
+
+* welke profielvelden al bestaan;
+* welke Competition DNA-velden al bestaan;
+* bestaande scoring;
+* bestaande competitor tables;
+* evidence model;
+* current Competitor Detail UI;
+* current rankings.
+
+Maak daarna een uitbreidingsplan.
+
+HERGEBRUIK bestaande functionaliteit.
+
+Maak geen tweede competitors-tabel of tweede Competition Engine wanneer deze al bestaat.
+
+==================================================
+40. EINDEDOEL
+=============
+
+Na deze uitbreiding moet het platform niet alleen kunnen zeggen:
+
+“Concurrent X heeft Competition Relevance 84.”
+
+Maar bijvoorbeeld:
+
+“Concurrent X is een grote internationale B2B Office Specialist, actief in zeven landen en onderdeel van een grotere groep. De onderneming beschikt over eigen voorraad en combineert deze met dropshipment. De financiële positie wordt op basis van de beschikbare openbare financiële gegevens als sterk ingeschat, met 82% confidence. Binnen Office Food is de concurrent zeer relevant door sterke assortiments- en doelgroepoverlap. Binnen Markers is de relevantie aanzienlijk lager. De concurrent is daarnaast interessant als Future Threat vanwege internationale uitbreiding en sterke Procurement Power.”
+
+Dat is het gewenste niveau van Competition Intelligence.
+
+START NU MET DE PLAN-ANALYSE EN BREID DAARNA DE BESTAANDE COMPETITION INTELLIGENCE MODULE UIT ZONDER BESTAANDE FUNCTIONALITEIT TE BREKEN.
