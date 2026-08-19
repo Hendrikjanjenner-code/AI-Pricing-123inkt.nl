@@ -642,6 +642,23 @@ def _log_budget_exceeded(username: str, user_role: str, reason: str) -> None:
         log_db.rollback()
     finally:
         log_db.close()
+
+# Bewaartermijn (dagen) voor AiBudgetSlot-rijen: oudere slots hebben geen
+# functie meer voor budgetbewaking of verbruiksrapportage en worden periodiek
+# verwijderd zodat de tabel niet onbegrensd groeit.
+DEFAULT_BUDGET_SLOT_RETENTION_DAYS = 90
+
+
+def _budget_slot_retention_days() -> int:
+    """Instelbare bewaartermijn via AI_BUDGET_SLOT_RETENTION_DAYS (default 90)."""
+    raw = os.environ.get("AI_BUDGET_SLOT_RETENTION_DAYS", "").strip()
+    if not raw:
+        return DEFAULT_BUDGET_SLOT_RETENTION_DAYS
+    try:
+        val = int(raw)
+        return val if val > 0 else DEFAULT_BUDGET_SLOT_RETENTION_DAYS
+    except ValueError:
+        return DEFAULT_BUDGET_SLOT_RETENTION_DAYS
 def get_data_freshness(db: Session) -> dict:
     """Laatste datum per kernbron; onderdeel van elk Copilot-antwoord."""
     def _max(col):
@@ -1632,3 +1649,42 @@ def _fewshot_rows_fts(db: Session, question: str, limit: int) -> list[dict]:
             .limit(50).all())
     scored = [(float(r.rank), r[0]) for r in rows if float(r.rank) >= FTS_MIN_RANK]
     return _dedupe_examples(scored, limit)
+
+def cleanup_old_budget_slots(db: Optional[Session] = None,
+                             retention_days: Optional[int] = None) -> int:
+    """
+    Verwijder AiBudgetSlot-rijen ouder dan de bewaartermijn (default ~90 dagen).
+
+    Recente slots blijven bewaard voor budgetbewaking en de verbruiksrapportage
+    in het beheerderspaneel. Geeft het aantal verwijderde rijen terug.
+    Wordt periodiek aangeroepen vanuit de nachtelijke scheduler; kan ook met een
+    eigen sessie/termijn worden aangeroepen (tests).
+    """
+    from datetime import timedelta
+
+    days = retention_days if retention_days is not None else _budget_slot_retention_days()
+    cutoff = date.today() - timedelta(days=days)
+
+    own_session = db is None
+    if own_session:
+        db = SessionLocal()
+    try:
+        deleted = (
+            db.query(models.AiBudgetSlot)
+            .filter(models.AiBudgetSlot.slot_date < cutoff)
+            .delete(synchronize_session=False)
+        )
+        db.commit()
+        if deleted:
+            logger.info(
+                "AI-budgetslots opgeruimd: %d rijen ouder dan %s verwijderd "
+                "(bewaartermijn %d dagen).", deleted, cutoff.isoformat(), days,
+            )
+        return deleted
+    except Exception as exc:
+        logger.error("Opruimen van oude AI-budgetslots mislukt: %s", exc)
+        db.rollback()
+        raise
+    finally:
+        if own_session:
+            db.close()

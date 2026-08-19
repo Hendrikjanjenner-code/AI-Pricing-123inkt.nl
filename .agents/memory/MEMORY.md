@@ -1,4 +1,3 @@
-// hint: Structural and logic conflict. Both design and behavior differ.
 - [Seed strategy](seed-strategy.md) — seed_users_only() always runs on startup; full demo data only with SEED_DEMO_DATA=true env var.
 - [Backend validate-first uploads](backend-validate-first.md) — POST /api/uploads/validate?upload_type=X validates CSV without saving; frontend calls it before import.
 - [Traffic model fields](traffic-model-fields.md) — FactTrafficDaily uses entity_type/entity_id (not sku_id); entity_type="SKU" for per-SKU rows.
@@ -45,5 +44,7 @@
 - [Rebase drops adjacent blocks](rebase-dropped-blocks.md) — task-merge rebases can silently drop module-level constant blocks; grep for definitions after every rebase.
 - [Test-shop teardown FK](test-suite-conventions.md) — request middleware writes cost-usage rows per shop; any teardown that deletes a shop must delete those rows first or FK-fails only in full-suite runs.
 - [Few-shot FTS retrieval](fewshot-fts.md) — dutch FTS + Jaccard-fallback; fail-safe fallback maskeert FTS-fouten (zelfs NameError); stemmer/rank-drempel quirks in topicfile.
-// hint: Logic changed on both sides. Requires understanding intent of each change.
 - [Loyalty expiry semantics](loyalty-expiry-semantics.md) — overdue points count as "expiring soon"; policy is per shop but apply_expiry_run keeps legacy expiry_cutoff/expiry_months fields.
+- [Few-shot FTS retrieval](fewshot-fts.md) — dutch FTS primary + Jaccard fallback; dutch stemmer quirk: 'marges' does NOT stem to 'marg'.
+- [Few-shot FTS retrieval](fewshot-fts.md) — fail-safe fallback maskeert FTS-fouten (zelfs NameError); rank-drempel ≤0.005 voor één-woord-matches.
+- [Schedulers uit in tests](test-scheduler-isolation.md) — TestClient start de lifespan; conftest zet alle DISABLE_*-vlaggen of full-suite runs krijgen StaleDataError/verdwenen rijen.

@@ -406,6 +406,14 @@ def run_migrations(engine, metadata) -> None:
             'SET run_at = COALESCE(created_at, run_date::timestamp) '
             'WHERE run_at IS NULL',
         ),
+        # Datum-index voor de periodieke opruiming van oude AI-budgetslots:
+        # de purge verwijdert op slot_date alleen; de unieke (username,
+        # slot_date)-index helpt daar niet bij op bestaande, grote tabellen.
+        (
+            "ix_ai_budget_slots_slot_date",
+            'CREATE INDEX IF NOT EXISTS ix_ai_budget_slots_slot_date '
+            'ON ai_budget_slots (slot_date)',
+        ),
         (
             "uq_ai_budget_config_global_singleton",
             'CREATE UNIQUE INDEX IF NOT EXISTS uq_ai_budget_config_global_singleton '

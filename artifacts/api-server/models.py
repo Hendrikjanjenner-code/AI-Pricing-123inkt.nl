@@ -2532,7 +2532,10 @@ class AiBudgetSlot(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(100), nullable=False, index=True)
-    slot_date = Column(Date, nullable=False)
+    # Eigen index op slot_date: de periodieke opruiming verwijdert op
+    # datum-alleen (slot_date < cutoff); de unieke (username, slot_date)-index
+    # helpt daar niet bij zodra de tabel groot wordt.
+    slot_date = Column(Date, nullable=False, index=True)
     calls_reserved = Column(Integer, default=0, nullable=False)
     tokens_reserved = Column(Integer, default=0, nullable=False)
     tokens_actual = Column(Integer, default=0, nullable=False)

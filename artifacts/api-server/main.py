@@ -158,6 +158,19 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("Startup: datakwaliteits-scan scheduler disabled via DISABLE_DQ_SCAN.")
 
+        # 5c. Start de onafhankelijke AI-budgetslot-opruiming: verwijdert
+        # periodiek AiBudgetSlot-rijen ouder dan de bewaartermijn
+        # (AI_BUDGET_SLOT_RETENTION_DAYS, default 90 dagen). Bewust een eigen
+        # scheduler met eigen disable-vlag, zodat het uitschakelen van andere
+        # schedulers (bv. DISABLE_DQ_SCAN) deze onderhoudstaak niet raakt.
+        budget_cleanup_task = None
+        if os.environ.get("DISABLE_AI_BUDGET_CLEANUP", "false").lower() not in ("1", "true", "yes"):
+            from services.ai_budget_cleanup_scheduler import start_ai_budget_cleanup_scheduler
+            budget_cleanup_task = start_ai_budget_cleanup_scheduler()
+            logger.info("Startup: AI-budgetslot opruim-scheduler started.")
+        else:
+            logger.info("Startup: AI-budgetslot opruiming disabled via DISABLE_AI_BUDGET_CLEANUP.")
+
         # 6. AI-sleutel bereikbaarheidstest (goedkope probe, geen tokenverbruik).
         # Resultaat wordt opgeslagen in startup_state én in ai_gateway._probe_cache
         # zodat /api/copilot/status het direct kan teruggeven.
@@ -214,13 +227,14 @@ async def lifespan(app: FastAPI):
         feed_sync_task = None
         ai_key_monitor_task = None
         dq_scan_task = None
+        budget_cleanup_task = None
         # Re-raise so the process doesn't silently pretend to be healthy —
         # but the error is now captured in startup_state for diagnostics.
         raise
     try:
         yield
     finally:
-        for _bg_task in (health_monitor_task, feed_sync_task, ai_key_monitor_task, dq_scan_task):
+        for _bg_task in (health_monitor_task, feed_sync_task, ai_key_monitor_task, dq_scan_task, budget_cleanup_task):
             if _bg_task is not None:
                 _bg_task.cancel()
                 try:

@@ -10,6 +10,7 @@ Dekt:
 - CRUD-autorisatie via HTTP-client (admin only)
 - Inputvalidatie op de PUT-endpoint
 """
+import os
 import types
 import unittest
 import uuid
@@ -1118,6 +1119,158 @@ class TestMidnightRollover(unittest.TestCase):
                          "het slot van vandaag mag niet gewijzigd zijn")
         self.assertEqual(today_slot.tokens_reserved, upfront * 2)
         self.assertEqual(today_slot.calls_reserved, 2)
+
+class TestBudgetSlotCleanup(unittest.TestCase):
+    """
+    Live-DB tests voor de periodieke opruiming van oude AiBudgetSlot-rijen:
+    rijen ouder dan de bewaartermijn verdwijnen, recente rijen blijven bewaard.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from database import SessionLocal
+        cls.SessionLocal = SessionLocal
+        try:
+            db = SessionLocal()
+            db.execute(__import__("sqlalchemy").text("SELECT 1"))
+            db.close()
+        except Exception as exc:
+            raise unittest.SkipTest(f"database niet bereikbaar: {exc}")
+
+    def setUp(self):
+        self.username = f"cleanup_test_{uuid.uuid4().hex[:10]}"
+        self.db = self.SessionLocal()
+        self.addCleanup(self._cleanup)
+
+    def _cleanup(self):
+        try:
+            self.db.rollback()
+            self.db.query(models.AiBudgetSlot).filter(
+                models.AiBudgetSlot.username == self.username
+            ).delete(synchronize_session=False)
+            self.db.commit()
+        finally:
+            self.db.close()
+
+    def _make_slot(self, slot_date):
+        slot = models.AiBudgetSlot(
+            username=self.username, slot_date=slot_date,
+            calls_reserved=1, tokens_reserved=100, tokens_actual=50,
+        )
+        self.db.add(slot)
+        self.db.commit()
+        return slot
+
+    def _dates(self):
+        return {
+            r.slot_date
+            for r in self.db.query(models.AiBudgetSlot).filter(
+                models.AiBudgetSlot.username == self.username
+            ).all()
+        }
+
+    def test_old_slots_deleted_recent_kept(self):
+        from datetime import timedelta
+        # Gebruik dezelfde klok als de code onder test: als een andere test
+        # date/datetime in ai_gateway heeft bevroren (en die patch lekt in een
+        # volledige suite-run), blijven de relatieve datums dan toch kloppen.
+        today = ai_gateway.date.today()
+        old_1 = today - timedelta(days=200)
+        old_2 = today - timedelta(days=91)
+        recent_1 = today - timedelta(days=89)
+        recent_2 = today
+        for d in (old_1, old_2, recent_1, recent_2):
+            self._make_slot(d)
+
+        deleted = ai_gateway.cleanup_old_budget_slots(self.db, retention_days=90)
+        self.db.expire_all()
+
+        self.assertGreaterEqual(deleted, 2)
+        self.assertEqual(self._dates(), {recent_1, recent_2},
+                         "oude slots moeten weg zijn, recente moeten blijven")
+
+    def test_boundary_slot_exactly_at_retention_kept(self):
+        """Een slot van precies `retention_days` oud blijft bewaard
+        (alleen strikt ouder dan de cutoff wordt verwijderd)."""
+        from datetime import timedelta
+        boundary = ai_gateway.date.today() - timedelta(days=90)
+        self._make_slot(boundary)
+
+        ai_gateway.cleanup_old_budget_slots(self.db, retention_days=90)
+        self.db.expire_all()
+
+        self.assertEqual(self._dates(), {boundary})
+
+    def test_scheduler_runs_cleanup_each_cycle_independent_of_dq_scan(self):
+        """De opruim-scheduler draait elke cyclus, ook als de DQ-scan is
+        uitgeschakeld (eigen taak, eigen configuratie) en ook als een
+        opruimronde faalt."""
+        import asyncio
+        from services import ai_budget_cleanup_scheduler as sched
+
+        calls = {"n": 0}
+
+        def fake_cleanup():
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise RuntimeError("tijdelijke DB-fout")
+            return 0
+
+        real_wait = asyncio.sleep
+
+        async def run_briefly():
+            task = asyncio.get_event_loop().create_task(sched._cleanup_loop())
+            try:
+                # startvertraging 0-achtig + 3 cycli van ~0s; echte (ongepatchte)
+                # wachtstap zodat de to_thread-cycli wandkloktijd krijgen.
+                for _ in range(400):
+                    await real_wait(0.01)
+                    if calls["n"] >= 3:
+                        break
+            finally:
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+        real_sleep = asyncio.sleep
+
+        async def instant_sleep(_seconds, *args, **kwargs):
+            # Versnel de loop: elke geplande wachtstap wordt vrijwel direct.
+            await real_sleep(0)
+
+        env = {
+            "DISABLE_DQ_SCAN": "true",  # DQ-scan uit mag de opruiming niet raken
+            "AI_BUDGET_CLEANUP_INTERVAL": "1",
+            "AI_BUDGET_CLEANUP_STARTUP_DELAY": "1",
+        }
+        with patch.dict(os.environ, env), \
+             patch.object(sched, "run_cleanup_once", side_effect=fake_cleanup), \
+             patch.object(sched.asyncio, "sleep", side_effect=instant_sleep):
+            asyncio.run(run_briefly())
+
+        self.assertGreaterEqual(
+            calls["n"], 3,
+            "de opruimstap moet elke cyclus draaien, ook na een fout en met DQ-scan uit",
+        )
+
+    def test_run_cleanup_once_delegates_to_gateway(self):
+        with patch.object(ai_gateway, "cleanup_old_budget_slots", return_value=5) as mock_cleanup:
+            from services.ai_budget_cleanup_scheduler import run_cleanup_once
+            self.assertEqual(run_cleanup_once(), 5)
+            mock_cleanup.assert_called_once_with()
+
+    def test_retention_days_env_override(self):
+        """AI_BUDGET_SLOT_RETENTION_DAYS stuurt de default bewaartermijn."""
+        with patch.dict(os.environ, {"AI_BUDGET_SLOT_RETENTION_DAYS": "30"}):
+            self.assertEqual(ai_gateway._budget_slot_retention_days(), 30)
+        with patch.dict(os.environ, {"AI_BUDGET_SLOT_RETENTION_DAYS": "0"}):
+            self.assertEqual(ai_gateway._budget_slot_retention_days(),
+                             ai_gateway.DEFAULT_BUDGET_SLOT_RETENTION_DAYS)
+        with patch.dict(os.environ, {"AI_BUDGET_SLOT_RETENTION_DAYS": "abc"}):
+            self.assertEqual(ai_gateway._budget_slot_retention_days(),
+                             ai_gateway.DEFAULT_BUDGET_SLOT_RETENTION_DAYS)
 
 
 if __name__ == "__main__":
