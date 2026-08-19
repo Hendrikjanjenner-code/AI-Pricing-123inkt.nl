@@ -105,8 +105,14 @@ class SyncRequest(BaseModel):
     tables: Optional[list[str]] = None  # None = alle tabellen
 
 
-def _do_sync(tables: Optional[list[str]], full_refresh: bool):
-    """Voer de sync uit (bedoeld als achtergrondtaak)."""
+def _do_sync(tables: Optional[list[str]], full_refresh: bool, run_id: str):
+    """Voer de sync uit (bedoeld als achtergrondtaak).
+
+    De run is al vóór het inplannen geregistreerd (register_sync_run) zodat
+    polls direct na de POST de run als lopend zien; hier alleen netjes
+    afmelden in de finally.
+    """
+    from bigquery.sync import finish_sync_run
     try:
         from bigquery.sync import sync_table, sync_all_tables
         if tables:
@@ -121,6 +127,8 @@ def _do_sync(tables: Optional[list[str]], full_refresh: bool):
         )
     except Exception as exc:
         logger.error("BigQuery sync achtergrondtaak fout: %s", exc)
+    finally:
+        finish_sync_run(run_id)
 
 
 @router.post("/sync")
@@ -143,9 +151,12 @@ def trigger_sync(
 
     tables = request.tables
     if background_tasks:
-        background_tasks.add_task(_do_sync, tables, False)
+        from bigquery.sync import register_sync_run
+        run_id = register_sync_run("incrementeel")
+        background_tasks.add_task(_do_sync, tables, False, run_id)
         return {
             "status": "gestart",
+            "run_id": run_id,
             "mode": "incrementeel",
             "tables": tables or "alle",
             "message": "Sync gestart in achtergrond. Controleer /api/bigquery/sync/history voor voortgang.",
@@ -178,9 +189,12 @@ def trigger_full_sync(
 
     tables = request.tables
     if background_tasks:
-        background_tasks.add_task(_do_sync, tables, True)
+        from bigquery.sync import register_sync_run
+        run_id = register_sync_run("volledig")
+        background_tasks.add_task(_do_sync, tables, True, run_id)
         return {
             "status": "gestart",
+            "run_id": run_id,
             "mode": "volledig",
             "tables": tables or "alle",
             "message": "Volledige sync gestart in achtergrond.",
@@ -202,8 +216,15 @@ def sync_history(
 ):
     """Geef de meest recente sync-batches terug."""
     try:
-        from bigquery.sync import get_sync_history
-        return {"history": get_sync_history(db, pg_table=table, limit=limit)}
+        from bigquery.sync import get_sync_history, get_sync_run_state
+        run_state = get_sync_run_state()
+        return {
+            "history": get_sync_history(db, pg_table=table, limit=limit),
+            "running": run_state["running"],
+            "running_mode": run_state["mode"],
+            "running_since": run_state["started_at"],
+            "active_runs": run_state["runs"],
+        }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

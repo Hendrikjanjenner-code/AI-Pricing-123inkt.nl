@@ -712,3 +712,63 @@ def test_bq_dim_product_merge_uses_composite_shop_sku_key():
     sql = fake.queries[0]
     assert "ON T.`shop_id` = S.`shop_id` AND T.`sku_id` = S.`sku_id`" in sql
     assert "T.`shop_id` = S.`shop_id`," not in sql.split("UPDATE SET")[1]  # pk niet in UPDATE
+
+def test_bq_run_state_overlapping_runs_aggregate():
+    """Twee gelijktijdige runs: running blijft True tot BEIDE klaar zijn;
+    finish van één run zet niet ten onrechte running=False."""
+    from bigquery import sync as bq_sync
+
+    a = bq_sync.register_sync_run("incrementeel")
+    b = bq_sync.register_sync_run("volledig")
+    try:
+        state = bq_sync.get_sync_run_state()
+        assert state["running"] is True
+        assert {r["run_id"] for r in state["runs"]} >= {a, b}
+
+        bq_sync.finish_sync_run(a)
+        state = bq_sync.get_sync_run_state()
+        assert state["running"] is True  # b loopt nog
+        assert all(r["run_id"] != a for r in state["runs"])
+
+        bq_sync.finish_sync_run(b)
+        state = bq_sync.get_sync_run_state()
+        assert state["running"] is False and state["runs"] == []
+        # Dubbel afmelden is onschadelijk
+        bq_sync.finish_sync_run(b)
+    finally:
+        bq_sync.finish_sync_run(a)
+        bq_sync.finish_sync_run(b)
+
+def test_bq_sync_post_marks_running_before_background_task(client, admin_headers, monkeypatch):
+    """De run wordt vóór het inplannen van de achtergrondtaak geregistreerd:
+    een poll direct na de POST ziet running=True. Na afloop is de run weg."""
+    import bigquery.client as bq_client
+    from bigquery import sync as bq_sync
+
+    monkeypatch.setattr(bq_client, "bq_available", lambda: True)
+
+    seen = {}
+
+    def fake_sync_all(full_refresh=False):
+        # Draait als achtergrondtaak: op dit punt moet de run al lopend zijn.
+        seen["state_during_run"] = bq_sync.get_sync_run_state()
+        return [{"status": "ok"}]
+
+    monkeypatch.setattr(bq_sync, "sync_all_tables", fake_sync_all)
+
+    resp = client.post("/api/bigquery/sync", json={}, headers=admin_headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "gestart" and body["run_id"]
+
+    # Registratie gebeurde vóór het inplannen; de taak zag zichzelf als lopend.
+    during = seen["state_during_run"]
+    assert during["running"] is True
+    assert any(r["run_id"] == body["run_id"] for r in during["runs"])
+
+    # TestClient voert achtergrondtaken synchroon uit: run is nu afgemeld.
+    hist = client.get("/api/bigquery/sync/history?limit=5", headers=admin_headers)
+    assert hist.status_code == 200
+    h = hist.json()
+    assert h["running"] is False
+    assert all(r["run_id"] != body["run_id"] for r in h["active_runs"])

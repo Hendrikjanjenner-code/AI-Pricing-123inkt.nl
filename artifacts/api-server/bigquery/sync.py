@@ -16,6 +16,7 @@ database en de applicatie blijven altijd operationeel.
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -28,42 +29,13 @@ from models import ImportJob
 
 logger = logging.getLogger("uvicorn.error")
 
-# Tabellen met een updatetimestamp: we gebruiken MAX(updated_at) als watermerk.
-# Tabellen zonder updated_at vallen terug op MAX(created_at) of MAX(date).
-WATERMARK_COLUMN: dict[str, str] = {
-    "dim_product": "updated_at",
-    "dim_category": "created_at",
-    "dim_shop": "created_at",
-    "dim_competitor": "created_at",
-    "fact_sales_daily": "date",
-    "fact_price_daily": "date",
-    "fact_competitor_price_daily": "date",
-    "fact_inventory_daily": "date",
-    "fact_pricing_recommendation_daily": "updated_at",
-    "sku_competition_score": "created_at",
-    "fact_bcg_classification_daily": "created_at",
-    "intelligence_signals": "created_at",
-}
-
-# Primaire sleutel per PostgreSQL-tabel (voor BigQuery MERGE). Een lijst
-# betekent een samengestelde MERGE-sleutel (bijv. shop-gescopeerde producten).
-PK_COLUMN: dict[str, str | list[str]] = {
-    "dim_product": ["shop_id", "sku_id"],
-    "dim_category": "id",
-    "dim_shop": "id",
-    "dim_competitor": "competitor_id",
-    "fact_sales_daily": "id",
-    "fact_price_daily": "id",
-    "fact_competitor_price_daily": "id",
-    "fact_inventory_daily": "id",
-    "fact_pricing_recommendation_daily": "id",
-    "sku_competition_score": "id",
-    "fact_bcg_classification_daily": "id",
-    "intelligence_signals": "id",
-}
-
-# Maximale batch-grootte per tabel (rijen per sync-run)
-BATCH_SIZE = 50_000
+# ── Run-status van lopende syncs (in-process) ────────────────────────────────
+# Jobs verschijnen pas ná afloop in de historie; deze registry maakt lopende
+# syncs zichtbaar voor de status-UI zodat die kan pollen tot afronding.
+# Meerdere gelijktijdige runs worden per run-ID bijgehouden: pas als ALLE runs
+# klaar zijn rapporteert get_sync_run_state() running=False.
+_active_runs: dict[str, dict[str, Any]] = {}
+_run_state_lock = threading.Lock()
 
 # Normalisatiewaarde voor NULL-watermerken: moet exact overeenkomen met het
 # COALESCE(..., TIMESTAMP 'epoch') in _fetch_pg_rows, anders pagineert een
@@ -548,3 +520,33 @@ def get_sync_history(db: Session, pg_table: Optional[str] = None, limit: int = 5
         }
         for j in jobs
     ]
+def get_sync_run_state() -> dict[str, Any]:
+    """Geef de geaggregeerde run-status terug (alle actieve runs)."""
+    with _run_state_lock:
+        runs = sorted(_active_runs.values(), key=lambda r: r["started_at"])
+        return {
+            "running": bool(runs),
+            "runs": [dict(r) for r in runs],
+            "mode": runs[0]["mode"] if runs else None,
+            "started_at": runs[0]["started_at"] if runs else None,
+        }
+
+def register_sync_run(mode: str) -> str:
+    """Registreer een (aanstaande) sync-run en geef het run-ID terug.
+
+    Aanroepen VÓÓR het inplannen van de achtergrondtaak, zodat een poll die
+    direct na de POST binnenkomt de run al als lopend ziet.
+    """
+    run_id = str(uuid.uuid4())
+    with _run_state_lock:
+        _active_runs[run_id] = {
+            "run_id": run_id,
+            "mode": mode,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }
+    return run_id
+
+def finish_sync_run(run_id: str) -> None:
+    """Markeer één specifieke run als afgerond; andere runs blijven lopend."""
+    with _run_state_lock:
+        _active_runs.pop(run_id, None)

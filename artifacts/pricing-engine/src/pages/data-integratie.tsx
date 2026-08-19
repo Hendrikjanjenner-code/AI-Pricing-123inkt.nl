@@ -260,6 +260,7 @@ function BigQuerySection() {
   const [costDays, setCostDays] = useState<number>(30);
   const [syncBusy, setSyncBusy] = useState<null | "incrementeel" | "volledig">(null);
   const [syncMsg, setSyncMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [syncRunning, setSyncRunning] = useState(false);
 
   const laad = useCallback(async () => {
     setLoading(true);
@@ -269,7 +270,14 @@ function BigQuerySection() {
       fetch(`${BASE}/api/bigquery/status`, opts)
         .then((r) => (r.ok ? r.json() : null)).then((d) => d && setStatus(d)).catch(() => {}),
       fetch(`${BASE}/api/bigquery/sync/history?limit=100`, opts)
-        .then((r) => (r.ok ? r.json() : null)).then((d) => d && setHistory(d.history as BqSyncRow[])).catch(() => {}),
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (d) {
+            setHistory(d.history as BqSyncRow[]);
+            setSyncRunning(Boolean(d.running));
+          }
+        })
+        .catch(() => {}),
       fetch(`${BASE}/api/bigquery/costs?days=${costDays}`, opts)
         .then((r) => (r.ok ? r.json() : null)).then((d) => d && setCosts(d)).catch(() => {}),
     ]);
@@ -277,6 +285,30 @@ function BigQuerySection() {
   }, [costDays]);
 
   useEffect(() => { laad(); }, [laad]);
+
+  // Zolang er een sync loopt: historie elke 6s pollen tot de run klaar is.
+  // De interval wordt opgeruimd bij afronding of bij het verlaten van de pagina.
+  useEffect(() => {
+    if (!syncRunning) return;
+    const id = setInterval(() => {
+      fetch(`${BASE}/api/bigquery/sync/history?limit=100`, {
+        headers: getAuthHeaders(),
+        signal: AbortSignal.timeout(30_000),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (!d) return;
+          setHistory(d.history as BqSyncRow[]);
+          if (!d.running) {
+            setSyncRunning(false);
+            // Eén volledige verversing zodat status & kosten het eindresultaat tonen
+            laad();
+          }
+        })
+        .catch(() => {});
+    }, 6000);
+    return () => clearInterval(id);
+  }, [syncRunning, laad]);
 
   const startSync = useCallback(async (mode: "incrementeel" | "volledig") => {
     setSyncBusy(mode);
@@ -297,7 +329,9 @@ function BigQuerySection() {
           ok: true,
           text: data?.message || `Sync (${mode}) gestart in achtergrond.`,
         });
-        // Historie kort daarna verversen zodat de nieuwe batch zichtbaar wordt
+        // Direct beginnen met pollen; de run-status van de server bepaalt
+        // wanneer het pollen weer stopt.
+        setSyncRunning(true);
         setTimeout(() => { laad(); }, 2000);
       } else {
         setSyncMsg({
@@ -347,8 +381,8 @@ function BigQuerySection() {
                   <button
                     type="button"
                     onClick={() => startSync("incrementeel")}
-                    disabled={syncBusy !== null || !verbonden}
-                    title={!verbonden ? "BigQuery is niet gekoppeld" : "Start een incrementele sync"}
+                    disabled={syncBusy !== null || !verbonden || syncRunning}
+                    title={!verbonden ? "BigQuery is niet gekoppeld" : syncRunning ? "Er loopt al een sync — wacht tot deze klaar is" : "Start een incrementele sync"}
                     className="inline-flex items-center gap-1 rounded-md border border-primary/40 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/5 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <RefreshCw className={`w-3 h-3 ${syncBusy === "incrementeel" ? "animate-spin" : ""}`} />
@@ -357,8 +391,8 @@ function BigQuerySection() {
                   <button
                     type="button"
                     onClick={() => startSync("volledig")}
-                    disabled={syncBusy !== null || !verbonden}
-                    title={!verbonden ? "BigQuery is niet gekoppeld" : "Herlaad alle tabellen volledig (kan lang duren)"}
+                    disabled={syncBusy !== null || !verbonden || syncRunning}
+                    title={!verbonden ? "BigQuery is niet gekoppeld" : syncRunning ? "Er loopt al een sync — wacht tot deze klaar is" : "Herlaad alle tabellen volledig (kan lang duren)"}
                     className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {syncBusy === "volledig" ? "Starten..." : "Volledige herlaad"}
@@ -382,6 +416,12 @@ function BigQuerySection() {
                   {verbonden ? `Verbonden${status?.project ? ` — project ${status.project}` : ""}` : "Niet gekoppeld"}
                 </span>
               </div>
+              {syncRunning && (
+                <div className="rounded-md border border-blue-200 bg-blue-50 p-2 text-xs flex items-center gap-1.5 text-blue-700">
+                  <RefreshCw className="w-3.5 h-3.5 shrink-0 animate-spin" />
+                  <span>Sync bezig — de historie wordt automatisch ververst tot de run klaar is.</span>
+                </div>
+              )}
               {syncMsg && (
                 <div
                   className={`rounded-md border p-2 text-xs flex items-center gap-1.5 ${
