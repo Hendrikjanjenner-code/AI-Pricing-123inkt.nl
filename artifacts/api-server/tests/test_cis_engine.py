@@ -22,6 +22,7 @@ from main import app
 from database import SessionLocal
 import models
 from engine.competitor_influence import run_cis_engine, calculate_cis, get_cis_class
+from engine.competition_rankings import run_competitor_rankings, W_INFLUENCE
 
 ADMIN_LOGIN = {"username": "dev_admin", "password": "admin123"}
 
@@ -332,6 +333,101 @@ def test_idempotent_rerun(seed_data):
         )
     finally:
         db.close()
+
+
+# ── Regressie: Influence mag niet stilletjes terugvallen naar 0 ───────────────
+
+def _overall_rankings(db, sid, run_date):
+    return db.query(models.CompetitorRanking).filter(
+        models.CompetitorRanking.shop_id == sid,
+        models.CompetitorRanking.run_date == run_date,
+        models.CompetitorRanking.scope == "overall",
+    ).all()
+
+
+def test_influence_nonzero_when_price_history_present(seed_data):
+    """
+    Vangnet voor de 30%-wegingsfactor: met prijshistorie én CIS-data mag de
+    Influence-score in de rankings nooit terugvallen naar 0. Mislukt als een
+    toekomstige wijziging in de rankings-engine of CIS-formule de score
+    ongemerkt op 0 zet.
+    """
+    db = SessionLocal()
+    sid = seed_data["shop_id"]
+    today = seed_data["today"]
+    try:
+        # Volledige pipeline: CIS-engine gevolgd door rankings-engine
+        written = run_cis_engine(db, ref_date=today, sku_ids=[SKU_A, SKU_B])
+        assert written > 0, "CIS-engine schreef geen rijen ondanks prijshistorie"
+        run_competitor_rankings(db, ref_date=today, shop_id=sid)
+
+        rows = _overall_rankings(db, sid, today)
+        assert rows, "Geen rankings geschreven voor de test-shop"
+        nonzero = [r for r in rows if (r.influence_score or 0) > 0]
+        assert nonzero, (
+            "REGRESSIE: alle influence_scores zijn 0 terwijl prijshistorie en "
+            "CIS-scores aanwezig zijn — de 30%-Influence-factor is uitgevallen. "
+            f"Rijen: {[(r.competitor_name, r.influence_score) for r in rows]}"
+        )
+        for r in nonzero:
+            assert r.evidence.get("cis_sku_count", 0) > 0
+            assert abs(r.evidence.get("weights", {}).get("influence", 0) - W_INFLUENCE) < 1e-9
+    finally:
+        db.close()
+
+
+def test_combined_score_differs_with_vs_without_cis(seed_data):
+    """
+    combined_score moet verschillen afhankelijk van CIS-aanwezigheid:
+    zonder CIS-rijen valt Influence terug op 0 en daalt de combined_score
+    met exact W_INFLUENCE * influence. Zou de score gelijk blijven, dan
+    telt de Influence-factor niet meer mee (stille regressie).
+    """
+    db = SessionLocal()
+    sid = seed_data["shop_id"]
+    today = seed_data["today"]
+    try:
+        # Run MET CIS-data
+        run_cis_engine(db, ref_date=today, sku_ids=[SKU_A, SKU_B])
+        run_competitor_rankings(db, ref_date=today, shop_id=sid)
+        with_cis = {r.competitor_name: (float(r.combined_score), float(r.influence_score))
+                    for r in _overall_rankings(db, sid, today)}
+        assert with_cis, "Geen rankings met CIS-data"
+        assert any(infl > 0 for _, infl in with_cis.values()), (
+            "Influence is al 0 mét CIS-data; regressietest kan verschil niet meten"
+        )
+
+        # Verwijder CIS-rijen en herrun rankings
+        db.query(models.CompetitorInfluenceScore).filter(
+            models.CompetitorInfluenceScore.sku_id.in_([SKU_A, SKU_B])
+        ).delete(synchronize_session=False)
+        db.commit()
+        run_competitor_rankings(db, ref_date=today, shop_id=sid)
+        without_cis = {r.competitor_name: (float(r.combined_score), float(r.influence_score))
+                       for r in _overall_rankings(db, sid, today)}
+
+        for name, (comb_with, infl_with) in with_cis.items():
+            if infl_with <= 0 or name not in without_cis:
+                continue
+            comb_without, infl_without = without_cis[name]
+            assert infl_without == 0.0, (
+                f"Influence van {name} is {infl_without} zonder CIS-rijen; verwacht 0"
+            )
+            assert comb_with != comb_without, (
+                f"REGRESSIE: combined_score van {name} identiek met en zonder CIS-data "
+                f"({comb_with}) — de Influence-factor telt niet meer mee"
+            )
+            expected_delta = W_INFLUENCE * infl_with
+            assert abs((comb_with - comb_without) - expected_delta) < 0.001, (
+                f"combined_score-verschil {comb_with - comb_without:.4f} wijkt af van "
+                f"W_INFLUENCE*influence = {expected_delta:.4f} voor {name}"
+            )
+    finally:
+        # Herstel CIS-data voor volgende tests in de module
+        try:
+            run_cis_engine(db, ref_date=today, sku_ids=[SKU_A, SKU_B])
+        finally:
+            db.close()
 
 
 # ── Integratie: rankings/run-endpoint vult Influence-score ────────────────────
