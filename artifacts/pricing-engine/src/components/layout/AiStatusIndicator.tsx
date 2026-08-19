@@ -1,63 +1,22 @@
-import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { AlertTriangle, Sparkles, WifiOff } from "lucide-react";
-import { getAuthHeaders } from "@/lib/auth";
 import { useAuth } from "@/lib/auth";
-
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
-
-interface ProviderStatus {
-  id: string;
-  label: string;
-  active: boolean;
-  configured: boolean;
-  reachable: boolean | null;
-  error: string | null;
-}
+import { useAiProviderStatus } from "@/hooks/use-ai-provider-status";
 
 /**
  * Klein AI-statusbadge in de navigatiebalk (Task #93).
  * Alleen zichtbaar voor admins; klik linkt naar de AI-provider-sectie
  * van de instellingenpagina.
+ *
+ * Leest uit de gedeelde React Query-cache (Task #104), zodat een
+ * providerwissel of verbindingstest op de instellingenpagina direct
+ * in het badge zichtbaar is.
  */
 export function AiStatusIndicator() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  const [providers, setProviders] = useState<ProviderStatus[] | null>(null);
-  const activeRef = useRef(true);
-
-  useEffect(() => {
-    if (!isAdmin) return;
-    activeRef.current = true;
-    let intervalId: ReturnType<typeof setInterval> | undefined;
-
-    const load = async () => {
-      if (document.hidden) return;
-      try {
-        const resp = await fetch(`${BASE}/api/copilot/provider`, {
-          headers: getAuthHeaders(),
-        });
-        if (!resp.ok) throw new Error("fetch failed");
-        const data = await resp.json();
-        if (!activeRef.current) return;
-        setProviders(Array.isArray(data?.providers) ? data.providers : []);
-      } catch {
-        // Behoud de laatst bekende status bij een mislukte refresh.
-      }
-    };
-
-    load();
-    intervalId = setInterval(load, 60000);
-    const onVisibilityChange = () => {
-      if (!document.hidden) load();
-    };
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => {
-      activeRef.current = false;
-      if (intervalId) clearInterval(intervalId);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
-  }, [isAdmin]);
+  const { data } = useAiProviderStatus(isAdmin);
+  const providers = data?.providers;
 
   if (!isAdmin || !providers) return null;
 

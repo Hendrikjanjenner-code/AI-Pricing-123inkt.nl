@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Trash2, UserPlus, AlertTriangle, Database, History, Download, RefreshCw, WifiOff } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getAuthToken } from "@/lib/auth";
+import { useAiProviderStatus, AI_PROVIDER_QUERY_KEY, type AiProviderInfo } from "@/hooks/use-ai-provider-status";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -45,27 +46,25 @@ export default function Instellingen() {
   const [migraties, setMigraties] = useState<any[]>([]);
   const [migratiesLaden, setMigratiesLaden] = useState(false);
 
-  // AI-provider (Task #79): actieve provider + status van beide opties
-  const [providerInfo, setProviderInfo] = useState<any>(null);
-  const [providerLaden, setProviderLaden] = useState(false);
+  // AI-provider (Task #79): actieve provider + status van beide opties.
+  // Gedeelde React Query-cache (Task #104): dezelfde query voedt ook het
+  // AI-statusbadge in de navigatiebalk, dat zo direct meebeweegt.
+  const isAdmin = user?.role === "admin";
+  const providerQuery = useAiProviderStatus(isAdmin);
+  const providerInfo = providerQuery.data ?? null;
+  const providerLaden = providerQuery.isFetching;
   const [providerWisselBezig, setProviderWisselBezig] = useState(false);
   const [providerTestBezig, setProviderTestBezig] = useState<string | null>(null);
   const [providerTests, setProviderTests] = useState<Record<string, { reachable: boolean; error: string | null }>>({});
 
-  const laadProvider = async () => {
-    setProviderLaden(true);
-    try {
-      const res = await fetch(`${BASE}/api/copilot/provider`, {
-        headers: { Authorization: `Bearer ${getAuthToken()}` },
-      });
-      if (!res.ok) throw new Error();
-      setProviderInfo(await res.json());
-    } catch {
+  useEffect(() => {
+    if (providerQuery.isError) {
       toast({ title: "AI-providerstatus ophalen mislukt", variant: "destructive" });
-    } finally {
-      setProviderLaden(false);
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providerQuery.isError]);
+
+  const laadProvider = () => providerQuery.refetch();
 
   const wisselProvider = async (provider: string | null) => {
     setProviderWisselBezig(true);
@@ -80,7 +79,8 @@ export default function Instellingen() {
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d?.detail || "Wisselen mislukt");
-      setProviderInfo(d);
+      // Direct de gedeelde cache bijwerken zodat badge én pagina meebewegen.
+      queryClient.setQueryData<AiProviderInfo>(AI_PROVIDER_QUERY_KEY, d);
       setProviderTests({});
       toast({
         title: "AI-provider gewijzigd",
@@ -108,8 +108,11 @@ export default function Instellingen() {
       const d = await res.json();
       if (!res.ok) throw new Error(d?.detail || "Test mislukt");
       setProviderTests(prev => ({ ...prev, [provider]: { reachable: d.reachable, error: d.error } }));
+      // Statusquery vernieuwen zodat het navigatiebadge de testuitslag direct toont.
+      queryClient.invalidateQueries({ queryKey: AI_PROVIDER_QUERY_KEY });
     } catch (e: any) {
       setProviderTests(prev => ({ ...prev, [provider]: { reachable: false, error: e?.message ?? "Test mislukt" } }));
+      queryClient.invalidateQueries({ queryKey: AI_PROVIDER_QUERY_KEY });
     } finally {
       setProviderTestBezig(null);
     }
@@ -163,21 +166,13 @@ export default function Instellingen() {
   useEffect(() => {
     if (user?.role === "admin") {
       laadMigraties();
-      laadProvider();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.role]);
 
-  // Peil automatisch elke 5 minuten opnieuw zodat de waarschuwingsbanner
-  // verdwijnt zodra de verbinding hersteld is, zonder handmatig vernieuwen.
-  useEffect(() => {
-    if (user?.role !== "admin") return;
-    const interval = setInterval(() => {
-      laadProvider();
-    }, 5 * 60 * 1000);
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.role]);
+  // De providerstatus wordt automatisch ververst door de gedeelde
+  // useAiProviderStatus-query (elke 60s + bij focus) — geen eigen
+  // polling-loop meer nodig (Task #104).
 
   const laadPreview = async () => {
     setPreviewLaden(true);
