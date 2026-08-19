@@ -1229,6 +1229,7 @@ def test_slow_full_run_publishes_engine_slow_run_signal(monkeypatch):
     monkeypatch.setattr(ci, "run_elasticity", lambda db, rd, shop_id=None: 0)
     monkeypatch.setattr(ci, "run_strategies", lambda db, rd, shop_id=None: 0)
     monkeypatch.setattr(ci, "warn_suspicious_matches", lambda db, rd, shop_id=None: 0)
+    monkeypatch.setattr(ci, "warn_elasticity_degradation", lambda db, rd, shop_id=None: 0)
     monkeypatch.setattr(competitor_profiling, "build_all_profiles",
                         lambda db, shop_id=None: [])
     # Drempel praktisch op nul: elke run is dan "te traag"
@@ -1253,4 +1254,282 @@ def test_slow_full_run_publishes_engine_slow_run_signal(monkeypatch):
             models.IntelligenceSignal.signal_type == "engine_slow_run",
         ).delete(synchronize_session=False)
         db.commit()
+        db.close()
+
+@pytest.fixture(scope="module")
+def elast_degradation_seed(client):
+    """Seed SkuElasticity-historie in een eigen test-shop:
+
+    - SKU-FALL: 2 oudere regressie-runs, daarna 3 opeenvolgende heuristiek-runs
+      (laatste = vandaag) → methode-terugvalsignaal verwacht.
+    - SKU-R2:   gisteren regressie R²=0.80, vandaag regressie R²=0.50
+      (daling 0.30 > drempel 0.15) → R²-dalingssignaal verwacht.
+    - SKU-OK:   altijd heuristiek (nooit regressie) → geen signaal.
+    - SKU-STAB: regressie met stabiele R² → geen signaal.
+    """
+    db = SessionLocal()
+    today = date.today()
+    sid = None
+    skus = [f"{ED_PFX}-FALL", f"{ED_PFX}-R2", f"{ED_PFX}-OK", f"{ED_PFX}-STAB"]
+    try:
+        shop = models.DimShop(shop_code=ED_PFX, name=f"{ED_PFX}-shop",
+                              active=True)
+        db.add(shop)
+        db.flush()
+        sid = shop.id
+        for s in skus:
+            db.add(models.DimProduct(sku_id=s, product_name=f"ED {s}",
+                                     current_price=10.0, shop_id=sid))
+        db.flush()
+
+        def add(sku, days_ago, method, r2):
+            db.add(models.SkuElasticity(
+                sku_id=sku, run_date=today - timedelta(days=days_ago),
+                own_price_elasticity=-1.2, cross_elasticity=0.3,
+                competitive_elasticity=0.5,
+                internal_substitution_elasticity=0.2,
+                elasticity_confidence_score=0.7,
+                confidence_class="bruikbaar",
+                method_label=method, regression_r2=r2))
+
+        # SKU-FALL: regressie (dag 4, 3) → heuristiek (dag 2, 1, 0)
+        add(skus[0], 4, "regressie", 0.62)
+        add(skus[0], 3, "regressie", 0.58)
+        add(skus[0], 2, "heuristiek", None)
+        add(skus[0], 1, "heuristiek", None)
+        add(skus[0], 0, "heuristiek", None)
+
+        # SKU-R2: regressie met sterke R²-daling
+        add(skus[1], 1, "regressie", 0.80)
+        add(skus[1], 0, "regressie", 0.50)
+
+        # SKU-OK: altijd heuristiek — nooit regressie geweest
+        for d in (3, 2, 1, 0):
+            add(skus[2], d, "heuristiek", None)
+
+        # SKU-STAB: regressie met stabiele R²
+        add(skus[3], 1, "regressie", 0.70)
+        add(skus[3], 0, "regressie", 0.68)
+
+        db.commit()
+        yield sid, skus
+    finally:
+        if skus:
+            db.query(models.SkuElasticity).filter(
+                models.SkuElasticity.sku_id.in_(skus),
+            ).delete(synchronize_session=False)
+        if sid is not None:
+            for model, col in [
+                (models.IntelligenceSignal, models.IntelligenceSignal.shop_id),
+                (models.CostUsageRecord, models.CostUsageRecord.shop_id),
+            ]:
+                db.query(model).filter(col == sid).delete(
+                    synchronize_session=False)
+        if skus:
+            db.query(models.DimProduct).filter(
+                models.DimProduct.sku_id.in_(skus),
+            ).delete(synchronize_session=False)
+        if sid is not None:
+            db.query(models.DimShop).filter(
+                models.DimShop.id == sid).delete(synchronize_session=False)
+        db.commit()
+        db.close()
+
+def test_elasticity_method_degraded_signal(elast_degradation_seed):
+    """3 opeenvolgende heuristiek-runs na eerdere regressie → signaal."""
+    from engine.competition_intelligence import warn_elasticity_degradation
+    sid, skus = elast_degradation_seed
+    db = SessionLocal()
+    try:
+        n = warn_elasticity_degradation(db, date.today(), shop_id=sid)
+        assert n >= 2, f"Verwacht >= 2 signalen (methode + R²), kreeg {n}"
+        sig = db.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.signal_type == "elasticity_method_degraded",
+            models.IntelligenceSignal.entity_id == skus[0],
+            models.IntelligenceSignal.shop_id == sid,
+            models.IntelligenceSignal.status == "active",
+        ).first()
+        assert sig is not None, "Geen methode-terugvalsignaal voor SKU-FALL"
+        assert sig.explanation and "heuristi" in sig.explanation.lower()
+        ev = sig.evidence or {}
+        assert ev.get("consecutive_heuristic_runs") == 3
+        assert ev.get("last_regression_run_date")
+        assert sig.sources and "sku_elasticity" in sig.sources
+    finally:
+        db.close()
+
+def test_elasticity_r2_drop_signal(elast_degradation_seed):
+    """R²-daling van 0.80 → 0.50 (> drempel 0.15) → signaal met waarden."""
+    from engine.competition_intelligence import warn_elasticity_degradation
+    sid, skus = elast_degradation_seed
+    db = SessionLocal()
+    try:
+        warn_elasticity_degradation(db, date.today(), shop_id=sid)
+        sig = db.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.signal_type == "elasticity_r2_dropped",
+            models.IntelligenceSignal.entity_id == skus[1],
+            models.IntelligenceSignal.shop_id == sid,
+            models.IntelligenceSignal.status == "active",
+        ).first()
+        assert sig is not None, "Geen R²-dalingssignaal voor SKU-R2"
+        assert sig.current_value == pytest.approx(0.50)
+        assert sig.previous_value == pytest.approx(0.80)
+        ev = sig.evidence or {}
+        assert ev.get("r2_drop") == pytest.approx(0.30)
+        assert ev.get("r2_drop_threshold") == pytest.approx(0.15)
+    finally:
+        db.close()
+
+def test_elasticity_r2_drop_detected_across_intermediate_heuristic_runs(client):
+    """Regressie (R² 0.80) → heuristiek → regressie (R² 0.50): de daling wordt
+    vergeleken met de VORIGE regressie-run, ook met tussenliggende
+    heuristiek-runs — en zelfstandig gedetecteerd door de detector."""
+    from engine.competition_intelligence import warn_elasticity_degradation
+
+    pfx = f"EDGAP{uuid.uuid4().hex[:6]}"
+    db = SessionLocal()
+    today = date.today()
+    sid = None
+    sku = f"{pfx}-SKU"
+    try:
+        shop = models.DimShop(shop_code=pfx, name=f"{pfx}-shop", active=True)
+        db.add(shop)
+        db.flush()
+        sid = shop.id
+        db.add(models.DimProduct(sku_id=sku, product_name="ED gap",
+                                 current_price=10.0, shop_id=sid))
+        db.flush()
+        for d, m, r2 in [(2, "regressie", 0.80), (1, "heuristiek", None),
+                         (0, "regressie", 0.50)]:
+            db.add(models.SkuElasticity(
+                sku_id=sku, run_date=today - timedelta(days=d),
+                own_price_elasticity=-1.0, cross_elasticity=0.2,
+                competitive_elasticity=0.4,
+                internal_substitution_elasticity=0.1,
+                elasticity_confidence_score=0.6,
+                confidence_class="bruikbaar",
+                method_label=m, regression_r2=r2))
+        db.commit()
+
+        n = warn_elasticity_degradation(db, today, shop_id=sid)
+        assert n == 1, f"Verwacht precies 1 R²-dalingssignaal, kreeg {n}"
+        sig = db.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.signal_type == "elasticity_r2_dropped",
+            models.IntelligenceSignal.entity_id == sku,
+            models.IntelligenceSignal.shop_id == sid,
+            models.IntelligenceSignal.status == "active",
+        ).first()
+        assert sig is not None
+        assert sig.previous_value == pytest.approx(0.80)
+        assert sig.current_value == pytest.approx(0.50)
+        ev = sig.evidence or {}
+        assert ev.get("previous_run_date") == str(today - timedelta(days=2))
+        assert ev.get("r2_drop") == pytest.approx(0.30)
+    finally:
+        db.query(models.SkuElasticity).filter(
+            models.SkuElasticity.sku_id == sku).delete(synchronize_session=False)
+        if sid is not None:
+            db.query(models.IntelligenceSignal).filter(
+                models.IntelligenceSignal.shop_id == sid).delete(
+                synchronize_session=False)
+            db.query(models.CostUsageRecord).filter(
+                models.CostUsageRecord.shop_id == sid).delete(
+                synchronize_session=False)
+        db.query(models.DimProduct).filter(
+            models.DimProduct.sku_id == sku).delete(synchronize_session=False)
+        if sid is not None:
+            db.query(models.DimShop).filter(
+                models.DimShop.id == sid).delete(synchronize_session=False)
+        db.commit()
+        db.close()
+
+def test_elasticity_degradation_threshold_configurable(monkeypatch, client):
+    """Drempels komen uit de model_governance-config: met een hogere
+    fallback-drempel (5) triggeren 3 heuristiek-runs géén signaal."""
+    from engine import competition_intelligence as ci
+
+    pfx = f"EDCFG{uuid.uuid4().hex[:6]}"
+    db = SessionLocal()
+    today = date.today()
+    sid = None
+    sku = f"{pfx}-SKU"
+    try:
+        shop = models.DimShop(shop_code=pfx, name=f"{pfx}-shop", active=True)
+        db.add(shop)
+        db.flush()
+        sid = shop.id
+        db.add(models.DimProduct(sku_id=sku, product_name="ED cfg",
+                                 current_price=10.0, shop_id=sid))
+        db.flush()
+        for d, m, r2 in [(4, "regressie", 0.6), (3, "regressie", 0.55),
+                         (2, "heuristiek", None), (1, "heuristiek", None),
+                         (0, "heuristiek", None)]:
+            db.add(models.SkuElasticity(
+                sku_id=sku, run_date=today - timedelta(days=d),
+                own_price_elasticity=-1.0, cross_elasticity=0.2,
+                competitive_elasticity=0.4,
+                internal_substitution_elasticity=0.1,
+                elasticity_confidence_score=0.6,
+                confidence_class="bruikbaar",
+                method_label=m, regression_r2=r2))
+        db.commit()
+
+        monkeypatch.setattr(ci, "_cfg", lambda db: dict(
+            ci.DEFAULTS, elasticity_fallback_runs_threshold=5))
+        n = ci.warn_elasticity_degradation(db, today, shop_id=sid)
+        assert n == 0, "Signaal ondanks hogere geconfigureerde drempel"
+    finally:
+        db.query(models.SkuElasticity).filter(
+            models.SkuElasticity.sku_id == sku).delete(synchronize_session=False)
+        db.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.shop_id == sid).delete(
+            synchronize_session=False)
+        db.query(models.CostUsageRecord).filter(
+            models.CostUsageRecord.shop_id == sid).delete(
+            synchronize_session=False)
+        db.query(models.DimProduct).filter(
+            models.DimProduct.sku_id == sku).delete(synchronize_session=False)
+        if sid is not None:
+            db.query(models.DimShop).filter(
+                models.DimShop.id == sid).delete(synchronize_session=False)
+        db.commit()
+        db.close()
+
+def test_elasticity_degradation_no_signal_for_stable_skus(elast_degradation_seed):
+    """Geen signalen voor SKU's zonder eerdere regressie of met stabiele R²."""
+    from engine.competition_intelligence import warn_elasticity_degradation
+    sid, skus = elast_degradation_seed
+    db = SessionLocal()
+    try:
+        warn_elasticity_degradation(db, date.today(), shop_id=sid)
+        n = db.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.entity_id.in_([skus[2], skus[3]]),
+            models.IntelligenceSignal.shop_id == sid,
+            models.IntelligenceSignal.signal_type.in_(
+                ["elasticity_method_degraded", "elasticity_r2_dropped"]),
+        ).count()
+        assert n == 0, f"Onterecht {n} signalen voor stabiele SKU's"
+    finally:
+        db.close()
+
+def test_run_all_includes_elasticity_degradation(run_engines):
+    """run_all rapporteert de degradatiestap in het resultaat."""
+    assert "elasticity_degradation_signals" in run_engines
+
+def test_elasticity_degradation_idempotent(elast_degradation_seed):
+    """Herhaalde aanroep op dezelfde run_date maakt geen extra signalen aan."""
+    from engine.competition_intelligence import warn_elasticity_degradation
+    sid, skus = elast_degradation_seed
+    db = SessionLocal()
+    try:
+        n = warn_elasticity_degradation(db, date.today(), shop_id=sid)
+        assert n == 0, f"Idempotentie geschonden: {n} extra signalen"
+        count = db.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.signal_type == "elasticity_method_degraded",
+            models.IntelligenceSignal.entity_id == skus[0],
+            models.IntelligenceSignal.shop_id == sid,
+            models.IntelligenceSignal.status == "active",
+        ).count()
+        assert count == 1, f"Verwacht 1 actief signaal, kreeg {count}"
+    finally:
         db.close()

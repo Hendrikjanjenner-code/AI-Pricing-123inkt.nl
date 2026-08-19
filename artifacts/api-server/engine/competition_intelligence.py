@@ -70,6 +70,12 @@ DEFAULTS = {
     # run_all voordat een engine_slow_run-signaal wordt gepubliceerd.
     # Shop-gescopeerde runs (tests) zijn uitgezonderd van deze drempel.
     "slow_run_threshold_seconds": 60.0,
+    # Elasticiteitsdegradatie: aantal opeenvolgende runs op "heuristiek"
+    # (terwijl er eerder regressie was) voordat een signaal wordt gepubliceerd
+    "elasticity_fallback_runs_threshold": 3,
+    # Elasticiteitsdegradatie: minimale R²-daling t.o.v. de vorige
+    # regressie-run die een signaal triggert
+    "elasticity_r2_drop_threshold": 0.15,
 }
 
 
@@ -792,6 +798,157 @@ def run_elasticity(db: Session, run_date: Optional[date] = None,
     logger.info("Elasticiteit: %d SKU's berekend (methode per SKU: regressie waar mogelijk).", n)
     return n
 
+def warn_elasticity_degradation(db: Session, run_date: Optional[date] = None,
+                                shop_id: Optional[int] = None) -> int:
+    """Bewaak stille degradatie van de regressie-elasticiteit per SKU.
+
+    Twee detectieregels (drempels via model_governance-config
+    'competition_intelligence'):
+    1. Methode-terugval: een SKU staat >= elasticity_fallback_runs_threshold
+       opeenvolgende runs op "heuristiek" terwijl er in een eerdere run
+       regressie werd gebruikt → signaal elasticity_method_degraded.
+    2. R²-daling: de R² van de laatste regressie-run ligt meer dan
+       elasticity_r2_drop_threshold onder die van de vorige regressie-run
+       → signaal elasticity_r2_dropped.
+
+    Idempotent bij reruns: per SKU per run_date maximaal één actief signaal
+    per type (zelfde waarneming maakt geen nieuw signaal aan).
+    """
+    rd = run_date or date.today()
+    cfg = _cfg(db)
+    fallback_runs = int(cfg.get("elasticity_fallback_runs_threshold",
+                                DEFAULTS["elasticity_fallback_runs_threshold"]))
+    r2_drop_threshold = float(cfg.get("elasticity_r2_drop_threshold",
+                                      DEFAULTS["elasticity_r2_drop_threshold"]))
+
+    prod_q = db.query(models.DimProduct.sku_id, models.DimProduct.shop_id,
+                      models.DimProduct.product_name)
+    if shop_id is not None:
+        prod_q = prod_q.filter(models.DimProduct.shop_id == shop_id)
+    prods = {p.sku_id: p for p in prod_q.all()}
+    if not prods:
+        return 0
+
+    hist_q = db.query(models.SkuElasticity.sku_id,
+                      models.SkuElasticity.run_date,
+                      models.SkuElasticity.method_label,
+                      models.SkuElasticity.regression_r2).filter(
+        models.SkuElasticity.run_date <= rd)
+    if shop_id is not None:
+        hist_q = hist_q.filter(
+            models.SkuElasticity.sku_id.in_(list(prods.keys())))
+    history: dict[str, dict[date, tuple]] = {}
+    for r in hist_q.all():
+        if r.sku_id in prods:
+            # Eén rij per (sku, run_date); latere rij overschrijft eventuele dubbel
+            history.setdefault(r.sku_id, {})[r.run_date] = (
+                r.method_label, r.regression_r2)
+
+    n_signals = 0
+    for sku_id, by_date in history.items():
+        runs = sorted(by_date.items(), key=lambda kv: kv[0], reverse=True)
+        if not runs or runs[0][0] != rd:
+            continue  # geen resultaat in de huidige run
+        prod = prods[sku_id]
+        sid = prod.shop_id or 1
+        name = prod.product_name or sku_id
+
+        # Regel 1: methode-terugval regressie → heuristiek
+        recent = runs[:fallback_runs]
+        older = runs[fallback_runs:]
+        if (len(recent) >= fallback_runs
+                and all(m == "heuristiek" for _, (m, _r2) in recent)
+                and any(m == "regressie" for _, (m, _r2) in older)):
+            last_reg_date, (_, last_reg_r2) = next(
+                (d, v) for d, v in older if v[0] == "regressie")
+            if not _already_signaled(db, "elasticity_method_degraded", sku_id,
+                                     sid, "run_date", str(rd)):
+                publish_signal(
+                    db, engine="competition",
+                    signal_type="elasticity_method_degraded",
+                    entity_type="sku", entity_id=sku_id, entity_name=name,
+                    severity="medium", direction="negative",
+                    metric="elasticity_heuristic_streak",
+                    current_value=float(fallback_runs),
+                    confidence=0.9,
+                    explanation=(
+                        f"SKU {sku_id} draait al {fallback_runs} runs achtereen "
+                        f"op de heuristische elasticiteitsschatting, terwijl op "
+                        f"{last_reg_date} nog regressie werd gebruikt "
+                        f"(R²={last_reg_r2 if last_reg_r2 is not None else 'onbekend'}). "
+                        f"Scenario-simulaties voor deze SKU zijn daardoor minder "
+                        f"betrouwbaar geworden — controleer of de trainingsdata "
+                        f"(verkoop-, prijs- en concurrentprijshistorie) verouderd "
+                        f"of onvolledig is."),
+                    evidence={
+                        "run_date": str(rd),
+                        "consecutive_heuristic_runs": fallback_runs,
+                        "fallback_runs_threshold": fallback_runs,
+                        "last_regression_run_date": str(last_reg_date),
+                        "last_regression_r2": last_reg_r2,
+                    },
+                    sources=["sku_elasticity"],
+                    suggested_action=(
+                        "Controleer de volledigheid van verkoop- en "
+                        "prijshistorie voor deze SKU; ververs de feed of "
+                        "verruim het lookback-venster"),
+                    model_version=MODEL_VERSION, shop_id=sid,
+                )
+                n_signals += 1
+
+        # Regel 2: sterke R²-daling t.o.v. de VORIGE regressie-run — ook als
+        # er tussenliggende heuristiek-runs zijn geweest.
+        cur_method, cur_r2 = runs[0][1]
+        if cur_method == "regressie" and cur_r2 is not None:
+            prev_reg = next(
+                ((d, v) for d, v in runs[1:]
+                 if v[0] == "regressie" and v[1] is not None), None)
+            if (prev_reg is not None
+                    and (float(prev_reg[1][1]) - float(cur_r2))
+                    > r2_drop_threshold):
+                prev_run_date, (_, prev_r2) = prev_reg
+                drop = round(float(prev_r2) - float(cur_r2), 4)
+                if not _already_signaled(db, "elasticity_r2_dropped", sku_id,
+                                         sid, "run_date", str(rd)):
+                    publish_signal(
+                        db, engine="competition",
+                        signal_type="elasticity_r2_dropped",
+                        entity_type="sku", entity_id=sku_id, entity_name=name,
+                        severity="medium", direction="negative",
+                        metric="elasticity_regression_r2",
+                        current_value=float(cur_r2),
+                        previous_value=float(prev_r2),
+                        change_pct=round(
+                            (float(cur_r2) - float(prev_r2))
+                            / float(prev_r2) * 100, 2) if float(prev_r2) else None,
+                        confidence=0.9,
+                        explanation=(
+                            f"De R² van de elasticiteitsregressie voor SKU "
+                            f"{sku_id} daalde van {float(prev_r2):.3f} "
+                            f"({prev_run_date}) naar {float(cur_r2):.3f} ({rd}) — "
+                            f"een daling van {drop:.3f}, boven de drempel van "
+                            f"{r2_drop_threshold:.2f}. De fit-kwaliteit van het "
+                            f"model verslechtert; scenario-simulaties kunnen "
+                            f"minder betrouwbaar worden."),
+                        evidence={
+                            "run_date": str(rd),
+                            "previous_run_date": str(prev_run_date),
+                            "current_r2": float(cur_r2),
+                            "previous_r2": float(prev_r2),
+                            "r2_drop": drop,
+                            "r2_drop_threshold": r2_drop_threshold,
+                        },
+                        sources=["sku_elasticity"],
+                        suggested_action=(
+                            "Controleer recente verkoop- en prijsdata op "
+                            "breuken of uitschieters die de regressiefit "
+                            "verslechteren"),
+                        model_version=MODEL_VERSION, shop_id=sid,
+                    )
+                    n_signals += 1
+
+    db.commit()
+    return n_signals
 def warn_suspicious_matches(db: Session, run_date: Optional[date] = None,
                              shop_id: Optional[int] = None) -> int:
     """Publiceer een waarschuwingssignaal per shop als het aantal verdachte
@@ -1016,6 +1173,7 @@ def run_all(db: Session, run_date: Optional[date] = None,
         "strategy_results": _timed("strategies", lambda: run_strategies(db, rd, shop_id=shop_id)),
         "profiles": profiles_count,
         "suspicious_match_signals": _timed("suspicious_matches", lambda: warn_suspicious_matches(db, rd, shop_id=shop_id)),
+        "elasticity_degradation_signals": _timed("elasticity_degradation", lambda: warn_elasticity_degradation(db, rd, shop_id=shop_id)),
         "model_version": MODEL_VERSION,
     }
 
