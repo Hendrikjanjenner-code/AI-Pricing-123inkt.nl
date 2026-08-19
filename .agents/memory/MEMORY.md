@@ -51,4 +51,5 @@
 - [Test-shop teardown FK](test-suite-conventions.md) — request middleware writes cost-usage rows per shop; any teardown that deletes a shop must delete those rows first or FK-fails only in full-suite runs.
 // hint: Logic changed on both sides. Requires understanding intent of each change.
 - [Keyset pagination & NULL watermarks](keyset-pagination-nulls.md) — row-tuple keyset compare drops NULL-watermark rows; coalesce both sides to a fixed minimum.
+- [Canonieke producthiërarchie](product-hierarchy.md) — staged niet-destructieve import; padtabel-sync verplicht bij elke boommutatie; apply claimt job atomisch.
 - [Shared-DB test isolation](shared-db-test-isolation.md) — future-dated max(date) seeds, purge residue for most-recent semantics, always set shop_id explicitly.

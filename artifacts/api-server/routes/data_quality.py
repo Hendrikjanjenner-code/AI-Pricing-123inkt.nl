@@ -429,6 +429,65 @@ def _detect_issues(db: Session, total_skus: int) -> list[dict]:  # noqa: C901
             "Zolang suggesties niet beoordeeld zijn, blijft de content onvolledig.",
             "Beoordeel de suggesties op de Contentsuggesties-pagina (goedkeuren of afwijzen)."))
 
+    # ── Producthiërarchie-checks (taak #215) ─────────────────────────────
+    PHN = models.ProductHierarchyNode
+    PHA = models.ProductHierarchyAssignment
+    ph_nodes = db.query(func.count(PHN.id)).scalar() or 0
+    if ph_nodes:
+        assigned_skus = (db.query(func.distinct(PHA.sku_id))
+                         .filter(PHA.status == "active").subquery())
+        unassigned = db.query(P).filter(
+            P.is_active == True,  # noqa: E712
+            P.sku_id.notin_(db.query(assigned_skus.c.sku_id))).count()
+        if unassigned:
+            issues.append(_issue(
+                "PH_PRODUCTS_WITHOUT_HIERARCHY", "warning",
+                "Producten zonder producthiërarchie",
+                "Actieve SKU's zonder actieve koppeling in de centrale producthiërarchie",
+                unassigned, "Systeem", "Producthiërarchie",
+                "Deze producten vallen buiten alle hiërarchie-gefilterde analyses en rapportages.",
+                "Importeer een hiërarchiebestand met deze productcodes of koppel ze handmatig."))
+
+        parent_ids = {pid for (pid,) in db.query(PHN.parent_id).filter(PHN.parent_id.isnot(None))}
+        existing_ids = {nid for (nid,) in db.query(PHN.id)}
+        orphan = len(parent_ids - existing_ids)
+        inactive_parents = {nid for (nid,) in db.query(PHN.id).filter(PHN.is_active == False)}  # noqa: E712
+        orphan += (db.query(func.count(PHN.id))
+                   .filter(PHN.is_active == True,  # noqa: E712
+                           PHN.parent_id.in_(inactive_parents or {0})).scalar() or 0)
+        if orphan:
+            issues.append(_issue(
+                "PH_ORPHAN_NODES", "error", "Wees-nodes in producthiërarchie",
+                "Hiërarchie-nodes met een ontbrekende of inactieve parent", orphan,
+                "Systeem", "Producthiërarchie",
+                "Wees-nodes en hun producten zijn onbereikbaar via de boom en descendant-queries.",
+                "Herstel de parent-koppeling of deactiveer de betreffende subtree bewust."))
+
+        dup_paths = (db.query(PHN.parent_id, func.lower(PHN.name))
+                     .filter(PHN.is_active == True)  # noqa: E712
+                     .group_by(PHN.parent_id, func.lower(PHN.name))
+                     .having(func.count(PHN.id) > 1).count())
+        if dup_paths:
+            issues.append(_issue(
+                "PH_DUPLICATE_PATHS", "error", "Dubbele paden in producthiërarchie",
+                "Meerdere actieve nodes met dezelfde naam onder dezelfde parent", dup_paths,
+                "Systeem", "Producthiërarchie",
+                "Producten kunnen op het verkeerde duplicaat worden gekoppeld; tellingen splitsen onbedoeld.",
+                "Voeg de duplicaatnodes samen of hernoem ze."))
+
+        multi_assign = (db.query(PHA.sku_id)
+                        .filter(PHA.status == "active")
+                        .group_by(PHA.sku_id)
+                        .having(func.count(PHA.id) > 1).count())
+        if multi_assign:
+            issues.append(_issue(
+                "PH_MULTIPLE_ACTIVE_ASSIGNMENTS", "warning",
+                "Producten met meerdere actieve hiërarchie-koppelingen",
+                "SKU's die aan meer dan één node tegelijk actief gekoppeld zijn", multi_assign,
+                "Systeem", "Producthiërarchie",
+                "Dubbele koppelingen laten producten dubbel meetellen in hiërarchie-aggregaties.",
+                "Controleer deze SKU's en laat per product één primaire koppeling actief."))
+
     # ── DRS-specifieke checks (bestaand) ─────────────────────────────────
     hier_names = {r.category_name for r in db.query(models.DimCategoryHierarchy.category_name).all()}
     if hier_names:

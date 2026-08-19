@@ -17,6 +17,7 @@ import Producten from "@/pages/skus";
 import ProductDetail from "@/pages/skus/detail";
 import Categorieen from "@/pages/categories";
 import CategorieHierarchie from "@/pages/categories-hierarchy";
+import ProductHierarchie from "@/pages/product-hierarchie";
 import Gegevensintegratie from "@/pages/data-upload";
 import DataIntegratie from "@/pages/data-integratie";
 import Datakwaliteit from "@/pages/data-quality";
@@ -334,6 +335,9 @@ function Router() {
       {/* Overige pagina's */}
       <Route path="/categorieen">
         <ProtectedRoute><Categorieen /></ProtectedRoute>
+      </Route>
+      <Route path="/producthierarchie">
+        <ProtectedRoute><ProductHierarchie /></ProtectedRoute>
       </Route>
       <Route path="/categorieen/hierarchie">
         <ProtectedRoute><CategorieHierarchie /></ProtectedRoute>

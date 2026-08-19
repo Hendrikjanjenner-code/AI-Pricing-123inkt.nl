@@ -1246,6 +1246,124 @@ class DimCategoryHierarchy(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class ProductHierarchyNode(Base):
+    """
+    Canonieke producthiërarchie (taak #215): één boom met 2–6+ dynamische
+    niveaus. Interne id is immutable; external_option_id komt uit het
+    bronbestand (optionId) en identificeert bladknopen over imports heen.
+    """
+    __tablename__ = "product_hierarchy_nodes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    external_option_id = Column(String(100), unique=True, index=True)  # NULL toegestaan (tussenniveaus)
+    name = Column(String(255), nullable=False)
+    parent_id = Column(Integer, ForeignKey("product_hierarchy_nodes.id", ondelete="SET NULL"),
+                       nullable=True, index=True)
+    level = Column(Integer, nullable=False, default=1, index=True)     # 1 = topniveau
+    # Gematerialiseerd pad van interne ids, bv. "/3/17/244/" — descendant-
+    # queries zijn dan een prefix-LIKE op een geïndexeerde kolom.
+    path = Column(String(1000), index=True)
+    path_names = Column(String(2000))     # leesbaar pad "Kantoor > Papier > A4"
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    valid_from = Column(Date)             # geldigheidsperiode (optioneel)
+    valid_to = Column(Date)
+    source = Column(String(50), default="import")   # import / handmatig
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by = Column(String(100))
+    updated_by = Column(String(100))
+
+    __table_args__ = (
+        Index("ix_ph_nodes_parent_name", "parent_id", "name"),
+    )
+
+
+class ProductHierarchyAssignment(Base):
+    """
+    Koppeling product ↔ hiërarchie-node. Niet-destructief: bij een verhuizing
+    wordt de oude rij op status 'superseded' gezet (met valid_to) en een
+    nieuwe actieve rij aangemaakt — mappings verdwijnen nooit stilzwijgend.
+    """
+    __tablename__ = "product_hierarchy_assignments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sku_id = Column(String(100), ForeignKey("dim_product.sku_id", ondelete="CASCADE"),
+                    nullable=False, index=True)
+    node_id = Column(Integer, ForeignKey("product_hierarchy_nodes.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    is_primary = Column(Boolean, default=True, nullable=False)
+    status = Column(String(20), default="active", nullable=False, index=True)  # active / superseded
+    valid_from = Column(DateTime, default=datetime.utcnow)
+    valid_to = Column(DateTime)
+    source = Column(String(50), default="import")
+    assigned_by = Column(String(100))
+    import_job_id = Column(Integer, index=True)   # herkomst-batch (ImportJob.id)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_ph_assign_sku_status", "sku_id", "status"),
+        Index("ix_ph_assign_node_status", "node_id", "status"),
+    )
+
+
+class ProductHierarchyPath(Base):
+    """Gematerialiseerde paden per bladknoop voor snelle rapportage/lookup."""
+    __tablename__ = "product_hierarchy_paths"
+
+    id = Column(Integer, primary_key=True, index=True)
+    leaf_node_id = Column(Integer, ForeignKey("product_hierarchy_nodes.id", ondelete="CASCADE"),
+                          nullable=False, unique=True, index=True)
+    path_string = Column(String(2000), nullable=False)   # "Kantoor > Papier > A4"
+    node_ids = Column(JSON)                              # [3, 17, 244]
+    depth = Column(Integer, nullable=False, default=1)
+    external_option_id = Column(String(100), index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ProductHierarchyStagingRow(Base):
+    """
+    Staging voor de niet-destructieve import-wizard: elke bestandsrij wordt
+    eerst hier geparkeerd (upload → validate → impact → approve → apply);
+    er verandert niets aan de echte hiërarchie tot de apply-stap.
+    """
+    __tablename__ = "product_hierarchy_staging_rows"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(Integer, ForeignKey("import_jobs.id", ondelete="CASCADE"),
+                    nullable=False, index=True)
+    row_number = Column(Integer, nullable=False)
+    external_option_id = Column(String(100), index=True)
+    product_code = Column(String(100), index=True)
+    path_names = Column(JSON)             # ["Kantoor", "Papier", "A4"]
+    matched_sku_id = Column(String(100), index=True)
+    match_method = Column(String(30))     # drs_id / ean / oem / geen
+    status = Column(String(20), default="nieuw", index=True)  # nieuw/geldig/fout/duplicaat
+    message = Column(Text)
+
+
+class ProductHierarchyChangeLog(Base):
+    """
+    Versie-/wijzigingshistorie van de hiërarchie: nieuwe, hernoemde,
+    verplaatste en gedeactiveerde nodes plus verplaatste producttoewijzingen,
+    met oud/nieuw, bron, gebruiker en tijdstip.
+    """
+    __tablename__ = "product_hierarchy_change_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    import_job_id = Column(Integer, index=True)
+    node_id = Column(Integer, index=True)
+    sku_id = Column(String(100), index=True)
+    change_type = Column(String(40), nullable=False, index=True)
+    # node_created / node_renamed / node_moved / node_deactivated /
+    # node_reactivated / assignment_created / assignment_moved
+    old_value = Column(JSON)
+    new_value = Column(JSON)
+    source = Column(String(50), default="import")
+    performed_by = Column(String(100))
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class FactPromotionsDaily(Base):
     """Placeholder: dagelijkse promotiedata per SKU (koppeling volgt)."""
     __tablename__ = "fact_promotions_daily"

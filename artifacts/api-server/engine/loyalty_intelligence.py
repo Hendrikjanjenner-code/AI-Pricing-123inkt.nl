@@ -766,6 +766,14 @@ def expiring_soon_members(db: Session, shop_id: int | None = None) -> list[dict]
                 models.LoyaltyTransaction.txn_date >= cutoff_full,
                 models.LoyaltyTransaction.txn_date < cutoff_soon,
             ).scalar()
+            if earliest is None:
+                # Alleen al-overdue punten: schat de (verstreken) vervaldatum
+                # op basis van de vroegste credit vóór de vervalgrens.
+                earliest = db.query(func.min(models.LoyaltyTransaction.txn_date)).filter(
+                    models.LoyaltyTransaction.member_id == member.id,
+                    models.LoyaltyTransaction.txn_type.in_(list(_CREDIT_TYPES)),
+                    models.LoyaltyTransaction.txn_date < cutoff_full,
+                ).scalar()
             expires_on = (
                 earliest + timedelta(days=policy.expiry_months * 30)
             ) if earliest else None

@@ -207,6 +207,7 @@ const navGroepen = [
   {
     label: "Configuratie",
     items: [
+      { href: "/producthierarchie",       label: "Producthiërarchie",    icon: FolderTree },
       { href: "/categorieen",             label: "Categorieregels",      icon: Layers },
       { href: "/categorieen/hierarchie",  label: "Categorieënhiërarchie", icon: FolderTree },
       { href: "/modelgezondheid",         label: "Modelgezondheid",      icon: Activity },

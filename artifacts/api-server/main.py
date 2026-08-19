@@ -33,6 +33,7 @@ from routes import (
     basket, promotion_intelligence, forecast, opportunities, model_registry, decisions,
     pim,
     command_center, governance, engine_jobs,
+    product_hierarchy,
 )
 
 # Optional modules (DRS import, PriceShape feed import) are imported
@@ -477,6 +478,7 @@ app.include_router(economic.router)
 app.include_router(reporting.router)
 app.include_router(bcg_transitions.router)
 app.include_router(category_hierarchy.router)
+app.include_router(product_hierarchy.router)
 app.include_router(break_even.router)
 app.include_router(ecosystem.router)
 app.include_router(explainability.router)
