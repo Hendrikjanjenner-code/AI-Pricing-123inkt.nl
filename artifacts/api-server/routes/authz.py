@@ -257,6 +257,17 @@ def update_user_authz(
         for s in req.scopes:
             if s.scope_type not in ("shop", "country", "legal_entity"):
                 raise HTTPException(status_code=400, detail=f"Onbekend scope-type '{s.scope_type}'")
+            if s.scope_type == "shop":
+                # user_allowed_shop_ids interpreteert shop-scopes uitsluitend als
+                # numerieke DimShop.id; een code/typefout zou de gebruiker anders
+                # stilletjes van alle shop-data afsnijden.
+                if not str(s.scope_value).isdigit() or not db.query(
+                    models.DimShop.id
+                ).filter(models.DimShop.id == int(s.scope_value)).first():
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Onbekende winkel-scope '{s.scope_value}': gebruik de numerieke winkel-id.",
+                    )
         db.query(models.UserScope).filter(
             models.UserScope.user_id == user.id
         ).delete(synchronize_session=False)

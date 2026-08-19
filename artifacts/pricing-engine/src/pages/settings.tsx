@@ -11,7 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Trash2, UserPlus, AlertTriangle, Database, History, Download, RefreshCw, WifiOff } from "lucide-react";
+import { Trash2, UserPlus, AlertTriangle, Database, History, Download, RefreshCw, WifiOff, KeyRound } from "lucide-react";
+import GebruikerToegangDialoog from "@/components/gebruiker-toegang-dialoog";
 import { useAuth } from "@/lib/auth";
 import { getAuthToken } from "@/lib/auth";
 import { useAiProviderStatus, AI_PROVIDER_QUERY_KEY, type AiProviderInfo } from "@/hooks/use-ai-provider-status";
@@ -37,6 +38,9 @@ export default function Instellingen() {
 
   const [open, setOpen] = useState(false);
   const [formulier, setFormulier] = useState({ username: '', email: '', password: '', role: 'viewer', full_name: '' });
+
+  // Toegang-dialoog (Task #227): per gebruiker afdelingen/permissies/scopes beheren.
+  const [toegangUser, setToegangUser] = useState<{ id: number; label: string } | null>(null);
 
   const [clearOpen, setClearOpen] = useState(false);
   const [clearBezig, setClearBezig] = useState(false);
@@ -332,6 +336,13 @@ export default function Instellingen() {
                       : <Badge variant="outline">Inactief</Badge>}
                   </TableCell>
                   <TableCell className="text-right">
+                    {isAdmin && (
+                      <Button variant="ghost" size="sm" className="h-8 gap-1 text-xs"
+                        onClick={() => setToegangUser({ id: user.id, label: user.full_name || user.username })}
+                        data-testid={`button-toegang-${user.id}`}>
+                        <KeyRound className="h-4 w-4" /> Toegang
+                      </Button>
+                    )}
                     <Button variant="ghost" size="icon" className="text-destructive hover:bg-destructive/10 h-8 w-8"
                       onClick={() => handleVerwijderen(user.id)} disabled={verwijderenMut.isPending}>
                       <Trash2 className="h-4 w-4" />
@@ -343,6 +354,15 @@ export default function Instellingen() {
           </Table>
         </CardContent>
       </Card>
+
+      {toegangUser && (
+        <GebruikerToegangDialoog
+          userId={toegangUser.id}
+          userLabel={toegangUser.label}
+          open={!!toegangUser}
+          onOpenChange={(v) => { if (!v) setToegangUser(null); }}
+        />
+      )}
 
       {user?.role === "admin" && (
         <Card id="ai-provider" className="scroll-mt-4">

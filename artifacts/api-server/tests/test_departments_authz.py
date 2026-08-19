@@ -275,3 +275,38 @@ def test_user_scopes_roundtrip(client, admin_headers, make_user):
         assert allowed is not None and 1 in allowed
     finally:
         db.close()
+
+
+def test_shop_scope_rejects_non_numeric_value(client, admin_headers, make_user):
+    """Task #227-regressie: shop-scopes zijn numerieke DimShop-ids.
+
+    Een shop_code (of typefout) als scope_value zou door user_allowed_shop_ids
+    genegeerd worden en de gebruiker stilletjes van álle shop-data afsnijden;
+    de API moet zo'n waarde daarom expliciet weigeren.
+    """
+    uid, _ = make_user("viewer", departments=["management"])
+    # Niet-numerieke waarde (zoals een shop_code) → 400, scopes onaangetast.
+    r = client.put(f"/api/authz/users/{uid}", headers=admin_headers, json={
+        "scopes": [{"scope_type": "shop", "scope_value": "main"}],
+    })
+    assert r.status_code == 400, r.text
+    assert "winkel" in r.json()["detail"].lower()
+    # Numeriek maar onbestaand id → eveneens 400.
+    r = client.put(f"/api/authz/users/{uid}", headers=admin_headers, json={
+        "scopes": [{"scope_type": "shop", "scope_value": "999999999"}],
+    })
+    assert r.status_code == 400, r.text
+    body = client.get(f"/api/authz/users/{uid}", headers=admin_headers).json()
+    assert body["scopes"] == []
+    # Geldig bestaand id blijft gewoon werken en geeft toegang tot die winkel.
+    r = client.put(f"/api/authz/users/{uid}", headers=admin_headers, json={
+        "scopes": [{"scope_type": "shop", "scope_value": "1"}],
+    })
+    assert r.status_code == 200, r.text
+    db = SessionLocal()
+    try:
+        user = db.query(models.User).filter(models.User.id == uid).first()
+        allowed = authz_mod.user_allowed_shop_ids(db, user)
+        assert allowed == {1}
+    finally:
+        db.close()
