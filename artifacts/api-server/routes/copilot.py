@@ -402,6 +402,7 @@ def _memory_out(m: models.AiUserMemory) -> dict:
         "value": m.value,
         "scope": "organisatie" if m.user_id is None else "persoonlijk",
         "source_conversation_id": m.source_conversation_id,
+        "source": m.source or "extracted",
         "created_at": m.created_at.isoformat() if m.created_at else None,
         "updated_at": m.updated_at.isoformat() if m.updated_at else None,
     }
@@ -415,6 +416,9 @@ def _memory_item_for_edit(
     admin/pricing_manager. Items van andere gebruikers → 404 (geen lek)."""
     row = db.query(models.AiUserMemory).filter(
         models.AiUserMemory.id == memory_id).first()
+    if row is not None and (row.status or "active") == "deleted":
+        # Tombstones zijn onzichtbaar voor de gebruiker (Task #135).
+        row = None
     if not row or (row.user_id is not None and row.user_id != user.id):
         raise HTTPException(status_code=404, detail="Geheugen-item niet gevonden")
     if row.user_id is None and user.role not in MEMORY_MANAGER_ROLES:
@@ -435,7 +439,8 @@ def list_memory(
     `editable` geeft aan of de huidige gebruiker het item mag wijzigen."""
     rows = (db.query(models.AiUserMemory)
             .filter((models.AiUserMemory.user_id == current_user.id) |
-                    (models.AiUserMemory.user_id.is_(None)))
+                    (models.AiUserMemory.user_id.is_(None)),
+                    models.AiUserMemory.status == "active")
             .order_by(desc(models.AiUserMemory.updated_at)).all())
     can_manage_org = current_user.role in MEMORY_MANAGER_ROLES
     out = []
@@ -459,6 +464,9 @@ def update_memory(
     if not value:
         raise HTTPException(status_code=400, detail="value is verplicht")
     row.value = value
+    # Handmatig gecorrigeerde waarden winnen voortaan van automatische
+    # extractie (Task #135).
+    row.source = "manual"
     row.updated_at = models.datetime.utcnow()
     db.commit()
     db.refresh(row)
@@ -473,7 +481,11 @@ def delete_memory(
 ):
     """Verwijder een geheugen-item (eigen items; organisatie-items admin/pm)."""
     row = _memory_item_for_edit(db, current_user, memory_id)
-    db.delete(row)
+    # Soft-delete (tombstone): de rij blijft bestaan met status="deleted"
+    # zodat automatische extractie dezelfde key niet stilletjes opnieuw
+    # aanmaakt (Task #135). Onzichtbaar in lijst en context.
+    row.status = "deleted"
+    row.updated_at = models.datetime.utcnow()
     db.commit()
     return {"message": "Geheugen-item verwijderd"}
 

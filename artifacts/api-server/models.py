@@ -2746,6 +2746,14 @@ class AiUserMemory(Base):
     key = Column(String(200), nullable=False)      # bv. favoriete_categorie
     value = Column(Text, nullable=False)           # bv. "Dranken"
     source_conversation_id = Column(Integer, index=True)
+    # Herkomst van de huidige waarde: "extracted" (automatisch) of "manual"
+    # (door de gebruiker gecorrigeerd). Handmatige waarden mogen NIET door
+    # automatische extractie worden overschreven (Task #135).
+    source = Column(String(20), nullable=False, default="extracted")
+    # Levenscyclus: "active" of "deleted" (tombstone). Verwijderde items
+    # blijven bestaan als tombstone zodat extractie dezelfde key niet
+    # stilletjes opnieuw aanmaakt (Task #135).
+    status = Column(String(20), nullable=False, default="active", index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

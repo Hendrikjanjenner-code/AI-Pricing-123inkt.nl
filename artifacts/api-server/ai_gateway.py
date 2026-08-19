@@ -1388,6 +1388,13 @@ def maybe_extract_memory(db: Session, user: models.User,
                        .filter(models.AiUserMemory.user_id == user.id,
                                models.AiUserMemory.key == key).first())
                 if row:
+                    # Tombstone: door de gebruiker verwijderde keys mogen
+                    # nooit stilletjes terugkeren via extractie (Task #135).
+                    if (row.status or "active") == "deleted":
+                        continue
+                    # Handmatig gecorrigeerde waarden winnen van extractie.
+                    if (row.source or "extracted") == "manual":
+                        continue
                     row.value = value
                     row.source_conversation_id = conversation_id
                     row.updated_at = datetime.utcnow()
@@ -1418,7 +1425,8 @@ def get_memory_block(db: Session, user: models.User) -> Optional[str]:
     try:
         rows = (db.query(models.AiUserMemory)
                 .filter((models.AiUserMemory.user_id == user.id) |
-                        (models.AiUserMemory.user_id.is_(None)))
+                        (models.AiUserMemory.user_id.is_(None)),
+                        models.AiUserMemory.status == "active")
                 .order_by(models.AiUserMemory.updated_at.desc())
                 .limit(MAX_MEMORY_ITEMS).all())
     except Exception:

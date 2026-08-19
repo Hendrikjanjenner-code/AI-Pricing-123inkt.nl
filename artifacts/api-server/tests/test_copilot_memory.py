@@ -140,8 +140,16 @@ def test_user_can_edit_and_delete_own_item(client, ctx, db):
 
         r = client.delete(f"/api/copilot/memory/{row.id}", headers=ctx["viewer"])
         assert r.status_code == 200
-        assert db.query(models.AiUserMemory).filter(
-            models.AiUserMemory.id == row.id).first() is None
+        db.expire_all()
+        # Soft-delete: tombstone blijft in de DB, item verdwijnt uit de lijst
+        tomb = db.query(models.AiUserMemory).filter(
+            models.AiUserMemory.id == row.id).first()
+        assert tomb is not None and tomb.status == "deleted"
+        r = client.get("/api/copilot/memory", headers=ctx["viewer"])
+        assert row.id not in {i["id"] for i in r.json()}
+        # Een tombstone is voor de gebruiker "niet gevonden"
+        assert client.delete(f"/api/copilot/memory/{row.id}",
+                             headers=ctx["viewer"]).status_code == 404
     finally:
         _cleanup(db, row.id)
 
@@ -180,8 +188,13 @@ def test_org_items_only_managed_by_admin_or_pm(client, ctx, db):
         assert client.delete(f"/api/copilot/memory/{org_id}",
                              headers=ctx["admin"]).status_code == 200
         db.expire_all()
-        assert db.query(models.AiUserMemory).filter(
-            models.AiUserMemory.id == org_id).first() is None
+        # Soft-delete: rij blijft bestaan als tombstone (status="deleted"),
+        # maar verdwijnt uit de lijst.
+        tomb = db.query(models.AiUserMemory).filter(
+            models.AiUserMemory.id == org_id).first()
+        assert tomb is not None and tomb.status == "deleted"
+        r = client.get("/api/copilot/memory", headers=ctx["admin"])
+        assert org_id not in {i["id"] for i in r.json()}
     finally:
         _cleanup(db, org_id)
 
@@ -189,3 +202,122 @@ def test_org_items_only_managed_by_admin_or_pm(client, ctx, db):
 def test_unknown_id_is_404(client, ctx):
     assert client.delete("/api/copilot/memory/99999999",
                          headers=ctx["admin"]).status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Task #135: verwijderde/gecorrigeerde voorkeuren mogen niet stilletjes
+# terugkeren of overschreven worden door automatische extractie.
+# ---------------------------------------------------------------------------
+import ai_gateway
+
+
+class _FakeResp:
+    def __init__(self, content):
+        self.usage = None
+        msg = type("M", (), {"content": content})()
+        self.choices = [type("C", (), {"message": msg})()]
+
+
+class _FakeClient:
+    def __init__(self, content):
+        completions = type("Comp", (), {})()
+        completions.create = lambda **kw: _FakeResp(content)
+        self.chat = type("Chat", (), {"completions": completions})()
+
+
+def _run_extraction(db, monkeypatch, user_id, extracted_items):
+    """Simuleer maybe_extract_memory met een gefakete LLM-respons."""
+    import json as _json
+    from datetime import date
+
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    conv = models.AiConversation(user_id=user_id, title="test")
+    db.add(conv)
+    db.commit()
+    db.refresh(conv)
+    msg_ids = []
+    for i in range(ai_gateway.MEMORY_EXTRACT_EVERY):
+        m = models.AiMessage(conversation_id=conv.id, role="user",
+                             content=f"vraag {i}")
+        db.add(m)
+        db.commit()
+        msg_ids.append(m.id)
+
+    monkeypatch.setattr(ai_gateway, "_try_reserve_auxiliary_budget",
+                        lambda *a, **k: date.today())
+    monkeypatch.setattr(ai_gateway, "_log_call", lambda *a, **k: None)
+    monkeypatch.setattr(ai_gateway, "_make_client",
+                        lambda: (_FakeClient(_json.dumps(extracted_items)), "test"))
+    try:
+        ai_gateway.maybe_extract_memory(db, user, conv.id)
+    finally:
+        db.query(models.AiMessage).filter(
+            models.AiMessage.id.in_(msg_ids)).delete(synchronize_session=False)
+        db.query(models.AiConversation).filter(
+            models.AiConversation.id == conv.id).delete(synchronize_session=False)
+        db.commit()
+
+
+def test_deleted_memory_does_not_return_after_extraction(client, ctx, db, monkeypatch):
+    viewer_id = ctx["_user_ids"][1]
+    key = f"test_tomb_{uuid.uuid4().hex[:8]}"
+    row = _add_memory(db, viewer_id, key=key, value="Dranken")
+    try:
+        # Gebruiker verwijdert het item
+        assert client.delete(f"/api/copilot/memory/{row.id}",
+                             headers=ctx["viewer"]).status_code == 200
+        # Extractie probeert dezelfde key opnieuw op te slaan
+        _run_extraction(db, monkeypatch, viewer_id,
+                        [{"key": key, "value": "Dranken"}])
+        db.expire_all()
+        rows = db.query(models.AiUserMemory).filter(
+            models.AiUserMemory.user_id == viewer_id,
+            models.AiUserMemory.key == key).all()
+        assert len(rows) == 1
+        assert rows[0].status == "deleted"
+        assert rows[0].value == "Dranken"
+        # En dus onzichtbaar in lijst en context
+        r = client.get("/api/copilot/memory", headers=ctx["viewer"])
+        assert key not in {i["key"] for i in r.json()}
+        block = ai_gateway.get_memory_block(
+            db, db.query(models.User).get(viewer_id))
+        assert block is None or key not in block
+    finally:
+        _cleanup(db, row.id)
+
+
+def test_manual_correction_wins_over_extraction(client, ctx, db, monkeypatch):
+    viewer_id = ctx["_user_ids"][1]
+    key = f"test_manual_{uuid.uuid4().hex[:8]}"
+    row = _add_memory(db, viewer_id, key=key, value="Dranken")
+    try:
+        # Gebruiker corrigeert handmatig
+        r = client.put(f"/api/copilot/memory/{row.id}", headers=ctx["viewer"],
+                       json={"value": "Papier"})
+        assert r.status_code == 200 and r.json()["source"] == "manual"
+        # Extractie probeert de oude waarde terug te zetten
+        _run_extraction(db, monkeypatch, viewer_id,
+                        [{"key": key, "value": "Dranken"}])
+        db.expire_all()
+        fresh = db.query(models.AiUserMemory).filter(
+            models.AiUserMemory.id == row.id).first()
+        assert fresh.value == "Papier"
+        assert fresh.source == "manual"
+    finally:
+        _cleanup(db, row.id)
+
+
+def test_extraction_still_updates_extracted_rows(client, ctx, db, monkeypatch):
+    viewer_id = ctx["_user_ids"][1]
+    key = f"test_upd_{uuid.uuid4().hex[:8]}"
+    row = _add_memory(db, viewer_id, key=key, value="Dranken")
+    try:
+        _run_extraction(db, monkeypatch, viewer_id,
+                        [{"key": key, "value": "Koffie"}])
+        db.expire_all()
+        fresh = db.query(models.AiUserMemory).filter(
+            models.AiUserMemory.id == row.id).first()
+        assert fresh.value == "Koffie"
+        assert fresh.status == "active"
+    finally:
+        _cleanup(db, row.id)
