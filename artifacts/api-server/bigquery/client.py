@@ -91,6 +91,25 @@ def bq_available() -> bool:
     return get_bq_client() is not None
 
 
+def bq_configured() -> bool:
+    """
+    True als BigQuery bewust is geconfigureerd (credentials/omgevingsvariabelen
+    aanwezig), los van of de client-initialisatie slaagt. Hiermee kan een
+    geplande sync 'niet geconfigureerd' (overslaan) onderscheiden van
+    'geconfigureerd maar kapot' (fout melden).
+    """
+    return bool(
+        os.environ.get("BQ_SERVICE_ACCOUNT_JSON", "").strip()
+        or os.environ.get("BQ_PROJECT_ID", "").strip()
+    )
+
+
+def bq_last_error() -> str:
+    """Laatste client-initialisatiefout ('' als er geen fout is)."""
+    _, err = _get_singleton()
+    return err
+
+
 def bq_status() -> dict:
     """Status-dict voor /api/bigquery/status."""
     client, err = _get_singleton()

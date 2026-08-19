@@ -65,6 +65,11 @@ PK_COLUMN: dict[str, str | list[str]] = {
 # Maximale batch-grootte per tabel (rijen per sync-run)
 BATCH_SIZE = 50_000
 
+# Normalisatiewaarde voor NULL-watermerken: moet exact overeenkomen met het
+# COALESCE(..., TIMESTAMP 'epoch') in _fetch_pg_rows, anders pagineert een
+# pagina vol NULL-watermerken eindeloos opnieuw.
+EPOCH = datetime(1970, 1, 1)
+
 
 def _get_last_watermark(db: Session, pg_table: str) -> Optional[datetime]:
     """
@@ -151,19 +156,20 @@ def _fetch_pg_rows(
     params: dict = {"lim": BATCH_SIZE}
 
     if wm_col:
-        # NULL-watermerken (bv. handmatig ingevoegde rijen zonder created_at)
-        # zouden met een kale (wm, pk) > (:lk_wm, :lk_pk)-vergelijking stil
-        # worden overgeslagen (NULL-vergelijking = unknown). COALESCE ze naar
-        # epoch zodat ze deterministisch vooraan sorteren en meegepagineerd
-        # worden.
+        # NULL-watermerken (rijen zonder created_at/updated_at) mogen nooit
+        # buiten de keyset-vergelijking vallen: COALESCE naar epoch zodat ze
+        # deterministisch vooraan sorteren én meegenomen worden.
         wm_expr = f"COALESCE(CAST({wm_col} AS TIMESTAMP), TIMESTAMP 'epoch')"
         if since is not None:
-            conds.append(f"CAST({wm_col} AS TIMESTAMP) >= :since")
+            # NULL-watermerken kunnen nooit "nieuwer dan since" zijn; neem ze
+            # elke run expliciet mee — de MERGE in BigQuery is idempotent, dus
+            # herverwerken is veilig en ze raken nooit permanent uitgesloten.
+            conds.append(f"({wm_expr} >= :since OR {wm_col} IS NULL)")
             params["since"] = since
         if last_key is not None:
             conds.append(f"({wm_expr}, {pk_col}) > (:lk_wm, :lk_pk)")
             lk_wm, lk_pk = last_key
-            params["lk_wm"] = lk_wm if lk_wm is not None else datetime(1970, 1, 1)
+            params["lk_wm"] = lk_wm if lk_wm is not None else EPOCH
             params["lk_pk"] = lk_pk
         order = f"{wm_expr}, {pk_col}"
     else:
@@ -415,7 +421,10 @@ def sync_table(pg_table: str, full_refresh: bool = False) -> dict:
                     max_watermark = wm_val if (max_watermark is None or wm_val > max_watermark) else max_watermark
                     last_key = (wm_val, last_row.get(tie_col))
                 else:
-                    last_key = (datetime.min, last_row.get(tie_col))
+                    # Zelfde normalisatie als het COALESCE-naar-epoch in
+                    # _fetch_pg_rows, anders pagineert een pagina vol
+                    # NULL-watermerken eindeloos opnieuw.
+                    last_key = (EPOCH, last_row.get(tie_col))
             else:
                 last_key = (None, last_row.get(tie_col))
 
@@ -466,7 +475,62 @@ def sync_all_tables(full_refresh: bool = False) -> list[dict]:
         results.append(result)
     return results
 
+def run_nightly_sync() -> int:
+    """
+    Draai de geplande (nachtelijke) incrementele BigQuery-sync.
 
+    Gebruikt door zowel de in-process feed-sync scheduler als het standalone
+    Scheduled-Deployment-script (scheduled_sync.py). Faalveilig:
+      - Niet-geconfigureerde BigQuery → overslaan met exit-code 0.
+      - Fouten per tabel worden door sync_table als ImportJob (source='bigquery')
+        geregistreerd en zijn zichtbaar via /api/bigquery/sync/history.
+      - Geeft 0 terug bij succes/overslaan, 1 bij één of meer fouten.
+    Deze functie gooit nooit.
+    """
+    try:
+        from bigquery.client import bq_available, bq_configured, bq_last_error
+        if not bq_available():
+            if not bq_configured():
+                logger.info(
+                    "BigQuery niet geconfigureerd — geplande BigQuery-sync overgeslagen."
+                )
+                return 0
+            # Geconfigureerd maar kapot (ongeldige credentials, ontbrekend
+            # pakket, ...): dit is een fout, geen overslag. Registreer een
+            # fout-ImportJob zodat het zichtbaar is in de sync-history, en
+            # geef exit 1 zodat de geplande run als mislukt wordt gemarkeerd.
+            err = bq_last_error() or "BigQuery-client kon niet worden geïnitialiseerd."
+            logger.error(
+                "BigQuery is geconfigureerd maar niet beschikbaar: %s", err
+            )
+            db = BackgroundSessionLocal()
+            try:
+                _save_import_job(db, "verbinding", 0, "fout", err)
+            finally:
+                db.close()
+            return 1
+
+        logger.info("Geplande BigQuery-sync (incrementeel) gestart ...")
+        results = sync_all_tables(full_refresh=False)
+        ok = [r for r in results if r["status"] == "ok"]
+        skipped = [r for r in results if r["status"] == "skipped"]
+        failed = [r for r in results if r["status"] == "error"]
+        total_rows = sum(r["rows_exported"] for r in results)
+        logger.info(
+            "Geplande BigQuery-sync klaar: %d tabellen ok, %d overgeslagen, "
+            "%d fout, %d rijen geëxporteerd.",
+            len(ok), len(skipped), len(failed), total_rows,
+        )
+        for r in failed:
+            logger.error(
+                "Geplande BigQuery-sync fout voor %s: %s", r["pg_table"], r["error"]
+            )
+        return 1 if failed else 0
+    except Exception:
+        logger.exception(
+            "Geplande BigQuery-sync mislukt — PostgreSQL-data blijft intact."
+        )
+        return 1
 def get_sync_history(db: Session, pg_table: Optional[str] = None, limit: int = 50) -> list[dict]:
     """Geef de meest recente sync-batches terug voor de status-UI."""
     q = db.query(ImportJob).filter(ImportJob.source == "bigquery")

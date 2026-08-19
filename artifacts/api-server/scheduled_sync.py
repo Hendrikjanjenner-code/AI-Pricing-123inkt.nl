@@ -43,7 +43,8 @@ logger = logging.getLogger("scheduled_sync")
 _SYSTEM_USER = SimpleNamespace(username="system-scheduled")
 
 
-def main() -> int:
+def _run_priceshape_refresh() -> int:
+    """Stap 1-4: PriceShape-feed + modelrun. Geeft exit-code terug (0/1)."""
     from sqlalchemy import text
     from database import SessionLocal, engine
     import models
@@ -96,6 +97,26 @@ def main() -> int:
         return 1
     finally:
         db.close()
+
+
+def main() -> int:
+    """
+    Nachtelijke run: (1) PriceShape-refresh + modelrun, (2) BigQuery-sync.
+
+    De BigQuery-stap draait ALTIJD — ook als PriceShape niet geconfigureerd is,
+    overgeslagen wordt of faalt — omdat de BigQuery-export een onafhankelijke
+    nachtelijke vereiste is. Fouten per tabel worden als ImportJob
+    (source='bigquery') geregistreerd (zichtbaar via /api/bigquery/sync/history).
+    De exit-code is 1 zodra één van beide stappen faalt, zodat de Scheduled
+    Deployment als mislukt wordt gemarkeerd.
+    """
+    feed_rc = _run_priceshape_refresh()
+
+    logger.info("Stap 5: BigQuery-sync (incrementeel) ...")
+    from bigquery.sync import run_nightly_sync
+    bq_rc = run_nightly_sync()
+
+    return 1 if (feed_rc != 0 or bq_rc != 0) else 0
 
 
 if __name__ == "__main__":

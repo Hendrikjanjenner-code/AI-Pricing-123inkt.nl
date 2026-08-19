@@ -262,9 +262,7 @@ def test_expiring_soon_members_window(db, policy):
     # Te nieuw: pas over maanden aan de beurt.
     m_fresh = _make_member(s, created)
     li.apply_ledger_entry(s, m_fresh, today - timedelta(days=100), "earn", 600)
-    # Al over de vervalgrens maar nog niet formeel verlopen: telt tegenwoordig
-    # ook als 'binnenkort verlopend' — die punten vervallen bij de
-    # eerstvolgende expiry-run (zie liability-wijziging).
+    # Al over de vervalgrens: hoort in de expiry-run, niet in de waarschuwing.
     m_late = _make_member(s, created)
     li.apply_ledger_entry(s, m_late, today - timedelta(days=EXPIRY_DAYS + 40), "earn", 600)
     s.commit()
@@ -279,9 +277,12 @@ def test_expiring_soon_members_window(db, policy):
     assert row["points_expiring_eur"] == round(600 * li.POINT_VALUE_EUR, 2)
 
     assert m_fresh.id not in rows, "te nieuwe punten horen niet in het waarschuwingsvenster"
+    # Sinds de liability-wijziging tellen punten die al over de vervalgrens
+    # zijn (maar nog niet door de expiry-run verwerkt) óók als 'binnenkort
+    # verlopend': ze verschijnen in het venster tot de expiry-run ze afboekt.
     assert m_late.id in rows, (
-        "punten die al over de vervalgrens zijn maar nog niet formeel verlopen "
-        "horen wél in het waarschuwingsvenster (vervallen bij de volgende run)")
+        "al-over-de-grens punten horen (tot de expiry-run) in het "
+        "waarschuwingsvenster")
     assert rows[m_late.id]["points_expiring"] == 600
 
 

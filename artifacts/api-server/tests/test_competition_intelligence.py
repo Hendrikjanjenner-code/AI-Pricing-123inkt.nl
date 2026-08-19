@@ -1263,7 +1263,6 @@ def test_slow_full_run_publishes_engine_slow_run_signal(monkeypatch):
 ED_PFX = f"ED-{uuid.uuid4().hex[:8]}"
 
 
-
 @pytest.fixture(scope="module")
 def elast_degradation_seed(client):
     """Seed SkuElasticity-historie in een eigen test-shop:

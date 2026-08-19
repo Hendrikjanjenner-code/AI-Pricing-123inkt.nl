@@ -231,6 +231,18 @@ competitor data without manual intervention:
   available, so this is a manual UI choice). Alternative for staying on autoscale:
   run `scheduled_sync.py` as a separate **Scheduled Deployment** (same full
   refresh, cron-style). Both paths call the same `services/refresh.run_model_refresh`.
+  Recommended Scheduled Deployment settings (creating it is a manual Publishing-UI
+  step; the agent cannot provision deployments): schedule **nightly 03:30
+  Europe/Amsterdam** (cron `30 3 * * *`), command
+  `cd artifacts/api-server && python scheduled_sync.py`, with the database and
+  BigQuery secrets (`BQ_SERVICE_ACCOUNT_JSON` or `BQ_PROJECT_ID`) attached.
+- **Nightly BigQuery export**: both scheduled paths also run the incremental
+  BigQuery sync via `bigquery.sync.run_nightly_sync()` — the in-process scheduler
+  after every cycle, `scheduled_sync.py` as step 5 (independent of the PriceShape
+  result). Unconfigured BigQuery is skipped (exit 0); configured-but-broken
+  credentials log an error, write a failed ImportJob (`source='bigquery'`,
+  visible in `/api/bigquery/sync/history`) and exit 1 so the scheduled run is
+  marked failed.
 - **Scheduler**: `services/feed_sync_scheduler.py` — an asyncio background task
   started in `main.py` lifespan (mirrors `connector_health_monitor`). Runs the
   **full** PriceShape refresh every `FEED_SYNC_INTERVAL` seconds (default 21600 =

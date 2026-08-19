@@ -10,6 +10,7 @@ Tests voor taak Data Integration & Data Quality Center:
 """
 import os
 import sys
+import uuid
 from datetime import date, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -413,6 +414,142 @@ def test_bq_fetch_pg_rows_paginates_without_gaps_or_dupes(monkeypatch):
         assert len(seen) == len(set(seen)), "paginatie leverde duplicaten op"
         assert set(seen) == expected, "paginatie miste rijen"
     finally:
+        db.close()
+
+
+def test_bq_null_watermark_rows_paginate_and_terminate(monkeypatch):
+    """Meerdere pagina's vol NULL-watermerk-rijen: de keyset (EPOCH-normalisatie)
+    moet vooruit blijven lopen — geen herhaalde pagina's, geen oneindige lus —
+    en alle NULL-rijen exact één keer opleveren."""
+    from sqlalchemy import text as _text
+    from bigquery import sync as bq_sync
+    monkeypatch.setattr(bq_sync, "BATCH_SIZE", 2)
+    db = SessionLocal()
+    codes = [f"BQNULL-{i}-{uuid.uuid4().hex[:6]}" for i in range(5)]
+    ids: list[int] = []
+    try:
+        for c in codes:
+            r = db.execute(_text(
+                "INSERT INTO dim_shop (shop_code, name, active, created_at) "
+                "VALUES (:c, :c, true, NULL) RETURNING id"), {"c": c})
+            ids.append(r.scalar())
+        db.commit()
+
+        seen: list = []
+        last_key = None
+        for _ in range(50):  # harde bovengrens: detecteert een oneindige lus
+            rows = bq_sync._fetch_pg_rows(db, "dim_shop", since=None,
+                                          last_key=last_key)
+            if not rows:
+                break
+            seen.extend(r["id"] for r in rows)
+            last = rows[-1]
+            wm = last.get(bq_sync.WATERMARK_COLUMN["dim_shop"])
+            # Zelfde normalisatie als sync_table: NULL → EPOCH
+            last_key = (wm if wm is not None else bq_sync.EPOCH, last["id"])
+            if len(rows) < bq_sync.BATCH_SIZE:
+                break
+        else:
+            raise AssertionError("paginatie liep vast in een oneindige lus")
+
+        assert len(seen) == len(set(seen)), "NULL-watermerk-rijen dubbel opgeleverd"
+        assert set(ids).issubset(set(seen)), "NULL-watermerk-rijen ontbreken"
+    finally:
+        db.rollback()
+        if ids:
+            db.execute(_text("DELETE FROM dim_shop WHERE id = ANY(:ids)"),
+                       {"ids": ids})
+            db.commit()
+        db.close()
+
+
+def test_bq_sync_table_incremental_exports_null_prefix_and_newer_rows(monkeypatch):
+    """Volledige incrementele sync_table-run: een sub-batch NULL-watermerk-
+    prefix én een nieuwere getimestampte rij bereiken allebei de BigQuery-
+    upsert, en de run eindigt (geen vroegtijdige stop na de NULL-partitie)."""
+    from datetime import datetime as _dt, timedelta as _td
+    from sqlalchemy import text as _text
+    _install_fake_bigquery_module()
+    from bigquery import sync as bq_sync
+    import bigquery.client as bq_client_mod
+
+    monkeypatch.setattr(bq_sync, "BATCH_SIZE", 3)
+    fake_client = _FakeBQClient()
+    fake_client.project = "proj"
+    monkeypatch.setattr(bq_client_mod, "get_bq_client", lambda: fake_client)
+    # Recente prev-watermark → incrementele run met een echte `since`
+    monkeypatch.setattr(bq_sync, "_get_last_watermark",
+                        lambda db, t: _dt.utcnow() - _td(hours=1))
+    monkeypatch.setattr(bq_sync, "_save_import_job",
+                        lambda *a, **k: None)
+    monkeypatch.setattr(bq_sync, "_ensure_dataset", lambda *a, **k: None)
+    monkeypatch.setattr(bq_sync, "_ensure_table", lambda *a, **k: None)
+    exported: list = []
+
+    def fake_upsert(client, project, tdef, rows, pk_col):
+        exported.extend(r["id"] for r in rows)
+        return len(rows), None
+    monkeypatch.setattr(bq_sync, "_upsert_rows", fake_upsert)
+
+    db = SessionLocal()
+    ids: list[int] = []
+    fresh_id = None
+    try:
+        # 4 NULL-watermerk-rijen (sub-batch prefix: > BATCH_SIZE=3 samen met
+        # de verse rij, maar de laatste NULL-pagina is korter dan BATCH_SIZE)
+        for i in range(4):
+            ids.append(db.execute(_text(
+                "INSERT INTO dim_shop (shop_code, name, active, created_at) "
+                "VALUES (:c, :c, true, NULL) RETURNING id"),
+                {"c": f"BQMIX-{i}-{uuid.uuid4().hex[:6]}"}).scalar())
+        # 1 nieuwere, getimestampte rij (ná de prev-watermark)
+        fresh_id = db.execute(_text(
+            "INSERT INTO dim_shop (shop_code, name, active, created_at) "
+            "VALUES (:c, :c, true, :ts) RETURNING id"),
+            {"c": f"BQMIX-F-{uuid.uuid4().hex[:6]}",
+             "ts": _dt.utcnow()}).scalar()
+        ids.append(fresh_id)
+        db.commit()
+
+        result = bq_sync.sync_table("dim_shop")
+        assert result["status"] == "ok", result
+        assert set(ids).issubset(set(exported)), (
+            "zowel de NULL-watermerk-prefix als de nieuwere rij moeten de "
+            "BigQuery-upsert bereiken")
+    finally:
+        db.rollback()
+        if ids:
+            db.execute(_text("DELETE FROM dim_shop WHERE id = ANY(:ids)"),
+                       {"ids": ids})
+            db.commit()
+        db.close()
+
+
+def test_bq_null_watermark_rows_included_in_incremental_run():
+    """Een NULL-watermerk-rij die ná het vorige watermerk ontstaat mag niet
+    permanent buiten de incrementele sync vallen: met een recente `since`
+    horen NULL-rijen elke run mee (MERGE maakt dat idempotent)."""
+    from datetime import datetime as _dt, timedelta as _td
+    from sqlalchemy import text as _text
+    from bigquery import sync as bq_sync
+    db = SessionLocal()
+    code = f"BQNULL-INC-{uuid.uuid4().hex[:6]}"
+    new_id = None
+    try:
+        new_id = db.execute(_text(
+            "INSERT INTO dim_shop (shop_code, name, active, created_at) "
+            "VALUES (:c, :c, true, NULL) RETURNING id"), {"c": code}).scalar()
+        db.commit()
+        since = _dt.utcnow() - _td(hours=1)
+        rows = bq_sync._fetch_pg_rows(db, "dim_shop", since=since)
+        assert any(r["id"] == new_id for r in rows), (
+            "NULL-watermerk-rij moet ondanks een recente since meegaan")
+    finally:
+        db.rollback()
+        if new_id is not None:
+            db.execute(_text("DELETE FROM dim_shop WHERE id = :i"),
+                       {"i": new_id})
+            db.commit()
         db.close()
 
 

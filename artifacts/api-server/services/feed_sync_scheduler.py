@@ -206,6 +206,20 @@ async def _scheduler_loop() -> None:
         except Exception as exc:  # noqa: BLE001 — scheduler mag nooit crashen
             logger.exception("Feed-sync scheduler lus-fout (genegeerd): %s", exc)
 
+        # BigQuery-export draait elke cyclus mee, onafhankelijk van het
+        # feed-sync-resultaat: analisten moeten ook historische data zien als
+        # de feed een keer faalt. run_nightly_sync gooit nooit, slaat over als
+        # BigQuery niet is geconfigureerd en registreert fouten per tabel als
+        # ImportJob (source='bigquery', zichtbaar in /api/bigquery/sync/history).
+        try:
+            from bigquery.sync import run_nightly_sync
+            await asyncio.to_thread(run_nightly_sync)
+        except asyncio.CancelledError:
+            logger.info("Feed-sync scheduler gestopt.")
+            raise
+        except Exception as exc:  # noqa: BLE001 — scheduler mag nooit crashen
+            logger.exception("BigQuery-sync lus-fout (genegeerd): %s", exc)
+
         try:
             await asyncio.sleep(interval)
         except asyncio.CancelledError:

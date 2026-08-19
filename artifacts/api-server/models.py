@@ -2519,8 +2519,12 @@ class AiFeedback(Base):
     # Opgeslagen (STORED) generated column: Postgres onderhoudt de dutch-
     # tsvector zelf bij insert/update; de GIN-index hierboven maakt de
     # few-shot FTS-zoekopdracht een index-scan i.p.v. per-rij to_tsvector.
+    # with_variant(Text, "sqlite"): unit-tests die een losse sqlite-DB
+    # aanmaken (create_all) kunnen TSVECTOR/Computed niet compileren; de
+    # CreateColumn-compiler-override hieronder laat op sqlite ook de
+    # Computed-clausule (to_tsvector) weg.
     question_tsv = Column(
-        TSVECTOR,
+        TSVECTOR().with_variant(Text(), "sqlite"),
         Computed("to_tsvector('dutch', coalesce(question, ''))", persisted=True),
         info={"pg_only": True},  # niet aanmaken in SQLite-test-DB's
     )

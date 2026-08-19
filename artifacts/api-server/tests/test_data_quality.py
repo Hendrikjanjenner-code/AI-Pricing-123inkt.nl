@@ -756,7 +756,21 @@ class TestFeedUnreachable:
             pytest.skip("Dev-DB bevat een recentere echte sync-job; scenario "
                         "'oude mislukking zonder nieuwe pogingen' niet opbouwbaar")
         try:
+            # De detectie kijkt alleen naar de MEEST RECENTE PriceShape-job.
+            # Op een dev-DB met echte feed-data kan er een nieuwere (geslaagde)
+            # job bestaan dan onze 2 dagen oude kunstmatige fout; dan hoort er
+            # terecht géén FEED_UNREACHABLE-issue te zijn.
+            newest = (
+                db.query(models.ImportJob)
+                .filter(models.ImportJob.upload_type == "api_sync_priceshape")
+                .order_by(models.ImportJob.created_at.desc())
+                .first())
             detected = _detect_issues(db, db.query(models.DimProduct).count())
+            if newest is not None and newest.id != fail_id:
+                assert all(d["issue_code"] != "FEED_UNREACHABLE" for d in detected), (
+                    "FEED_UNREACHABLE mag niet vuren als de meest recente "
+                    "PriceShape-job niet de mislukte poging is")
+                return
             issue = next(d for d in detected if d["issue_code"] == "FEED_UNREACHABLE")
             if recent_success:
                 # Dev-DB bevat een echte recente sync; dan is warning correct.

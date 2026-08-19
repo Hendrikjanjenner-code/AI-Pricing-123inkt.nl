@@ -1,18 +1,11 @@
 ---
 name: Few-shot FTS retrieval
-description: Copilot few-shot retrieval uses Postgres dutch FTS with word-overlap fallback; dutch stemmer quirks.
+description: Copilot few-shot retrieval uses Postgres dutch FTS with word-overlap fallback; dutch stemmer quirks and fail-safe trap.
 ---
 Few-shot retrieval (ai_gateway) is primarily Postgres full-text: OR-tsquery over query words with to_tsvector('dutch', question), ranked by ts_rank; any exception rolls back and falls back to Jaccard word-overlap.
 
-**Why:** synonym/reformulated questions must still match; FTS may be unavailable (fail-safe requirement).
+**Why:** synonym/reformulated questions must still match; FTS may be unavailable (fail-safe requirement). But because the FTS route swallows every exception, a coding error (e.g. an undefined constant after a bad merge) silently disables FTS — the fallback masks it.
 
-The tsvector is a STORED generated column (question_tsv) with a GIN index; the auto-migrator skips Computed columns, so generated columns need manual DDL in migrate.py's _MANUAL_INDEXES. ts_rank normalizes on document length: a strong single-stem match on a short question scores only ~0.008, so the min-rank cutoff must stay very low (0.003) — the @@ filter already excludes zero-overlap questions.
+The tsvector is a STORED generated column (question_tsv) with a GIN index; the auto-migrator skips Computed columns, so generated columns need manual DDL in migrate.py's _MANUAL_INDEXES. ts_rank normalizes on document length: a strong single-stem match on a short question scores only ~0.008, so the min-rank cutoff must stay very low (≤0.003–0.005) — the @@ filter already excludes zero-overlap questions.
 
-**How to apply:** the dutch snowball stemmer is quirky — 'marge'→'marg' but 'marges'→'marges' (no match!). When writing retrieval tests, verify stems via `SELECT to_tsvector('dutch', ...)` first.
----
-name: Few-shot FTS retrieval
-description: Copilot few-shot retrieval via Postgres dutch FTS — thresholds en fail-safe valkuil
----
-De FTS-route in get_fewshot_examples vangt élke exception op en valt stil terug op woordoverlap; een NameError (bijv. ontbrekende constante door een slechte merge) schakelt FTS dus onopgemerkt uit.
-**Why:** validatie faalde doordat FTS_MIN_RANK nergens gedefinieerd was; de fallback maskeerde dat.
-**How to apply:** bij FTS-wijzigingen de retrieval-test draaien; ts_rank van een OR-tsquery met één matchend lexeem in een langere vraag is ~0.0076, dus drempel ≤0.005 houden.
+**How to apply:** the dutch snowball stemmer is quirky — 'marge'→'marg' but 'marges'→'marges' (no match!). When writing retrieval tests, verify stems via `SELECT to_tsvector('dutch', ...)` first, and run the retrieval tests after any FTS change to catch silently-disabled FTS.
