@@ -253,3 +253,60 @@ def test_fifo_warn_window_mode(db):
         s, m.id, _wallet(s, m.id),
         expiry_cutoff=cutoff_soon, warn_window_end=cutoff_full)
     assert pts == 30
+
+
+def test_fifo_warn_window_counts_overdue_points(db):
+    """
+    Regressie (taak 160): punten die de vervalgrens al gepasseerd zijn maar
+    nog niet formeel verlopen (expiry-run nog niet gedraaid) tellen mee als
+    'binnenkort verlopend' in de warn-window-modus.
+    """
+    s, ids = db
+    m = _mk_member(s, ids)
+    today = date.today()
+    cutoff_full = today - timedelta(days=360)
+    cutoff_soon = today - timedelta(days=330)
+
+    _earn(s, m, cutoff_full - timedelta(days=40), 100)  # al over de vervalgrens
+    _earn(s, m, cutoff_full + timedelta(days=10), 50)   # verloopt binnenkort
+    _earn(s, m, today, 25)                              # vers, telt niet mee
+
+    # Geen redeems: zowel de 100 overdue- als de 50 venster-punten tellen mee.
+    pts = li._fifo_expirable_points(
+        s, m.id, _wallet(s, m.id),
+        expiry_cutoff=cutoff_soon, warn_window_end=cutoff_full)
+    assert pts == 150
+
+    # Een deel van de overdue-punten is al geconsumeerd: de rest telt nog mee.
+    li.apply_ledger_entry(s, m, today, "redeem", -60, commit=True)
+    pts = li._fifo_expirable_points(
+        s, m.id, _wallet(s, m.id),
+        expiry_cutoff=cutoff_soon, warn_window_end=cutoff_full)
+    assert pts == 90  # 40 overdue + 50 venster
+
+    # Na een expiry-run zijn de overdue-punten formeel verlopen en tellen
+    # alleen de venster-punten nog mee (geen dubbeltelling).
+    li.apply_ledger_entry(s, m, today, "expire", -40, commit=True)
+    pts = li._fifo_expirable_points(
+        s, m.id, _wallet(s, m.id),
+        expiry_cutoff=cutoff_soon, warn_window_end=cutoff_full)
+    assert pts == 50
+
+
+def test_liability_summary_includes_overdue_points(db):
+    """points_expiring_30d/90d bevatten ook al-overdue-maar-niet-verlopen punten."""
+    s, ids = db
+    policy = li._get_expiry_policy(s)
+    if not policy.enabled:
+        pytest.skip("verloopbeleid staat uit in deze database")
+
+    before = li.liability_summary(s)
+
+    m = _mk_member(s, ids)
+    # Punten die de vervalgrens al 20 dagen gepasseerd zijn (expiry-run nog niet gedraaid).
+    overdue = date.today() - timedelta(days=policy.expiry_months * 30 + 20)
+    _earn(s, m, overdue, 200)
+
+    after = li.liability_summary(s)
+    assert after["points_expiring_30d"] - before["points_expiring_30d"] == 200
+    assert after["points_expiring_90d"] - before["points_expiring_90d"] == 200

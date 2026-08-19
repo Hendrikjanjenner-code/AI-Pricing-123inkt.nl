@@ -510,7 +510,10 @@ def _fifo_expirable_points(
         # Van de window-punten: wat is al geconsumeerd na pre-window?
         redeems_on_window = max(0, (total_redeemed + total_expired) - redeems_on_pre_window)
         still_live_window = max(0, earned_in_window - redeems_on_window)
-        return min(int(wallet.balance_points or 0), still_live_window + (0 if remaining_pre_window else 0))
+        # Punten die de vervalgrens al gepasseerd zijn maar nog niet formeel
+        # verlopen (bijv. omdat de expiry-run nog niet gedraaid heeft) tellen
+        # mee als "binnenkort verlopend": ze vervallen bij de eerstvolgende run.
+        return min(int(wallet.balance_points or 0), still_live_window + remaining_pre_window)
 
     # Normaal verlooppad: alle punten vóór cutoff
     total_redeemed = int(wallet.lifetime_redeemed or 0)
