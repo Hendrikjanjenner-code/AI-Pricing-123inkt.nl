@@ -47,7 +47,6 @@ interface ConnectorSummary {
   label: string;
   configured: boolean;
   source: "db" | "env" | "default" | null;
-  default_feed_url?: string | null;
   fields: FieldDef[];
   fields_filled: string[];
   masked_values: Record<string, string>;
@@ -55,6 +54,9 @@ interface ConnectorSummary {
   last_test_message: string | null;
   last_tested_at: string | null;
   last_synced_at: string | null;
+  last_sync_status: "ok" | "error" | null;
+  last_sync_message: string | null;
+  last_sync_attempt_at: string | null;
   configured_by: string | null;
   live_status?: ConnStatus;
   live_message?: string;
@@ -527,6 +529,12 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
             <div>
               <span className="font-medium">Laatste sync:</span>{" "}
               {formatDate(connector.last_synced_at)}
+              {connector.last_sync_status === "ok" && (
+                <span className="ml-1.5 text-emerald-600 font-medium">✓ geslaagd</span>
+              )}
+              {connector.last_sync_status === "error" && (
+                <span className="ml-1.5 text-red-600 font-medium">✗ mislukt</span>
+              )}
             </div>
             {connector.configured_by && (
               <div>
@@ -569,11 +577,35 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
           </div>
         )}
 
-        {connector.name === "priceshape" && connector.source === "default" && connector.default_feed_url && (
+        {connector.last_sync_status === "error" && (
+          <div className="flex items-start gap-2 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-800">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p>
+                <span className="font-medium">
+                  Laatste synchronisatie mislukt
+                  {connector.last_sync_attempt_at
+                    ? ` (${formatDate(connector.last_sync_attempt_at)})`
+                    : ""}.
+                </span>{" "}
+                {connector.last_sync_message || "Geen foutdetails beschikbaar."}
+              </p>
+              {connector.name === "priceshape" && connector.source === "default" && (
+                <p>
+                  De ingebouwde standaard-feed lijkt niet (meer) bereikbaar. Controleer of de
+                  PriceShape-exportfeed nog bestaat en het token nog geldig is, of stel via
+                  &ldquo;Wijzigen / Vervangen&rdquo; een eigen feed-URL in. De laatst-goede data
+                  blijft intact; de app blijft gewoon werken.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {connector.name === "priceshape" && connector.source === "default" && (
           <div className="rounded-md bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-800">
             <span className="font-medium">Standaard-feed actief.</span>{" "}
-            De connector gebruikt automatisch de vaste feed-URL{" "}
-            <span className="font-mono break-all">{connector.default_feed_url}</span>.
+            De connector gebruikt automatisch de ingebouwde PriceShape-exportfeed.
             Je hoeft niets in te vullen; een eigen URL opslaan overschrijft de standaard,
             ontkoppelen valt hierop terug.
           </div>

@@ -97,7 +97,167 @@ def test_summary_reports_default_source(monkeypatch, db):
     summary = rc._connector_summary(db, "priceshape")
     assert summary["configured"] is True
     assert summary["source"] == "default"
-    assert summary["default_feed_url"] == pc.DEFAULT_FEED_URL
+
+
+def test_summary_never_leaks_default_feed_url(monkeypatch, db):
+    """De standaard-feed-URL bevat een opaque export-token en mag nooit in de
+    connector-samenvatting (of foutmeldingen daarin) richting de UI lekken."""
+    import json
+    from urllib.parse import urlparse
+    from routes import connectors as rc
+    _clear_env(monkeypatch)
+    _del_db_config(db)
+    token = urlparse(pc.DEFAULT_FEED_URL).path.rstrip("/").split("/")[-1]
+    summary = rc._connector_summary(db, "priceshape")
+    blob = json.dumps(summary)
+    assert pc.DEFAULT_FEED_URL not in blob
+    assert token not in blob, "opaque export-token lekt via de connector-samenvatting"
+
+
+def test_summary_exposes_failed_last_sync(monkeypatch, db):
+    """Een mislukte (geplande) sync is als last_sync_status='error' + reden
+    zichtbaar in de connector-samenvatting, zodat de kaart kan waarschuwen
+    dat de standaard-feed faalt."""
+    _clear_env(monkeypatch)
+    _del_db_config(db)
+    from datetime import datetime, timezone
+    from engine.import_engine import new_batch_id
+    from routes import connectors as rc
+    job = models.ImportJob(
+        batch_id=new_batch_id(),
+        upload_type="api_sync_priceshape",
+        filename="handmatige-sync-priceshape",
+        source="API-Sync",
+        status="fout",
+        error_message="Feed onbereikbaar: HTTP 403",
+        uploaded_by="system-autosync",
+        created_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+    )
+    db.add(job)
+    db.commit()
+    try:
+        summary = rc._connector_summary(db, "priceshape")
+        assert summary["last_sync_status"] == "error"
+        assert "onbereikbaar" in (summary["last_sync_message"] or "")
+        assert summary["last_sync_attempt_at"] is not None
+    finally:
+        db.delete(job)
+        db.commit()
+
+
+def test_summary_exposes_ok_last_sync(monkeypatch, db):
+    """Een geslaagde sync toont last_sync_status='ok' zonder foutbericht."""
+    _clear_env(monkeypatch)
+    _del_db_config(db)
+    from datetime import datetime, timezone
+    from engine.import_engine import new_batch_id
+    from routes import connectors as rc
+    job = models.ImportJob(
+        batch_id=new_batch_id(),
+        upload_type="api_sync_priceshape",
+        filename="handmatige-sync-priceshape",
+        source="API-Sync",
+        status="geimporteerd",
+        uploaded_by="system-autosync",
+        created_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+    )
+    db.add(job)
+    db.commit()
+    try:
+        summary = rc._connector_summary(db, "priceshape")
+        assert summary["last_sync_status"] == "ok"
+        assert summary["last_sync_message"] is None
+    finally:
+        db.delete(job)
+        db.commit()
+
+
+def test_scheduler_failure_after_ingest_shows_error_on_card(monkeypatch, db):
+    """Faalt de geplande sync buiten _run_sync (bijv. de modelrun ná een
+    geslaagde ingest), dan moet er toch een fout-ImportJob komen zodat de
+    connector-kaart 'mislukt' + reden toont in plaats van 'geslaagd'."""
+    _clear_env(monkeypatch)
+    _del_db_config(db)
+    from datetime import datetime, timezone
+    from engine.import_engine import new_batch_id
+    from routes import connectors as rc
+    from services import feed_sync_scheduler as fss
+
+    # Simuleer een eerdere geslaagde ingest-job (zou zonder fix 'ok' tonen).
+    ok_job = models.ImportJob(
+        batch_id=new_batch_id(), upload_type="api_sync_priceshape",
+        filename="handmatige-sync-priceshape", source="API-Sync",
+        status="geimporteerd", uploaded_by="system-autosync",
+        created_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+    )
+    db.add(ok_job)
+    db.commit()
+
+    def boom():
+        raise RuntimeError("modelrun kapot met token abcdefghijklmnopqrstuvwxyz123456")
+
+    monkeypatch.setattr(fss, "_run_sync_once", boom)
+    try:
+        fss._run_sync_with_retries(max_retries=1, backoff_base=1)
+        db.expire_all()
+        summary = rc._connector_summary(db, "priceshape")
+        assert summary["last_sync_status"] == "error"
+        msg = summary["last_sync_message"] or ""
+        assert "Geplande sync mislukt" in msg
+        # Redactie: lange token-achtige strings mogen niet in de reden staan.
+        assert "abcdefghijklmnopqrstuvwxyz123456" not in msg
+        assert summary["last_test_status"] == "error"
+    finally:
+        db.query(models.ImportJob).filter(
+            models.ImportJob.upload_type == "api_sync_priceshape",
+            models.ImportJob.uploaded_by == "system-autosync",
+        ).delete()
+        db.query(models.ConnectorConfig).filter(
+            models.ConnectorConfig.connector_name == "priceshape").delete()
+        db.commit()
+
+
+def test_failed_sync_message_is_redacted(monkeypatch, db):
+    """Een gewone mislukte feed-sync (bijv. onbereikbare feed) mag nooit een
+    token/credential-URL in ImportJob, connectorstatus of samenvatting lekken."""
+    _clear_env(monkeypatch)
+    _del_db_config(db)
+    from types import SimpleNamespace
+    import feed_ingest
+    from routes import connectors as rc
+
+    token = "supersecrettoken1234567890abcdef"
+
+    class FakeConnectorError(Exception):
+        pass
+    FakeConnectorError.__name__ = "PriceShapeConnectorError"
+
+    def boom(db_, source="priceshape"):
+        raise FakeConnectorError(
+            f"Feed niet bereikbaar: https://feed.example.com/export?key={token} gaf HTTP 403")
+
+    monkeypatch.setattr(feed_ingest, "ingest_feed", boom)
+    try:
+        result = rc._run_sync("priceshape", db, SimpleNamespace(username="tester"))
+        assert result["status"] == "error"
+        assert token not in result["message"]
+        db.expire_all()
+        summary = rc._connector_summary(db, "priceshape")
+        assert summary["last_sync_status"] == "error"
+        assert token not in (summary["last_sync_message"] or "")
+        assert token not in (summary["last_test_message"] or "")
+    finally:
+        db.rollback()
+        db.query(models.ImportJob).filter(
+            models.ImportJob.upload_type == "api_sync_priceshape",
+            models.ImportJob.uploaded_by == "tester",
+        ).delete()
+        db.query(models.ConnectorConfig).filter(
+            models.ConnectorConfig.connector_name == "priceshape").delete()
+        db.commit()
 
 
 def test_scheduler_treats_default_feed_as_configured(monkeypatch, db):

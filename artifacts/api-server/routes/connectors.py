@@ -311,10 +311,9 @@ def _connector_summary(db: Session, name: str) -> dict:
     # PriceShape heeft een ingebouwde standaard-feed-URL: zonder DB/env-config
     # is de connector tóch geconfigureerd (bron "default") en verdwijnt de
     # feed-URL dus nooit — ook niet na "Ontkoppelen".
-    default_feed_url = None
+    # NB: de standaard-feed-URL zelf blijft server-side — hij bevat een
+    # opaque export-token en mag nooit richting de UI/API lekken.
     if name == "priceshape":
-        from connectors.priceshape_connector import DEFAULT_FEED_URL
-        default_feed_url = DEFAULT_FEED_URL
         if not configured:
             configured = True
             source = "default"
@@ -324,9 +323,34 @@ def _connector_summary(db: Session, name: str) -> dict:
     # api_sync_priceshape ImportJob). >24u (of nooit geslaagd) = error.
     feed_outage = _priceshape_feed_outage(db) if name == "priceshape" else None
 
+    # Laatste sync-uitkomst (ok/fout + reden) uit de importgeschiedenis: elke
+    # sync — handmatig én gepland — persisteert een ImportJob. Zo is een
+    # mislukte nachtelijke sync op bijv. de standaard-feed direct zichtbaar
+    # op de connector-kaart, zonder schema-wijziging.
+    last_sync_status = None
+    last_sync_message = None
+    last_sync_attempt_at = None
+    last_job = (
+        db.query(models.ImportJob)
+        .filter(models.ImportJob.upload_type == f"api_sync_{name}")
+        .order_by(models.ImportJob.created_at.desc())
+        .first()
+    )
+    if last_job:
+        if last_job.status == "geimporteerd":
+            last_sync_status = "ok"
+        elif last_job.status == "fout":
+            last_sync_status = "error"
+            last_sync_message = last_job.error_message
+        last_sync_attempt_at = (
+            last_job.created_at.isoformat() if last_job.created_at else None
+        )
+
     return {
         "feed_outage": feed_outage,
-        "default_feed_url": default_feed_url,
+        "last_sync_status": last_sync_status,
+        "last_sync_message": last_sync_message,
+        "last_sync_attempt_at": last_sync_attempt_at,
         "name": name,
         "label": CONNECTOR_LABELS[name],
         "configured": configured,
@@ -856,7 +880,14 @@ def _run_sync(name: str, db: Session, current_user, force_full: bool = False) ->
                 message = f"Microsoft Ads sync voltooid: {len(rows)} campagne-kostenrijen opgehaald."
 
         except Exception as exc:
-            exc_msg = str(exc)
+            # Redigeer het foutbericht vóór persistentie/weergave: request-fouten
+            # echoën de opgevraagde URL (incl. token/querystring-credentials) en
+            # dit bericht belandt in ImportJob, connectorstatus én de UI-kaart.
+            try:
+                from connectors.priceshape_connector import _redact
+                exc_msg = _redact(str(exc))
+            except Exception:
+                exc_msg = str(exc)
             if "ConnectorError" not in type(exc).__name__:
                 # Echte runtime-fout (ValueError, NetworkError, …) → fout
                 status = "error"

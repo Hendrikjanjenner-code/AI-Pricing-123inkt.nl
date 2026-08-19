@@ -1320,13 +1320,19 @@ def _login_or_create(client, login, role):
         try:
             if not db.query(models.User).filter(
                     models.User.username == login["username"]).first():
-                db.add(models.User(
-                    username=login["username"],
-                    email=f"{login['username']}@example.com",
-                    hashed_password=auth_utils.hash_password(login["password"]),
-                    role=role,
-                ))
-                db.commit()
+                try:
+                    db.add(models.User(
+                        username=login["username"],
+                        email=f"{login['username']}@example.com",
+                        hashed_password=auth_utils.hash_password(login["password"]),
+                        role=role,
+                    ))
+                    db.commit()
+                except Exception:
+                    # Parallel draaiende suites kunnen dezelfde testgebruiker
+                    # tegelijk aanmaken (unique username/email) — dan bestaat
+                    # hij inmiddels en volstaat opnieuw inloggen.
+                    db.rollback()
         finally:
             db.close()
         resp = client.post("/api/auth/login", json=login)

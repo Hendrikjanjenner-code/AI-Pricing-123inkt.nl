@@ -114,7 +114,55 @@ def _run_sync_once() -> dict | None:
     finally:
         db.close()
 
+def _redacted_exc(exc: Exception) -> str:
+    """Foutbericht zonder tokens/URL-credentials — veilig voor logs en UI."""
+    try:
+        from connectors.priceshape_connector import _redact
+        return f"{type(exc).__name__}: {_redact(str(exc))[:500]}"
+    except Exception:
+        return type(exc).__name__
+def _record_scheduler_failure(exc: Exception) -> None:
+    """Persisteer een scheduler-fout zichtbaar voor de UI: een fout-ImportJob
+    (waarop de connector-kaart 'laatste sync'-status baseert) én de
+    connector-statusvelden. Gooit zelf nooit."""
+    try:
+        from connectors.priceshape_connector import _redact
+        message = f"Geplande sync mislukt: {_redact(str(exc))[:500]}"
+    except Exception:
+        message = "Geplande sync mislukt."
 
+    try:
+        import models
+        from database import SessionLocal
+        from engine.import_engine import new_batch_id
+        db_local = SessionLocal()
+        try:
+            db_local.add(models.ImportJob(
+                batch_id=new_batch_id(),
+                upload_type="api_sync_priceshape",
+                filename="geplande-sync-priceshape",
+                source="API-Sync",
+                status="fout",
+                rows_processed=0,
+                rows_failed=0,
+                rows_duplicates=0,
+                error_log=[{"rij": None, "veld": None, "bericht": message}],
+                error_message=message,
+                uploaded_by=_SYSTEM_USER.username,
+                created_at=datetime.now(timezone.utc),
+                completed_at=datetime.now(timezone.utc),
+            ))
+            db_local.commit()
+        finally:
+            db_local.close()
+    except Exception:
+        logger.warning("Feed-sync: fout-ImportJob niet kunnen opslaan.", exc_info=True)
+
+    try:
+        from routes.connectors import record_sync_status
+        record_sync_status("priceshape", "error", message)
+    except Exception:
+        logger.warning("Feed-sync: fout-status niet kunnen registreren.", exc_info=True)
 def _run_sync_with_retries(max_retries: int,
                            backoff_base: int = DEFAULT_RETRY_BACKOFF) -> None:
     """
@@ -165,7 +213,17 @@ def _run_sync_with_retries(max_retries: int,
                 )
                 return
         except Exception as exc:  # noqa: BLE001 — scheduler mag nooit crashen
-            logger.exception("Feed-sync poging %d/%d gooide een fout: %s", attempt, max_retries, exc)
+            # Geen logger.exception: het bericht (en de traceback) kan de
+            # feed-URL incl. token bevatten. Log geredigeerd, zonder traceback.
+            logger.error("Feed-sync poging %d/%d gooide een fout: %s",
+                         attempt, max_retries, _redacted_exc(exc))
+            # Maak de mislukking óók zichtbaar op de connector-kaart. Normaal
+            # registreert _run_sync dit zelf, maar een fout die daarbuiten
+            # optreedt (bijv. in de modelrun ná een geslaagde ingest) zou
+            # anders stil blijven — en de kaart zou zelfs "geslaagd" tonen,
+            # want die leest de nieuwste ImportJob. Bericht wordt geredigeerd
+            # (geen tokens/URL's lekken).
+            _record_scheduler_failure(exc)
 
         if attempt < max_retries:
             backoff = _backoff_seconds(attempt, backoff_base)  # 60s, 120s, 240s … max 10 min
@@ -204,7 +262,7 @@ async def _scheduler_loop() -> None:
             logger.info("Feed-sync scheduler gestopt.")
             raise
         except Exception as exc:  # noqa: BLE001 — scheduler mag nooit crashen
-            logger.exception("Feed-sync scheduler lus-fout (genegeerd): %s", exc)
+            logger.error("Feed-sync scheduler lus-fout (genegeerd): %s", _redacted_exc(exc))
 
         # BigQuery-export draait elke cyclus mee, onafhankelijk van het
         # feed-sync-resultaat: analisten moeten ook historische data zien als

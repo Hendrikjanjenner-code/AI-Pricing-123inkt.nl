@@ -131,10 +131,14 @@ def test_data_quality_report_shape_and_registry(client, admin_headers):
 
 
 def test_issue_owner_status_workflow(client, admin_headers):
+    import uuid as _uuid
+    # Uniek per run: een vaste code botst (unique issue_code) met restanten
+    # van een afgebroken run of een parallel draaiende validatiesuite.
+    _code = f"TEST_WORKFLOW_ISSUE_{_uuid.uuid4().hex[:8]}"
     db = SessionLocal()
     try:
         row = models.DataQualityIssue(
-            issue_code="TEST_WORKFLOW_ISSUE", title="Test", message="Testissue",
+            issue_code=_code, title="Test", message="Testissue",
             severity="warning", source="Test", module="Test", affected_count=1,
             status="open",
         )
