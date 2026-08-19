@@ -73,6 +73,8 @@ def viewer_headers(client):
     resp = client.post("/api/auth/login", json=VIEWER_LOGIN)
     if resp.status_code != 200:
         pytest.skip("Geen dev_viewer account beschikbaar")
+    from authz_helpers import grant_legacy_views
+    grant_legacy_views(VIEWER_LOGIN["username"])
     return {"Authorization": f"Bearer {resp.json()['token']}"}
 
 

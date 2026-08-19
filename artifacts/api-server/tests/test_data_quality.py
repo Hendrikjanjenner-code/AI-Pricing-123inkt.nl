@@ -1321,6 +1321,8 @@ def viewer_auth(client):
             db.close()
         resp = client.post("/api/auth/login", json=VIEWER_LOGIN)
     assert resp.status_code == 200, resp.text
+    from authz_helpers import grant_legacy_views
+    grant_legacy_views(VIEWER_LOGIN["username"])
     return {"Authorization": f"Bearer {resp.json()['token']}"}
 
 

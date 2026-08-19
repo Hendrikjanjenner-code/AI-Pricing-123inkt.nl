@@ -55,7 +55,10 @@ export default function Login() {
       // longer blocks navigation on this resolving.
       queryClient.resetQueries({ queryKey: getGetCurrentUserQueryKey() });
       console.info("[login] dashboard route opened");
-      setLocation("/");
+      // Afdelingsgerichte startpagina (taak 219): elke workspace heeft een
+      // eigen default startroute; val terug op het dashboard.
+      const startRoute = (res.user as any)?.workspace?.default_route || "/";
+      setLocation(startRoute.startsWith("/") ? startRoute : "/");
     } catch (err: any) {
       console.error("[login] login failed:", err?.data?.detail || err?.message || err);
       toast({

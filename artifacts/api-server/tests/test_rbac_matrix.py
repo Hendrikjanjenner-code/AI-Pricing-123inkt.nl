@@ -70,6 +70,15 @@ def tokens(client):
         })
         assert r.status_code in (200, 201), r.text
         created_ids.append(r.json()["id"])
+        # Nieuw permissiemodel (taak 219): nieuwe gebruikers krijgen smalle
+        # rol-basisrechten. Deze matrix documenteert het capability-niveau
+        # van de rollen; geef de testgebruikers daarom brede view-permissies
+        # (zoals gemigreerde bestaande gebruikers die hebben).
+        import authz as authz_mod
+        g = client.put(f"/api/authz/users/{r.json()['id']}", headers=headers, json={
+            "extra_permissions": authz_mod.LEGACY_ROLE_PERMISSIONS[role],
+        })
+        assert g.status_code == 200, g.text
         lr = client.post("/api/auth/login", json={"username": username, "password": password})
         assert lr.status_code == 200, lr.text
         toks[role] = lr.json()["token"]

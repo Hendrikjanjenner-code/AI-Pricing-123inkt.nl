@@ -58,6 +58,14 @@ class AuthResponse(BaseModel):
     token: str
 
 
+def _user_payload(db: Session, user: models.User) -> dict:
+    """UserOut + authz-velden (permissies, afdelingen, workspace, scopes)."""
+    import authz
+    payload = UserOut.from_orm_user(user).model_dump()
+    payload.update(authz.authz_payload(db, user))
+    return payload
+
+
 def _run_login(username: str, password: str) -> dict:
     """
     Runs the full blocking login flow (DB connect + query + password check +
@@ -94,7 +102,7 @@ def _run_login(username: str, password: str) -> dict:
         token = auth_utils.create_access_token({"sub": str(user.id)})
         logger.info("login: token generation completed for username=%s", username)
 
-        return {"ok": True, "user": UserOut.from_orm_user(user), "token": token}
+        return {"ok": True, "user": _user_payload(db, user), "token": token}
     finally:
         db.close()
         logger.info("login: db session closed for username=%s", username)
@@ -161,9 +169,12 @@ def logout():
     return {"message": "Logged out successfully"}
 
 
-@router.get("/me", response_model=UserOut)
-def get_me(current_user: models.User = Depends(auth_utils.get_current_user)):
-    return UserOut.from_orm_user(current_user)
+@router.get("/me")
+def get_me(
+    current_user: models.User = Depends(auth_utils.get_current_user),
+    db: Session = Depends(get_db),
+):
+    return _user_payload(db, current_user)
 
 
 @router.get("/health")

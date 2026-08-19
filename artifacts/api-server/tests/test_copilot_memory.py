@@ -56,6 +56,8 @@ def ctx(client):
         })
         assert r.status_code in (200, 201), r.text
         created_ids.append(r.json()["id"])
+        from authz_helpers import grant_legacy_views
+        grant_legacy_views(username)
         lr = client.post("/api/auth/login",
                          json={"username": username, "password": password})
         assert lr.status_code == 200, lr.text

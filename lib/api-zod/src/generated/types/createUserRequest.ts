@@ -13,4 +13,6 @@ export interface CreateUserRequest {
   full_name?: string;
   password: string;
   role: CreateUserRequestRole;
+  /** @nullable */
+  departments?: string[] | null;
 }

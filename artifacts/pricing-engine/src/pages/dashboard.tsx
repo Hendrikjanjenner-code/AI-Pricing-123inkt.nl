@@ -10,7 +10,8 @@ import { ArrowUpRight, ArrowDownRight, AlertTriangle, CheckCircle2, ShieldAlert 
 import { Skeleton } from "@/components/ui/skeleton";
 import { InfoTooltip } from "@/components/InfoTooltip";
 import { WidgetError } from "@/components/WidgetError";
-import { getAuthHeaders } from "@/lib/auth";
+import { getAuthHeaders, useAuth } from "@/lib/auth";
+import { gebruikersPermissies } from "@/lib/route-registry";
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 
@@ -307,6 +308,14 @@ const STRATEGIE_LABELS: Record<string, string> = {
 };
 
 export default function Dashboard() {
+  // Afdelingsgericht Command Center (taak 219): widgets zijn permissie-gedreven —
+  // een gebruiker zonder pricing.view ziet geen pricing-KPI's of -grafieken.
+  const { user } = useAuth();
+  const perms = gebruikersPermissies(user);
+  const magPricing = perms.has("*") || perms.has("pricing.view");
+  const workspaceNaam = user?.departments?.length
+    ? user.departments.map((d: any) => d.name).join(", ")
+    : null;
   // Global Filter Context (taak #216): alle widgets op dit scherm respecteren
   // dezelfde context; de server expandeert parent-selecties naar descendants.
   const globalFilters = useGlobalFilters();
@@ -318,15 +327,15 @@ export default function Dashboard() {
     return resp.json();
   };
   const { data: summary, isLoading: loadingSummary, isError: summaryError } =
-    useQuery<any>({ queryKey: ["dashboard-summary", filterQs], queryFn: dash("summary") });
+    useQuery<any>({ queryKey: ["dashboard-summary", filterQs], queryFn: dash("summary"), enabled: magPricing });
   const { data: marginData, isLoading: loadingMargin, isError: marginError } =
-    useQuery<any[]>({ queryKey: ["dashboard-margin-by-category", filterQs], queryFn: dash("charts/margin-by-category") });
+    useQuery<any[]>({ queryKey: ["dashboard-margin-by-category", filterQs], queryFn: dash("charts/margin-by-category"), enabled: magPricing });
   const { data: recsData, isLoading: loadingRecs, isError: recsError } =
-    useQuery<any[]>({ queryKey: ["dashboard-recs-by-strategy", filterQs], queryFn: dash("charts/recs-by-strategy") });
+    useQuery<any[]>({ queryKey: ["dashboard-recs-by-strategy", filterQs], queryFn: dash("charts/recs-by-strategy"), enabled: magPricing });
   const { data: confData, isLoading: loadingConf, isError: confError } =
-    useQuery<any[]>({ queryKey: ["dashboard-confidence-dist", filterQs], queryFn: dash("charts/confidence-distribution") });
+    useQuery<any[]>({ queryKey: ["dashboard-confidence-dist", filterQs], queryFn: dash("charts/confidence-distribution"), enabled: magPricing });
   const { data: priceData, isLoading: loadingPrice, isError: priceError } =
-    useQuery<any[]>({ queryKey: ["dashboard-price-change-dist", filterQs], queryFn: dash("charts/price-change-distribution") });
+    useQuery<any[]>({ queryKey: ["dashboard-price-change-dist", filterQs], queryFn: dash("charts/price-change-distribution"), enabled: magPricing });
 
   if (summaryError) {
     console.error("[dashboard] failed to load summary");
@@ -339,7 +348,14 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold tracking-tight">Dagelijks overzicht</h1>
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Dagelijks overzicht</h1>
+        {workspaceNaam && (
+          <p className="text-sm text-muted-foreground mt-1" data-testid="workspace-naam">
+            Workspace: {workspaceNaam}
+          </p>
+        )}
+      </div>
 
       <GlobalFilterBar />
 
@@ -347,7 +363,14 @@ export default function Dashboard() {
 
       <NachtelijkeEnginesStrip />
 
-      {loadingSummary ? (
+      {!magPricing ? (
+        <Card className="p-6">
+          <p className="text-sm text-muted-foreground">
+            Pricing-KPI's zijn niet zichtbaar voor jouw afdeling. Gebruik de
+            navigatie links voor de domeinen van jouw workspace.
+          </p>
+        </Card>
+      ) : loadingSummary ? (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {[1,2,3,4].map(i => <Skeleton key={i} className="h-[120px] w-full" />)}
         </div>
@@ -431,7 +454,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {magPricing && <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
             <CardTitle>Margeverbetering per categorie</CardTitle>
@@ -522,7 +545,7 @@ export default function Dashboard() {
             ) : loadingConf ? <Skeleton className="w-full h-full" /> : <WidgetError />}
           </CardContent>
         </Card>
-      </div>
+      </div>}
     </div>
   );
 }

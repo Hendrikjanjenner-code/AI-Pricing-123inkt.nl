@@ -16,6 +16,9 @@ class CreateUserRequest(BaseModel):
     full_name: Optional[str] = None
     password: str
     role: str
+    # Optionele afdelingscodes (taak 219); zonder opgave krijgt de gebruiker
+    # de standaardafdeling die bij zijn rol hoort.
+    departments: Optional[list[str]] = None
 
 
 class UpdateUserRequest(BaseModel):
@@ -68,6 +71,10 @@ def create_user(
     db.add(user)
     db.commit()
     db.refresh(user)
+    # Afdelingskoppeling (taak 219): expliciet opgegeven of rol-default.
+    import authz
+    authz.ensure_user_authz_defaults(db, user, req.departments)
+    db.commit()
     return _user_out(user)
 
 
@@ -93,6 +100,9 @@ def update_user(
         user.is_active = req.is_active
     db.commit()
     db.refresh(user)
+    # Rol- of statuswijziging beïnvloedt de effectieve permissies direct.
+    import authz
+    authz.invalidate_permission_cache(user.id)
     return _user_out(user)
 
 

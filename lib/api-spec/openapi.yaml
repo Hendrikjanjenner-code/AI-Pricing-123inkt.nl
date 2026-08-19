@@ -834,6 +834,135 @@ paths:
               schema:
                 $ref: "#/components/schemas/ExportHistoryResponse"
 
+  /authz/permissions:
+    get:
+      operationId: listAuthzPermissions
+      tags: [authz]
+      summary: Permissiecatalogus
+      responses:
+        "200":
+          description: Catalogus
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  permissions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PermissionDef"
+                required: [permissions]
+
+  /authz/departments:
+    get:
+      operationId: listAuthzDepartments
+      tags: [authz]
+      summary: Afdelingen (workspaces)
+      responses:
+        "200":
+          description: Afdelingen
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DepartmentListResponse"
+
+  /authz/departments/{dept_id}:
+    patch:
+      operationId: updateAuthzDepartment
+      tags: [authz]
+      summary: Afdeling bijwerken
+      parameters:
+        - name: dept_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DepartmentUpdateRequest"
+      responses:
+        "200":
+          description: Bijgewerkte afdeling
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Department"
+
+  /authz/roles-matrix:
+    get:
+      operationId: getRolesMatrix
+      tags: [authz]
+      summary: Rollen & Rechten-matrix
+      responses:
+        "200":
+          description: Matrix
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RolesMatrixResponse"
+    put:
+      operationId: updateRolesMatrix
+      tags: [authz]
+      summary: Rollen & Rechten-matrix bijwerken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RolesMatrixUpdateRequest"
+      responses:
+        "200":
+          description: Bijgewerkte matrix
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RolesMatrixResponse"
+
+  /authz/users/{user_id}:
+    get:
+      operationId: getUserAuthz
+      tags: [authz]
+      summary: Toegangsrechten van een gebruiker
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Toegangsrechten
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserAuthz"
+    put:
+      operationId: updateUserAuthz
+      tags: [authz]
+      summary: Toegangsrechten van een gebruiker bijwerken
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserAuthzUpdateRequest"
+      responses:
+        "200":
+          description: Bijgewerkte toegangsrechten
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserAuthz"
+
   /users:
     get:
       operationId: listUsers
@@ -1374,7 +1503,191 @@ components:
           type: boolean
         created_at:
           type: string
+        permissions:
+          type: array
+          items:
+            type: string
+        departments:
+          type: array
+          items:
+            $ref: "#/components/schemas/DepartmentRef"
+        workspace:
+          $ref: "#/components/schemas/Workspace"
+        scopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserScope"
       required: [id, username, email, role, is_active]
+
+    DepartmentRef:
+      type: object
+      properties:
+        id:
+          type: integer
+        code:
+          type: string
+        name:
+          type: string
+      required: [id, code, name]
+
+    Workspace:
+      type: object
+      properties:
+        domains:
+          type: array
+          items:
+            type: string
+        default_route:
+          type: string
+        primary_department:
+          type: ["string", "null"]
+      required: [domains, default_route]
+
+    UserScope:
+      type: object
+      properties:
+        scope_type:
+          type: string
+          enum: [shop, country, legal_entity]
+        scope_value:
+          type: string
+      required: [scope_type, scope_value]
+
+    PermissionDef:
+      type: object
+      properties:
+        code:
+          type: string
+        label:
+          type: string
+        domein:
+          type: string
+      required: [code, label, domein]
+
+    Department:
+      type: object
+      properties:
+        id:
+          type: integer
+        code:
+          type: string
+        name:
+          type: string
+        workspace_domains:
+          type: array
+          items:
+            type: string
+        default_permissions:
+          type: array
+          items:
+            type: string
+        default_route:
+          type: string
+        positie:
+          type: integer
+        active:
+          type: boolean
+      required: [id, code, name, workspace_domains, default_permissions, default_route, active]
+
+    DepartmentListResponse:
+      type: object
+      properties:
+        departments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Department"
+      required: [departments]
+
+    DepartmentUpdateRequest:
+      type: object
+      properties:
+        name:
+          type: ["string", "null"]
+        workspace_domains:
+          type: ["array", "null"]
+          items:
+            type: string
+        default_permissions:
+          type: ["array", "null"]
+          items:
+            type: string
+        default_route:
+          type: ["string", "null"]
+        active:
+          type: ["boolean", "null"]
+
+    RolesMatrixResponse:
+      type: object
+      properties:
+        roles:
+          type: array
+          items:
+            type: string
+        matrix:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+        permissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PermissionDef"
+      required: [roles, matrix, permissions]
+
+    RolesMatrixUpdateRequest:
+      type: object
+      properties:
+        matrix:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+      required: [matrix]
+
+    UserAuthz:
+      type: object
+      properties:
+        user_id:
+          type: integer
+        username:
+          type: string
+        role:
+          type: string
+        departments:
+          type: array
+          items:
+            $ref: "#/components/schemas/DepartmentRef"
+        extra_permissions:
+          type: array
+          items:
+            type: string
+        scopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserScope"
+        effective_permissions:
+          type: array
+          items:
+            type: string
+      required: [user_id, username, role, departments, extra_permissions, scopes, effective_permissions]
+
+    UserAuthzUpdateRequest:
+      type: object
+      properties:
+        department_codes:
+          type: ["array", "null"]
+          items:
+            type: string
+        extra_permissions:
+          type: ["array", "null"]
+          items:
+            type: string
+        scopes:
+          type: ["array", "null"]
+          items:
+            $ref: "#/components/schemas/UserScope"
 
     CreateUserRequest:
       type: object
@@ -1390,6 +1703,10 @@ components:
         role:
           type: string
           enum: [admin, pricing_manager, analyst, viewer]
+        departments:
+          type: ["array", "null"]
+          items:
+            type: string
       required: [username, email, password, role]
 
     UpdateUserRequest:

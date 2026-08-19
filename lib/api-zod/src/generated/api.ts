@@ -31,6 +31,31 @@ export const LoginUserResponse = zod.object({
     role: zod.enum(["admin", "pricing_manager", "analyst", "viewer"]),
     is_active: zod.boolean(),
     created_at: zod.string().optional(),
+    permissions: zod.array(zod.string()).optional(),
+    departments: zod
+      .array(
+        zod.object({
+          id: zod.number(),
+          code: zod.string(),
+          name: zod.string(),
+        }),
+      )
+      .optional(),
+    workspace: zod
+      .object({
+        domains: zod.array(zod.string()),
+        default_route: zod.string(),
+        primary_department: zod.string().nullish(),
+      })
+      .optional(),
+    scopes: zod
+      .array(
+        zod.object({
+          scope_type: zod.enum(["shop", "country", "legal_entity"]),
+          scope_value: zod.string(),
+        }),
+      )
+      .optional(),
   }),
   token: zod.string(),
 });
@@ -53,6 +78,31 @@ export const GetCurrentUserResponse = zod.object({
   role: zod.enum(["admin", "pricing_manager", "analyst", "viewer"]),
   is_active: zod.boolean(),
   created_at: zod.string().optional(),
+  permissions: zod.array(zod.string()).optional(),
+  departments: zod
+    .array(
+      zod.object({
+        id: zod.number(),
+        code: zod.string(),
+        name: zod.string(),
+      }),
+    )
+    .optional(),
+  workspace: zod
+    .object({
+      domains: zod.array(zod.string()),
+      default_route: zod.string(),
+      primary_department: zod.string().nullish(),
+    })
+    .optional(),
+  scopes: zod
+    .array(
+      zod.object({
+        scope_type: zod.enum(["shop", "country", "legal_entity"]),
+        scope_value: zod.string(),
+      }),
+    )
+    .optional(),
 });
 
 /**
@@ -1060,6 +1110,166 @@ export const GetExportHistoryResponse = zod.object({
 });
 
 /**
+ * @summary Permissiecatalogus
+ */
+export const ListAuthzPermissionsResponse = zod.object({
+  permissions: zod.array(
+    zod.object({
+      code: zod.string(),
+      label: zod.string(),
+      domein: zod.string(),
+    }),
+  ),
+});
+
+/**
+ * @summary Afdelingen (workspaces)
+ */
+export const ListAuthzDepartmentsResponse = zod.object({
+  departments: zod.array(
+    zod.object({
+      id: zod.number(),
+      code: zod.string(),
+      name: zod.string(),
+      workspace_domains: zod.array(zod.string()),
+      default_permissions: zod.array(zod.string()),
+      default_route: zod.string(),
+      positie: zod.number().optional(),
+      active: zod.boolean(),
+    }),
+  ),
+});
+
+/**
+ * @summary Afdeling bijwerken
+ */
+export const UpdateAuthzDepartmentParams = zod.object({
+  dept_id: zod.coerce.number(),
+});
+
+export const UpdateAuthzDepartmentBody = zod.object({
+  name: zod.string().nullish(),
+  workspace_domains: zod.array(zod.string()).nullish(),
+  default_permissions: zod.array(zod.string()).nullish(),
+  default_route: zod.string().nullish(),
+  active: zod.boolean().nullish(),
+});
+
+export const UpdateAuthzDepartmentResponse = zod.object({
+  id: zod.number(),
+  code: zod.string(),
+  name: zod.string(),
+  workspace_domains: zod.array(zod.string()),
+  default_permissions: zod.array(zod.string()),
+  default_route: zod.string(),
+  positie: zod.number().optional(),
+  active: zod.boolean(),
+});
+
+/**
+ * @summary Rollen & Rechten-matrix
+ */
+export const GetRolesMatrixResponse = zod.object({
+  roles: zod.array(zod.string()),
+  matrix: zod.record(zod.string(), zod.array(zod.string())),
+  permissions: zod.array(
+    zod.object({
+      code: zod.string(),
+      label: zod.string(),
+      domein: zod.string(),
+    }),
+  ),
+});
+
+/**
+ * @summary Rollen & Rechten-matrix bijwerken
+ */
+export const UpdateRolesMatrixBody = zod.object({
+  matrix: zod.record(zod.string(), zod.array(zod.string())),
+});
+
+export const UpdateRolesMatrixResponse = zod.object({
+  roles: zod.array(zod.string()),
+  matrix: zod.record(zod.string(), zod.array(zod.string())),
+  permissions: zod.array(
+    zod.object({
+      code: zod.string(),
+      label: zod.string(),
+      domein: zod.string(),
+    }),
+  ),
+});
+
+/**
+ * @summary Toegangsrechten van een gebruiker
+ */
+export const GetUserAuthzParams = zod.object({
+  user_id: zod.coerce.number(),
+});
+
+export const GetUserAuthzResponse = zod.object({
+  user_id: zod.number(),
+  username: zod.string(),
+  role: zod.string(),
+  departments: zod.array(
+    zod.object({
+      id: zod.number(),
+      code: zod.string(),
+      name: zod.string(),
+    }),
+  ),
+  extra_permissions: zod.array(zod.string()),
+  scopes: zod.array(
+    zod.object({
+      scope_type: zod.enum(["shop", "country", "legal_entity"]),
+      scope_value: zod.string(),
+    }),
+  ),
+  effective_permissions: zod.array(zod.string()),
+});
+
+/**
+ * @summary Toegangsrechten van een gebruiker bijwerken
+ */
+export const UpdateUserAuthzParams = zod.object({
+  user_id: zod.coerce.number(),
+});
+
+export const UpdateUserAuthzBody = zod.object({
+  department_codes: zod.array(zod.string()).nullish(),
+  extra_permissions: zod.array(zod.string()).nullish(),
+  scopes: zod
+    .array(
+      zod.object({
+        scope_type: zod.enum(["shop", "country", "legal_entity"]),
+        scope_value: zod.string(),
+      }),
+    )
+    .nullish(),
+});
+
+export const UpdateUserAuthzResponse = zod.object({
+  user_id: zod.number(),
+  username: zod.string(),
+  role: zod.string(),
+  departments: zod.array(
+    zod.object({
+      id: zod.number(),
+      code: zod.string(),
+      name: zod.string(),
+    }),
+  ),
+  extra_permissions: zod.array(zod.string()),
+  scopes: zod.array(
+    zod.object({
+      scope_type: zod.enum(["shop", "country", "legal_entity"]),
+      scope_value: zod.string(),
+    }),
+  ),
+  effective_permissions: zod.array(zod.string()),
+});
+
+/**
  * @summary List all users
  */
 export const ListUsersResponseItem = zod.object({
@@ -1070,6 +1280,31 @@ export const ListUsersResponseItem = zod.object({
   role: zod.enum(["admin", "pricing_manager", "analyst", "viewer"]),
   is_active: zod.boolean(),
   created_at: zod.string().optional(),
+  permissions: zod.array(zod.string()).optional(),
+  departments: zod
+    .array(
+      zod.object({
+        id: zod.number(),
+        code: zod.string(),
+        name: zod.string(),
+      }),
+    )
+    .optional(),
+  workspace: zod
+    .object({
+      domains: zod.array(zod.string()),
+      default_route: zod.string(),
+      primary_department: zod.string().nullish(),
+    })
+    .optional(),
+  scopes: zod
+    .array(
+      zod.object({
+        scope_type: zod.enum(["shop", "country", "legal_entity"]),
+        scope_value: zod.string(),
+      }),
+    )
+    .optional(),
 });
 export const ListUsersResponse = zod.array(ListUsersResponseItem);
 
@@ -1082,6 +1317,7 @@ export const CreateUserBody = zod.object({
   full_name: zod.string().optional(),
   password: zod.string(),
   role: zod.enum(["admin", "pricing_manager", "analyst", "viewer"]),
+  departments: zod.array(zod.string()).nullish(),
 });
 
 /**
@@ -1106,6 +1342,31 @@ export const UpdateUserResponse = zod.object({
   role: zod.enum(["admin", "pricing_manager", "analyst", "viewer"]),
   is_active: zod.boolean(),
   created_at: zod.string().optional(),
+  permissions: zod.array(zod.string()).optional(),
+  departments: zod
+    .array(
+      zod.object({
+        id: zod.number(),
+        code: zod.string(),
+        name: zod.string(),
+      }),
+    )
+    .optional(),
+  workspace: zod
+    .object({
+      domains: zod.array(zod.string()),
+      default_route: zod.string(),
+      primary_department: zod.string().nullish(),
+    })
+    .optional(),
+  scopes: zod
+    .array(
+      zod.object({
+        scope_type: zod.enum(["shop", "country", "legal_entity"]),
+        scope_value: zod.string(),
+      }),
+    )
+    .optional(),
 });
 
 /**

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 import jwt as pyjwt
 from jwt.exceptions import InvalidTokenError
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from database import get_db, SessionLocal
@@ -142,7 +142,30 @@ def require_role(*roles: str):
         # startup is veiliger dan een permanent onbereikbaar endpoint.
         raise ValueError(f"require_role: unknown role(s) {unknown}; valid: {VALID_ROLES}")
 
-    def role_checker(current_user: models.User = Depends(get_current_user)):
+    def role_checker(
+        request: Request,
+        current_user: models.User = Depends(get_current_user),
+    ):
+        # Granulair permissiemodel (taak 219): als er voor dit pad+methode een
+        # actie-permissie bestaat, is die leidend — toekennen in de Rollen &
+        # Rechten-matrix (of als extra recht) geeft de capability, intrekken
+        # blokkeert hem, onafhankelijk van de legacy-rollenlijst.
+        import authz
+        perm = authz.required_action_permission(request.url.path, request.method)
+        if perm is not None:
+            if current_user.role == "admin":
+                return current_user
+            db = SessionLocal()
+            try:
+                allowed = perm in authz.effective_permissions(db, current_user)
+            finally:
+                db.close()
+            if not allowed:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Permissie '{perm}' vereist",
+                )
+            return current_user
         if current_user.role not in roles:
             raise HTTPException(status_code=403, detail="Insufficient permissions")
         return current_user

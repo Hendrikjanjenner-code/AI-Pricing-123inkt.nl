@@ -5,7 +5,10 @@
  * AI Pricing Decision Engine API
  * OpenAPI spec version: 0.1.0
  */
+import type { DepartmentRef } from "./departmentRef";
 import type { UserRole } from "./userRole";
+import type { UserScope } from "./userScope";
+import type { Workspace } from "./workspace";
 
 export interface User {
   id: number;
@@ -15,4 +18,8 @@ export interface User {
   role: UserRole;
   is_active: boolean;
   created_at?: string;
+  permissions?: string[];
+  departments?: DepartmentRef[];
+  workspace?: Workspace;
+  scopes?: UserScope[];
 }

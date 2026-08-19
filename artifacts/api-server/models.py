@@ -118,7 +118,27 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class Department(Base):
+    """
+    Afdeling / workspace (taak 219). Elke afdeling definieert welke frontend-
+    domeinen standaard zichtbaar zijn (workspace), welke permissies leden
+    standaard krijgen en wat de default startpagina is.
+    """
+    __tablename__ = "departments"
 
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(50), unique=True, nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    # Frontend-domein-ids (route-registry DomeinId) die deze workspace toont.
+    workspace_domains = Column(JSON, default=list)
+    # Permissiecodes die leden van deze afdeling standaard krijgen.
+    default_permissions = Column(JSON, default=list)
+    # Frontend-route die als startpagina/default view geldt.
+    default_route = Column(String(255), default="/")
+    positie = Column(Integer, default=0)
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 class DimCategory(Base):
     __tablename__ = "dim_category"
 
@@ -3119,3 +3139,51 @@ def _skip_computed_on_sqlite(element, compiler, **kw):
             compiler.dialect.type_compiler.process(column.type),
         )
     return compiler.visit_create_column(element, **kw)
+
+class UserScope(Base):
+    """
+    Data-scope per gebruiker: beperkt tot shop / land / juridische entiteit.
+    Geen rijen = onbeperkt (alle shops). Handhaving in winkelkeuze en
+    shop-gescopeerde queries (zie helper authz.user_allowed_shop_ids).
+    """
+    __tablename__ = "user_scopes"
+    __table_args__ = (UniqueConstraint("user_id", "scope_type", "scope_value", name="uq_user_scope"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    scope_type = Column(String(20), nullable=False)   # shop / country / legal_entity
+    scope_value = Column(String(255), nullable=False) # shop_id / landcode / entiteitsnaam
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class UserDepartment(Base):
+    """Koppeling gebruiker ↔ afdeling(en)."""
+    __tablename__ = "user_departments"
+    __table_args__ = (UniqueConstraint("user_id", "department_id", name="uq_user_department"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"), nullable=False, index=True)
+    is_primary = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class RolePermission(Base):
+    """Rollen & Rechten-matrix: welke permissies een rol standaard heeft.
+    Bewerkbaar via de beheer-UI (niet hardcoded); wijzigingen worden geaudit."""
+    __tablename__ = "role_permissions"
+    __table_args__ = (UniqueConstraint("role", "permission_code", name="uq_role_permission"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    role = Column(String(50), nullable=False, index=True)
+    permission_code = Column(String(100), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class UserPermission(Base):
+    """Extra (cross-department) permissies per gebruiker, bovenop rol + afdeling."""
+    __tablename__ = "user_permissions"
+    __table_args__ = (UniqueConstraint("user_id", "permission_code", name="uq_user_permission"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    permission_code = Column(String(100), nullable=False, index=True)
+    granted_by = Column(String(100))
+    created_at = Column(DateTime, default=datetime.utcnow)

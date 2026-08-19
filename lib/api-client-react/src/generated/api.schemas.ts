@@ -121,6 +121,33 @@ export const UserRole = {
   viewer: "viewer",
 } as const;
 
+export interface DepartmentRef {
+  id: number;
+  code: string;
+  name: string;
+}
+
+export interface Workspace {
+  domains: string[];
+  default_route: string;
+  /** @nullable */
+  primary_department?: string | null;
+}
+
+export type UserScopeScopeType =
+  (typeof UserScopeScopeType)[keyof typeof UserScopeScopeType];
+
+export const UserScopeScopeType = {
+  shop: "shop",
+  country: "country",
+  legal_entity: "legal_entity",
+} as const;
+
+export interface UserScope {
+  scope_type: UserScopeScopeType;
+  scope_value: string;
+}
+
 export interface User {
   id: number;
   username: string;
@@ -129,11 +156,82 @@ export interface User {
   role: UserRole;
   is_active: boolean;
   created_at?: string;
+  permissions?: string[];
+  departments?: DepartmentRef[];
+  workspace?: Workspace;
+  scopes?: UserScope[];
 }
 
 export interface AuthResponse {
   user: User;
   token: string;
+}
+
+export interface PermissionDef {
+  code: string;
+  label: string;
+  domein: string;
+}
+
+export interface Department {
+  id: number;
+  code: string;
+  name: string;
+  workspace_domains: string[];
+  default_permissions: string[];
+  default_route: string;
+  positie?: number;
+  active: boolean;
+}
+
+export interface DepartmentListResponse {
+  departments: Department[];
+}
+
+export interface DepartmentUpdateRequest {
+  /** @nullable */
+  name?: string | null;
+  /** @nullable */
+  workspace_domains?: string[] | null;
+  /** @nullable */
+  default_permissions?: string[] | null;
+  /** @nullable */
+  default_route?: string | null;
+  /** @nullable */
+  active?: boolean | null;
+}
+
+export type RolesMatrixResponseMatrix = { [key: string]: string[] };
+
+export interface RolesMatrixResponse {
+  roles: string[];
+  matrix: RolesMatrixResponseMatrix;
+  permissions: PermissionDef[];
+}
+
+export type RolesMatrixUpdateRequestMatrix = { [key: string]: string[] };
+
+export interface RolesMatrixUpdateRequest {
+  matrix: RolesMatrixUpdateRequestMatrix;
+}
+
+export interface UserAuthz {
+  user_id: number;
+  username: string;
+  role: string;
+  departments: DepartmentRef[];
+  extra_permissions: string[];
+  scopes: UserScope[];
+  effective_permissions: string[];
+}
+
+export interface UserAuthzUpdateRequest {
+  /** @nullable */
+  department_codes?: string[] | null;
+  /** @nullable */
+  extra_permissions?: string[] | null;
+  /** @nullable */
+  scopes?: UserScope[] | null;
 }
 
 export type CreateUserRequestRole =
@@ -152,6 +250,8 @@ export interface CreateUserRequest {
   full_name?: string;
   password: string;
   role: CreateUserRequestRole;
+  /** @nullable */
+  departments?: string[] | null;
 }
 
 export interface UpdateUserRequest {
@@ -902,6 +1002,10 @@ export type PushRecommendationsToDrsParams = {
 
 export type GetExportHistoryParams = {
   limit?: number;
+};
+
+export type ListAuthzPermissions200 = {
+  permissions: PermissionDef[];
 };
 
 export type ListSignalsParams = {

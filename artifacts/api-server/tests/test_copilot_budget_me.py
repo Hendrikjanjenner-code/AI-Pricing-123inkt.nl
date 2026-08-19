@@ -48,6 +48,8 @@ def ctx(client):
     })
     assert r.status_code in (200, 201), r.text
     user_id = r.json()["id"]
+    from authz_helpers import grant_legacy_views
+    grant_legacy_views(username)
     lr = client.post("/api/auth/login", json={"username": username, "password": password})
     assert lr.status_code == 200, lr.text
     user_headers = {"Authorization": f"Bearer {lr.json()['token']}"}

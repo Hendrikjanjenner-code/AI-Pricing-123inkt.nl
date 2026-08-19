@@ -13,7 +13,6 @@ import {
   sidebarModel, vindRoute, MIJN_DASHBOARD, type DomeinId, type RouteDef,
 } from "@/lib/route-registry";
 
-const GROEPEN = sidebarModel();
 
 const OPEN_GROEPEN_KEY = "sidebar.openDomeinen";
 
@@ -83,6 +82,10 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
 
   if (!user) return null;
 
+  // Workspace-gedreven sidebar (taak 219): domeinen en items worden
+  // gefilterd op de afdeling(en) en permissies van de gebruiker.
+  const groepen = sidebarModel(user);
+
   const toggleDomein = (id: DomeinId) => {
     setOpenDomeinen((huidig) => {
       const volgend = new Set(huidig);
@@ -107,7 +110,7 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
             <NavItem item={MIJN_DASHBOARD} location={location} />
           </div>
 
-          {GROEPEN.map(({ domein, items }) => {
+          {groepen.map(({ domein, items }) => {
             const open = openDomeinen.has(domein.id);
             const bevatActief = actieveRoute?.domein === domein.id;
             const DomeinIcon = domein.icon;
@@ -151,6 +154,9 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
               <span className="text-sm font-medium truncate">{user.full_name || user.username}</span>
               <span className="text-xs text-sidebar-foreground/50 truncate">
                 {ROL_LABELS[user.role] || user.role.replace('_', ' ')}
+                {user.departments?.length
+                  ? ` · ${user.departments.map((d: any) => d.name).join(", ")}`
+                  : ""}
               </span>
             </div>
             <Button variant="ghost" size="icon" onClick={logout}

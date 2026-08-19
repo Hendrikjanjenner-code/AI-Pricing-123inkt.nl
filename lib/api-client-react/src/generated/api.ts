@@ -35,6 +35,9 @@ import type {
   CreateUserRequest,
   DashboardSummary,
   DataQualityReport,
+  Department,
+  DepartmentListResponse,
+  DepartmentUpdateRequest,
   DrsPushResult,
   ErrorResponse,
   ExportHistoryResponse,
@@ -45,6 +48,7 @@ import type {
   HealthStatus,
   ImportJob,
   IntelligenceSignal,
+  ListAuthzPermissions200,
   ListCopilotModelCallsParams,
   ListProductsParams,
   ListRecommendationsParams,
@@ -63,6 +67,8 @@ import type {
   RecommendationDetail,
   RecommendationListResponse,
   RejectRequest,
+  RolesMatrixResponse,
+  RolesMatrixUpdateRequest,
   Shop,
   ShopListResponse,
   SignalCatalog,
@@ -75,6 +81,8 @@ import type {
   UpdateUserRequest,
   UploadResult,
   User,
+  UserAuthz,
+  UserAuthzUpdateRequest,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -3395,6 +3403,579 @@ export function useGetExportHistory<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary Permissiecatalogus
+ */
+export const getListAuthzPermissionsUrl = () => {
+  return `/api/authz/permissions`;
+};
+
+export const listAuthzPermissions = async (
+  options?: RequestInit,
+): Promise<ListAuthzPermissions200> => {
+  return customFetch<ListAuthzPermissions200>(getListAuthzPermissionsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListAuthzPermissionsQueryKey = () => {
+  return [`/api/authz/permissions`] as const;
+};
+
+export const getListAuthzPermissionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAuthzPermissions>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listAuthzPermissions>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListAuthzPermissionsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listAuthzPermissions>>
+  > = ({ signal }) => listAuthzPermissions({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAuthzPermissions>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListAuthzPermissionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAuthzPermissions>>
+>;
+export type ListAuthzPermissionsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Permissiecatalogus
+ */
+
+export function useListAuthzPermissions<
+  TData = Awaited<ReturnType<typeof listAuthzPermissions>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listAuthzPermissions>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListAuthzPermissionsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Afdelingen (workspaces)
+ */
+export const getListAuthzDepartmentsUrl = () => {
+  return `/api/authz/departments`;
+};
+
+export const listAuthzDepartments = async (
+  options?: RequestInit,
+): Promise<DepartmentListResponse> => {
+  return customFetch<DepartmentListResponse>(getListAuthzDepartmentsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListAuthzDepartmentsQueryKey = () => {
+  return [`/api/authz/departments`] as const;
+};
+
+export const getListAuthzDepartmentsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAuthzDepartments>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listAuthzDepartments>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListAuthzDepartmentsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listAuthzDepartments>>
+  > = ({ signal }) => listAuthzDepartments({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAuthzDepartments>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListAuthzDepartmentsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAuthzDepartments>>
+>;
+export type ListAuthzDepartmentsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Afdelingen (workspaces)
+ */
+
+export function useListAuthzDepartments<
+  TData = Awaited<ReturnType<typeof listAuthzDepartments>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listAuthzDepartments>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListAuthzDepartmentsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Afdeling bijwerken
+ */
+export const getUpdateAuthzDepartmentUrl = (deptId: number) => {
+  return `/api/authz/departments/${deptId}`;
+};
+
+export const updateAuthzDepartment = async (
+  deptId: number,
+  departmentUpdateRequest: DepartmentUpdateRequest,
+  options?: RequestInit,
+): Promise<Department> => {
+  return customFetch<Department>(getUpdateAuthzDepartmentUrl(deptId), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(departmentUpdateRequest),
+  });
+};
+
+export const getUpdateAuthzDepartmentMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateAuthzDepartment>>,
+    TError,
+    { deptId: number; data: BodyType<DepartmentUpdateRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateAuthzDepartment>>,
+  TError,
+  { deptId: number; data: BodyType<DepartmentUpdateRequest> },
+  TContext
+> => {
+  const mutationKey = ["updateAuthzDepartment"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateAuthzDepartment>>,
+    { deptId: number; data: BodyType<DepartmentUpdateRequest> }
+  > = (props) => {
+    const { deptId, data } = props ?? {};
+
+    return updateAuthzDepartment(deptId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateAuthzDepartmentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateAuthzDepartment>>
+>;
+export type UpdateAuthzDepartmentMutationBody =
+  BodyType<DepartmentUpdateRequest>;
+export type UpdateAuthzDepartmentMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Afdeling bijwerken
+ */
+export const useUpdateAuthzDepartment = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateAuthzDepartment>>,
+    TError,
+    { deptId: number; data: BodyType<DepartmentUpdateRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateAuthzDepartment>>,
+  TError,
+  { deptId: number; data: BodyType<DepartmentUpdateRequest> },
+  TContext
+> => {
+  return useMutation(getUpdateAuthzDepartmentMutationOptions(options));
+};
+
+/**
+ * @summary Rollen & Rechten-matrix
+ */
+export const getGetRolesMatrixUrl = () => {
+  return `/api/authz/roles-matrix`;
+};
+
+export const getRolesMatrix = async (
+  options?: RequestInit,
+): Promise<RolesMatrixResponse> => {
+  return customFetch<RolesMatrixResponse>(getGetRolesMatrixUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetRolesMatrixQueryKey = () => {
+  return [`/api/authz/roles-matrix`] as const;
+};
+
+export const getGetRolesMatrixQueryOptions = <
+  TData = Awaited<ReturnType<typeof getRolesMatrix>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getRolesMatrix>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetRolesMatrixQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getRolesMatrix>>> = ({
+    signal,
+  }) => getRolesMatrix({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getRolesMatrix>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetRolesMatrixQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getRolesMatrix>>
+>;
+export type GetRolesMatrixQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Rollen & Rechten-matrix
+ */
+
+export function useGetRolesMatrix<
+  TData = Awaited<ReturnType<typeof getRolesMatrix>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getRolesMatrix>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetRolesMatrixQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Rollen & Rechten-matrix bijwerken
+ */
+export const getUpdateRolesMatrixUrl = () => {
+  return `/api/authz/roles-matrix`;
+};
+
+export const updateRolesMatrix = async (
+  rolesMatrixUpdateRequest: RolesMatrixUpdateRequest,
+  options?: RequestInit,
+): Promise<RolesMatrixResponse> => {
+  return customFetch<RolesMatrixResponse>(getUpdateRolesMatrixUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(rolesMatrixUpdateRequest),
+  });
+};
+
+export const getUpdateRolesMatrixMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateRolesMatrix>>,
+    TError,
+    { data: BodyType<RolesMatrixUpdateRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateRolesMatrix>>,
+  TError,
+  { data: BodyType<RolesMatrixUpdateRequest> },
+  TContext
+> => {
+  const mutationKey = ["updateRolesMatrix"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateRolesMatrix>>,
+    { data: BodyType<RolesMatrixUpdateRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateRolesMatrix(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateRolesMatrixMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateRolesMatrix>>
+>;
+export type UpdateRolesMatrixMutationBody = BodyType<RolesMatrixUpdateRequest>;
+export type UpdateRolesMatrixMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Rollen & Rechten-matrix bijwerken
+ */
+export const useUpdateRolesMatrix = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateRolesMatrix>>,
+    TError,
+    { data: BodyType<RolesMatrixUpdateRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateRolesMatrix>>,
+  TError,
+  { data: BodyType<RolesMatrixUpdateRequest> },
+  TContext
+> => {
+  return useMutation(getUpdateRolesMatrixMutationOptions(options));
+};
+
+/**
+ * @summary Toegangsrechten van een gebruiker
+ */
+export const getGetUserAuthzUrl = (userId: number) => {
+  return `/api/authz/users/${userId}`;
+};
+
+export const getUserAuthz = async (
+  userId: number,
+  options?: RequestInit,
+): Promise<UserAuthz> => {
+  return customFetch<UserAuthz>(getGetUserAuthzUrl(userId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetUserAuthzQueryKey = (userId: number) => {
+  return [`/api/authz/users/${userId}`] as const;
+};
+
+export const getGetUserAuthzQueryOptions = <
+  TData = Awaited<ReturnType<typeof getUserAuthz>>,
+  TError = ErrorType<unknown>,
+>(
+  userId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getUserAuthz>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetUserAuthzQueryKey(userId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getUserAuthz>>> = ({
+    signal,
+  }) => getUserAuthz(userId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!userId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getUserAuthz>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetUserAuthzQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getUserAuthz>>
+>;
+export type GetUserAuthzQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Toegangsrechten van een gebruiker
+ */
+
+export function useGetUserAuthz<
+  TData = Awaited<ReturnType<typeof getUserAuthz>>,
+  TError = ErrorType<unknown>,
+>(
+  userId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getUserAuthz>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetUserAuthzQueryOptions(userId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Toegangsrechten van een gebruiker bijwerken
+ */
+export const getUpdateUserAuthzUrl = (userId: number) => {
+  return `/api/authz/users/${userId}`;
+};
+
+export const updateUserAuthz = async (
+  userId: number,
+  userAuthzUpdateRequest: UserAuthzUpdateRequest,
+  options?: RequestInit,
+): Promise<UserAuthz> => {
+  return customFetch<UserAuthz>(getUpdateUserAuthzUrl(userId), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(userAuthzUpdateRequest),
+  });
+};
+
+export const getUpdateUserAuthzMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateUserAuthz>>,
+    TError,
+    { userId: number; data: BodyType<UserAuthzUpdateRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateUserAuthz>>,
+  TError,
+  { userId: number; data: BodyType<UserAuthzUpdateRequest> },
+  TContext
+> => {
+  const mutationKey = ["updateUserAuthz"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateUserAuthz>>,
+    { userId: number; data: BodyType<UserAuthzUpdateRequest> }
+  > = (props) => {
+    const { userId, data } = props ?? {};
+
+    return updateUserAuthz(userId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateUserAuthzMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateUserAuthz>>
+>;
+export type UpdateUserAuthzMutationBody = BodyType<UserAuthzUpdateRequest>;
+export type UpdateUserAuthzMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Toegangsrechten van een gebruiker bijwerken
+ */
+export const useUpdateUserAuthz = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateUserAuthz>>,
+    TError,
+    { userId: number; data: BodyType<UserAuthzUpdateRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateUserAuthz>>,
+  TError,
+  { userId: number; data: BodyType<UserAuthzUpdateRequest> },
+  TContext
+> => {
+  return useMutation(getUpdateUserAuthzMutationOptions(options));
+};
 
 /**
  * @summary List all users

@@ -120,6 +120,12 @@ async def lifespan(app: FastAPI):
             seed_users_only()
             logger.info("Startup: demo user accounts ensured.")
 
+            # 3-bis. Departments/permissies seeden + eenmalige migratie van
+            # bestaande gebruikers naar het granulaire model (taak 219).
+            from authz import seed_authz
+            seed_authz()
+            logger.info("Startup: authz (departments/permissies) ensured.")
+
             # 3a. Dev-only safety net: guarantee a recoverable admin login exists
             # locally without ever touching/deleting existing data (no-op in prod).
             from auth import create_default_admin_if_missing
@@ -326,6 +332,53 @@ async def observability_middleware(request: Request, call_next):
     return response
 
 
+# ------------------------------------------------------------------
+# Autorisatie-middleware (taak 219): dwingt de Route Registry-permissies
+# (authz.ROUTE_PERMISSIONS) af op ÉLKE /api-route, zodat verboden endpoints
+# ook via directe URL 403 geven. Menu-verbergen in de frontend is alleen UX.
+# Zonder (geldig) token laat de middleware het verzoek door: de bestaande
+# per-route dependencies geven dan zoals voorheen 401.
+# ------------------------------------------------------------------
+import authz as _authz
+import auth as _auth_utils
+import models
+import jwt as _pyjwt
+from database import SessionLocal as _AuthzSessionLocal
+
+
+@app.middleware("http")
+async def authz_middleware(request: Request, call_next):
+    # View-permissie per padsegment; voor schrijfmethodes geldt daarnaast
+    # een actie-permissie (bv. pricing.approve op goedkeurings-endpoints).
+    required = (_authz.required_action_permission(request.url.path, request.method)
+                or _authz.required_permission_for_path(request.url.path))
+    if required:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            try:
+                payload = _pyjwt.decode(token, _auth_utils.SECRET_KEY,
+                                        algorithms=[_auth_utils.ALGORITHM])
+                user_id = int(payload.get("sub"))
+            except Exception:
+                user_id = None
+            if user_id is not None:
+                db = _AuthzSessionLocal()
+                try:
+                    user = db.query(models.User).filter(models.User.id == user_id).first()
+                    if user and user.is_active and user.role != "admin":
+                        if required not in _authz.effective_permissions(db, user):
+                            return JSONResponse(
+                                status_code=403,
+                                content={"detail": f"Permissie '{required}' vereist",
+                                         "error_code": "PERMISSION_DENIED",
+                                         "required_permission": required},
+                            )
+                finally:
+                    db.close()
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -514,6 +567,8 @@ app.include_router(copilot.router)
 app.include_router(pim.router)
 app.include_router(command_center.router)
 app.include_router(governance.router)
+from routes import authz as authz_routes
+app.include_router(authz_routes.router)
 
 # Register whichever optional modules imported successfully above. Modules
 # that failed to import were already recorded in disabled_optional_routers

@@ -124,6 +124,7 @@ import CommandCenter from "@/pages/command-center";
 import PlatformGap from "@/pages/platform-gap";
 import DocsCenter from "@/pages/docs-center";
 import DevBacklog from "@/pages/dev-backlog";
+import Toegangsbeheer from "@/pages/toegangsbeheer";
 import Eindevaluatie from "@/pages/eindevaluatie";
 
 // ---------------------------------------------------------------------------
@@ -161,6 +162,47 @@ export const DOMEINEN: Domein[] = [
 // Route-definities
 // ---------------------------------------------------------------------------
 export type Rol = "viewer" | "analyst" | "pricing_manager" | "admin";
+
+// ---------------------------------------------------------------------------
+// Granulaire permissies (taak 219): elk domein heeft één view-permissie die
+// bepaalt of het domein zichtbaar/bereikbaar is. De backend dwingt dezelfde
+// permissies af op elke API-route — menu-verbergen hier is alleen UX.
+// ---------------------------------------------------------------------------
+export const DOMEIN_PERMISSIES: Record<DomeinId, string | null> = {
+  "command-center": null,               // altijd zichtbaar voor ingelogde gebruikers
+  "concurrentie": "competition.view",
+  "pricing": "pricing.view",
+  "catman": "catman.view",
+  "inkoop": "supplier.view",
+  "supply-chain": "supplychain.view",
+  "search-digital": "seo.view",
+  "promoties-loyalty": "promotions.view",
+  "forecast-risico": "forecast.view",
+  "product-data": "data.view",
+  "ai-besluitvorming": "ai.view",
+  "management": "management.view",
+  "beheer": "admin.manage",
+};
+
+/** Permissies van de ingelogde gebruiker (uit /api/auth/me). */
+export function gebruikersPermissies(user: any): Set<string> {
+  if (user?.role === "admin") return new Set(["*"]);
+  return new Set<string>(Array.isArray(user?.permissions) ? user.permissions : []);
+}
+
+function heeftPermissie(perms: Set<string>, code: string | null): boolean {
+  if (!code) return true;
+  return perms.has("*") || perms.has(code);
+}
+
+/** Mag de gebruiker deze route openen? (route-override of domein-permissie) */
+export function magRoute(route: RouteDef, user: any): boolean {
+  const perms = gebruikersPermissies(user);
+  const vereist = route.vereistePermissie !== undefined
+    ? route.vereistePermissie
+    : DOMEIN_PERMISSIES[route.domein];
+  return heeftPermissie(perms, vereist);
+}
 export type Afdeling =
   | "management" | "pricing" | "catman" | "inkoop" | "supply_chain"
   | "digital" | "marketing" | "data" | "beheer";
@@ -184,12 +226,18 @@ export interface RouteDef {
   breadcrumbParent?: string;
   /** Oude paden die permanent naar deze route redirecten. */
   aliases?: string[];
+  /**
+   * Granulaire permissie-override (taak 219). Standaard geldt de
+   * view-permissie van het domein (DOMEIN_PERMISSIES); `null` = geen
+   * permissie vereist (alle ingelogde gebruikers).
+   */
+  vereistePermissie?: string | null;
 }
 
 const r = (
   path: string, label: string, domein: DomeinId, component: ComponentType,
   positie: number,
-  opts: Partial<Pick<RouteDef, "permission" | "department" | "inSidebar" | "icon" | "breadcrumbParent" | "aliases">> = {},
+  opts: Partial<Pick<RouteDef, "permission" | "department" | "inSidebar" | "icon" | "breadcrumbParent" | "aliases" | "vereistePermissie">> = {},
 ): RouteDef => ({
   path, label, domein, component, positie,
   permission: opts.permission ?? "viewer",
@@ -198,6 +246,7 @@ const r = (
   icon: opts.icon,
   breadcrumbParent: opts.breadcrumbParent,
   aliases: opts.aliases,
+  ...(opts.vereistePermissie !== undefined ? { vereistePermissie: opts.vereistePermissie } : {}),
 });
 
 export const ROUTES: RouteDef[] = [
@@ -320,9 +369,10 @@ export const ROUTES: RouteDef[] = [
 
   // --- Beheer -------------------------------------------------------------------
   r("/instellingen", "Instellingen", "beheer", Instellingen, 1, { icon: Settings, permission: "pricing_manager", department: "beheer", aliases: ["/settings"] }),
-  r("/audit-log", "Audit Log", "beheer", AuditLogPage, 2, { icon: ClipboardList, permission: "pricing_manager", department: "beheer" }),
-  r("/documentatie", "Platformdocumentatie", "beheer", DocsCenter, 3, { icon: FileText, department: "beheer" }),
-  r("/backlog", "Development Backlog", "beheer", DevBacklog, 4, { icon: ClipboardList, department: "beheer" }),
+  r("/toegangsbeheer", "Afdelingen & Rechten", "beheer", Toegangsbeheer, 2, { icon: Shield, permission: "admin", department: "beheer" }),
+  r("/audit-log", "Audit Log", "beheer", AuditLogPage, 3, { icon: ClipboardList, permission: "pricing_manager", department: "beheer", vereistePermissie: "audit.view" }),
+  r("/documentatie", "Platformdocumentatie", "beheer", DocsCenter, 4, { icon: FileText, department: "beheer", vereistePermissie: null }),
+  r("/backlog", "Development Backlog", "beheer", DevBacklog, 5, { icon: ClipboardList, department: "beheer", vereistePermissie: null }),
 ];
 
 // ---------------------------------------------------------------------------
@@ -373,13 +423,25 @@ export interface SidebarGroep {
  * Sidebar-model: 13 domeinen in vaste volgorde met hun zichtbare routes.
  * "Mijn Dashboard" ("/") wordt apart bovenaan gepind en zit niet in een groep.
  */
-export function sidebarModel(): SidebarGroep[] {
+export function sidebarModel(user?: any): SidebarGroep[] {
+  // Workspace-domeinen (taak 219): afdelingen bepalen welke domeinen
+  // standaard zichtbaar zijn; extra permissies breiden de workspace uit.
+  // Zonder user (of voor admins) worden alle domeinen getoond.
+  const workspaceDomains: string[] | null =
+    user && user.role !== "admin" && Array.isArray(user?.workspace?.domains)
+      ? user.workspace.domains
+      : null;
   return [...DOMEINEN]
     .sort((a, b) => a.positie - b.positie)
+    .filter((domein) =>
+      domein.id === "command-center" ||
+      !workspaceDomains || workspaceDomains.includes(domein.id))
     .map((domein) => ({
       domein,
       items: ROUTES
-        .filter((route) => route.domein === domein.id && route.inSidebar && route.path !== "/")
+        .filter((route) =>
+          route.domein === domein.id && route.inSidebar && route.path !== "/" &&
+          (!user || magRoute(route, user)))
         .sort((a, b) => a.positie - b.positie),
     }))
     .filter((groep) => groep.items.length > 0);
