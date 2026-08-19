@@ -237,6 +237,12 @@ def test_approved_price_scenario_flows_into_execution(client, admin_headers, db,
         assert execution and execution["execution_staged"] is True
         rec_id = execution["recommendation_id"]
 
+        # Detail-GET blijft de klaargezette prijsregel tonen (badge overleeft refresh)
+        det2 = client.get(f"/api/decisions/{did}", params={"shop_id": shop_id}, headers=admin_headers).json()
+        assert det2.get("execution", {}).get("execution_staged") is True
+        assert det2["execution"]["recommendation_id"] == rec_id
+        assert "execution_job_id" not in det2["execution"]
+
         # Aanbeveling staat klaar in het bestaande execution-pad
         rec = db.get(models.FactPricingRecommendationDaily, rec_id)
         assert rec.source_decision_id == did
@@ -283,6 +289,10 @@ def test_approved_price_scenario_flows_into_execution(client, admin_headers, db,
         exec_event = next(e for e in hist["events"] if e["to_status"] == "executed")
         assert exec_event["values_snapshot"]["execution_job_id"] == job_id
         assert exec_event["values_snapshot"]["recommendation_id"] == rec_id
+
+        # Detail-GET toont nu ook de gekoppelde execution-job
+        det3 = client.get(f"/api/decisions/{did}", params={"shop_id": shop_id}, headers=admin_headers).json()
+        assert det3["execution"]["execution_job_id"] == job_id
     finally:
         db.rollback()
         sku_job_ids = [

@@ -21,7 +21,17 @@ async function apiFetch(path: string, options?: RequestInit) {
     ...options,
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(options?.headers || {}) },
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const text = await res.text();
+    let message = text;
+    try {
+      const body = JSON.parse(text);
+      if (body?.detail) message = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+    } catch { /* geen JSON-body */ }
+    const err = new Error(message) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
+  }
   return res.json();
 }
 
@@ -85,7 +95,13 @@ export default function BeslissingDetail() {
       setRejectOpen(false);
       setRejectReason("");
     },
-    onError: (e: any) => toast({ title: "Actie mislukt", description: String(e?.message || e), variant: "destructive" }),
+    onError: (e: any) => {
+      if (e?.status === 409) {
+        toast({ title: "Nog niet mogelijk", description: String(e?.message || e) });
+      } else {
+        toast({ title: "Actie mislukt", description: String(e?.message || e), variant: "destructive" });
+      }
+    },
   });
 
   if (isLoading || !data) {
@@ -151,6 +167,36 @@ export default function BeslissingDetail() {
             )}
           </div>
         </div>
+
+        {data.execution?.execution_staged && (
+          <Card className="border-green-300 bg-green-50/50" data-testid="card-execution-staged">
+            <CardContent className="py-4 flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2 text-sm text-green-800">
+                <PlayCircle className="h-4 w-4 shrink-0" />
+                <div>
+                  <span className="font-medium">
+                    {data.execution.execution_job_id
+                      ? "Prijsregel uitgevoerd via execution-job"
+                      : "Prijsregel klaargezet voor uitvoering"}
+                  </span>
+                  {data.execution.new_price != null && (
+                    <span> — nieuwe prijs €{Number(data.execution.new_price).toFixed(2)}</span>
+                  )}
+                  {data.execution.execution_job_id && (
+                    <span className="text-xs block text-green-700">
+                      Job: <span className="font-mono">{data.execution.execution_job_id}</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+              <Link href="/uitvoering">
+                <Button variant="outline" size="sm" data-testid="link-prijsuitvoering">
+                  Naar Prijsuitvoering <ExternalLink className="h-3.5 w-3.5 ml-1" />
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
+        )}
 
         {data.summary && (
           <Card className="border-primary/40">
@@ -283,6 +329,20 @@ export default function BeslissingDetail() {
                   {" — "}{e.actor} ({e.actor_type === "ai" ? "AI" : "mens"})
                   <span className="text-muted-foreground"> · {e.created_at?.replace("T", " ").slice(0, 16)}</span>
                   {e.note && <div className="text-muted-foreground">{e.note}</div>}
+                  {e.values_snapshot?.execution_staged && (
+                    <div className="text-xs text-green-700" data-testid={`event-execution-staged-${e.id}`}>
+                      Prijsregel klaargezet (aanbeveling #{e.values_snapshot.recommendation_id}
+                      {e.values_snapshot.new_price != null ? `, €${Number(e.values_snapshot.new_price).toFixed(2)}` : ""})
+                    </div>
+                  )}
+                  {e.values_snapshot?.execution_job_id && (
+                    <div className="text-xs text-green-700" data-testid={`event-execution-job-${e.id}`}>
+                      Gekoppelde execution-job: <span className="font-mono">{e.values_snapshot.execution_job_id}</span>
+                      {e.values_snapshot.execution_mode ? ` (${e.values_snapshot.execution_mode})` : ""}
+                      {" · "}
+                      <Link href="/uitvoering" className="underline hover:text-green-900">Prijsuitvoering</Link>
+                    </div>
+                  )}
                 </div>
               ))}
               <div className="text-xs text-muted-foreground pt-2">

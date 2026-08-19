@@ -205,6 +205,44 @@ def get_decision(
     out["signal_snapshot"] = d.signal_snapshot or []
     if d.entity_type == "category":
         out["category_context"] = _category_context(db, d.shop_id, d.entity_id)
+    execution = _execution_status(db, d)
+    if execution:
+        out["execution"] = execution
+    return out
+
+
+def _execution_status(db: Session, d: models.Decision) -> dict:
+    """Huidige uitvoeringsstatus van een beslissing: is er een prijsregel
+    klaargezet (FactPricingRecommendationDaily met source_decision_id) en zo
+    ja, is die al via een echte (niet-dry-run) execution-job uitgevoerd?
+    Zo blijft de badge 'Prijsregel klaargezet voor uitvoering' ook na een
+    pagina-refresh zichtbaar."""
+    staged = db.query(models.FactPricingRecommendationDaily).filter(
+        models.FactPricingRecommendationDaily.source_decision_id == d.id,
+    ).first()
+    if staged is None:
+        return {}
+    out = {
+        "execution_staged": True,
+        "recommendation_id": staged.id,
+        "new_price": float(staged.recommended_price) if staged.recommended_price is not None else None,
+    }
+    from services.execution_engine import DRY_RUN
+    row = (
+        db.query(models.PriceExecutionLine, models.PriceExecutionJob)
+        .join(models.PriceExecutionJob, models.PriceExecutionJob.job_id == models.PriceExecutionLine.job_id)
+        .filter(
+            models.PriceExecutionLine.recommendation_id == staged.id,
+            models.PriceExecutionLine.status == "goedgekeurd",
+            models.PriceExecutionJob.execution_mode != DRY_RUN,
+        )
+        .order_by(desc(models.PriceExecutionJob.created_at))
+        .first()
+    )
+    if row is not None:
+        line, job = row
+        out["execution_job_id"] = job.job_id
+        out["execution_mode"] = job.execution_mode
     return out
 
 
