@@ -1,0 +1,2718 @@
+# PLATFORMBREDE BOUWOPDRACHT
+
+## Centrale Producthiërarchie + Universele Filters + Nieuwe Navigatiestructuur + Afdelingsgerichte Workspaces
+
+Breid het bestaande AI Commercial Intelligence Platform uit met één centrale producthiërarchie die door de VOLLEDIGE applicatie wordt gebruikt.
+
+Dit is geen losse functionaliteit voor één module.
+
+De producthiërarchie moet een centrale dimensie van het gehele platform worden en moet gebruikt kunnen worden voor:
+
+* dashboards;
+* analyses;
+* rankings;
+* concurrentie;
+* pricing;
+* omzet;
+* marge;
+* traffic;
+* zoekdata;
+* leveranciers;
+* voorraad;
+* promoties;
+* BCG;
+* basketanalyse;
+* switching;
+* loyalty;
+* forecasts;
+* opportunities;
+* management;
+* Commercial Decision Engine;
+* Commercial AI Copilot.
+
+Tegelijkertijd moet de algemene navigatie van de applicatie veel duidelijker worden.
+
+Doel:
+
+1. Eén uniforme producthiërarchie.
+2. Eén universeel filtermechanisme.
+3. Logische hoofdonderdelen in de linker navigatie.
+4. Alle functionaliteit behorend bij één domein onder hetzelfde menuonderdeel.
+5. Afdelingsgerichte werkruimtes.
+6. Gebruikers zien standaard alleen relevante onderdelen.
+7. Autorisaties worden zowel functioneel als visueel toegepast.
+8. Management en geautoriseerde cross-functionele gebruikers kunnen over afdelingen heen kijken.
+
+==================================================
+
+1. EERST BESTAANDE APPLICATIE ANALYSEREN
+   ==================================================
+
+Inspecteer eerst de volledige bestaande applicatie.
+
+Breng in kaart:
+
+* huidige sidebar;
+* bestaande routes;
+* menu-items;
+* dashboards;
+* productfilters;
+* category filters;
+* bestaande producthiërarchie;
+* tabellen waarin categorie wordt opgeslagen;
+* DRS Product Master;
+* importtabellen;
+* bestaande gebruikersrollen;
+* bestaande afdelingen;
+* RBAC;
+* alle Intelligence Engines;
+* alle rapportages.
+
+Identificeer dubbele of inconsistente categorievelden.
+
+Voorbeelden:
+
+* category;
+* category_name;
+* category_id;
+* product_group;
+* subcategory;
+* department;
+* hierarchy;
+* taxonomy.
+
+Maak één migratieplan zodat bestaande functionaliteit dezelfde centrale producthiërarchie gaat gebruiken.
+
+Breek bestaande filters niet.
+
+Migreer iteratief.
+
+==================================================
+2. BRONDATA PRODUCTHIËRARCHIE
+=============================
+
+Gebruik het aangeleverde bestand:
+
+202608141341_0_Product_hierarchieen_met_ids(2).xlsx
+
+wanneer dit binnen het Replit-project beschikbaar is.
+
+Indien het bestand niet beschikbaar is:
+
+maak een importfunctie waarbij hetzelfde bestand opnieuw kan worden geüpload.
+
+Het bestand bevat:
+
+* optionId;
+* productcode;
+* path.
+
+De huidige dataset bevat ongeveer:
+
+* 114.849 productregels;
+* 1.474 unieke hiërarchiepaden;
+* 6 hoofdniveaugroepen;
+* hiërarchieën met 2 tot maximaal 6 niveaus.
+
+Gebruik deze aantallen alleen ter validatie van de eerste import.
+
+Hardcode de aantallen NIET.
+
+De applicatie moet ook toekomstige wijzigingen ondersteunen.
+
+==================================================
+3. VOORBEELDEN VAN DE ECHTE HIERARCHIE
+======================================
+
+De structuur bevat onder andere:
+
+Facility & Almere
+→ Office_food
+→ Drinks
+→ Coffee
+→ Beans
+
+Facility & Almere
+→ Office_food
+→ Drinks
+→ Coffee
+→ Cups
+
+Office classic
+→ Office_notes
+→ Sticky
+→ 76 x 76 mm
+→ Z-notes
+→ Z-notes dispensers
+
+Office classic
+→ Office_writing
+→ Marker
+→ Permanent marker
+→ Bullet point
+→ Eco
+
+Office classic
+→ Office_writing
+→ Marker
+→ Whiteboard marker
+→ Bullet point
+
+De applicatie mag daarom niet uitgaan van exact drie categorielevels.
+
+Ondersteun dynamisch minimaal:
+
+Level 1
+Level 2
+Level 3
+Level 4
+Level 5
+Level 6
+
+Architectuur moet later uitbreidbaar blijven naar meer niveaus.
+
+==================================================
+4. CENTRAAL PRODUCT HIERARCHY MODEL
+===================================
+
+Maak één canonical Product Hierarchy Model.
+
+Maak minimaal:
+
+product_hierarchy_nodes
+
+Velden:
+
+* id
+* external_option_id nullable
+* parent_id nullable
+* hierarchy_level
+* name
+* normalized_name
+* full_path
+* path_key
+* active
+* sort_order
+* valid_from
+* valid_until
+* source_system
+* source_updated_at
+* created_at
+* updated_at
+
+Maak daarnaast:
+
+product_hierarchy_assignments
+
+Velden:
+
+* id
+* product_id
+* product_code
+* hierarchy_node_id
+* hierarchy_path_id
+* external_option_id
+* is_primary
+* valid_from
+* valid_until
+* source_system
+* created_at
+* updated_at
+
+Maak daarnaast indien nuttig:
+
+product_hierarchy_paths
+
+Velden:
+
+* id
+* external_option_id
+* level_1_id nullable
+* level_2_id nullable
+* level_3_id nullable
+* level_4_id nullable
+* level_5_id nullable
+* level_6_id nullable
+* full_path
+* path_hash
+* active
+* source_system
+* valid_from
+* valid_until
+
+Voorkom dat dezelfde node tientallen keren wordt aangemaakt.
+
+Gebruik echte parent-child relaties.
+
+==================================================
+5. OPTIONID BEHOUDEN
+====================
+
+De aangeleverde dataset bevat optionId.
+
+Bewaar deze waarde.
+
+Gebruik optionId niet automatisch als primaire interne database-ID.
+
+Gebruik:
+
+internal immutable ID
+
+plus:
+
+external_option_id.
+
+Hierdoor blijft de applicatie onafhankelijk van wijzigingen in externe bronsystemen.
+
+==================================================
+6. PRODUCTCODE-KOPPELING
+========================
+
+Iedere productcode uit het bestand moet worden gekoppeld aan het bestaande centrale Product-record.
+
+Match bij voorkeur op:
+
+1. bestaand DRS product ID;
+2. productcode / SKU;
+3. eventueel gecontroleerde alternatieve identifier.
+
+Maak een importresultaat met:
+
+* productregels ontvangen;
+* producten gekoppeld;
+* producten niet gevonden;
+* dubbele productcodes;
+* conflicterende hiërarchieën;
+* nieuwe hiërarchiepaden;
+* gewijzigde hiërarchiepaden;
+* fouten;
+* warnings.
+
+Geen product mag stilzwijgend aan de verkeerde hiërarchie worden gekoppeld.
+
+==================================================
+7. PRODUCTHIERARCHIE ALS PLATFORMBREDE DIMENSIE
+===============================================
+
+Gebruik voortaan dezelfde hierarchy IDs in ALLE Intelligence Engines.
+
+Niet:
+
+Competition heeft eigen categorie A
+Pricing heeft categorie B
+Traffic heeft categorie C.
+
+Wel:
+
+Central Product Hierarchy
+↓
+Competition
+Pricing
+Brand
+Traffic
+Supplier
+Promotion
+Basket
+Forecast
+BCG
+Switching
+Loyalty
+Management
+Decision Engine
+Copilot
+
+Iedere module verwijst naar dezelfde:
+
+hierarchy_node_id
+
+en/of:
+
+hierarchy_path_id.
+
+==================================================
+8. UNIVERSELE PRODUCTHIERARCHIE FILTER
+======================================
+
+Maak één platformbrede hierarchy filter component.
+
+Deze component moet herbruikbaar zijn op alle relevante schermen.
+
+Naam:
+
+Producthiërarchie
+
+Gebruik een hiërarchische cascading filter.
+
+Voorbeeld:
+
+Niveau 1
+Facility & Almere
+
+↓
+
+Niveau 2
+Office_food
+
+↓
+
+Niveau 3
+Drinks
+
+↓
+
+Niveau 4
+Coffee
+
+↓
+
+Niveau 5
+Beans
+
+De gebruiker moet ook op een hoger niveau kunnen stoppen.
+
+Voorbeeld:
+
+Facility & Almere
+→ Office_food
+
+Dan moeten ALLE onderliggende producten worden meegenomen.
+
+==================================================
+9. FILTERCOMPONENT
+==================
+
+De filter moet ondersteunen:
+
+* zoeken;
+* boomstructuur;
+* uitklappen;
+* inklappen;
+* breadcrumb;
+* multi-select;
+* één niveau selecteren;
+* volledige subtree selecteren;
+* reset;
+* opgeslagen filter;
+* favorieten;
+* recent gebruikte filters.
+
+Toon altijd de actieve selectie.
+
+Bijvoorbeeld:
+
+Producthiërarchie:
+Facility & Almere
+/
+Office_food
+/
+Drinks
+/
+Coffee
+
+Maak het eenvoudig om één niveau terug te gaan.
+
+==================================================
+10. GLOBAL FILTER BAR
+=====================
+
+Voeg boven belangrijke dashboards een vaste Global Filter Bar toe.
+
+Ondersteun minimaal:
+
+SHOP
+
+LAND
+
+LEGAL ENTITY
+
+DATUM / PERIODE
+
+PRODUCTHIERARCHIE
+
+MERK
+
+LEVERANCIER
+
+SKU
+
+Waar relevant aanvullend:
+
+CONCURRENT
+
+KLANTSEGMENT
+
+VERKOOPKANAAL
+
+B2B/B2C
+
+De actieve filters moeten door onderliggende widgets worden gedeeld.
+
+==================================================
+11. FILTERCONTEXT BEHOUDEN
+==========================
+
+Wanneer een gebruiker bijvoorbeeld selecteert:
+
+Shop:
+123inkt NL
+
+Producthiërarchie:
+Facility & Almere
+→ Office_food
+→ Drinks
+→ Coffee
+
+Periode:
+Laatste 13 weken
+
+en daarna navigeert van:
+
+Competition
+
+naar:
+
+Pricing
+
+naar:
+
+Brand
+
+naar:
+
+Basket
+
+moeten dezelfde filters actief blijven.
+
+Gebruik hiervoor een:
+
+Global Filter Context.
+
+Filtercontext moet bij navigatie behouden blijven.
+
+==================================================
+12. FILTEREN VAN ALLE INTELLIGENCE ENGINES
+==========================================
+
+De Producthiërarchie-filter moet minimaal functioneren op:
+
+COMPETITION
+
+* competitors;
+* rankings;
+* competitor scores;
+* matches;
+* competitor prices;
+* threat analysis.
+
+PRICING
+
+* pricing grid;
+* recommendations;
+* price gaps;
+* margin;
+* simulations.
+
+BRAND
+
+* brand strength;
+* OEM;
+* private label;
+* substitution;
+* house-brand opportunity.
+
+BCG
+
+* Star;
+* Cash Cow;
+* Question Mark;
+* Dog.
+
+TRAFFIC
+
+* traffic;
+* conversion;
+* search volume;
+* demand.
+
+SEO / SEA / GEO / AEO
+
+* keywords;
+* queries;
+* visibility;
+* landing pages;
+* category performance;
+* search opportunities;
+* AI-search visibility.
+
+SUPPLIER
+
+* suppliers;
+* purchase price;
+* risk;
+* lead time.
+
+SUPPLY CHAIN
+
+* stock;
+* stockouts;
+* availability;
+* forecast;
+* inventory risk.
+
+PROMOTION
+
+* promotions;
+* uplift;
+* ROI;
+* cannibalisation.
+
+BASKET
+
+* associations;
+* cross-sell;
+* upsell.
+
+SWITCHING
+
+* brand switching;
+* cannibalisation;
+* category churn.
+
+LOYALTY
+
+* category participation;
+* customer value;
+* incentives.
+
+OPPORTUNITIES
+
+* commercial opportunities.
+
+DECISION ENGINE
+
+* recommendations;
+* scenarios.
+
+MANAGEMENT
+
+* all aggregated KPIs.
+
+==================================================
+13. DATABASE-QUERY GEDRAG
+=========================
+
+Een selectie van een parent node moet automatisch alle descendants meenemen.
+
+Voorbeeld:
+
+Office_writing
+
+moet resultaten bevatten van:
+
+Office_writing
+→ Marker
+→ Permanent marker
+→ Bullet point
+→ Eco
+
+maar ook alle andere kinderen onder Office_writing.
+
+Gebruik geen client-side filtering op honderdduizenden producten.
+
+Implementeer efficiënte databasequeries.
+
+Overweeg:
+
+* materialized path;
+* closure table;
+* recursive CTE;
+* cached descendant sets.
+
+Kies op basis van bestaande stack de meest robuuste oplossing.
+
+==================================================
+14. HIERARCHY SERVICE
+=====================
+
+Maak één centrale:
+
+ProductHierarchyService
+
+Verantwoordelijk voor:
+
+* tree ophalen;
+* descendants ophalen;
+* ancestors ophalen;
+* breadcrumb;
+* products per node;
+* import;
+* validation;
+* hierarchy version;
+* hierarchy mapping;
+* search.
+
+Voorbeelden API:
+
+GET /api/product-hierarchy
+
+GET /api/product-hierarchy/tree
+
+GET /api/product-hierarchy/{id}
+
+GET /api/product-hierarchy/{id}/children
+
+GET /api/product-hierarchy/{id}/descendants
+
+GET /api/product-hierarchy/{id}/products
+
+GET /api/product-hierarchy/search
+
+POST /api/product-hierarchy/import
+
+GET /api/product-hierarchy/imports
+
+==================================================
+15. HIERARCHIEVERSIES
+=====================
+
+Producthiërarchieën kunnen veranderen.
+
+Bewaar daarom historie.
+
+Ondersteun:
+
+* nieuwe node;
+* renamed node;
+* moved node;
+* inactive node;
+* product verplaatst;
+* nieuwe path;
+* oude path.
+
+Log:
+
+* oude waarde;
+* nieuwe waarde;
+* datum;
+* bron;
+* gebruiker;
+* reden.
+
+Historische analyses moeten bij voorkeur reproduceerbaar blijven.
+
+==================================================
+16. BELANGRIJKE NIEUWE NAVIGATIESTRUCTUUR
+=========================================
+
+Herontwerp de linker sidebar.
+
+De huidige applicatie moet veel overzichtelijker worden.
+
+Gebruik DOMEINEN als hoofdmenu.
+
+Niet tientallen losse menu-items door elkaar.
+
+Gebruik minimaal onderstaande hoofdstructuur.
+
+==================================================
+17. SIDEBAR – HOOFDMENU
+=======================
+
+### 1. COMMAND CENTER
+
+Onderdelen:
+
+* Mijn dashboard
+* Management overzicht
+* Opportunities
+* Risks
+* Pending approvals
+* AI Copilot
+
+### 2. CONCURRENTIE
+
+ALLE concurrentiegerelateerde functionaliteit moet hieronder vallen.
+
+Onderdelen:
+
+* Concurrentie Dashboard
+* Concurrent Ranking
+* Concurrenten
+* Concurrent Detail
+* Competition DNA
+* Concurrent Discovery
+* Assortimentsvergelijking
+* Product Matching
+* Matching Workbench
+* Prijswaarnemingen
+* Price Relevance
+* Influence Analysis
+* Future Threat
+* Service & Loyalty Comparison
+* Procurement Power
+* Validation Worklist
+* Competition Data Quality
+* Competition Configuratie
+
+Gebruik GEEN losse Competition-links buiten dit domein.
+
+### 3. PRICING
+
+Onderdelen:
+
+* Pricing Dashboard
+* Pricing Grid
+* Price Recommendations
+* Price Gaps
+* Margin Analysis
+* Price History
+* Elasticity
+* Price Scenarios
+* Pricing Approvals
+* Pricing Guardrails
+* Pricing Data Quality
+
+### 4. CATEGORY MANAGEMENT
+
+Label in UI:
+
+CatMan
+
+Onderdelen:
+
+* Category Dashboard
+* Assortiment
+* Category Performance
+* Brand Intelligence
+* Huismerk / OEM
+* BCG
+* Customer Switching
+* Cannibalisation
+* Basket Intelligence
+* Cross-sell
+* Promotion Intelligence
+* Category Opportunities
+* Category Risks
+
+### 5. INKOOP
+
+Onderdelen:
+
+* Inkoop Dashboard
+* Suppliers
+* Supplier Intelligence
+* Purchase Price Development
+* Supplier Comparison
+* Supplier Risk
+* Supplier Overlap
+* Procurement Opportunities
+* Contracten / afspraken indien beschikbaar
+* Inkoopmacht / Buying Groups
+* Cost Forecast
+* Supplier Data Quality
+
+### 6. SUPPLY CHAIN
+
+Onderdelen:
+
+* Supply Chain Dashboard
+* Voorraad
+* Stock History
+* Stockouts
+* Availability
+* Lead Times
+* Inventory Forecast
+* Demand Forecast
+* Supply Risk
+* Replenishment Signals
+* Logistics Intelligence
+
+### 7. SEARCH & DIGITAL GROWTH
+
+Gebruik als ondertitel:
+
+SEO / SEA / GEO / AEO
+
+Onderdelen:
+
+* Digital Growth Dashboard
+* SEO Intelligence
+* SEA Intelligence
+* Search Console
+* Google Analytics
+* Search Demand
+* Keyword Intelligence
+* Landing Page Performance
+* Category Visibility
+* Product Visibility
+* GEO Intelligence
+* AEO Intelligence
+* AI Search Visibility
+* Content Opportunities
+* Traffic Intelligence
+* Conversion Intelligence
+
+GEO betekent hier Generative Engine Optimization indien dit binnen de organisatie zo wordt gebruikt.
+
+AEO betekent Answer Engine Optimization.
+
+Maak termen configureerbaar indien interne terminologie anders is.
+
+### 8. PROMOTIES & LOYALTY
+
+Onderdelen:
+
+* Promotion Dashboard
+* Active Promotions
+* Promotion Analysis
+* Promotion Opportunities
+* Loyalty Dashboard
+* Customer Value
+* Churn
+* Next Best Action
+* Campaigns
+* Rewards
+* Vouchers
+
+### 9. FORECAST & RISICO
+
+Onderdelen:
+
+* Forecast Dashboard
+* Sales Forecast
+* Margin Forecast
+* Demand Forecast
+* Commercial Risk
+* External Risk
+* Scenario Analysis
+
+### 10. PRODUCT & DATA
+
+Onderdelen:
+
+* Product 360
+* Producthiërarchie
+* Product Master
+* Product Matching Data
+* Data Quality
+* Import Center
+* Data Sources
+* Synchronisaties
+
+PIM-functionaliteit kan hier later onder vallen.
+
+### 11. AI & BESLUITVORMING
+
+Onderdelen:
+
+* Commercial AI Copilot
+* Commercial Decision Engine
+* Scenario Comparison
+* AI Recommendations
+* AI Explainability
+* Approval Worklist
+* AI Model Runs
+
+### 12. MANAGEMENT
+
+Alleen zichtbaar voor geautoriseerde managementrollen.
+
+Onderdelen:
+
+* Executive Dashboard
+* Commercial Overview
+* Shop Comparison
+* Cost & Scalability
+* Business Value
+* ROI
+* Platform Readiness
+
+### 13. BEHEER
+
+Alleen voor Admin / technische rollen.
+
+Onderdelen:
+
+* Users
+* Roles
+* Departments
+* Permissions
+* Shops
+* Countries
+* Product Hierarchy Management
+* Configuration
+* Integrations
+* AI Gateway
+* Audit Log
+* Platform Health
+* Security
+* Development Backlog
+* Prompt Library
+
+==================================================
+18. AFDELINGSGERICHTE WORKSPACES
+================================
+
+De applicatie moet niet voor iedere gebruiker dezelfde tientallen menu-items tonen.
+
+Introduceer:
+
+Department Workspace
+
+Iedere gebruiker krijgt:
+
+* één primaire afdeling;
+* optioneel meerdere secundaire afdelingen;
+* één of meer rollen;
+* shop scope;
+* country scope;
+* legal entity scope.
+
+Voorbeelden afdelingen:
+
+* Category Management
+* Pricing
+* Inkoop
+* Supply Chain
+* SEO / SEA / GEO / AEO
+* Marketing
+* Loyalty / CRM
+* Management
+* Finance
+* Data / BI
+* IT / Admin
+
+==================================================
+19. CATMAN WORKSPACE
+====================
+
+Category Management ziet standaard:
+
+COMMAND CENTER
+
+CONCURRENTIE
+
+CATMAN
+
+PRICING – relevante views
+
+PROMOTIES – relevante views
+
+AI & BESLUITVORMING
+
+Geen technische beheerpagina's.
+
+CatMan moet bijvoorbeeld snel kunnen zien:
+
+* category performance;
+* concurrenten;
+* assortment;
+* brands;
+* BCG;
+* pricing;
+* switching;
+* cannibalisation;
+* basket;
+* promotion;
+* opportunities;
+* risks.
+
+==================================================
+20. PRICING WORKSPACE
+=====================
+
+Pricing ziet standaard:
+
+COMMAND CENTER
+
+CONCURRENTIE
+alle relevante pricing-concurrentie
+
+PRICING
+
+CATMAN
+alleen noodzakelijke read-only intelligence
+
+AI & BESLUITVORMING
+
+Pricing hoeft standaard niet te zien:
+
+* Supplier Administration;
+* SEO instellingen;
+* Loyalty administratie;
+* technische integrations.
+
+==================================================
+21. INKOOP WORKSPACE
+====================
+
+Inkoop ziet standaard:
+
+COMMAND CENTER
+
+INKOOP
+
+SUPPLY CHAIN
+relevante informatie
+
+CONCURRENTIE
+alleen relevante procurement/assortment views
+
+PRODUCT & DATA
+relevante product- en leveranciersinformatie
+
+AI & BESLUITVORMING
+
+Belangrijke inzichten:
+
+* supplier pricing;
+* supplier risk;
+* supplier overlap;
+* procurement power;
+* alternative suppliers;
+* cost forecast;
+* buying groups;
+* competitor procurement signals.
+
+==================================================
+22. SUPPLY CHAIN WORKSPACE
+==========================
+
+Supply Chain ziet standaard:
+
+COMMAND CENTER
+
+SUPPLY CHAIN
+
+INKOOP
+relevante read-only supplierinformatie
+
+FORECAST & RISICO
+
+PRODUCT & DATA
+voorraad/productcontext
+
+AI & BESLUITVORMING
+
+Focus:
+
+* voorraad;
+* stockouts;
+* lead times;
+* demand;
+* replenishment;
+* supplier risk;
+* availability;
+* forecasts.
+
+==================================================
+23. SEO / SEA / GEO / AEO WORKSPACE
+===================================
+
+Deze afdeling ziet standaard:
+
+COMMAND CENTER
+
+SEARCH & DIGITAL GROWTH
+
+CONCURRENTIE
+alleen Traffic/Visibility-gerelateerde concurrentie
+
+CATMAN
+read-only categorie/brandinformatie waar relevant
+
+PRODUCT & DATA
+relevante productinformatie
+
+AI & BESLUITVORMING
+
+Focus:
+
+* SEO;
+* SEA;
+* GA4;
+* Search Console;
+* organic visibility;
+* paid visibility;
+* keywords;
+* search demand;
+* conversion;
+* GEO;
+* AEO;
+* AI search visibility;
+* content opportunities.
+
+==================================================
+24. MANAGEMENT WORKSPACE
+========================
+
+Management ziet:
+
+COMMAND CENTER
+
+MANAGEMENT
+
+AI & BESLUITVORMING
+
+en geaggregeerde informatie uit:
+
+* Competition
+* Pricing
+* CatMan
+* Inkoop
+* Supply Chain
+* Digital Growth
+* Loyalty
+
+Management hoeft standaard niet alle operationele beheerpagina's te zien.
+
+Management kan wel doordrillen indien geautoriseerd.
+
+==================================================
+25. FINANCE WORKSPACE
+=====================
+
+Finance ziet bijvoorbeeld:
+
+COMMAND CENTER
+
+PRICING
+financiële onderdelen
+
+PROMOTIES
+ROI
+
+LOYALTY
+liability
+
+MANAGEMENT
+kosten / business value
+
+Geen concurrentmatching-workbench tenzij expliciet toegekend.
+
+==================================================
+26. DATA / BI WORKSPACE
+=======================
+
+Data / BI ziet:
+
+PRODUCT & DATA
+
+DATA QUALITY
+
+INTEGRATIONS
+
+MODEL RUNS
+
+REPORTING
+
+platformbrede read-access waar toegestaan.
+
+Geen commerciële approvalrechten standaard.
+
+==================================================
+27. ADMIN WORKSPACE
+===================
+
+Admin ziet:
+
+alles waarvoor expliciete rechten bestaan.
+
+Daarnaast:
+
+* Users
+* Roles
+* Departments
+* Permissions
+* Shops
+* Integrations
+* Security
+* Configuration
+* Audit
+* Platform Health
+
+==================================================
+28. MENU-ZICHTBAARHEID IS NIET HETZELFDE ALS SECURITY
+=====================================================
+
+Zeer belangrijk.
+
+Menu-items verbergen is alleen UX.
+
+Werkelijke beveiliging moet backend-side plaatsvinden.
+
+Iedere route, API en semantic function controleert:
+
+* user;
+* role;
+* department;
+* permission;
+* shop_scope;
+* country_scope;
+* legal_entity_scope.
+
+Een gebruiker mag een verboden API niet kunnen openen door handmatig een URL te typen.
+
+==================================================
+29. PERMISSION MODEL
+====================
+
+Maak permissies functioneel.
+
+Bijvoorbeeld:
+
+competition.view
+
+competition.edit
+
+competition.approve
+
+competition.match.review
+
+pricing.view
+
+pricing.propose
+
+pricing.approve
+
+supplier.view
+
+supplier.edit
+
+traffic.view
+
+seo.view
+
+sea.view
+
+geo.view
+
+aeo.view
+
+supply_chain.view
+
+loyalty.view
+
+loyalty.manage
+
+management.view
+
+admin.manage
+
+Maak granular permissions.
+
+Gebruik niet alleen één grote ADMIN of USER rol.
+
+==================================================
+30. DEPARTMENT + ROLE + SCOPE
+=============================
+
+Gebruik drie aparte concepten.
+
+DEPARTMENT
+
+Waar werkt iemand?
+
+Voorbeeld:
+
+Category Management.
+
+ROLE
+
+Wat is de verantwoordelijkheid?
+
+Voorbeeld:
+
+Category Manager.
+
+PERMISSION
+
+Welke actie mag iemand uitvoeren?
+
+Voorbeeld:
+
+competition.approve.
+
+SCOPE
+
+Welke data mag iemand zien?
+
+Voorbeeld:
+
+shop NL.
+
+Combineer:
+
+User
+→ Department
+→ Role
+→ Permission
+→ Data Scope.
+
+==================================================
+31. PERSONALISEERBARE SIDEBAR
+=============================
+
+Sidebar toont alleen toegestane hoofdgebieden.
+
+Ondersteun:
+
+* inklapbare groepen;
+* submenu;
+* favorites;
+* recent used;
+* pinned pages.
+
+Bewaar voorkeur per gebruiker.
+
+==================================================
+32. DUIDELIJKE LABELS
+=====================
+
+Gebruik in de Nederlandse interface begrijpelijke labels.
+
+Bijvoorbeeld:
+
+Competition Intelligence
+→ Concurrentie
+
+Customer Switching & Cannibalisation
+→ Klantoverstap & Kannibalisatie
+
+Supplier Intelligence
+→ Leveranciersanalyse
+
+Traffic & Demand
+→ Traffic & Vraag
+
+Commercial Decision Engine
+→ Commerciële Besluitvorming
+
+Gebruik technische Engelse termen alleen als deze intern gebruikelijk zijn.
+
+==================================================
+33. BREADCRUMBS
+===============
+
+Toon boven ieder scherm een duidelijke breadcrumb.
+
+Bijvoorbeeld:
+
+Concurrentie
+
+>
+
+Product Matching
+
+>
+
+Office classic
+
+>
+
+Office_writing
+
+>
+
+Marker
+
+of:
+
+CatMan
+
+>
+
+Customer Switching
+
+>
+
+Facility & Almere
+
+>
+
+Office_food
+
+>
+
+Drinks
+
+>
+
+Coffee
+
+==================================================
+34. PRODUCTHIERARCHIE OOK IN PAGINATITEL
+========================================
+
+Wanneer een hiërarchiefilter actief is, toon deze context bovenaan.
+
+Bijvoorbeeld:
+
+Concurrentie Dashboard
+
+Facility & Almere
+→ Office_food
+→ Drinks
+→ Coffee
+
+Periode: laatste 13 weken
+
+Shop: 123inkt NL
+
+Zo weet de gebruiker altijd naar welke data hij kijkt.
+
+==================================================
+35. URL / DEEP LINK FILTERS
+===========================
+
+Maak geselecteerde filters waar mogelijk onderdeel van URL state.
+
+Hierdoor kan een gebruiker een analyse delen.
+
+Bijvoorbeeld:
+
+/competition/ranking?
+shop=NL
+&hierarchy=1234
+&period=13w
+
+Respecteer altijd autorisatie.
+
+Een gedeelde URL geeft geen aanvullende rechten.
+
+==================================================
+36. SAVED VIEWS
+===============
+
+Laat gebruikers persoonlijke views opslaan.
+
+Voorbeelden:
+
+“Mijn Office Food overzicht”
+
+“Markers Competition”
+
+“Paper Copy Pricing”
+
+“Coffee Switching”
+
+Bewaar:
+
+* filter;
+* sort;
+* columns;
+* dashboard configuration.
+
+Ondersteun:
+
+Private
+
+Team
+
+Department
+
+indien rechten dit toestaan.
+
+==================================================
+37. DEPARTMENT DEFAULT VIEWS
+============================
+
+Maak standaardviews per afdeling.
+
+Bijvoorbeeld:
+
+CatMan startpagina:
+
+* Category Performance
+* Competition
+* Margin
+* Brand
+* Opportunities
+* Risks.
+
+Inkoop:
+
+* Supplier Risk
+* Cost Developments
+* Stock
+* Procurement Opportunities.
+
+Digital Growth:
+
+* Traffic
+* Search Demand
+* SEO
+* SEA
+* GEO
+* AEO
+* Competition Visibility.
+
+Pricing:
+
+* Price Opportunities
+* Margin
+* Competitor Prices
+* Pending Decisions.
+
+==================================================
+38. CROSS-FUNCTIONELE SIGNALEN
+==============================
+
+Gebruikers moeten niet onnodig alle andere afdelingsschermen zien om relevante informatie te ontvangen.
+
+Gebruik Intelligence Signals.
+
+Voorbeeld:
+
+SEO ontdekt:
+
+“Search demand Coffee +20%”
+
+CatMan hoeft niet naar SEO Dashboard.
+
+CatMan krijgt in Category Dashboard:
+
+Demand Signal:
++20%
+
+Bron:
+Search & Digital Growth.
+
+Inkoop krijgt bijvoorbeeld:
+
+“Expected demand +20%, voorraaddekking laag.”
+
+Pricing krijgt:
+
+“Demand increasing, competitor pricing stable.”
+
+Zo delen modules intelligence zonder iedereen alle schermen te geven.
+
+==================================================
+39. COMMAND CENTER PER GEBRUIKER
+================================
+
+Maak “Mijn Dashboard” afhankelijk van afdeling en rechten.
+
+Toon:
+
+* relevante KPI's;
+* relevante opportunities;
+* relevante risks;
+* pending approvals;
+* alerts;
+* AI recommendations.
+
+Geen generiek dashboard voor iedereen.
+
+==================================================
+40. GLOBAL SEARCH
+=================
+
+Voeg platformbrede zoekfunctie toe.
+
+Zoek op:
+
+* SKU;
+* productcode;
+* EAN;
+* OEM;
+* product;
+* hierarchy node;
+* category;
+* brand;
+* supplier;
+* competitor.
+
+Resultaten worden gefilterd op permissies.
+
+==================================================
+41. COMMERCIAL AI COPILOT EN PRODUCTHIERARCHIE
+==============================================
+
+De Copilot moet producthiërarchie begrijpen.
+
+Voorbeelden:
+
+“Welke concurrenten zijn belangrijk binnen Office Food?”
+
+“Wat gebeurt er binnen Coffee?”
+
+“Welke Marker subcategorie verliest de meeste marge?”
+
+“Welke onderdelen onder Office_writing hebben hoge concurrentiedruk?”
+
+Copilot vertaalt dit naar de centrale hierarchy IDs.
+
+Gebruik niet alleen tekstmatching.
+
+==================================================
+42. COPILOT EN DEPARTMENT PERMISSIONS
+=====================================
+
+Copilot respecteert dezelfde afdelingsrechten.
+
+Een SEO-gebruiker mag bijvoorbeeld vragen:
+
+“Welke categorie heeft de grootste organische opportunity?”
+
+Maar krijgt niet automatisch vertrouwelijke supplier contractdata.
+
+Een Inkoop-gebruiker mag supplierinformatie gebruiken.
+
+CatMan mag commerciële categorie-informatie combineren.
+
+Management kan afhankelijk van rechten cross-functioneel analyseren.
+
+==================================================
+43. DEPARTMENT-AWARE COPILOT
+============================
+
+Laat de Copilot context begrijpen.
+
+Bijvoorbeeld:
+
+Pricing Specialist vraagt:
+
+“Wat vraagt vandaag aandacht?”
+
+Prioriteer:
+
+* pricing;
+* margin;
+* competition;
+* price opportunities.
+
+SEO Specialist vraagt dezelfde vraag.
+
+Prioriteer:
+
+* traffic;
+* search;
+* visibility;
+* conversion;
+* GEO/AEO.
+
+Inkoop:
+
+* supplier;
+* purchase costs;
+* stock;
+* procurement risk.
+
+==================================================
+44. FILTER DATA IN COMMERCIAL DECISION ENGINE
+=============================================
+
+Decision Engine gebruikt dezelfde Global Filter Context.
+
+Als CatMan selecteert:
+
+Facility & Almere
+→ Office_food
+→ Drinks
+→ Coffee
+
+dan worden alleen Intelligence Signals gebruikt die binnen deze selectie vallen.
+
+Geen signalen uit unrelated categories in dezelfde scenarioanalyse.
+
+==================================================
+45. HIERARCHY DATA QUALITY
+==========================
+
+Voeg Product Hierarchy toe aan Data Quality Center.
+
+Controleer:
+
+* product zonder hierarchy;
+* onbekende optionId;
+* productcode niet gevonden;
+* meerdere primaire hierarchies;
+* parent ontbreekt;
+* orphan node;
+* duplicate path;
+* duplicate option ID;
+* invalid level;
+* inactive path met actieve producten;
+* product zonder leaf node;
+* conflict met DRS.
+
+Toon:
+
+* probleem;
+* aantal producten;
+* impact;
+* mogelijke oplossing.
+
+==================================================
+46. HIERARCHY MANAGEMENT UI
+===========================
+
+Maak onder:
+
+Product & Data
+→ Producthiërarchie
+
+een overzichtelijke beheeromgeving.
+
+Toon links:
+
+Tree.
+
+Rechts:
+
+geselecteerde node.
+
+Informatie:
+
+* naam;
+* level;
+* parent;
+* full path;
+* optionId;
+* aantal directe producten;
+* totaal producten descendants;
+* child nodes;
+* source;
+* last sync;
+* status.
+
+Alleen bevoegde gebruikers mogen wijzigingen maken.
+
+==================================================
+47. PRODUCT HIERARCHY DASHBOARD
+===============================
+
+Toon:
+
+* totaal products;
+* products linked;
+* products unlinked;
+* total nodes;
+* paths;
+* max depth;
+* root groups;
+* hierarchy data quality;
+* last import.
+
+Toon hoofdgroepen uit de actuele data.
+
+Geen hardcoded lijst.
+
+==================================================
+48. IMPORT WORKFLOW
+===================
+
+Maak import wizard.
+
+STAP 1
+
+Upload XLS/XLSX/CSV.
+
+STAP 2
+
+Kolommen detecteren.
+
+Voor huidige bestand:
+
+optionId
+
+productcode
+
+path.
+
+STAP 3
+
+Preview.
+
+STAP 4
+
+Validatie.
+
+STAP 5
+
+Impact analysis.
+
+Toon:
+
+* nieuwe paths;
+* gewijzigde paths;
+* nieuwe assignments;
+* verwijderde assignments;
+* conflicten.
+
+STAP 6
+
+Human approval.
+
+STAP 7
+
+Import.
+
+STAP 8
+
+Audit log.
+
+==================================================
+49. GEEN DESTRUCTIEVE IMPORT
+============================
+
+Een nieuwe hierarchy-import mag nooit stilzwijgend bestaande mappings verwijderen.
+
+Gebruik:
+
+staging
+→ validate
+→ compare
+→ approve
+→ apply.
+
+==================================================
+50. PERFORMANCE
+===============
+
+De huidige bron bevat meer dan honderdduizend productregels.
+
+Ontwerp daarom voor schaal.
+
+Niet:
+
+volledige hierarchy + alle productrecords naar browser sturen.
+
+Gebruik:
+
+* lazy loading;
+* server-side search;
+* pagination;
+* caching;
+* indexed hierarchy IDs;
+* optimized descendant queries.
+
+Doel:
+
+filters moeten snel reageren.
+
+==================================================
+51. MOBILE / SMALL SCREEN
+=========================
+
+Sidebar moet inklapbaar zijn.
+
+Global filters moeten op kleinere schermen in een filter drawer kunnen openen.
+
+Desktop blijft primaire use-case.
+
+==================================================
+52. UI CONSISTENCY
+==================
+
+Gebruik één design system voor:
+
+* navigation;
+* cards;
+* filters;
+* tables;
+* badges;
+* confidence;
+* approvals;
+* warnings.
+
+Maak modules visueel herkenbaar maar niet als losse applicaties.
+
+==================================================
+53. INFO-KNOPPEN
+================
+
+Voeg relevante “i”-informatie toe.
+
+Bij Producthiërarchie:
+
+Leg uit:
+
+* wat Level 1 t/m 6 betekenen;
+* waar gegevens vandaan komen;
+* wanneer laatst bijgewerkt;
+* welke producten onder een geselecteerde node vallen.
+
+Bij filters:
+
+“Deze selectie wordt toegepast op alle onderliggende niveaus.”
+
+==================================================
+54. AFDELINGSBEHEER
+===================
+
+Maak onder:
+
+Beheer
+→ Departments
+
+een configuratiescherm.
+
+Admin kan instellen:
+
+* department name;
+* default workspace;
+* visible navigation domains;
+* default permissions;
+* default dashboard;
+* permitted Intelligence Engines.
+
+Geen wijziging zonder audittrail.
+
+==================================================
+55. ROLE MATRIX UI
+==================
+
+Maak:
+
+Beheer
+→ Rollen & Rechten
+
+Matrix:
+
+```
+            CatMan  Pricing  Inkoop  SEO  Supply Chain
+```
+
+Competition      ✓       ✓       limited ...
+Pricing          ✓       ✓
+Supplier                 limited ✓
+Traffic           read           ... ✓
+etc.
+
+Werkelijke matrix wordt vanuit permissions opgebouwd.
+
+Niet hardcoded in UI.
+
+==================================================
+56. CROSS-DEPARTMENT ACCESS
+===========================
+
+Een gebruiker kan meerdere afdelingen/rechten hebben.
+
+Voorbeeld:
+
+Senior Category Manager
+
+Department:
+CatMan
+
+Extra permission:
+Pricing View.
+
+Of:
+
+Commercial Director
+
+Departments:
+Management
+
+Permissions:
+cross-functional read.
+
+Ondersteun dit zonder aparte accounttypen te bouwen.
+
+==================================================
+57. AUDIT
+=========
+
+Log:
+
+* hierarchy imports;
+* mapping changes;
+* permission changes;
+* department changes;
+* saved shared views;
+* configuration changes.
+
+==================================================
+58. TESTS PRODUCTHIERARCHIE
+===========================
+
+Schrijf minimaal tests voor:
+
+* import;
+* duplicate paths;
+* parent-child relationships;
+* optionId;
+* product assignment;
+* hierarchy selection;
+* descendants;
+* global filters;
+* saved filter;
+* cross-module filters;
+* inactive hierarchy;
+* changed hierarchy.
+
+==================================================
+59. TESTS RBAC / DEPARTMENT
+===========================
+
+Test minimaal:
+
+CatMan ziet CatMan.
+
+Inkoop ziet Inkoop.
+
+SEO/SEA/GEO/AEO ziet Digital Growth.
+
+Pricing ziet Pricing.
+
+Supply Chain ziet Supply Chain.
+
+Een gebruiker zonder supplier.permission kan supplier endpoints niet openen.
+
+Een verborgen menu-item mag via URL niet toegankelijk worden.
+
+Copilot respecteert dezelfde rechten.
+
+==================================================
+60. END-TO-END TEST
+===================
+
+Test deze flow:
+
+Selecteer:
+
+Shop:
+123inkt NL
+
+Producthiërarchie:
+
+Facility & Almere
+→ Office_food
+→ Drinks
+→ Coffee
+
+Ga naar:
+
+Competition.
+
+Controleer gefilterde concurrenten.
+
+Ga daarna naar:
+
+Brand.
+
+Zelfde hierarchy actief.
+
+Ga naar:
+
+Switching.
+
+Zelfde hierarchy actief.
+
+Ga naar:
+
+Pricing.
+
+Zelfde hierarchy actief.
+
+Ga naar:
+
+Basket.
+
+Zelfde hierarchy actief.
+
+Open:
+
+Commercial Decision Engine.
+
+Alle gebruikte signalen vallen binnen Coffee.
+
+Vraag Copilot:
+
+“Wat zijn de belangrijkste commerciële ontwikkelingen binnen deze selectie?”
+
+Controleer:
+
+* hierarchy;
+* period;
+* shop;
+* permissions;
+* sources.
+
+==================================================
+61. TWEEDE END-TO-END TEST
+==========================
+
+Selecteer:
+
+Office classic
+→ Office_writing
+→ Marker.
+
+Controleer:
+
+* Competition;
+* Matching;
+* Pricing;
+* Brand;
+* Traffic;
+* Opportunities.
+
+Drill vervolgens naar:
+
+Permanent marker
+→ Bullet point
+→ Eco.
+
+Controleer dat iedere module dezelfde kleinere productset gebruikt.
+
+==================================================
+62. MANAGEMENT CROSS-SHOP
+=========================
+
+Management moet, wanneer geautoriseerd, kunnen filteren op:
+
+* één shop;
+* meerdere shops;
+* all shops;
+* land;
+* product hierarchy.
+
+Voorbeeld:
+
+Vergelijk Coffee performance over verschillende shops.
+
+Gebruik dezelfde hierarchy mapping waar mogelijk.
+
+Als hiërarchieën per shop verschillen:
+
+maak expliciete mapping.
+
+==================================================
+63. DATA MODEL VOOR SHOP-SPECIFIEKE HIERARCHIE
+==============================================
+
+Architectuur moet ondersteunen:
+
+global hierarchy
+
+plus indien noodzakelijk:
+
+shop-specific mapping.
+
+Maak niet automatisch een aparte hierarchy per shop.
+
+Gebruik:
+
+canonical hierarchy
++
+shop mapping.
+
+==================================================
+64. ACTIEVE FILTERS ZICHTBAAR MAKEN
+===================================
+
+Boven ieder belangrijk dashboard:
+
+ACTIVE CONTEXT
+
+Shop: 123inkt NL
+
+Product:
+Office Food > Drinks > Coffee
+
+Period:
+13 weeks
+
+Brand:
+All
+
+Maak reset-knop:
+
+Alle filters wissen.
+
+==================================================
+65. DASHBOARD KPI'S MOETEN FILTER REAGEREN
+==========================================
+
+Alle KPI cards, charts en tables op een scherm moeten dezelfde filtercontext respecteren.
+
+Geen situatie waarbij:
+
+bovenste KPI = totaal platform
+
+maar tabel = Coffee.
+
+Maak filter scope zichtbaar indien een widget bewust afwijkend is.
+
+==================================================
+66. EXPORTS RESPECTEREN FILTERS
+===============================
+
+CSV/XLSX/PDF exports gebruiken:
+
+* actuele filter;
+* user scope;
+* permissions.
+
+Export bevat metadata:
+
+* generated at;
+* user;
+* shop;
+* period;
+* hierarchy;
+* filters.
+
+==================================================
+67. COMMERCIAL SIGNALS HIERARCHY-AWARE
+======================================
+
+Voeg aan IntelligenceSignal toe:
+
+* hierarchy_node_id;
+* hierarchy_path_id;
+* hierarchy_level.
+
+Hierdoor kunnen signalen worden geaggregeerd van:
+
+SKU
+→ subcategory
+→ category
+→ parent category.
+
+==================================================
+68. OPPORTUNITY ENGINE HIERARCHY-AWARE
+======================================
+
+Opportunities moeten filterbaar zijn op hierarchy.
+
+Voorbeelden:
+
+Office Food:
+12 opportunities.
+
+Coffee:
+4 opportunities.
+
+Beans:
+2 opportunities.
+
+Management kan vanuit een hoger niveau doordrillen.
+
+==================================================
+69. MANAGEMENT AGGREGATIE
+=========================
+
+Management moet bijvoorbeeld kunnen zien:
+
+Facility & Almere
+
+→ Revenue
+→ Margin
+→ Opportunities
+→ Risks
+
+en vervolgens doordrillen naar:
+
+Office_food
+
+→ Drinks
+
+→ Coffee.
+
+Gebruik dezelfde producthiërarchie.
+
+==================================================
+70. AFDELINGSSTRUCTUUR IS UX + GOVERNANCE
+=========================================
+
+Het doel is tweeledig.
+
+UX:
+
+gebruikers zien minder ruis.
+
+GOVERNANCE:
+
+gebruikers krijgen alleen data en acties waarvoor zij rechten hebben.
+
+Bouw beide.
+
+==================================================
+71. AANBEVOLEN SIDEBAR VOLGORDE PER USER
+========================================
+
+Toon “Mijn Dashboard” altijd bovenaan.
+
+Daarna alleen relevante domeinen.
+
+Bijvoorbeeld CATMAN:
+
+## Mijn Dashboard
+
+Concurrentie
+Category Management
+Pricing
+Promoties
+AI & Besluitvorming
+-------------------
+
+Product & Data
+Help
+
+INKOOP:
+
+## Mijn Dashboard
+
+Inkoop
+Supply Chain
+Concurrentie
+Forecast & Risico
+AI & Besluitvorming
+-------------------
+
+Product & Data
+Help
+
+DIGITAL GROWTH:
+
+## Mijn Dashboard
+
+Search & Digital Growth
+Concurrentie
+Category Insights
+AI & Besluitvorming
+-------------------
+
+Product & Data
+Help
+
+==================================================
+72. FAVORIETEN
+==============
+
+Gebruikers kunnen maximaal relevante pagina's pinnen boven de sidebar.
+
+Voorbeeld:
+
+⭐ Coffee Competition
+⭐ Pricing Grid
+⭐ Category Opportunities.
+
+==================================================
+73. HELP & DEFINITIES
+=====================
+
+Voeg centrale:
+
+Help / Begrippen
+
+toe.
+
+Zoekbaar op:
+
+* CRS;
+* Price Relevance;
+* Influence;
+* BCG;
+* CLV;
+* GEO;
+* AEO;
+* Cannibalisation;
+* Product Hierarchy.
+
+==================================================
+74. MIGRATIE BESTAANDE SCHERMEN
+===============================
+
+Maak een lijst van alle bestaande routes.
+
+Map iedere route naar het juiste hoofdmenu.
+
+Voorbeeld:
+
+competitor-dashboard
+→ Concurrentie
+
+matching-workbench
+→ Concurrentie
+
+competitor-data-quality
+→ Concurrentie
+
+supplier-risk
+→ Inkoop
+
+stock-dashboard
+→ Supply Chain
+
+traffic
+→ Search & Digital Growth.
+
+Geen orphan pages.
+
+==================================================
+75. ROUTE REGISTRY
+==================
+
+Maak indien passend één centrale Route Registry.
+
+Iedere route definieert:
+
+* domain;
+* label;
+* icon;
+* permission;
+* department default;
+* navigation position;
+* breadcrumb.
+
+Hierdoor worden sidebar en permissions niet op meerdere plaatsen handmatig onderhouden.
+
+==================================================
+76. GEEN DUBBELE MENU-ITEMS
+===========================
+
+Functionaliteit hoort maar in één primair domein.
+
+Andere afdelingen kunnen deeplinks krijgen.
+
+Voorbeeld:
+
+Product Matching hoort primair onder:
+
+Concurrentie.
+
+CatMan kan Product Matching zien als hij permission heeft.
+
+Maar maak niet ook een tweede Product Matching pagina onder CatMan.
+
+==================================================
+77. PLAN MODE – EERST BEOORDELEN
+================================
+
+Gebruik deze opdracht eerst in Replit Plan Mode.
+
+Maak vóór uitvoering:
+
+1. Current Navigation Assessment
+2. Existing Product Hierarchy Assessment
+3. Database Impact Analysis
+4. Hierarchy Import Plan
+5. Global Filter Architecture
+6. Route & Sidebar Architecture
+7. Department Workspace Model
+8. RBAC / Permissions Matrix
+9. Migration Plan
+10. Performance Plan
+11. Test Plan
+12. Security Review
+
+Vul ontbrekende noodzakelijke onderdelen zelf aan.
+
+==================================================
+78. IMPLEMENTATIEVOLGORDE
+=========================
+
+Gebruik daarna bij voorkeur:
+
+FASE 1
+
+Canonical Product Hierarchy.
+
+FASE 2
+
+Import / mapping productcodes.
+
+FASE 3
+
+Hierarchy Service/API.
+
+FASE 4
+
+Global Filter Context.
+
+FASE 5
+
+Bestaande modules naar centrale hierarchy migreren.
+
+FASE 6
+
+Nieuwe sidebar en Route Registry.
+
+FASE 7
+
+Department Workspaces.
+
+FASE 8
+
+RBAC backend enforcement.
+
+FASE 9
+
+Copilot hierarchy + department awareness.
+
+FASE 10
+
+Saved views / favorites.
+
+FASE 11
+
+Management drilldown.
+
+FASE 12
+
+End-to-end tests.
+
+==================================================
+79. ACCEPTANCE CRITERIA
+=======================
+
+De functionaliteit is pas afgerond wanneer:
+
+1. De volledige aangeleverde producthiërarchie kan worden geïmporteerd.
+
+2. Productcodes correct zijn gekoppeld.
+
+3. De hierarchy maximaal aanwezige niveaus ondersteunt.
+
+4. De hiërarchie in één centrale databasearchitectuur staat.
+
+5. Alle relevante Intelligence Engines dezelfde hierarchy gebruiken.
+
+6. Producthiërarchie platformbreed filterbaar is.
+
+7. Een parentselectie automatisch children bevat.
+
+8. Filtercontext tussen modules behouden blijft.
+
+9. Competition-functionaliteit volledig onder Concurrentie is georganiseerd.
+
+10. Pricing-functionaliteit onder Pricing staat.
+
+11. CatMan-functionaliteit onder CatMan staat.
+
+12. Inkoopfunctionaliteit onder Inkoop staat.
+
+13. Supply Chain-functionaliteit onder Supply Chain staat.
+
+14. SEO/SEA/GEO/AEO-functionaliteit logisch onder Search & Digital Growth staat.
+
+15. Menu's afhankelijk zijn van Department + Role + Permission.
+
+16. Backend API's dezelfde permissies afdwingen.
+
+17. Copilot dezelfde permissions respecteert.
+
+18. Management cross-functioneel kan analyseren indien toegestaan.
+
+19. Data Quality hierarchyproblemen toont.
+
+20. Audit wijzigingen registreert.
+
+21. De end-to-end Coffee hierarchy-test slaagt.
+
+22. De end-to-end Marker hierarchy-test slaagt.
+
+23. Geen bestaande relevante functionaliteit verloren is gegaan.
+
+==================================================
+80. EINDEDOEL
+=============
+
+Na implementatie moet de applicatie voor een gebruiker veel eenvoudiger aanvoelen.
+
+Niet:
+
+één enorme lijst met tientallen technische modules.
+
+Wel:
+
+MIJN DASHBOARD
+
+CONCURRENTIE
+
+PRICING
+
+CATMAN
+
+INKOOP
+
+SUPPLY CHAIN
+
+SEARCH & DIGITAL GROWTH
+
+PROMOTIES & LOYALTY
+
+FORECAST & RISICO
+
+PRODUCT & DATA
+
+AI & BESLUITVORMING
+
+MANAGEMENT
+
+BEHEER
+
+maar uitsluitend de onderdelen waarvoor de betreffende gebruiker rechten heeft.
+
+Tegelijkertijd moet de gebruiker overal dezelfde productcontext kunnen gebruiken.
+
+Voorbeeld:
+
+Facility & Almere
+
+>
+
+Office_food
+
+>
+
+Drinks
+
+>
+
+Coffee
+
+Dezelfde selectie moet vervolgens bruikbaar zijn voor:
+
+Concurrentie
+→ Pricing
+→ Brand
+→ Traffic
+→ Supplier
+→ Basket
+→ Switching
+→ Forecast
+→ Decision Engine
+→ Copilot.
+
+Dit moet één geïntegreerd Commercial Intelligence Platform worden en niet een verzameling losse dashboards.
+
+==================================================
+81. START NU IN PLAN MODE
+=========================
+
+Analyseer nu eerst de bestaande applicatie en vergelijk deze met bovenstaande specificatie.
+
+Controleer nadrukkelijk:
+
+* huidige producthierarchie;
+* bestaande category filters;
+* huidige sidebar;
+* huidige routes;
+* huidige RBAC;
+* huidige modules;
+* overlap tussen menu-items.
+
+Maak daarna een concreet uitvoeringsplan.
+
+Optimaliseer voor:
+
+* eenvoud voor gebruikers;
+* één centrale producthiërarchie;
+* platformbrede filtering;
+* duidelijke afdelingsworkspaces;
+* sterke security;
+* hergebruik;
+* schaalbaarheid;
+* consistente navigatie;
+* minimale duplicatie.
+
+Na goedkeuring van het plan moet deze wijziging platformbreed worden uitgevoerd.
