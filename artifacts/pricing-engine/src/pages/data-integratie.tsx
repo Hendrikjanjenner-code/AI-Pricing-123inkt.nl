@@ -197,6 +197,266 @@ function KpiCard({ icon: Icon, label, value, kleur }: { icon: React.ComponentTyp
 const HISTORY_PAGE_SIZE = 200;
 const HISTORY_MAX_LIMIT = 500;
 
+// ── BigQuery status & kosten ─────────────────────────────────────────────────
+
+interface BqStatus {
+  available: boolean;
+  project: string;
+  error?: string | null;
+  checked_at?: string | null;
+  configuration_help?: {
+    option_1?: { env_var: string; description: string; example: string };
+    option_2?: { env_vars: string[]; description: string };
+  };
+}
+
+interface BqSyncRow {
+  id: number;
+  pg_table: string;
+  status: string;
+  rows_exported: number;
+  completed_at: string | null;
+  error: string | null;
+}
+
+interface BqCosts {
+  period_days: number;
+  total_bytes: number;
+  total_tb: number;
+  total_cost_usd: number;
+  by_module: {
+    module: string;
+    query_count: number;
+    total_bytes: number;
+    total_tb: number;
+    total_cost_usd: number;
+    avg_duration_ms: number;
+    error_count: number;
+  }[];
+  pricing_note?: string;
+  error?: string;
+}
+
+function formatBytes(bytes: number) {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  let v = bytes;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v.toLocaleString("nl-NL", { maximumFractionDigits: 2 })} ${units[i]}`;
+}
+
+function formatUsd(v: number) {
+  return `$${v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: v < 0.01 && v > 0 ? 6 : 2 })}`;
+}
+
+function BigQuerySection() {
+  const [status, setStatus] = useState<BqStatus | null>(null);
+  const [history, setHistory] = useState<BqSyncRow[] | null>(null);
+  const [costs, setCosts] = useState<BqCosts | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [costDays, setCostDays] = useState<number>(30);
+
+  const laad = useCallback(async () => {
+    setLoading(true);
+    const headers = getAuthHeaders();
+    const opts = { headers, signal: AbortSignal.timeout(30_000) };
+    await Promise.all([
+      fetch(`${BASE}/api/bigquery/status`, opts)
+        .then((r) => (r.ok ? r.json() : null)).then((d) => d && setStatus(d)).catch(() => {}),
+      fetch(`${BASE}/api/bigquery/sync/history?limit=100`, opts)
+        .then((r) => (r.ok ? r.json() : null)).then((d) => d && setHistory(d.history as BqSyncRow[])).catch(() => {}),
+      fetch(`${BASE}/api/bigquery/costs?days=${costDays}`, opts)
+        .then((r) => (r.ok ? r.json() : null)).then((d) => d && setCosts(d)).catch(() => {}),
+    ]);
+    setLoading(false);
+  }, [costDays]);
+
+  useEffect(() => { laad(); }, [laad]);
+
+  // Laatste sync per tabel (history staat al gesorteerd op completed_at desc)
+  const perTabel = useMemo(() => {
+    const map = new Map<string, BqSyncRow>();
+    for (const row of history ?? []) {
+      if (!map.has(row.pg_table)) map.set(row.pg_table, row);
+    }
+    return Array.from(map.values()).sort((a, b) => a.pg_table.localeCompare(b.pg_table));
+  }, [history]);
+
+  const recenteFouten = useMemo(
+    () => (history ?? []).filter((r) => FOUT_STATUSSEN.has(r.status) || r.error).slice(0, 5),
+    [history],
+  );
+
+  const verbonden = status?.available === true;
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Status & freshness kaart */}
+      <Card className={verbonden ? "border-emerald-200" : "border-dashed"}>
+        <CardHeader>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Database className="w-4 h-4 text-muted-foreground" />
+                BigQuery — dataversheid
+              </CardTitle>
+              <CardDescription>Verbindingsstatus en laatste sync per tabel.</CardDescription>
+            </div>
+            <button type="button" onClick={laad} className="text-xs text-primary hover:underline" disabled={loading}>
+              {loading ? "Laden..." : "Vernieuwen"}
+            </button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {loading && !status ? (
+            <Skeleton className="h-32 w-full" />
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${verbonden ? "bg-emerald-500" : "bg-gray-400"}`} />
+                <span className={`text-sm font-medium ${verbonden ? "text-emerald-600" : "text-muted-foreground"}`}>
+                  {verbonden ? `Verbonden${status?.project ? ` — project ${status.project}` : ""}` : "Niet gekoppeld"}
+                </span>
+              </div>
+              {!verbonden && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 space-y-1">
+                  <div className="font-medium flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5" /> BigQuery configureren
+                  </div>
+                  <p>
+                    Stel de secret <code className="font-mono bg-amber-100 px-1 rounded">BQ_SERVICE_ACCOUNT_JSON</code> in
+                    (JSON-inhoud van een Google Cloud service-account sleutel) via Replit Secrets.
+                    Alternatief: <code className="font-mono bg-amber-100 px-1 rounded">BQ_PROJECT_ID</code> +{" "}
+                    <code className="font-mono bg-amber-100 px-1 rounded">GOOGLE_APPLICATION_CREDENTIALS</code>.
+                  </p>
+                  {status?.error && <p className="text-amber-700">Details: {String(status.error).slice(0, 200)}</p>}
+                </div>
+              )}
+              {perTabel.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Nog geen syncs uitgevoerd.</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs">Tabel</TableHead>
+                      <TableHead className="text-xs">Laatste sync</TableHead>
+                      <TableHead className="text-xs text-right">Rijen</TableHead>
+                      <TableHead className="text-xs">Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {perTabel.map((r) => (
+                      <TableRow key={r.pg_table}>
+                        <TableCell className="text-xs font-mono">{r.pg_table}</TableCell>
+                        <TableCell className="text-xs">{formatDatum(r.completed_at)}</TableCell>
+                        <TableCell className="text-xs text-right font-mono">{(r.rows_exported ?? 0).toLocaleString("nl-NL")}</TableCell>
+                        <TableCell>{statusBadge(r.status)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+              {recenteFouten.length > 0 && (
+                <div className="rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700 space-y-1">
+                  <div className="font-medium flex items-center gap-1">
+                    <XCircle className="w-3.5 h-3.5" /> Recente sync-fouten
+                  </div>
+                  {recenteFouten.map((r) => (
+                    <p key={r.id} title={r.error ?? undefined}>
+                      {r.pg_table} — {formatDatum(r.completed_at)}
+                      {r.error ? `: ${String(r.error).slice(0, 140)}` : ""}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Kosten kaart */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Zap className="w-4 h-4 text-muted-foreground" />
+                BigQuery — querykosten
+              </CardTitle>
+              <CardDescription>
+                Gescande bytes en geschatte kosten per module.
+                {costs?.pricing_note ? ` Tarief: ${costs.pricing_note}.` : ""}
+              </CardDescription>
+            </div>
+            <Select value={String(costDays)} onValueChange={(v) => setCostDays(Number(v))}>
+              <SelectTrigger className="w-[130px] h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="7">Laatste 7 dagen</SelectItem>
+                <SelectItem value="30">Laatste 30 dagen</SelectItem>
+                <SelectItem value="90">Laatste 90 dagen</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {loading && !costs ? (
+            <Skeleton className="h-32 w-full" />
+          ) : !costs ? (
+            <p className="text-sm text-muted-foreground">Kostendata niet beschikbaar.</p>
+          ) : (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="text-2xl font-bold">{formatUsd(costs.total_cost_usd)}</div>
+                  <div className="text-xs text-muted-foreground">Geschatte kosten ({costs.period_days} dagen)</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-bold">{formatBytes(costs.total_bytes)}</div>
+                  <div className="text-xs text-muted-foreground">Totaal gescand</div>
+                </div>
+              </div>
+              {costs.by_module.length === 0 ? (
+                <p className="text-xs text-muted-foreground">Nog geen BigQuery-queries geregistreerd in deze periode.</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs">Module</TableHead>
+                      <TableHead className="text-xs text-right">Queries</TableHead>
+                      <TableHead className="text-xs text-right">Gescand</TableHead>
+                      <TableHead className="text-xs text-right">Kosten</TableHead>
+                      <TableHead className="text-xs text-right">Fouten</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {costs.by_module.map((m) => (
+                      <TableRow key={m.module}>
+                        <TableCell className="text-xs font-mono">{m.module}</TableCell>
+                        <TableCell className="text-xs text-right">{m.query_count}</TableCell>
+                        <TableCell className="text-xs text-right font-mono">{formatBytes(m.total_bytes)}</TableCell>
+                        <TableCell className="text-xs text-right font-mono">{formatUsd(m.total_cost_usd)}</TableCell>
+                        <TableCell className="text-xs text-right">
+                          {m.error_count > 0 ? <span className="text-red-600">{m.error_count}</span> : 0}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Zie ook het <Link href="/platform/kosten" className="text-primary hover:underline">Cost &amp; Scalability Dashboard</Link> voor het volledige platformkostenbeeld.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function DataIntegratie() {
   const [drsStatus, setDrsStatus] = useState<ConnStatus | null>(null);
   const [priceshapeStatus, setPriceshapeStatus] = useState<ConnStatus | null>(null);
@@ -415,6 +675,8 @@ export default function DataIntegratie() {
           <BronStatusCard key={k.key} kaart={k} />
         ))}
       </div>
+
+      <BigQuerySection />
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <KpiCard icon={Package} label="Producten" value={totaalProducten.toLocaleString("nl-NL")} />
