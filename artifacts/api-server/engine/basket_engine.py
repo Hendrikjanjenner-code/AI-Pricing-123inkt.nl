@@ -124,11 +124,19 @@ def run_basket_engine(db: Session, run_date: date | None = None,
     top = (
         sorted(rows, key=lambda r: (r.affinity_score or 0), reverse=True)[:int(cfg["signal_top_n"])]
     )
+    signaled_antecedents: set[str] = set()
     for r in top:
         a = products.get(r.sku_id_a)
         b = products.get(r.sku_id_b)
         if not a or not b:
             continue
+        # Eén signaal per antecedent-SKU per run: de dedupe-sleutel is per
+        # entity (sku_id_a); een tweede publish in dezelfde run zou de
+        # unieke actieve-signaal-constraint schenden. Rijen zijn al op
+        # affinity gesorteerd, dus de sterkste associatie wint.
+        if r.sku_id_a in signaled_antecedents:
+            continue
+        signaled_antecedents.add(r.sku_id_a)
         publish_signal(
             db,
             shop_id=sid,
