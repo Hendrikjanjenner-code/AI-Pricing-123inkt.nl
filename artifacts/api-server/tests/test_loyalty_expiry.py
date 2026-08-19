@@ -285,7 +285,6 @@ def test_expiring_soon_members_window(db, policy):
         "waarschuwingsvenster")
     assert rows[m_late.id]["points_expiring"] == 600
 
-
 def test_expiring_soon_respects_fifo_redeems(db, policy):
     """Redeems consumeren FIFO eerst de window-punten als er niets ouders is:
     het waarschuwingsbedrag daalt mee."""

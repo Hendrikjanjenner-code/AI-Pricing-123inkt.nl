@@ -840,7 +840,6 @@ class TestFeedUnreachable:
         finally:
             self._cleanup(db, fail_id, ok_id)
 
-
 class TestLowConfidenceMatches:
     def test_ai_match_triggers(self, client, auth):
         db = SessionLocal()

@@ -413,7 +413,10 @@ def test_multi_shop_isolation(client, admin_headers, run_engines):
         for i in (1, 0):
             db.add(models.FactCompetitorPriceDaily(
                 date=today - timedelta(days=i), sku_id=sku_b2,
-                competitor_name=COMP_1, price=25.0 if i else 20.0,
+                # Prijzen dicht bij de eigen prijs (30.0) houden: een groot
+                # verschil zou de match als 'verdacht' kunnen classificeren
+                # en dan telt hij niet mee in de dekking.
+                competitor_name=COMP_1, price=29.0 if i else 27.0,
                 shop_id=shop_b))
         db.add(models.AiMatchResult(own_sku_id=sku_b2, competitor_name=COMP_1,
                                     match_type="Exact", confidence=1.0,
@@ -1260,7 +1263,6 @@ def test_slow_full_run_publishes_engine_slow_run_signal(monkeypatch):
 
 # Uniek prefix voor de elasticiteit-degradatietests (eigen test-shop + SKU's)
 ED_PFX = f"ED-{uuid.uuid4().hex[:8]}"
-
 
 @pytest.fixture(scope="module")
 def elast_degradation_seed(client):

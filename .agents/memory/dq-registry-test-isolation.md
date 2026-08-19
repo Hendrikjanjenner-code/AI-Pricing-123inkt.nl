@@ -5,7 +5,7 @@ description: How to test the data-quality registry/nightly scan without corrupti
 
 Rule: in tests that drive `_sync_issue_registry` or `run_scan_once`, never replace the detection list wholesale (e.g. mock `_detect_issues` to return only a synthetic issue, or sync `[]`). The registry auto-resolves every issue missing from the list, so this silently flips real open issues to 'opgelost'.
 
-**Why:** completion code review rejected tests that did exactly this — they invalidated existing data-quality workflow state and deleted foreign scheduler ImportJobs via `id > max` cleanup.
+**Why:** tests on the shared dev DB that replace detection wholesale or clean up by id-range corrupt real workflow state (auto-resolve flips genuine open issues) and delete rows created by other processes.
 
 **How to apply:**
 - Wrap the real `_detect_issues` and append one uniquely-coded synthetic issue; assert by filtering on that code.

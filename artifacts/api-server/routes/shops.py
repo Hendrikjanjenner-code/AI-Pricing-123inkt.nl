@@ -41,8 +41,9 @@ class ShopCreate(BaseModel):
 @router.get("")
 def list_shops(
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_role("admin")),
 ):
+    """Winkelwissel is een beheerdersfunctie: alleen admins mogen de shoplijst zien."""
     shops = db.query(models.DimShop).order_by(models.DimShop.id).all()
     return {"shops": [_shop_out(s) for s in shops]}
 

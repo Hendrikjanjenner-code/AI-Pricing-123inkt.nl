@@ -62,6 +62,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConnectorHealthIndicator } from "@/components/layout/ConnectorHealthIndicator";
+import { ShopSwitcher } from "@/components/layout/ShopSwitcher";
 import { AiStatusIndicator } from "@/components/layout/AiStatusIndicator";
 import { NotificationBell } from "@/components/layout/NotificationBell";
 
@@ -314,6 +315,7 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
         <header className="h-16 border-b bg-card flex items-center justify-between px-8 shrink-0">
           <div className="font-semibold text-foreground">{huidigLabel}</div>
           <div className="flex items-center gap-2">
+            {user.role === "admin" && <ShopSwitcher />}
             <AiStatusIndicator />
             <ConnectorHealthIndicator />
             <NotificationBell />

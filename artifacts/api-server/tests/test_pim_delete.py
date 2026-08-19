@@ -239,7 +239,6 @@ def test_defaults_not_reseeded_after_deleting_final_record(tmp_path):
         db.close()
         pim_engine._defaults_seeded = orig_flag
 
-
 def test_deleted_record_stays_gone_after_list_refresh(client, admin_headers):
     """Na DELETE + GET-refresh komt het verwijderde record niet terug."""
     code = f"del_attr_refresh_{TAG}"

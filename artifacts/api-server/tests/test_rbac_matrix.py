@@ -137,6 +137,9 @@ MATRIX = [
      {"admin": True, "pricing_manager": False, "analyst": False, "viewer": False}),
     ("POST", "/api/users", {"username": "x", "email": "x@x.x", "password": "x", "role": "viewer", "full_name": "x"},
      {"admin": None, "pricing_manager": False, "analyst": False, "viewer": False}),
+    # Shoplijst (winkelwissel in navigatie): alleen admin
+    ("GET", "/api/shops", None,
+     {"admin": True, "pricing_manager": False, "analyst": False, "viewer": False}),
     # Shops aanmaken: alleen admin
     ("POST", "/api/shops", {"shop_code": "zzz", "name": "Z"},
      {"admin": None, "pricing_manager": False, "analyst": False, "viewer": False}),

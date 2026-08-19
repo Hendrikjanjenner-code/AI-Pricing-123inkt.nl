@@ -185,7 +185,6 @@ def _fetch_pg_rows(
     cols = list(result.keys())
     return [dict(zip(cols, row)) for row in result.fetchall()]
 
-
 def _cast_row(row: dict) -> dict:
     """
     Converteer Python-types naar BigQuery-compatibele types:
