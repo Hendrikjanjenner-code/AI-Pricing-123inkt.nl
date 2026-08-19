@@ -3187,3 +3187,40 @@ class UserPermission(Base):
     permission_code = Column(String(100), nullable=False, index=True)
     granted_by = Column(String(100))
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SavedView(Base):
+    """
+    Opgeslagen view (taak #221): filter-, sorteer-, kolom- en dashboard-
+    configuratie per pagina, deelbaar als private / team / department.
+    Een department-view kan als afdelings-default worden gemarkeerd.
+    """
+    __tablename__ = "saved_views"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200), nullable=False)
+    page_key = Column(String(200), nullable=False, index=True)  # route-pad, bv. "/recommendations" of "*" (alle pagina's)
+    scope = Column(String(20), nullable=False, default="private", index=True)  # private / team / department
+    department_id = Column(Integer, ForeignKey("departments.id", ondelete="CASCADE"),
+                           nullable=True, index=True)
+    is_department_default = Column(Boolean, default=False, nullable=False)
+    config = Column(JSON, nullable=False, default=dict)  # {filters, sort, columns, dashboard}
+    owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"),
+                           nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class UserUiPreference(Base):
+    """
+    Persoonlijke UI-voorkeuren per gebruiker (taak #221): favorieten,
+    recent gebruikte pagina's/filters e.d. — vrije JSON per sleutel.
+    """
+    __tablename__ = "user_ui_preferences"
+    __table_args__ = (UniqueConstraint("user_id", "pref_key", name="uq_user_ui_pref"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    pref_key = Column(String(50), nullable=False)
+    value = Column(JSON, nullable=False, default=dict)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

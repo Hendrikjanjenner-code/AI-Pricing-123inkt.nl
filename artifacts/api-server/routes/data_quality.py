@@ -434,8 +434,12 @@ def _detect_issues(db: Session, total_skus: int) -> list[dict]:  # noqa: C901
     PHA = models.ProductHierarchyAssignment
     ph_nodes = db.query(func.count(PHN.id)).scalar() or 0
     if ph_nodes:
-        assigned_skus = (db.query(func.distinct(PHA.sku_id))
-                         .filter(PHA.status == "active").subquery())
+        # NB: query op de kolom zelf + .distinct(), zodat de subquery-kolom
+        # 'sku_id' blijft heten (func.distinct(...) geeft een anonieme kolom
+        # en dan faalt assigned_skus.c.sku_id met AttributeError).
+        assigned_skus = (db.query(PHA.sku_id)
+                         .filter(PHA.status == "active")
+                         .distinct().subquery())
         unassigned = db.query(P).filter(
             P.is_active == True,  # noqa: E712
             P.sku_id.notin_(db.query(assigned_skus.c.sku_id))).count()

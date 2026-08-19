@@ -25,6 +25,8 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { getAuthHeaders } from "@/lib/auth";
+import { InfoTooltip } from "@/components/InfoTooltip";
+import { SavedViewsMenu } from "@/components/filters/SavedViewsMenu";
 import { HierarchyFilter } from "@/components/filters/HierarchyFilter";
 import { useGlobalFilters } from "@/hooks/use-global-filters";
 import {
@@ -206,13 +208,18 @@ export function GlobalFilterBar() {
       {/* Desktop */}
       <div className="hidden md:flex flex-wrap items-center gap-2">
         <Filter className="w-4 h-4 text-muted-foreground shrink-0" />
+        <InfoTooltip definitieId="global_filter_context" />
         <FilterControls filters={filters} />
-        {actief && (
-          <Button variant="ghost" size="sm" className="ml-auto text-xs"
-            onClick={() => clearGlobalFilters()}>
-            Alle filters wissen
-          </Button>
-        )}
+        <InfoTooltip definitieId="product_hierarchy" />
+        <div className="ml-auto flex items-center gap-2">
+          {actief && (
+            <Button variant="ghost" size="sm" className="text-xs"
+              onClick={() => clearGlobalFilters()}>
+              Alle filters wissen
+            </Button>
+          )}
+          <SavedViewsMenu />
+        </div>
       </div>
 
       {/* Mobiel: drawer */}

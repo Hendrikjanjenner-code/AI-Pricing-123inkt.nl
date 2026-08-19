@@ -35,3 +35,6 @@ DimShop rows instead of assuming shop id 1 exists — a hardcoded shop_id=1 fail
 on a fresh/empty DB with "Shop 1 not found" or "relation dim_shop does not exist".
 **Why:** modules must pass standalone (pytest tests/test_x.py), not only after
 another module happened to create tables/shops.
+
+## TestClient teardown
+App-shutdown may cancel background tasks; module-scoped TestClient teardown must tolerate a cancelled-task error (treat shutdown cancellation as benign, not a test failure).

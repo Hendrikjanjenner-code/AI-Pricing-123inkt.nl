@@ -115,6 +115,7 @@ ROUTE_PERMISSIONS: dict[str, str] = {
     # Management
     "rapportages": "management.view",
     "platform": "management.view",
+    "management": "management.view",
     # Beheer
     "audit-log": "audit.view",
     "users": "admin.manage",
@@ -123,6 +124,9 @@ ROUTE_PERMISSIONS: dict[str, str] = {
     "authz": None,  # fijnmazig per endpoint geregeld in routes/authz.py
     # Altijd toegankelijk voor ingelogde gebruikers (command center e.d.)
     "dashboard": None, "command-center": None, "signals": None,
+    # Taak #221: zoekresultaten en saved views worden per-endpoint
+    # permission-gefilterd; voorkeuren zijn strikt per gebruiker.
+    "search": None, "saved-views": None, "me": None,
     "notifications": None, "auth": None, "engine-jobs": None,
     "explainability": None, "bigquery": None, "health": None, "healthz": None,
 }

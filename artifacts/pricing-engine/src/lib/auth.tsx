@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { useGetCurrentUser, setAuthTokenGetter, ApiError } from "@workspace/api-client-react";
+import { resetUserPrefs } from "@/lib/user-prefs";
 
 // Initialize auth token getter
 setAuthTokenGetter(() => localStorage.getItem("auth_token"));
@@ -92,6 +93,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         console.error("[auth] session rejected by server (status %s):", status, (error as any)?.message || error);
         setAuthToken(null);
         setUser(null);
+        resetUserPrefs();
         setLocation("/login");
         return;
       }
@@ -118,6 +120,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const logout = () => {
     setAuthToken(null);
     setUser(null);
+    // Persoonlijke favorieten/recents wissen zodat een volgende gebruiker in
+    // dezelfde browser niet andermans voorkeuren ziet.
+    resetUserPrefs();
     setLocation("/login");
   };
 

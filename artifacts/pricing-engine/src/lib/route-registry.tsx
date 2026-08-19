@@ -123,6 +123,8 @@ import BeslissingDetail from "@/pages/decisions/detail";
 import CommandCenter from "@/pages/command-center";
 import PlatformGap from "@/pages/platform-gap";
 import DocsCenter from "@/pages/docs-center";
+import ManagementDrilldown from "@/pages/management-drilldown";
+import Begrippen from "@/pages/begrippen";
 import DevBacklog from "@/pages/dev-backlog";
 import Toegangsbeheer from "@/pages/toegangsbeheer";
 import Eindevaluatie from "@/pages/eindevaluatie";
@@ -360,6 +362,7 @@ export const ROUTES: RouteDef[] = [
 
   // --- Management -------------------------------------------------------------
   r("/rapportages", "Management-rapportages", "management", ManagementRapportages, 1, { icon: FileText }),
+  r("/management/drilldown", "Management-drilldown", "management", ManagementDrilldown, 1.5, { icon: FolderTree }),
   r("/platform/health", "Platform Health Center", "management", PlatformHealth, 2, { icon: Activity }),
   r("/platform/kosten", "Cost & Scalability", "management", PlatformKosten, 3, { icon: DollarSign }),
   r("/platform/businesscase", "Businesscase per shop", "management", PlatformBusinesscase, 4, { icon: Calculator }),
@@ -372,6 +375,7 @@ export const ROUTES: RouteDef[] = [
   r("/toegangsbeheer", "Afdelingen & Rechten", "beheer", Toegangsbeheer, 2, { icon: Shield, permission: "admin", department: "beheer" }),
   r("/audit-log", "Audit Log", "beheer", AuditLogPage, 3, { icon: ClipboardList, permission: "pricing_manager", department: "beheer", vereistePermissie: "audit.view" }),
   r("/documentatie", "Platformdocumentatie", "beheer", DocsCenter, 4, { icon: FileText, department: "beheer", vereistePermissie: null }),
+  r("/help/begrippen", "Help & Begrippen", "beheer", Begrippen, 4.5, { icon: BookOpen, department: "beheer", vereistePermissie: null }),
   r("/backlog", "Development Backlog", "beheer", DevBacklog, 5, { icon: ClipboardList, department: "beheer", vereistePermissie: null }),
 ];
 

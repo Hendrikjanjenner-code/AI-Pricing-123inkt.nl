@@ -1,8 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useAuth } from "@/lib/auth";
 import { Link, useLocation } from "wouter";
-import { Box, LogOut, ChevronDown, ChevronRight } from "lucide-react";
+import { Box, LogOut, ChevronDown, ChevronRight, Star, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { GlobalSearch } from "@/components/layout/GlobalSearch";
+import { useDepartmentDefaultView } from "@/components/filters/SavedViewsMenu";
+import {
+  ensureUserPrefsLoaded, getUserPrefs, subscribeUserPrefs,
+  isFavorite, toggleFavorite, recordRecentVisit,
+} from "@/lib/user-prefs";
 import { ConnectorHealthIndicator } from "@/components/layout/ConnectorHealthIndicator";
 import { useFilterUrlSync } from "@/hooks/use-global-filters";
 import { ShopSwitcher } from "@/components/layout/ShopSwitcher";
@@ -48,20 +54,85 @@ function isRouteActief(item: RouteDef, location: string): boolean {
 function NavItem({ item, location }: { item: RouteDef; location: string }) {
   const actief = isRouteActief(item, location);
   const Icon = item.icon ?? Box;
+  const fav = isFavorite(item.path);
   return (
     <Link href={item.path}>
       <div
         data-testid={`nav-${item.path}`}
-        className={`flex items-center gap-3 px-3 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer ${
+        className={`group/nav flex items-center gap-3 px-3 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer ${
           actief
             ? "bg-sidebar-accent text-sidebar-accent-foreground"
             : "text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
         }`}
       >
         <Icon className="w-4 h-4 shrink-0" />
-        <span className="truncate">{item.label}</span>
+        <span className="truncate flex-1">{item.label}</span>
+        <button
+          type="button"
+          aria-label={fav ? "Verwijder uit favorieten" : "Voeg toe aan favorieten"}
+          data-testid={`fav-toggle-${item.path}`}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleFavorite({ path: item.path, label: item.label });
+          }}
+          className={`shrink-0 transition-opacity ${
+            fav ? "opacity-100 text-amber-400" : "opacity-0 group-hover/nav:opacity-60 hover:!opacity-100"
+          }`}
+        >
+          <Star className={`w-3.5 h-3.5 ${fav ? "fill-amber-400" : ""}`} />
+        </button>
       </div>
     </Link>
+  );
+}
+
+/** Favorieten + recent bezochte pagina's, gepind boven de domeingroepen. */
+function FavorietenSectie({ location }: { location: string }) {
+  const prefs = useSyncExternalStore(subscribeUserPrefs, getUserPrefs);
+  if (!prefs.loaded || (prefs.favorites.length === 0 && prefs.recents.length === 0)) {
+    return null;
+  }
+  const favPaths = new Set(prefs.favorites.map((f) => f.path));
+  const recents = prefs.recents.filter((r) => !favPaths.has(r.path)).slice(0, 4);
+  return (
+    <div className="mb-3" data-testid="sidebar-favorieten">
+      {prefs.favorites.length > 0 && (
+        <>
+          <div className="flex items-center gap-2 px-2 py-1 text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/50">
+            <Star className="w-3.5 h-3.5" /> Favorieten
+          </div>
+          {prefs.favorites.map((f) => {
+            const route = vindRoute(f.path);
+            return (
+              <NavItem
+                key={f.path}
+                item={route ?? { ...MIJN_DASHBOARD, path: f.path, label: f.label }}
+                location={location}
+              />
+            );
+          })}
+        </>
+      )}
+      {recents.length > 0 && (
+        <>
+          <div className="flex items-center gap-2 px-2 py-1 mt-1 text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/50">
+            <Clock className="w-3.5 h-3.5" /> Recent
+          </div>
+          {recents.map((rec) => (
+            <Link key={rec.path} href={rec.path}>
+              <div
+                data-testid={`recent-${rec.path}`}
+                className="flex items-center gap-3 px-3 py-1 rounded-md text-sm text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground cursor-pointer"
+              >
+                <Clock className="w-3.5 h-3.5 shrink-0 opacity-50" />
+                <span className="truncate">{rec.label}</span>
+              </div>
+            </Link>
+          ))}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -71,8 +142,26 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
   // Houd de f_-URL-params op élke route in sync (deelbare deep links),
   // ook op schermen zonder GlobalFilterBar.
   useFilterUrlSync();
+  // Department-default saved view (taak #221): éénmalig per sessie toepassen
+  // als de gebruiker zonder eigen filtercontext binnenkomt.
+  useDepartmentDefaultView();
+  // Favorieten/recents live-houden (herrender bij wijziging).
+  useSyncExternalStore(subscribeUserPrefs, getUserPrefs);
 
   const actieveRoute = vindRoute(location);
+
+  // Per gebruiker laden; een gebruikerswissel reset en herlaadt de store.
+  useEffect(() => {
+    if (user?.id != null) void ensureUserPrefsLoaded(user.id);
+  }, [user?.id]);
+
+  // Recent bezochte pagina's bijhouden (alleen registry-pagina's).
+  useEffect(() => {
+    const route = vindRoute(location);
+    if (route && !route.path.includes(":")) {
+      recordRecentVisit({ path: location.split("?")[0], label: route.label });
+    }
+  }, [location]);
   const [openDomeinen, setOpenDomeinen] = useState<Set<DomeinId>>(() => {
     const bewaard = leesOpenGroepen();
     const open = new Set<DomeinId>(bewaard ?? ["command-center"]);
@@ -109,6 +198,9 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
           <div className="mb-3">
             <NavItem item={MIJN_DASHBOARD} location={location} />
           </div>
+
+          {/* Favorieten & recent — gepind boven de domeingroepen (taak #221) */}
+          <FavorietenSectie location={location} />
 
           {groepen.map(({ domein, items }) => {
             const open = openDomeinen.has(domein.id);
@@ -171,6 +263,7 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
         <header className="h-16 border-b bg-card flex items-center justify-between px-8 shrink-0 gap-4">
           <Breadcrumbs />
           <div className="flex items-center gap-2 shrink-0">
+            <GlobalSearch />
             {user.role === "admin" && <ShopSwitcher />}
             <AiStatusIndicator />
             <ConnectorHealthIndicator />

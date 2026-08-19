@@ -34,6 +34,7 @@ from routes import (
     pim,
     command_center, governance, engine_jobs,
     product_hierarchy,
+    saved_views, global_search, management_drilldown,
 )
 
 # Optional modules (DRS import, PriceShape feed import) are imported
@@ -567,6 +568,10 @@ app.include_router(copilot.router)
 app.include_router(pim.router)
 app.include_router(command_center.router)
 app.include_router(governance.router)
+app.include_router(saved_views.router)
+app.include_router(saved_views.prefs_router)
+app.include_router(global_search.router)
+app.include_router(management_drilldown.router)
 from routes import authz as authz_routes
 app.include_router(authz_routes.router)
 

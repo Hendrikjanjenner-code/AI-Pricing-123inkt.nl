@@ -553,6 +553,81 @@ export function getDefinitie(id: string): KpiDefinition | undefined {
   return KPI_DEFINITIES[id.toLowerCase().replace(/[^a-z_]/g, "_")];
 }
 
+// ── Platformbegrippen (taak #221) — voor de Help/Begrippen-sectie ──────────
+export const PLATFORM_BEGRIPPEN: Record<string, KpiDefinition> = {
+  crs: {
+    id: "crs",
+    naam: "Competitive Relevance Score",
+    afkorting: "CRS",
+    categorie: "concurrentie",
+    korteUitleg: "Hoe relevant een concurrent is voor jouw assortiment en kanaal.",
+    uitgebreideUitleg: "De CRS weegt overlap in assortiment, prijsagressiviteit en kanaalrelevantie tot één score per concurrent. Concurrenten met een hoge CRS wegen zwaarder mee in prijsadviezen en signalen.",
+    interpretatie: "0–1: hoger = relevanter. Boven ~0,7 is een concurrent leidend voor prijsdruk.",
+    businessImpact: "Voorkomt dat irrelevante prijsvechters je prijsstrategie sturen.",
+  },
+  influence: {
+    id: "influence",
+    naam: "Competitor Influence",
+    afkorting: "Influence",
+    categorie: "concurrentie",
+    korteUitleg: "Gemeten invloed van een concurrent op jouw verkopen en conversie.",
+    uitgebreideUitleg: "Influence meet per concurrent hoe sterk diens prijsbewegingen historisch samenhangen met veranderingen in jouw afzet en conversie. Anders dan CRS (relevantie vooraf) is Influence empirisch: wat gebeurt er daadwerkelijk met jouw verkoop als deze concurrent beweegt?",
+    interpretatie: "Hogere score = sterkere aantoonbare invloed op jouw resultaat.",
+    businessImpact: "Richt je monitoring en prijsreacties op concurrenten die er echt toe doen.",
+  },
+  geo: {
+    id: "geo",
+    naam: "Generative Engine Optimization",
+    afkorting: "GEO",
+    categorie: "algemeen",
+    korteUitleg: "Vindbaarheid van je producten in AI-antwoordmachines (ChatGPT, Gemini, e.d.).",
+    uitgebreideUitleg: "GEO is de opvolger van klassieke SEO voor generatieve zoeksystemen: zorgen dat AI-assistenten jouw producten, prijzen en content correct citeren en aanbevelen. Denk aan gestructureerde productdata, autoritatieve bronnen en machine-leesbare specificaties.",
+    interpretatie: "Kwalitatief: hoe vaak en hoe correct verschijn je in AI-gegenereerde antwoorden.",
+    businessImpact: "Een groeiend deel van de oriëntatie verloopt via AI-antwoorden; onzichtbaarheid daar kost traffic.",
+  },
+  aeo: {
+    id: "aeo",
+    naam: "Answer Engine Optimization",
+    afkorting: "AEO",
+    categorie: "algemeen",
+    korteUitleg: "Optimaliseren voor directe antwoorden (featured snippets, voice, AI-overviews).",
+    uitgebreideUitleg: "AEO richt zich op het beantwoorden van concrete vragen ('welk A4-papier voor laserprinters?') zodat zoekmachines en assistenten jouw content als hét antwoord tonen. Overlapt met GEO maar is breder: ook klassieke featured snippets en voice search.",
+    interpretatie: "Kwalitatief: aandeel vraaggedreven zoekopdrachten waarop jouw content het antwoord levert.",
+    businessImpact: "Antwoordposities vangen de klik vóór de klassieke resultatenlijst.",
+  },
+  product_hierarchy: {
+    id: "product_hierarchy",
+    naam: "Product Hierarchy",
+    afkorting: "Hiërarchie",
+    categorie: "algemeen",
+    korteUitleg: "De canonieke productboom (2–6 niveaus) waarop alle filters en aggregaties draaien.",
+    uitgebreideUitleg: "Elke SKU is gekoppeld aan één actieve node in de canonieke producthiërarchie. Filters op een hoger niveau tellen automatisch alle onderliggende niveaus mee (descendants). De hiërarchie wordt niet-destructief geïmporteerd: verhuizingen bewaren de historie.",
+    interpretatie: "Niveau 1 = topcategorie; diepere niveaus zijn steeds specifieker.",
+    businessImpact: "Eén gedeelde boom zorgt dat dashboards, drilldowns en filters overal dezelfde cijfers tonen.",
+  },
+  global_filter_context: {
+    id: "global_filter_context",
+    naam: "Global Filter Context",
+    categorie: "algemeen",
+    korteUitleg: "De centrale filterbalk (hiërarchie, merk, periode, SKU) die op alle modules doorwerkt.",
+    uitgebreideUitleg: "Filters die je bovenin kiest blijven actief terwijl je tussen modules navigeert en zitten in de URL als deelbare deep-link. Een geselecteerde parent-node telt server-side automatisch alle onderliggende niveaus mee.",
+    interpretatie: "Actieve filters zijn zichtbaar als chips in de filterbalk.",
+    businessImpact: "Analyseer één assortimentsdeel consistent door het hele platform heen.",
+  },
+  saved_view: {
+    id: "saved_view",
+    naam: "Saved View",
+    categorie: "algemeen",
+    korteUitleg: "Opgeslagen filter- en schermconfiguratie, privé of gedeeld met team/afdeling.",
+    uitgebreideUitleg: "Een saved view bewaart de Global Filter Context (en optioneel sorteer-/kolom-/dashboardconfiguratie) onder een naam. Views kunnen privé zijn, met het hele team gedeeld, of per afdeling — inclusief een afdelings-default die nieuwe sessies automatisch krijgen.",
+    interpretatie: "Privé = alleen jij; Team = iedereen; Afdeling = leden van die afdeling.",
+    businessImpact: "Iedereen kijkt met één klik naar dezelfde afgesproken snede van de data.",
+  },
+};
+
+// Merge zodat InfoTooltip-definitieId's ook platformbegrippen kunnen zijn.
+Object.assign(KPI_DEFINITIES, PLATFORM_BEGRIPPEN);
+
 export function getDefinitiesPerCategorie(cat: KpiCategorie): KpiDefinition[] {
   return Object.values(KPI_DEFINITIES).filter(d => d.categorie === cat);
 }
