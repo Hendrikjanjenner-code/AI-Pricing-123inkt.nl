@@ -1371,6 +1371,26 @@ def get_match_quality(
         t["avg_confidence"] = round(t.pop("_conf_sum") / t["total"], 3) if t["total"] else None
 
     reviewed = totals["approved"] + totals["rejected"]
+
+    # Match-basis: EAN-geverifieerd vs feed-koppeling (itemGroupId).
+    # PriceShape-exports op itemGroupId-basis hebben ean_match=False — dat is
+    # verwacht gedrag, geen kwaliteitsprobleem.
+    ean_matched = 0
+    feed_linked = 0
+    basis_rows = db.query(
+        models.AiMatchResult.ean_match,
+        _f.count(models.AiMatchResult.id),
+    ).join(models.DimProduct,
+           models.DimProduct.sku_id == models.AiMatchResult.own_sku_id
+    ).filter(models.DimProduct.shop_id == sid,
+             models.AiMatchResult.match_type == "Exact"
+    ).group_by(models.AiMatchResult.ean_match).all()
+    for is_ean, cnt in basis_rows:
+        if is_ean:
+            ean_matched += cnt
+        else:
+            feed_linked += cnt
+
     # Verdachte matches: hoge confidence maar extreem prijsverschil
     suspects = (
         db.query(models.AiMatchResult)
@@ -1389,6 +1409,13 @@ def get_match_quality(
             **{k: v for k, v in totals.items()},
             "review_rate_pct": round(reviewed / totals["total"] * 100, 1) if totals["total"] else 0.0,
             "approval_rate_pct": round(totals["approved"] / reviewed * 100, 1) if reviewed else None,
+        },
+        "match_basis": {
+            "ean_matched": ean_matched,
+            "feed_linked": feed_linked,
+            "note": ("Feed-koppeling via itemGroupId is de standaard voor "
+                     "PriceShape-exports; 0 EAN-matches is dan verwacht en "
+                     "geen kwaliteitsprobleem."),
         },
         "by_match_type": by_type,
         "suspect_matches": [{

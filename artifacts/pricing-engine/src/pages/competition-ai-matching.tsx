@@ -133,6 +133,30 @@ export default function CompetitionAiMatching() {
         </div>
       )}
 
+      {/* Match-basis: EAN vs feed-koppeling */}
+      {quality?.match_basis && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Card>
+            <CardContent className="py-3 px-4">
+              <p className="text-xs text-muted-foreground">EAN-match (geverifieerd)</p>
+              <p className="text-xl font-bold tabular-nums">{quality.match_basis.ean_matched}</p>
+              <p className="text-xs text-muted-foreground">Exacte matches bevestigd via EAN/GTIN</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-3 px-4">
+              <p className="text-xs text-muted-foreground" title={quality.match_basis.note}>
+                Feed-koppeling (itemGroupId)
+              </p>
+              <p className="text-xl font-bold tabular-nums">{quality.match_basis.feed_linked}</p>
+              <p className="text-xs text-muted-foreground">
+                Standaard voor PriceShape-exports zonder EAN — 0 EAN-matches is dan verwacht, geen kwaliteitsprobleem.
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* Match-type statistieken */}
       <div className="flex flex-wrap gap-3">
         {stats.map(s => (
