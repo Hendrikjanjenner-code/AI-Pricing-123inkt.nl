@@ -915,6 +915,7 @@ async def upload_bulk(
     results = []
     totaal_verwerkt = 0
     totaal_mislukt = 0
+    totaal_duplicaten = 0
 
     for csv_name in csv_names:
         raw = zf.read(csv_name)
@@ -1084,6 +1085,7 @@ async def upload_bulk(
 
             totaal_verwerkt += proc
             totaal_mislukt += fail
+            totaal_duplicaten += dup_count
             all_warns = file_warns + warns
             results.append({
                 "bestand": csv_name,
@@ -1091,6 +1093,7 @@ async def upload_bulk(
                 "status": "voltooid",
                 "rows_processed": proc,
                 "rows_failed": fail,
+                "rows_duplicates": dup_count,
                 "warnings": all_warns[:10],
             })
 
@@ -1107,6 +1110,7 @@ async def upload_bulk(
         "bestanden": len(csv_names),
         "totaal_verwerkt": totaal_verwerkt,
         "totaal_mislukt": totaal_mislukt,
+        "totaal_duplicaten": totaal_duplicaten,
         "resultaten": results,
     }
 

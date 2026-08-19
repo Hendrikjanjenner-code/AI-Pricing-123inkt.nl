@@ -1372,11 +1372,12 @@ export default function Gegevensintegratie() {
       <div>
         <h2 className="text-lg font-bold mb-4">Recente importtaken</h2>
         <div className="border rounded-md bg-card">
-          <div className="grid grid-cols-6 border-b bg-muted/50 p-3 text-sm font-medium text-muted-foreground">
+          <div className="grid grid-cols-7 border-b bg-muted/50 p-3 text-sm font-medium text-muted-foreground">
             <div className="col-span-2">Bestandsnaam</div>
             <div>Type</div>
             <div>Status</div>
             <div className="text-right">Verwerkt / Mislukt</div>
+            <div className="text-right">Duplicaten</div>
             <div className="text-right">Datum</div>
           </div>
           <div className="divide-y">
@@ -1385,7 +1386,7 @@ export default function Gegevensintegratie() {
             ) : !uploads?.length ? (
               <div className="p-8 text-center text-muted-foreground">Geen recente uploads.</div>
             ) : uploads.map((job) => (
-              <div key={job.id} className="grid grid-cols-6 items-center p-3 text-sm">
+              <div key={job.id} className="grid grid-cols-7 items-center p-3 text-sm">
                 <div className="col-span-2 font-medium truncate pr-4">{job.filename}</div>
                 <div className="capitalize text-muted-foreground text-xs">
                   {job.upload_type === "drs"
@@ -1402,6 +1403,18 @@ export default function Gegevensintegratie() {
                   <span className="text-emerald-600">{job.rows_processed}</span>
                   {" / "}
                   <span className={job.rows_failed > 0 ? "text-destructive" : ""}>{job.rows_failed}</span>
+                </div>
+                <div className="text-right tabular-nums">
+                  {((job as any).rows_duplicates ?? 0) > 0 ? (
+                    <Badge
+                      className="bg-amber-500/10 text-amber-700 border-amber-200 text-xs"
+                      title="Rijen overgeslagen als duplicaat binnen dit bestand"
+                    >
+                      {(job as any).rows_duplicates} overgeslagen
+                    </Badge>
+                  ) : (
+                    <span className="text-muted-foreground">0</span>
+                  )}
                 </div>
                 <div className="text-right text-muted-foreground tabular-nums text-xs">
                   {new Date(job.created_at).toLocaleString("nl-NL")}

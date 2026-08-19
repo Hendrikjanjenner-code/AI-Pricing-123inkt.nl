@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "wouter";
 import { useListUploads, useGetExportHistory, useGetDataQuality, useGetDashboardSummary } from "@workspace/api-client-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +12,7 @@ import {
   Package, Percent, RefreshCw, Server, ShieldAlert, XCircle, Zap,
 } from "lucide-react";
 import { getAuthHeaders, useAuth } from "@/lib/auth";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -596,6 +596,7 @@ export default function DataIntegratie() {
   }, []);
 
   const jobs: any[] = (uploads as any[]) ?? [];
+  const [openJobId, setOpenJobId] = useState<number | null>(null);
 
   const laatsteVoorBron = (predicate: (j: any) => boolean) => {
     const gefilterd = jobs.filter(predicate);
@@ -821,8 +822,19 @@ export default function DataIntegratie() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  gefilterdeJobs.map((j) => (
-                    <TableRow key={j.id}>
+                  gefilterdeJobs.map((j) => {
+                    const detailItems: string[] = (Array.isArray(j.error_log) && j.error_log.length > 0)
+                      ? j.error_log.map((e: any) => (typeof e === "string" ? e : e?.bericht ?? "")).filter(Boolean)
+                      : (j.warnings ?? []);
+                    const heeftDetails = detailItems.length > 0 || (j.rows_duplicates ?? 0) > 0 || !!j.error_message;
+                    const isOpen = openJobId === j.id;
+                    return (
+                    <React.Fragment key={j.id}>
+                    <TableRow
+                      className={heeftDetails ? "cursor-pointer" : undefined}
+                      onClick={heeftDetails ? () => setOpenJobId(isOpen ? null : j.id) : undefined}
+                      title={heeftDetails ? "Klik voor details (waarschuwingen en overgeslagen duplicaten)" : undefined}
+                    >
                       <TableCell className="text-sm">{formatDatum(j.created_at)}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className="text-xs">{j.source ?? "Onbekend"}</Badge>
@@ -838,7 +850,11 @@ export default function DataIntegratie() {
                         {j.rows_failed > 0 ? <span className="text-red-600">{j.rows_failed}</span> : j.rows_failed}
                       </TableCell>
                       <TableCell className="text-right text-sm">
-                        {(j.rows_duplicates ?? 0) > 0 ? <span className="text-amber-600">{j.rows_duplicates}</span> : 0}
+                        {(j.rows_duplicates ?? 0) > 0 ? (
+                          <Badge className="bg-amber-50 text-amber-700 border-amber-200 text-xs">
+                            {j.rows_duplicates} overgeslagen
+                          </Badge>
+                        ) : 0}
                       </TableCell>
                       <TableCell className="text-right text-sm">
                         {(j.warnings?.length ?? 0) > 0 ? (
@@ -846,7 +862,40 @@ export default function DataIntegratie() {
                         ) : 0}
                       </TableCell>
                     </TableRow>
-                  ))
+                    {isOpen && (
+                      <TableRow className="bg-muted/30 hover:bg-muted/30">
+                        <TableCell colSpan={10} className="py-3">
+                          <div className="space-y-2 text-xs">
+                            {(j.rows_duplicates ?? 0) > 0 && (
+                              <div className="flex items-center gap-2 text-amber-700 font-medium">
+                                <AlertTriangle className="h-3.5 w-3.5" />
+                                {j.rows_duplicates} rij{j.rows_duplicates === 1 ? "" : "en"} overgeslagen als duplicaat binnen dit bestand.
+                              </div>
+                            )}
+                            {j.error_message && (
+                              <div className="text-red-600">{j.error_message}</div>
+                            )}
+                            {detailItems.length > 0 ? (
+                              <ul className="list-disc pl-5 space-y-0.5 text-muted-foreground max-h-48 overflow-y-auto">
+                                {detailItems.slice(0, 100).map((m: string, i: number) => (
+                                  <li key={i} className={m.toLowerCase().includes("duplicaat") ? "text-amber-700" : undefined}>{m}</li>
+                                ))}
+                                {detailItems.length > 100 && (
+                                  <li className="italic">… en {detailItems.length - 100} meer</li>
+                                )}
+                              </ul>
+                            ) : (
+                              !j.error_message && (j.rows_duplicates ?? 0) === 0 && (
+                                <span className="text-muted-foreground">Geen details beschikbaar.</span>
+                              )
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    </React.Fragment>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
