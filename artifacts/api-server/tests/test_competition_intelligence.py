@@ -435,7 +435,10 @@ def test_multi_shop_isolation(client, admin_headers, run_engines):
                                     run_date=today, shop_id=shop_b))
         db.commit()
 
-        resp = client.post("/api/competition/intelligence/run", headers=admin_headers)
+        # Scope de run tot shop B: deterministisch en snel, ook op een DB met
+        # duizenden echte producten en state van andere tests/shops.
+        resp = client.post("/api/competition/intelligence/run",
+                           json={"shop_id": shop_b}, headers=admin_headers)
         assert resp.status_code == 200
 
         # Default-shop views bevatten geen shop-B data

@@ -528,7 +528,7 @@ def test_bq_fetch_pg_rows_null_watermarks_multipage(monkeypatch):
             # Zelfde normalisatie als de sync-lus: NULL → epoch
             from datetime import datetime as _dt
             if wm is None:
-                wm = bq_sync._EPOCH
+                wm = bq_sync.EPOCH
             elif not isinstance(wm, _dt):
                 wm = _dt.combine(wm, _dt.min.time())
             last_key = (wm, last["id"])

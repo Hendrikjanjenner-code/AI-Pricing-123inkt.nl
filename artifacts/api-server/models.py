@@ -2616,8 +2616,10 @@ class AiBudgetConfig(Base):
 
     - username=None  →  globale standaard (geldt voor alle gebruikers zonder eigen rij)
     - username=<naam> →  gebruikersspecifieke override
-    - max_calls_per_day  = None  →  geen limiet voor calls
-    - max_tokens_per_day = None  →  geen limiet voor tokens
+    - max_calls_per_day  = None  →  val per veld terug op de globale rij,
+      anders op de omgevingsstandaard (DEFAULT_MAX_CALLS_PER_DAY)
+    - max_tokens_per_day = None  →  idem (DEFAULT_MAX_TOKENS_PER_DAY);
+      NULL betekent dus nooit 'onbeperkt'
 
     De globale singleton (username IS NULL) wordt afgedwongen via een partial
     unique index (zie migrate.py). SQLAlchemy's unique=True op een nullable
@@ -2629,7 +2631,7 @@ class AiBudgetConfig(Base):
     # unique=True hier bewust NIET: de partial unique index in migrate.py
     # dwingt de singleton-beperking correct af in PostgreSQL.
     username = Column(String(100), nullable=True, index=True)
-    # None = geen limiet actief
+    # None = per veld terugvallen op globaal/env-standaard (nooit 'onbeperkt')
     max_calls_per_day = Column(Integer, nullable=True)
     max_tokens_per_day = Column(Integer, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

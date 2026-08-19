@@ -613,16 +613,28 @@ def _get_budget_config(db: Session, username: str) -> tuple[Optional[int], Optio
     user_row = db.query(models.AiBudgetConfig).filter(
         models.AiBudgetConfig.username == username
     ).first()
-    if user_row:
-        return user_row.max_calls_per_day, user_row.max_tokens_per_day
-
     global_row = db.query(models.AiBudgetConfig).filter(
         models.AiBudgetConfig.username.is_(None)
     ).first()
-    if global_row:
-        return global_row.max_calls_per_day, global_row.max_tokens_per_day
 
-    return DEFAULT_MAX_CALLS_PER_DAY, DEFAULT_MAX_TOKENS_PER_DAY
+    # Per veld onafhankelijk terugvallen: gebruiker → globaal → env-standaard.
+    # NULL betekent altijd "gebruik de standaard", nooit "onbeperkt" — anders
+    # zou een leeg veld in de beheerders-UI stilletjes een limiet uitschakelen.
+    def _resolve(user_val: Optional[int], global_val: Optional[int], default: int) -> int:
+        if user_val is not None:
+            return user_val
+        if global_val is not None:
+            return global_val
+        return default
+
+    return (
+        _resolve(user_row.max_calls_per_day if user_row else None,
+                 global_row.max_calls_per_day if global_row else None,
+                 DEFAULT_MAX_CALLS_PER_DAY),
+        _resolve(user_row.max_tokens_per_day if user_row else None,
+                 global_row.max_tokens_per_day if global_row else None,
+                 DEFAULT_MAX_TOKENS_PER_DAY),
+    )
 
 def _log_budget_exceeded(username: str, user_role: str, reason: str) -> None:
     """Log een budgetoverschrijding in een aparte kortstondige sessie."""

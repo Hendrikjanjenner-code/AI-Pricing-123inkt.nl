@@ -89,6 +89,49 @@ class TestBudgetConfigHierarchy(unittest.TestCase):
         self.assertEqual(calls, 7)
         self.assertEqual(tokens, 77000)
 
+    @staticmethod
+    def _two_row_db(user_row, global_row):
+        """DB die eerst de gebruikersrij en daarna de globale rij teruggeeft."""
+        class DB:
+            _q = 0
+            def query(self, *a):
+                outer = self
+                class Q:
+                    def filter(self, *a, **k): return self
+                    def first(self_inner):
+                        outer._q += 1
+                        return user_row if outer._q == 1 else global_row
+                return Q()
+        return DB()
+
+    def test_user_null_field_falls_back_to_global(self):
+        """Een NULL-veld in de gebruikersrij betekent 'gebruik globaal',
+        nooit 'onbeperkt' — een leeg veld in de UI mag geen limiet uitschakelen."""
+        user_row = _budget_row(username="alice", max_calls=5, max_tokens=None)
+        global_row = _budget_row(username=None, max_calls=20, max_tokens=200000)
+        calls, tokens = ai_gateway._get_budget_config(
+            self._two_row_db(user_row, global_row), "alice")
+        self.assertEqual(calls, 5)          # override actief
+        self.assertEqual(tokens, 200000)    # NULL → globale waarde
+
+    def test_user_null_field_falls_back_to_env_without_global(self):
+        user_row = _budget_row(username="alice", max_calls=None, max_tokens=150000)
+        with patch.object(ai_gateway, "DEFAULT_MAX_CALLS_PER_DAY", 7):
+            calls, tokens = ai_gateway._get_budget_config(
+                self._two_row_db(user_row, None), "alice")
+        self.assertEqual(calls, 7)          # NULL → env-standaard
+        self.assertEqual(tokens, 150000)
+
+    def test_global_null_field_falls_back_to_env(self):
+        """Een NULL-veld in de globale rij valt terug op de env-standaard,
+        wordt niet 'onbeperkt'."""
+        global_row = _budget_row(username=None, max_calls=None, max_tokens=200000)
+        with patch.object(ai_gateway, "DEFAULT_MAX_CALLS_PER_DAY", 7):
+            calls, tokens = ai_gateway._get_budget_config(
+                self._two_row_db(None, global_row), "x")
+        self.assertEqual(calls, 7)
+        self.assertEqual(tokens, 200000)
+
 
 # ─── check_and_reserve_budget: atomische handhaving ──────────────────────────
 
@@ -190,11 +233,14 @@ class TestCheckAndReserveBudget(unittest.TestCase):
         self.assertIsNotNone(warning)
         self.assertIn("tokenlimiet", warning)
 
-    def test_no_warning_without_limits(self):
-        """Geen limieten geconfigureerd → nooit een waarschuwing."""
+    def test_no_warning_under_env_defaults_with_null_config(self):
+        """NULL-config valt terug op de env-standaard; ruim daaronder geen
+        waarschuwing."""
         db, _ = _make_slot_db(max_calls=None, max_tokens=None,
-                              calls_reserved=9999, tokens_reserved=9999999)
-        with patch("ai_gateway.SessionLocal", return_value=db):
+                              calls_reserved=1, tokens_reserved=16384)
+        with patch("ai_gateway.SessionLocal", return_value=db), \
+             patch.object(ai_gateway, "DEFAULT_MAX_CALLS_PER_DAY", 10000), \
+             patch.object(ai_gateway, "DEFAULT_MAX_TOKENS_PER_DAY", 100_000_000):
             _, _, warning = ai_gateway.check_and_reserve_budget("u", "viewer")
         self.assertIsNone(warning)
 
@@ -275,10 +321,22 @@ class TestCheckAndReserveBudget(unittest.TestCase):
         self.assertEqual(len(logged), 1)
         self.assertEqual(logged[0].status, "budget_exceeded")
 
-    def test_no_limit_never_raises(self):
-        """max_calls=None, max_tokens=None → geen beperking."""
-        db, slot = self._run(max_calls=None, max_tokens=None,
-                             calls_reserved=9999, tokens_reserved=9999999)
+    def test_null_config_enforces_env_defaults(self):
+        """max_calls=None, max_tokens=None → env-standaard geldt (NULL is
+        nooit 'onbeperkt'); boven de standaard wordt geweigerd."""
+        with patch.object(ai_gateway, "DEFAULT_MAX_CALLS_PER_DAY", 10), \
+             patch.object(ai_gateway, "DEFAULT_MAX_TOKENS_PER_DAY", 100000), \
+             patch("ai_gateway._log_budget_exceeded"):
+            with self.assertRaises(Exception):
+                self._run(max_calls=None, max_tokens=None,
+                          calls_reserved=9999, tokens_reserved=9999999)
+
+    def test_null_config_allows_within_env_defaults(self):
+        """Onder de env-standaard blijft een NULL-config gewoon doorlaten."""
+        with patch.object(ai_gateway, "DEFAULT_MAX_CALLS_PER_DAY", 10000), \
+             patch.object(ai_gateway, "DEFAULT_MAX_TOKENS_PER_DAY", 100_000_000):
+            db, slot = self._run(max_calls=None, max_tokens=None,
+                                 calls_reserved=9999, tokens_reserved=9999999)
         self.assertTrue(db.committed)
 
     def test_slot_not_incremented_on_exceeded(self):

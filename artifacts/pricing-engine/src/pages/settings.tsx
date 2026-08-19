@@ -15,6 +15,7 @@ import { Trash2, UserPlus, AlertTriangle, Database, History, Download, RefreshCw
 import { useAuth } from "@/lib/auth";
 import { getAuthToken } from "@/lib/auth";
 import { useAiProviderStatus, AI_PROVIDER_QUERY_KEY, type AiProviderInfo } from "@/hooks/use-ai-provider-status";
+import AiBudgetBeheer from "@/components/ai-budget-beheer";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -468,6 +469,8 @@ export default function Instellingen() {
           </CardContent>
         </Card>
       )}
+
+      {user?.role === "admin" && <AiBudgetBeheer />}
 
       {user?.role === "admin" && (
         <Card className="border-destructive/30">

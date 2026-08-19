@@ -29,6 +29,10 @@ CVS_RUN_DATE = date(2001, 1, 15)
 # Vaste run-datum voor fraude/NBA-signaaltests (los van vandaag)
 FRAUD_RUN_DATE = date(2001, 2, 15)
 
+# Idem voor fraude-detectie: vaste historische run_date zodat de test geen
+# fraude-signalen van echte dagelijkse runs raakt (delete/filter op run_date).
+FRAUD_RUN_DATE = date(2001, 1, 15)
+
 
 def _cleanup_member_ids(mids):
     s = SessionLocal()

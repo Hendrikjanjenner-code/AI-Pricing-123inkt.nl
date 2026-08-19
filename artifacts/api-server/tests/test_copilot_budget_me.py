@@ -106,7 +106,9 @@ class TestBudgetMe:
             assert body["calls_pct"] == round(12 / body["max_calls_per_day"] * 100, 1)
 
     def test_token_only_limit(self, client, ctx):
-        """Ongelimiteerde calls maar wél een tokenlimiet: pct's kloppen."""
+        """NULL-callimiet valt per veld terug op globaal/env-standaard;
+        de tokenlimiet uit de gebruikersrij geldt wél."""
+        import ai_gateway
         db = SessionLocal()
         try:
             db.add(models.AiBudgetConfig(
@@ -114,14 +116,22 @@ class TestBudgetMe:
                 max_calls_per_day=None, max_tokens_per_day=10_000,
             ))
             db.commit()
+            glob = (db.query(models.AiBudgetConfig)
+                    .filter(models.AiBudgetConfig.username.is_(None)).first())
+            expected_calls = (
+                glob.max_calls_per_day
+                if glob is not None and glob.max_calls_per_day is not None
+                else ai_gateway.DEFAULT_MAX_CALLS_PER_DAY)
         finally:
             db.close()
         try:
             r = client.get("/api/copilot/budget/me", headers=ctx["user"])
             assert r.status_code == 200, r.text
             body = r.json()
-            assert body["max_calls_per_day"] is None
-            assert body["calls_pct"] is None
+            # NULL betekent nooit 'onbeperkt': per veld terugval op de
+            # globale rij, anders op de omgevingsstandaard.
+            assert body["max_calls_per_day"] == expected_calls
+            assert body["calls_pct"] is not None
             assert body["max_tokens_per_day"] == 10_000
             # Slot uit vorige test: 3000 gereserveerde tokens
             assert body["tokens_pct"] == 30.0

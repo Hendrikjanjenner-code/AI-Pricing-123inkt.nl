@@ -37,6 +37,43 @@ logger = logging.getLogger("uvicorn.error")
 _active_runs: dict[str, dict[str, Any]] = {}
 _run_state_lock = threading.Lock()
 
+# Tabellen met een updatetimestamp: we gebruiken MAX(updated_at) als watermerk.
+# Tabellen zonder updated_at vallen terug op MAX(created_at) of MAX(date).
+WATERMARK_COLUMN: dict[str, str] = {
+    "dim_product": "updated_at",
+    "dim_category": "created_at",
+    "dim_shop": "created_at",
+    "dim_competitor": "created_at",
+    "fact_sales_daily": "date",
+    "fact_price_daily": "date",
+    "fact_competitor_price_daily": "date",
+    "fact_inventory_daily": "date",
+    "fact_pricing_recommendation_daily": "updated_at",
+    "sku_competition_score": "created_at",
+    "fact_bcg_classification_daily": "created_at",
+    "intelligence_signals": "created_at",
+}
+
+# Primaire sleutel per PostgreSQL-tabel (voor BigQuery MERGE). Een lijst
+# betekent een samengestelde MERGE-sleutel (bijv. shop-gescopeerde producten).
+PK_COLUMN: dict[str, str | list[str]] = {
+    "dim_product": ["shop_id", "sku_id"],
+    "dim_category": "id",
+    "dim_shop": "id",
+    "dim_competitor": "competitor_id",
+    "fact_sales_daily": "id",
+    "fact_price_daily": "id",
+    "fact_competitor_price_daily": "id",
+    "fact_inventory_daily": "id",
+    "fact_pricing_recommendation_daily": "id",
+    "sku_competition_score": "id",
+    "fact_bcg_classification_daily": "id",
+    "intelligence_signals": "id",
+}
+
+# Maximale batch-grootte per tabel (rijen per sync-run)
+BATCH_SIZE = 50_000
+
 # Normalisatiewaarde voor NULL-watermerken: moet exact overeenkomen met het
 # COALESCE(..., TIMESTAMP 'epoch') in _fetch_pg_rows, anders pagineert een
 # pagina vol NULL-watermerken eindeloos opnieuw.

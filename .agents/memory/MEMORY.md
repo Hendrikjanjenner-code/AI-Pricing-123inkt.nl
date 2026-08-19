@@ -29,6 +29,7 @@
 - [PIM source ownership](pim-source-ownership.md) — attribute values keep a source; cross-source writes must warn, never silently overwrite (DRS stays master).
 - [Feed-sync failure visibility](feed-sync-visibility.md) — failed syncs reuse ConnectorConfig.last_test_* (no schema change); feed response diagnostics + sanity checks live in the connector, reset per read cycle.
 - [Parallel task merges vs validation](parallel-task-validation.md) — completion validation runs the full suite on merged state; sibling-task regressions (dropped constants, changed API shapes) land on you — fix minimally, note in drift_reason.
+- [Full-suite gate vs moving main](suite-green-gate.md) — completion validation reruns the whole suite after rebase; unrelated bad merges (undefined constants) or data-dependent tests can block; fix minimally.
 - [Stale lib d.ts vs artifact typecheck](typecheck-libs-stale.md) — TS2305 from @workspace pkgs means run root `pnpm run typecheck:libs` first; refs use built dist, not src.
 - [DQ registry test isolation](dq-registry-test-isolation.md) — never call _sync_issue_registry/_detect_issues with a replaced/empty detection list in shared-DB tests; wrap the real detector and add a synthetic issue, or unrelated registry rows get auto-resolved.
 - [PIM defaults seed-once](pim-defaults-seeding.md) — "seed if empty" on list reads resurrects deleted reference data; use a persistent seeded-once marker.
