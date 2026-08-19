@@ -456,11 +456,17 @@ def _normalize_flat(rows: list[dict]) -> tuple[list[dict], list[dict]]:
 
 # ── persisteren ─────────────────────────────────────────────────────────────
 def ingest_feed(db: Session, source: str = SOURCE_NAME,
-                content: bytes | None = None, content_type: str = "") -> dict:
+                content: bytes | None = None, content_type: str = "",
+                shop_id: int = 1) -> dict:
     """Lees de feed volledig in en persisteer catalogus + prijzen + concurrenten.
 
     `content` kan een reeds opgehaalde feed-body zijn (bijv. van schijf), zodat
     een eenmalige bulk-load de trage download kan overslaan.
+
+    `shop_id` bepaalt voor welke winkel deze sync draait. ALLE replace-deletes
+    en alle geschreven rijen zijn strikt tot die winkel beperkt: een sync voor
+    winkel A mag nooit producten, dagprijzen of concurrentrijen van winkel B
+    wissen of overschrijven (twee-winkel-isolatie).
     """
     today = date.today()
     from services import import_settings as imps
@@ -527,8 +533,25 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
             f"blijft staan). Ontvangen respons: {response_info}"
         )
 
-    # 1. Producten: splits in nieuw vs bestaand.
-    existing_ids = {row[0] for row in db.query(models.DimProduct.sku_id).all()}
+    # 1. Producten: splits in nieuw vs bestaand — ALLEEN binnen deze winkel.
+    # Producten van andere winkels tellen niet mee als "bestaand": die mogen
+    # nooit door deze sync geüpdatet worden.
+    existing_ids = {row[0] for row in db.query(models.DimProduct.sku_id).filter(
+        models.DimProduct.shop_id == shop_id).all()}
+    # Sku's die al bij een ANDERE winkel horen volledig overslaan: de sku_id is
+    # de primary key, dus een insert zou crashen en een update zou de rij van
+    # die andere winkel overschrijven.
+    foreign_ids = {row[0] for row in db.query(models.DimProduct.sku_id).filter(
+        models.DimProduct.sku_id.in_([p["sku_id"] for p in catalog]),
+        models.DimProduct.shop_id != shop_id).all()}
+    if foreign_ids:
+        logger.warning(
+            "Feed-sync (shop %s): %d sku's overgeslagen omdat ze al bij een "
+            "andere winkel horen.", shop_id, len(foreign_ids))
+        catalog = [p for p in catalog if p["sku_id"] not in foreign_ids]
+        comp_rows = [r for r in comp_rows if r["sku_id"] not in foreign_ids]
+    for p in catalog:
+        p["shop_id"] = shop_id
     to_insert = [p for p in catalog if p["sku_id"] not in existing_ids]
     to_update = [p for p in catalog if p["sku_id"] in existing_ids]
 
@@ -573,7 +596,7 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
     # bestaande dagprijzen niet weggooien (laatst-goede data blijft staan).
     price_maps = [{
         "date": today, "sku_id": p["sku_id"], "price": p["current_price"],
-        "cost_price": p["cost_price"],
+        "cost_price": p["cost_price"], "shop_id": shop_id,
     } for p in catalog if p["current_price"] is not None]
     if not imps.component_enabled(settings, "own_prices"):
         logger.info("Feed-sync: eigen prijzen uitgevinkt in importinstellingen — overgeslagen.")
@@ -583,12 +606,17 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
         # de vervangende dagprijsrijen (replace mag niets wissen).
         existing_costs = dict(db.query(
             models.FactPriceDaily.sku_id, models.FactPriceDaily.cost_price,
-        ).filter(models.FactPriceDaily.date == today).all())
+        ).filter(models.FactPriceDaily.date == today,
+                 models.FactPriceDaily.shop_id == shop_id).all())
         for m in price_maps:
             m["cost_price"] = existing_costs.get(m["sku_id"])
     if price_maps:
-        db.query(models.FactPriceDaily).filter(models.FactPriceDaily.date == today).delete(
-            synchronize_session=False)
+        # Replace-delete strikt tot DEZE winkel beperkt: dagprijzen van andere
+        # winkels blijven altijd staan.
+        db.query(models.FactPriceDaily).filter(
+            models.FactPriceDaily.date == today,
+            models.FactPriceDaily.shop_id == shop_id,
+        ).delete(synchronize_session=False)
         for chunk in _chunks(price_maps):
             db.bulk_insert_mappings(models.FactPriceDaily, chunk)
         db.commit()
@@ -605,7 +633,7 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
     known = {p["sku_id"] for p in catalog} | existing_ids
     comp_maps = [{
         "date": today, "sku_id": r["sku_id"], "competitor_name": r["competitor_name"],
-        "price": r["price"], "url": r["url"], "source": source,
+        "price": r["price"], "url": r["url"], "source": source, "shop_id": shop_id,
         "in_stock": r.get("in_stock"), "delivery_days": r.get("delivery_days"),
         "currency": r.get("currency"), "vendor_name": r.get("vendor_name"),
         "observed_at": r.get("observed_at"), "raw_attributes": r.get("raw_attributes"),
@@ -619,6 +647,7 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
             for rec in db.query(models.FactCompetitorPriceDaily).filter(
                 models.FactCompetitorPriceDaily.date == today,
                 models.FactCompetitorPriceDaily.source == source,
+                models.FactCompetitorPriceDaily.shop_id == shop_id,
             ).all()
         }
         for m in comp_maps:
@@ -632,9 +661,12 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
         # Volledige vervanging van de snapshot van vandaag (normale pad), maar
         # uitgevinkte concurrenten behouden hun bestaande data (worden nooit
         # gewist door een sync waarin ze niet meegenomen worden).
+        # Replace-delete strikt tot DEZE winkel beperkt: concurrentrijen van
+        # andere winkels (zelfde datum en bron) blijven altijd staan.
         delete_q = db.query(models.FactCompetitorPriceDaily).filter(
             models.FactCompetitorPriceDaily.date == today,
             models.FactCompetitorPriceDaily.source == source,
+            models.FactCompetitorPriceDaily.shop_id == shop_id,
         )
         disabled = settings["disabled_competitors"]
         if disabled:
