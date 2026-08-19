@@ -32,6 +32,35 @@ logger = logging.getLogger(__name__)
 MODEL_VERSION = "signals-v1.0.0"
 MAX_PER_TYPE = 25
 
+# Drempels voor uitsluitings-spike (taak #213): een reden telt als spike
+# wanneer het totaal >50% hoger ligt dan de vorige run ÉN de absolute
+# stijging relevant is (geen ruis bij kleine aantallen).
+EXCLUSION_SPIKE_MIN_PCT = 50.0
+EXCLUSION_SPIKE_MIN_INCREASE = 10
+
+EXCLUSION_REASON_LABELS = {
+    "COMPETITOR_IGNORED_OUT_OF_STOCK": "geen voorraad",
+    "COMPETITOR_IGNORED_BAD_DELIVERY": "te lange levertijd",
+    "COMPETITOR_IGNORED_OUTLIER": "uitbijterprijs",
+    "COMPETITOR_IGNORED_BAD_MATCH": "slechte match",
+    "COMPETITOR_IGNORED_LOW_RELEVANCE": "lage relevantie",
+    "COMPETITOR_IGNORED_DIFFERENT_PACK_SIZE": "afwijkende verpakkingsgrootte",
+}
+
+
+def _exclusion_reason_totals(db: Session, sid: int, run_date) -> dict[str, int]:
+    """Totaal aantal uitgesloten concurrentprijzen per reden voor één run."""
+    totals: dict[str, int] = {}
+    rows = db.query(models.SkuCompetitionScore.excluded_reasons).filter(
+        func.coalesce(models.SkuCompetitionScore.shop_id, sid) == sid,
+        models.SkuCompetitionScore.run_date == run_date,
+        models.SkuCompetitionScore.excluded_reasons.isnot(None),
+    ).all()
+    for (reasons,) in rows:
+        for reason, cnt in (reasons or {}).items():
+            totals[reason] = totals.get(reason, 0) + int(cnt or 0)
+    return totals
+
 
 def _f(v) -> float | None:
     return float(v) if v is not None else None
@@ -148,6 +177,71 @@ def emit_competition_signals(db: Session) -> int:
             still_active={("competitive_pressure_increased", s.sku_id) for s in pressure_all}
             | {("price_increase_opportunity", s.sku_id) for s in opportunity_all},
         )
+
+    # Uitsluitings-spike (taak #213): plotselinge stijging van het aantal
+    # uitgesloten concurrentprijzen per reden t.o.v. de vorige scoring-run.
+    # Alleen evalueerbaar als er een vorige run bestaat; zonder vergelijking
+    # wordt niets gepubliceerd én niets geresolved.
+    if latest_score:
+        prev_run = db.query(func.max(models.SkuCompetitionScore.run_date)).filter(
+            func.coalesce(models.SkuCompetitionScore.shop_id, sid) == sid,
+            models.SkuCompetitionScore.run_date < latest_score).scalar()
+        if prev_run:
+            cur_totals: dict[str, int] = {}
+            for s in scores:
+                for reason, cnt in (s.excluded_reasons or {}).items():
+                    cur_totals[reason] = cur_totals.get(reason, 0) + int(cnt or 0)
+            prev_totals = _exclusion_reason_totals(db, sid, prev_run)
+            spiking: list[tuple[str, int, int]] = []
+            for reason in set(cur_totals) | set(prev_totals):
+                cur = cur_totals.get(reason, 0)
+                prev = prev_totals.get(reason, 0)
+                increase = cur - prev
+                if (increase >= EXCLUSION_SPIKE_MIN_INCREASE
+                        and cur > prev * (1 + EXCLUSION_SPIKE_MIN_PCT / 100.0)):
+                    spiking.append((reason, cur, prev))
+            for reason, cur, prev in spiking:
+                label = EXCLUSION_REASON_LABELS.get(reason, reason)
+                change_pct = round((cur - prev) / prev * 100, 1) if prev else None
+                publish_signal(
+                    db, engine="competition", signal_type="exclusion_spike",
+                    entity_type="exclusion_reason", entity_id=reason,
+                    entity_name=label,
+                    severity="high" if (prev and cur > prev * 3) or (not prev and cur >= 5 * EXCLUSION_SPIKE_MIN_INCREASE) else "medium",
+                    direction="negative",
+                    metric="excluded_competitor_prices",
+                    current_value=float(cur), previous_value=float(prev),
+                    change_pct=change_pct,
+                    confidence=0.8,
+                    explanation=(
+                        f"Het aantal uitgesloten concurrentprijzen wegens {label} steeg van "
+                        f"{prev} (run {prev_run.isoformat()}) naar {cur} (run "
+                        f"{latest_score.isoformat()})"
+                        + (f" (+{change_pct}%)." if change_pct is not None else " (voorheen 0).")
+                        + " Dit kan wijzen op een feedprobleem of een drempelwijziging."),
+                    evidence={
+                        "reason": reason,
+                        "current_total": cur,
+                        "previous_total": prev,
+                        "current_run_date": latest_score.isoformat(),
+                        "previous_run_date": prev_run.isoformat(),
+                    },
+                    sources=["sku_competition_score"],
+                    suggested_action=(
+                        "Feedkwaliteit en uitsluitingsdrempels (voorraad/levertijd/"
+                        "uitbijter) controleren"),
+                    model_version=MODEL_VERSION,
+                )
+                n += 1
+            # Auto-resolve zodra de aantallen normaliseren. Alleen hier —
+            # binnen een evalueerbare vergelijking van twee runs.
+            auto_resolve_signals(
+                db, engine="competition", shop_id=sid,
+                signal_types=["exclusion_spike"],
+                entity_type="exclusion_reason",
+                still_active={("exclusion_spike", reason)
+                              for reason, _cur, _prev in spiking},
+            )
 
     # Rankingverschuivingen (§11): concurrent stijgt in de overall ranking
     latest = db.query(func.max(models.CompetitorRanking.run_date)).filter(
