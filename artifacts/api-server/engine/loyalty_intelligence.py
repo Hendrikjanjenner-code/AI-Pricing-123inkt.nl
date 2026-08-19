@@ -284,8 +284,15 @@ def compute_customer_value(db: Session, run_date: date | None = None) -> int:
         models.CustomerValueScore.run_date == run_date
     ).delete()
 
+    # Herbevestig vlak vóór het schrijven welke leden nog bestaan: een
+    # concurrent verwijderd lid (bv. testopruiming) mag geen FK-fout op
+    # customer_value_scores veroorzaken.
+    valid_ids = {i for (i,) in db.query(models.LoyaltyMember.id).all()}
+
     n = 0
     for m in members:
+        if m.id not in valid_ids:
+            continue
         _, freq, monetary, _ = stats_12m.get(m.id, (m.id, 0, 0, None))
         last_purchase = last_any.get(m.id)
         recency = (run_date - last_purchase).days if last_purchase else None
@@ -448,11 +455,13 @@ def liability_summary(db: Session, shop_id: int | None = None) -> dict:
     points_expiring_90d = 0
     expiry_forecast: list[dict] = []
     scope_ids = [shop_id] if shop_id is not None else _loyalty_shop_ids(db)
+    any_enabled = policy.enabled
     for sid in scope_ids:
         shop_policy = policy if sid == (shop_id if shop_id is not None else 1) \
             else _get_expiry_policy(db, sid)
         if not shop_policy.enabled:
             continue
+        any_enabled = True
         points_expiring_30d += _compute_expiring_points(db, shop_policy, warn_days=30, shop_id=sid)
         points_expiring_90d += _compute_expiring_points(db, shop_policy, warn_days=90, shop_id=sid)
         shop_forecast = _expiry_forecast_monthly(db, shop_policy, months=6, shop_id=sid)
@@ -462,6 +471,12 @@ def liability_summary(db: Session, shop_id: int | None = None) -> dict:
             for agg, extra in zip(expiry_forecast, shop_forecast):
                 agg["points"] += extra["points"]
                 agg["eur"] = round(agg["eur"] + extra["eur"], 2)
+    if not expiry_forecast and any_enabled:
+        # Wel een enabled beleid maar (nog) geen shops met wallets: lever
+        # tóch de maandgrenzen op, zodat consumenten altijd een curve van
+        # vaste lengte krijgen. Bij volledig uitgeschakeld beleid blijft de
+        # curve leeg (geen speculatieve buckets).
+        expiry_forecast = _expiry_forecast_monthly(db, policy, months=6, shop_id=-1)
 
     return {
         "shop_id": shop_id,
@@ -792,24 +807,27 @@ def expiring_soon_members(db: Session, shop_id: int | None = None) -> list[dict]
             overdue_live = _fifo_expirable_points(
                 db, wallet.member_id, wallet, expiry_cutoff=cutoff_full,
             )
-            date_filters = [
+            earliest_window = db.query(func.min(models.LoyaltyTransaction.txn_date)).filter(
                 models.LoyaltyTransaction.member_id == member.id,
                 models.LoyaltyTransaction.txn_type.in_(list(_CREDIT_TYPES)),
+                models.LoyaltyTransaction.txn_date >= cutoff_full,
                 models.LoyaltyTransaction.txn_date < cutoff_soon,
-            ]
-            if overdue_live <= 0:
-                date_filters.append(models.LoyaltyTransaction.txn_date >= cutoff_full)
-            earliest = db.query(func.min(models.LoyaltyTransaction.txn_date)).filter(
-                *date_filters
             ).scalar()
-            if earliest is None:
-                # Alleen al-overdue punten: schat de (verstreken) vervaldatum
-                # op basis van de vroegste credit vóór de vervalgrens.
+            if earliest_window is None:
+                # Alleen al-overdue punten: geen zinvolle toekomstige
+                # vervaldatum — de schatting blijft begrensd op het
+                # waarschuwingsvenster (expires_on = None).
+                earliest = None
+            elif overdue_live > 0:
+                # Overdue + window: de vroegste credit überhaupt bepaalt
+                # FIFO de (verstreken) vervaldatum → days_until_expiry <= 0.
                 earliest = db.query(func.min(models.LoyaltyTransaction.txn_date)).filter(
                     models.LoyaltyTransaction.member_id == member.id,
                     models.LoyaltyTransaction.txn_type.in_(list(_CREDIT_TYPES)),
-                    models.LoyaltyTransaction.txn_date < cutoff_full,
+                    models.LoyaltyTransaction.txn_date < cutoff_soon,
                 ).scalar()
+            else:
+                earliest = earliest_window
             expires_on = (
                 earliest + timedelta(days=policy.expiry_months * 30)
             ) if earliest else None
@@ -827,7 +845,6 @@ def expiring_soon_members(db: Session, shop_id: int | None = None) -> list[dict]
             })
     result.sort(key=lambda r: r["days_until_expiry"] if r["days_until_expiry"] is not None else 9999)
     return result
-
 
 # ---------------------------------------------------------------------------
 # Fraude

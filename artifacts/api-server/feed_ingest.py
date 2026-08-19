@@ -898,14 +898,7 @@ def score_competition(db: Session, shop_id: int = 1) -> int:
         models.SkuCompetitionScore.shop_id == shop_id,
     ).delete(synchronize_session=False)
 
-    score_maps: list[dict] = []
-    for sku_id, prices in by_sku.items():
-        prod = products.get(sku_id)
-        if prod is None or not prices:
-            continue
-        ref_price, used, excluded, reasons = ce.calculate_reference_price(prices)
-        if ref_price is None or used == 0:
-            continue
+    def _merge_stock_delivery(sku_id: str, excluded: int, reasons: dict | None):
         oos = out_of_stock_by_sku.get(sku_id, 0)
         if oos:
             excluded += oos
@@ -916,6 +909,43 @@ def score_competition(db: Session, shop_id: int = 1) -> int:
             excluded += bad
             reasons = dict(reasons or {})
             reasons[ce.EXCLUSION_BAD_DELIVERY] = reasons.get(ce.EXCLUSION_BAD_DELIVERY, 0) + bad
+        return excluded, reasons
+
+    def _excluded_only_row(sku_id: str, excluded: int, reasons: dict | None) -> dict:
+        """Score-rij voor een SKU waarvan álle concurrentprijzen zijn
+        uitgesloten (voorraad/levertijd/uitbijter): geen referentieprijs,
+        maar de uitsluitingstellingen blijven zichtbaar in het dashboard."""
+        return {
+            "sku_id": sku_id, "run_date": today, "shop_id": shop_id,
+            "product_comparability_score": 0.0,
+            "price_sensitivity_score": 0.0,
+            "substitution_score": 0.0,
+            "competitor_relevance_score": 0.0,
+            "competitor_price_reliability_score": 0.0,
+            "basket_dependency_score": 0.0,
+            "strategic_importance_score": 0.0,
+            "pcis_score": 0.0,
+            "competition_class": ce.get_competition_class(0.0),
+            "reference_price": None,
+            "price_index": None,
+            "competitors_used": 0,
+            "competitors_excluded": excluded,
+            "excluded_reasons": reasons or None,
+        }
+
+    score_maps: list[dict] = []
+    for sku_id, prices in by_sku.items():
+        prod = products.get(sku_id)
+        if prod is None or not prices:
+            continue
+        ref_price, used, excluded, reasons = ce.calculate_reference_price(prices)
+        excluded, reasons = _merge_stock_delivery(sku_id, excluded, reasons)
+        if ref_price is None or used == 0:
+            # Alle prijzen uitgesloten (bv. allemaal uitbijters): geen
+            # referentieprijs, maar tel de uitsluitingen wel mee.
+            if excluded:
+                score_maps.append(_excluded_only_row(sku_id, excluded, reasons))
+            continue
 
         own = float(prod.current_price) if prod.current_price else None
         price_index = round(own / ref_price, 4) if own and ref_price else None
@@ -952,6 +982,16 @@ def score_competition(db: Session, shop_id: int = 1) -> int:
             "competitors_excluded": excluded,
             "excluded_reasons": reasons or None,
         })
+
+    # SKU's waarvan álle concurrentprijzen al vóór de referentieberekening
+    # zijn uitgesloten (voorraad/levertijd) komen niet in by_sku voor, maar
+    # hun uitsluitingen moeten wél zichtbaar blijven in het dashboard.
+    for sku_id in set(out_of_stock_by_sku) | set(bad_delivery_by_sku):
+        if sku_id in by_sku or products.get(sku_id) is None:
+            continue
+        excluded, reasons = _merge_stock_delivery(sku_id, 0, None)
+        if excluded:
+            score_maps.append(_excluded_only_row(sku_id, excluded, reasons))
 
     for chunk in _chunks(score_maps):
         db.bulk_insert_mappings(models.SkuCompetitionScore, chunk)

@@ -41,6 +41,7 @@ def get_competition_summary(
             "influence_count": 0, "monitor_count": 0, "ignore_count": 0,
             "avg_price_index": 1.0, "total_competitors_excluded": 0,
             "downward_pressure_count": 0, "upward_opportunity_count": 0,
+            "excluded_by_reason": {}, "last_run_date": None,
         }
 
     avg_pcis = sum(s.pcis_score or 0 for s in scores) / len(scores)
@@ -52,6 +53,15 @@ def get_competition_summary(
     price_indexed = [s for s in scores if s.price_index is not None]
     avg_pi = sum(s.price_index for s in price_indexed) / len(price_indexed) if price_indexed else 1.0
     total_excluded = sum(s.competitors_excluded or 0 for s in scores)
+
+    # Uitsluitingen per reden over de laatste scoring-run
+    last_run = max((s.run_date for s in scores if s.run_date), default=None)
+    excluded_by_reason: dict = {}
+    for s in scores:
+        if last_run is not None and s.run_date != last_run:
+            continue
+        for reason, cnt in (s.excluded_reasons or {}).items():
+            excluded_by_reason[reason] = excluded_by_reason.get(reason, 0) + (cnt or 0)
     downward = sum(1 for s in price_indexed if s.price_index < 0.97)
     upward = sum(1 for s in price_indexed if s.price_index > 1.03)
 
@@ -67,6 +77,8 @@ def get_competition_summary(
         "total_competitors_excluded": total_excluded,
         "downward_pressure_count": downward,
         "upward_opportunity_count": upward,
+        "excluded_by_reason": excluded_by_reason,
+        "last_run_date": last_run.isoformat() if last_run else None,
     }
 
 

@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
-import { Search, TrendingDown, TrendingUp, Target, AlertTriangle, Circle, Minus, Sparkles } from "lucide-react";
+import { Search, TrendingDown, TrendingUp, Target, AlertTriangle, Circle, Minus, Sparkles, Ban } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState } from "react";
 import { useShopId, withShop } from "@/hooks/use-shop-id";
@@ -112,6 +112,34 @@ export default function CompetitionDashboard() {
             <CardContent><div className="text-2xl font-bold text-emerald-600">{summary.upward_opportunity_count}</div><p className="text-xs text-muted-foreground">SKU's goedkoper dan markt</p></CardContent>
           </Card>
         </div>
+      )}
+
+      {/* Uitsluitingen per reden (laatste scoring-run) */}
+      {summary && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-1"><Ban className="h-4 w-4 text-muted-foreground" /> Uitgesloten concurrentprijzen</CardTitle>
+            <CardDescription>
+              Per reden uitgesloten van de referentieprijs{summary.last_run_date ? ` — laatste run van ${summary.last_run_date}` : ""}. Een plotselinge stijging kan wijzen op feedproblemen of een te strenge drempel (import-instellingen op de connectoren-pagina).
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-3 gap-4" data-testid="exclusion-breakdown">
+              <div>
+                <div className="text-2xl font-bold tabular-nums" data-testid="excluded-out-of-stock">{summary.excluded_by_reason?.COMPETITOR_IGNORED_OUT_OF_STOCK ?? 0}</div>
+                <p className="text-xs text-muted-foreground">Niet op voorraad</p>
+              </div>
+              <div>
+                <div className="text-2xl font-bold tabular-nums" data-testid="excluded-bad-delivery">{summary.excluded_by_reason?.COMPETITOR_IGNORED_BAD_DELIVERY ?? 0}</div>
+                <p className="text-xs text-muted-foreground">Levertijd te lang</p>
+              </div>
+              <div>
+                <div className="text-2xl font-bold tabular-nums" data-testid="excluded-outlier">{summary.excluded_by_reason?.COMPETITOR_IGNORED_OUTLIER ?? 0}</div>
+                <p className="text-xs text-muted-foreground">Prijsuitbijter</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Concurrent-rankings (drie-scoremodel) */}

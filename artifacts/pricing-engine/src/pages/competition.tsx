@@ -139,6 +139,33 @@ export default function ConcurrentieIntelligence() {
         </div>
       )}
 
+      {samenvatting && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Uitgesloten concurrentprijzen</CardTitle>
+            <CardDescription>
+              Per reden uitgesloten van de referentieprijs{samenvatting.last_run_date ? ` — laatste run van ${samenvatting.last_run_date}` : ""}. Een plotselinge stijging kan wijzen op feedproblemen of een te strenge drempel (import-instellingen op de connectoren-pagina).
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-3 gap-4" data-testid="exclusion-breakdown">
+              <div>
+                <div className="text-2xl font-bold tabular-nums" data-testid="excluded-out-of-stock">{samenvatting.excluded_by_reason?.COMPETITOR_IGNORED_OUT_OF_STOCK ?? 0}</div>
+                <p className="text-xs text-muted-foreground">Niet op voorraad</p>
+              </div>
+              <div>
+                <div className="text-2xl font-bold tabular-nums" data-testid="excluded-bad-delivery">{samenvatting.excluded_by_reason?.COMPETITOR_IGNORED_BAD_DELIVERY ?? 0}</div>
+                <p className="text-xs text-muted-foreground">Levertijd te lang</p>
+              </div>
+              <div>
+                <div className="text-2xl font-bold tabular-nums" data-testid="excluded-outlier">{samenvatting.excluded_by_reason?.COMPETITOR_IGNORED_OUTLIER ?? 0}</div>
+                <p className="text-xs text-muted-foreground">Prijsuitbijter</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <Card>
           <CardHeader>
