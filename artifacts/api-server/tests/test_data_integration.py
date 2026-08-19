@@ -416,6 +416,56 @@ def test_bq_fetch_pg_rows_paginates_without_gaps_or_dupes(monkeypatch):
     finally:
         db.close()
 
+def test_bq_fetch_pg_rows_includes_null_watermarks_incrementally(monkeypatch):
+    """Rijen zonder watermerk (bv. handmatig aangemaakt) mogen niet permanent
+    buiten een incrementele sync vallen: met een `since`-filter én
+    keyset-paginatie moeten NULL-watermerk-rijen toch meekomen."""
+    from bigquery import sync as bq_sync
+    from datetime import datetime as _dt, timedelta as _td
+    import uuid as _uuid
+    monkeypatch.setattr(bq_sync, "BATCH_SIZE", 2)
+    wm_col = bq_sync.WATERMARK_COLUMN["dim_shop"]
+    db = SessionLocal()
+    sa_text = __import__("sqlalchemy").text
+    codes = [f"BQNULL{_uuid.uuid4().hex[:6]}" for _ in range(3)]
+    try:
+        # Twee rijen zonder watermerk + één recente rij mét watermerk
+        for code in codes[:2]:
+            db.execute(sa_text(
+                f"INSERT INTO dim_shop (shop_code, name, active, {wm_col}) "
+                "VALUES (:c, :c, true, NULL)"), {"c": code})
+        db.execute(sa_text(
+            f"INSERT INTO dim_shop (shop_code, name, active, {wm_col}) "
+            "VALUES (:c, :c, true, now())"), {"c": codes[2]})
+        db.commit()
+        inserted = {r[0] for r in db.execute(sa_text(
+            "SELECT id FROM dim_shop WHERE shop_code = ANY(:cs)"),
+            {"cs": codes})}
+        since = _dt.utcnow() - _td(days=1)
+        seen: list = []
+        last_key = None
+        while True:
+            rows = bq_sync._fetch_pg_rows(db, "dim_shop", since=since,
+                                          last_key=last_key)
+            if not rows:
+                break
+            seen.extend(r["id"] for r in rows)
+            last = rows[-1]
+            wm = last.get(wm_col)
+            if wm is not None and not isinstance(wm, _dt):
+                wm = _dt.combine(wm, _dt.min.time())
+            last_key = (wm, last["id"])
+            if len(rows) < bq_sync.BATCH_SIZE:
+                break
+        assert len(seen) == len(set(seen)), "paginatie leverde duplicaten op"
+        assert inserted <= set(seen), (
+            "NULL-watermerk-rijen moeten in een incrementele sync meekomen")
+    finally:
+        db.execute(sa_text("DELETE FROM dim_shop WHERE shop_code = ANY(:cs)"),
+                   {"cs": codes})
+        db.commit()
+        db.close()
+
 def test_bq_fetch_pg_rows_incremental_includes_null_watermarks():
     """Incrementele sync (since gezet) mag rijen met een NULL-watermerk niet
     overslaan: de MERGE is idempotent, dus opnieuw exporteren is veilig —

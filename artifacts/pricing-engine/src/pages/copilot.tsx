@@ -138,10 +138,22 @@ type MemoryItem = {
   key: string;
   value: string;
   scope: "persoonlijk" | "organisatie";
+  source?: "manual" | "extracted";
   editable: boolean;
   updated_at?: string | null;
 };
 
+function SourceBadge({ source }: { source?: "manual" | "extracted" }) {
+  const manual = source === "manual";
+  return (
+    <Badge
+      variant="outline"
+      className={`h-4 px-1 text-[9px] ${manual ? "" : "text-muted-foreground"}`}
+    >
+      {manual ? "handmatig" : "automatisch"}
+    </Badge>
+  );
+}
 function MemorySection() {
   const { user } = useAuth();
   const canManageOrg = user?.role === "admin" || user?.role === "pricing_manager";
@@ -156,6 +168,8 @@ function MemorySection() {
   const [newValue, setNewValue] = useState("");
   const [newScope, setNewScope] = useState<"persoonlijk" | "organisatie">("persoonlijk");
   const [adding, setAdding] = useState(false);
+  const [showDeleted, setShowDeleted] = useState(false);
+  const [deletedItems, setDeletedItems] = useState<MemoryItem[] | null>(null);
 
   const addItem = async () => {
     const key = newKey.trim();
@@ -209,9 +223,47 @@ function MemorySection() {
         headers: getAuthHeaders(),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setItems((prev) => (prev || []).filter((i) => i.id !== id));
+      setItems((prev) => {
+        const removed = (prev || []).find((i) => i.id === id);
+        if (removed && deletedItems != null) {
+          setDeletedItems((d) => [removed, ...(d || []).filter((i) => i.id !== id)]);
+        }
+        return (prev || []).filter((i) => i.id !== id);
+      });
     } catch {
       setError("Verwijderen mislukt.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const loadDeleted = async () => {
+    setError(null);
+    try {
+      const res = await fetch(`${BASE}/api/copilot/memory/deleted`, {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setDeletedItems((await res.json()) as MemoryItem[]);
+    } catch {
+      setError("Verwijderde items konden niet worden geladen.");
+    }
+  };
+
+  const restore = async (id: number) => {
+    setBusyId(id);
+    setError(null);
+    try {
+      const res = await fetch(`${BASE}/api/copilot/memory/${id}/restore`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const restored = (await res.json()) as MemoryItem;
+      setDeletedItems((prev) => (prev || []).filter((i) => i.id !== id));
+      setItems((prev) => [restored, ...(prev || []).filter((i) => i.id !== id)]);
+    } catch {
+      setError("Herstellen mislukt.");
     } finally {
       setBusyId(null);
     }
@@ -338,6 +390,7 @@ function MemorySection() {
                         organisatie
                       </Badge>
                     )}
+                    <SourceBadge source={m.source} />
                   </div>
                   {editingId === m.id ? (
                     <form
@@ -395,6 +448,63 @@ function MemorySection() {
               </div>
             </div>
           ))}
+          <div className="pt-1">
+            <button
+              type="button"
+              className="flex w-full items-center gap-1 text-muted-foreground hover:text-foreground"
+              onClick={() => {
+                const next = !showDeleted;
+                setShowDeleted(next);
+                if (next && deletedItems == null) void loadDeleted();
+              }}
+            >
+              <Trash2 className="h-3 w-3" /> Verwijderde items
+              <span className="ml-auto">{showDeleted ? "−" : "+"}</span>
+            </button>
+            {showDeleted && (
+              <div className="mt-1.5 space-y-1.5">
+                {deletedItems == null && <Skeleton className="h-8 w-full" />}
+                {deletedItems != null && deletedItems.length === 0 && (
+                  <p className="text-muted-foreground">Geen verwijderde items.</p>
+                )}
+                {(deletedItems || []).map((m) => (
+                  <div
+                    key={m.id}
+                    className="rounded border border-dashed bg-background/60 p-1.5"
+                  >
+                    <div className="flex items-start gap-1.5">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1">
+                          <span className="truncate font-medium text-muted-foreground">
+                            {m.key}
+                          </span>
+                          {m.scope === "organisatie" && (
+                            <Badge variant="outline" className="h-4 px-1 text-[9px]">
+                              organisatie
+                            </Badge>
+                          )}
+                          <SourceBadge source={m.source} />
+                        </div>
+                        <p className="mt-0.5 break-words text-muted-foreground line-through">
+                          {m.value}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-6 shrink-0 px-2 text-[10px]"
+                        disabled={busyId === m.id}
+                        onClick={() => void restore(m.id)}
+                      >
+                        Herstel
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

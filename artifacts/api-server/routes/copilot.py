@@ -450,6 +450,28 @@ def list_memory(
         out.append(item)
     return out
 
+@router.get("/memory/deleted")
+def list_deleted_memory(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """Verwijderde geheugen-items (tombstones) die de gebruiker mag herstellen:
+    eigen items + (voor admin/pricing_manager) organisatie-brede items."""
+    can_manage_org = current_user.role in MEMORY_MANAGER_ROLES
+    q = db.query(models.AiUserMemory).filter(
+        models.AiUserMemory.status == "deleted")
+    if can_manage_org:
+        q = q.filter((models.AiUserMemory.user_id == current_user.id) |
+                     (models.AiUserMemory.user_id.is_(None)))
+    else:
+        q = q.filter(models.AiUserMemory.user_id == current_user.id)
+    rows = q.order_by(desc(models.AiUserMemory.updated_at)).all()
+    out = []
+    for r in rows:
+        item = _memory_out(r)
+        item["editable"] = True
+        out.append(item)
+    return out
 @router.post("/memory")
 def create_memory(
     payload: dict = Body(...),
@@ -486,13 +508,18 @@ def create_memory(
     ).first()
     if existing:
         existing.value = value
+        # Een tombstone (status="deleted") wordt door een handmatige upsert
+        # weer geactiveerd — de gebruiker maakt de key bewust opnieuw aan.
+        existing.status = "active"
+        existing.source = "manual"
         existing.updated_at = models.datetime.utcnow()
         db.commit()
         db.refresh(existing)
         item = _memory_out(existing)
         item["editable"] = True
         return item
-    row = models.AiUserMemory(user_id=user_id, key=key, value=value)
+    row = models.AiUserMemory(user_id=user_id, key=key, value=value,
+                              source="manual")
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -873,3 +900,32 @@ def upsert_budget_config(
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         "updated_by": row.updated_by,
     }
+
+@router.post("/memory/{memory_id}/restore")
+def restore_memory(
+    memory_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """Herstel een verwijderd geheugen-item: status terug naar "active",
+    waarna automatische extractie de key weer mag bijwerken."""
+    row = db.query(models.AiUserMemory).filter(
+        models.AiUserMemory.id == memory_id).first()
+    if not row or (row.user_id is not None and row.user_id != current_user.id):
+        raise HTTPException(status_code=404, detail="Geheugen-item niet gevonden")
+    if row.user_id is None and current_user.role not in MEMORY_MANAGER_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail="Organisatie-brede geheugen-items kunnen alleen door "
+                   "admin of pricing_manager worden beheerd",
+        )
+    if (row.status or "active") != "deleted":
+        raise HTTPException(
+            status_code=409, detail="Geheugen-item is niet verwijderd")
+    row.status = "active"
+    row.updated_at = models.datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    item = _memory_out(row)
+    item["editable"] = True
+    return item

@@ -396,3 +396,101 @@ def test_add_requires_key_and_value(client, ctx):
                        ).status_code == 400
     assert client.post("/api/copilot/memory",
                        json={"key": "k", "value": "x"}).status_code == 401
+
+
+# ─── Herstel van verwijderde items (Task #161) ───────────────────────────────
+
+def test_deleted_list_and_restore_own_item(client, ctx, db):
+    viewer_id = ctx["_user_ids"][1]
+    row = _add_memory(db, viewer_id, value="hersteltest")
+    try:
+        assert client.delete(f"/api/copilot/memory/{row.id}",
+                             headers=ctx["viewer"]).status_code == 200
+        # Zichtbaar in de verwijderde-lijst met source-veld
+        r = client.get("/api/copilot/memory/deleted", headers=ctx["viewer"])
+        assert r.status_code == 200
+        by_id = {i["id"]: i for i in r.json()}
+        assert row.id in by_id
+        assert by_id[row.id]["source"] == "extracted"
+        # Herstellen zet status terug naar active
+        r = client.post(f"/api/copilot/memory/{row.id}/restore",
+                        headers=ctx["viewer"])
+        assert r.status_code == 200
+        db.expire_all()
+        fresh = db.query(models.AiUserMemory).filter(
+            models.AiUserMemory.id == row.id).first()
+        assert fresh.status == "active"
+        # Terug in de normale lijst, weg uit de verwijderde-lijst
+        r = client.get("/api/copilot/memory", headers=ctx["viewer"])
+        assert row.id in {i["id"] for i in r.json()}
+        r = client.get("/api/copilot/memory/deleted", headers=ctx["viewer"])
+        assert row.id not in {i["id"] for i in r.json()}
+        # Nogmaals herstellen: 409
+        assert client.post(f"/api/copilot/memory/{row.id}/restore",
+                           headers=ctx["viewer"]).status_code == 409
+    finally:
+        _cleanup(db, row.id)
+
+
+def test_restore_rbac(client, ctx, db):
+    pm_id = ctx["_user_ids"][0]
+    other = _add_memory(db, pm_id, value="privé")
+    org = _add_memory(db, None, value="org-item")
+    try:
+        for r in (other, org):
+            r.status = "deleted"
+        db.commit()
+        # Andermans item: onzichtbaar en niet herstelbaar (404)
+        r = client.get("/api/copilot/memory/deleted", headers=ctx["viewer"])
+        ids = {i["id"] for i in r.json()}
+        assert other.id not in ids and org.id not in ids
+        assert client.post(f"/api/copilot/memory/{other.id}/restore",
+                           headers=ctx["viewer"]).status_code == 404
+        # Viewer mag org-item niet herstellen (403)
+        assert client.post(f"/api/copilot/memory/{org.id}/restore",
+                           headers=ctx["viewer"]).status_code == 403
+        # Admin ziet en herstelt het org-item wel
+        r = client.get("/api/copilot/memory/deleted", headers=ctx["admin"])
+        assert org.id in {i["id"] for i in r.json()}
+        assert client.post(f"/api/copilot/memory/{org.id}/restore",
+                           headers=ctx["admin"]).status_code == 200
+    finally:
+        _cleanup(db, other.id, org.id)
+
+
+def test_restore_reenables_extraction(client, ctx, db, monkeypatch):
+    """Na herstel mag automatische extractie de key weer bijwerken."""
+    viewer_id = ctx["_user_ids"][1]
+    row = _add_memory(db, viewer_id, value="voor")
+    try:
+        assert client.delete(f"/api/copilot/memory/{row.id}",
+                             headers=ctx["viewer"]).status_code == 200
+        assert client.post(f"/api/copilot/memory/{row.id}/restore",
+                           headers=ctx["viewer"]).status_code == 200
+        _run_extraction(db, monkeypatch, viewer_id,
+                        [{"key": row.key, "value": "na-extractie"}])
+        db.expire_all()
+        fresh = db.query(models.AiUserMemory).filter(
+            models.AiUserMemory.id == row.id).first()
+        assert fresh.status == "active" and fresh.value == "na-extractie"
+    finally:
+        _cleanup(db, row.id)
+
+
+def test_manual_add_of_deleted_key_reactivates(client, ctx, db):
+    """Handmatig opnieuw toevoegen van een verwijderde key heractiveert het item."""
+    viewer_id = ctx["_user_ids"][1]
+    row = _add_memory(db, viewer_id, value="oud")
+    try:
+        assert client.delete(f"/api/copilot/memory/{row.id}",
+                             headers=ctx["viewer"]).status_code == 200
+        r = client.post("/api/copilot/memory", headers=ctx["viewer"],
+                        json={"key": row.key, "value": "nieuw"})
+        assert r.status_code == 200
+        db.expire_all()
+        fresh = db.query(models.AiUserMemory).filter(
+            models.AiUserMemory.id == row.id).first()
+        assert fresh.status == "active" and fresh.value == "nieuw"
+        assert fresh.source == "manual"
+    finally:
+        _cleanup(db, row.id)

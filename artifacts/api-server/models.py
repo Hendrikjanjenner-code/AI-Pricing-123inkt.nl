@@ -2929,6 +2929,19 @@ class AiConversationSummary(Base):
     upto_message_id = Column(Integer)              # laatste bericht in de samenvatting
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+@compiles(CreateColumn, "sqlite")
+def _sqlite_skip_computed_columns(element, compiler, **kw):
+    """SQLite (unit-tests met create_all) kan Postgres-specifieke generated
+    columns zoals to_tsvector niet renderen; maak er daar een gewone,
+    ongegenereerde kolom van. Op Postgres blijft de STORED kolom intact."""
+    column = element.element
+    if column.computed is not None:
+        return "%s %s" % (
+            compiler.preparer.format_column(column),
+            compiler.dialect.type_compiler.process(column.type),
+        )
+    return compiler.visit_create_column(element, **kw)
+
 @compiles(TSVECTOR, "sqlite")
 def _tsvector_as_text_sqlite(type_, compiler, **kw):
     return "TEXT"
