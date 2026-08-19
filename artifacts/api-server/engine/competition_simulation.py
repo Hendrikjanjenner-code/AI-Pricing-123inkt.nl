@@ -49,8 +49,12 @@ def simulate_competitor_scenario(
     if change_pct is None or abs(change_pct) > 0.5:
         raise HTTPException(status_code=400, detail="change_pct moet tussen -0.5 en 0.5 liggen")
 
-    product = db.query(models.DimProduct).filter(
-        models.DimProduct.sku_id == sku_id).first()
+    product_q = db.query(models.DimProduct).filter(
+        models.DimProduct.sku_id == sku_id)
+    if shop_id is not None:
+        # Shop-scoping: een sku_id uit een andere shop mag hier nooit matchen.
+        product_q = product_q.filter(models.DimProduct.shop_id == shop_id)
+    product = product_q.first()
     if not product:
         raise HTTPException(status_code=404, detail=f"SKU {sku_id} niet gevonden")
     # Shop-scope: gebruik de shop van het product (of de meegegeven shop_id indien opgegeven)
@@ -177,7 +181,8 @@ def simulate_competitor_scenario(
         "elasticity_used": {"own": own_e, "competitive": comp_e,
                             "source": "sku_elasticity" if elast else "default",
                             "method": elast.method_label if elast and elast.method_label else "default",
-                            "regression_r2": float(elast.regression_r2) if elast and elast.regression_r2 is not None else None},
+                            "regression_r2": float(elast.regression_r2) if elast and elast.regression_r2 is not None else None,
+                            "confidence_class": elast.confidence_class if elast else None},
         "price_index": {
             "before": idx_before,
             "expected": idx_expected,

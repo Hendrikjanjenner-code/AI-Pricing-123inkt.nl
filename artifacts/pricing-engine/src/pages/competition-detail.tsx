@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useParams, Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +10,7 @@ import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, Tooltip, Cell
 } from "recharts";
-import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle, Calculator } from "lucide-react";
 import { useShopId } from "@/hooks/use-shop-id";
 
 const KLASSE_KLEUREN: Record<string, string> = {
@@ -54,6 +55,11 @@ const UITSLUITINGS_LABELS: Record<string, string> = {
   COMPETITOR_IGNORED_LOW_CSS: "Lage prijsduurzaamheid (CSS)",
 };
 
+const METHODE_LABELS: Record<string, string> = {
+  regressie: "Regressie",
+  heuristiek: "Heuristiek",
+  default: "Standaardwaarde",
+};
 export default function ConcurrentieDetail() {
   const shopId = useShopId();
   const params = useParams<{ sku_id: string }>();
@@ -188,6 +194,8 @@ export default function ConcurrentieDetail() {
         </Card>
       </div>
 
+      <PrijsSimulatie skuId={skuId} shopId={shopId} />
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Concurrentenprijsdetail</CardTitle>
@@ -278,3 +286,202 @@ export default function ConcurrentieDetail() {
     </div>
   );
 }
+
+function PrijsSimulatie({ skuId, shopId }: { skuId: string; shopId: number | undefined }) {
+  const [changePctInput, setChangePctInput] = useState("-5");
+
+  const simulate = useMutation({
+    mutationFn: async (changePct: number) => {
+      const token = localStorage.getItem("auth_token");
+      const res = await fetch("/api/competition/simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          sku_id: skuId,
+          change_pct: changePct / 100,
+          ...(shopId !== undefined ? { shop_id: shopId } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.detail || `Simulatie mislukt (${res.status})`);
+      }
+      return res.json();
+    },
+  });
+
+  const parsed = parseFloat(changePctInput.replace(",", "."));
+  const invalid = isNaN(parsed) || parsed < -50 || parsed > 50;
+  const sim = simulate.data;
+
+  const scenarios = sim && sim.data_available ? [
+    { label: "Verwacht (gewogen volgkans)", data: sim.scenario_expected, index: sim.price_index?.expected },
+    { label: "Niemand volgt", data: sim.scenario_nobody_follows, index: sim.price_index?.if_nobody_follows },
+    { label: "Iedereen volgt", data: sim.scenario_all_follow, index: sim.price_index?.if_all_follow },
+  ] : [];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Calculator className="h-4 w-4" /> Prijssimulatie
+        </CardTitle>
+        <CardDescription>
+          Simuleer een eigen prijswijziging met per-concurrent volgkansen. Er wordt geen prijswijziging uitgevoerd.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="text-sm text-muted-foreground" htmlFor="sim-change-pct">Prijswijziging</label>
+          <input
+            id="sim-change-pct"
+            type="number"
+            step="0.5"
+            min={-50}
+            max={50}
+            value={changePctInput}
+            onChange={e => setChangePctInput(e.target.value)}
+            className="w-24 rounded-md border bg-background px-2 py-1.5 text-sm tabular-nums"
+          />
+          <span className="text-sm text-muted-foreground">%</span>
+          <Button
+            size="sm"
+            disabled={invalid || simulate.isPending}
+            onClick={() => simulate.mutate(parsed)}
+          >
+            {simulate.isPending ? "Simuleren…" : "Simuleer"}
+          </Button>
+          {invalid && <span className="text-xs text-red-600">Voer een percentage tussen -50 en 50 in.</span>}
+        </div>
+
+        {simulate.isError && (
+          <div className="text-sm text-red-600">{(simulate.error as Error).message}</div>
+        )}
+
+        {sim && sim.data_available === false && (
+          <div className="text-sm text-muted-foreground">{sim.note || "Simulatie niet mogelijk voor deze SKU."}</div>
+        )}
+
+        {sim && sim.data_available && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="font-medium">
+                €{sim.current_price?.toFixed(2)} → €{sim.new_price?.toFixed(2)}
+              </span>
+              <span className="text-muted-foreground">
+                ({sim.change_pct > 0 ? "+" : ""}{(sim.change_pct * 100).toFixed(1)}%)
+              </span>
+              <ElasticiteitBadge elasticityUsed={sim.elasticity_used} />
+            </div>
+
+            <LageBetrouwbaarheidWaarschuwing elasticityUsed={sim.elasticity_used} />
+
+            <div className="border rounded-md overflow-hidden">
+              <div className="grid grid-cols-5 border-b bg-muted/50 px-4 py-2 text-xs font-medium text-muted-foreground">
+                <div className="col-span-2">Scenario</div>
+                <div className="text-right">Volume-effect</div>
+                <div className="text-right">Omzet (30d)</div>
+                <div className="text-right">Marge (30d)</div>
+              </div>
+              <div className="divide-y">
+                {scenarios.map(s => (
+                  <div key={s.label} className="grid grid-cols-5 items-center px-4 py-2.5 text-sm">
+                    <div className="col-span-2">
+                      {s.label}
+                      {s.index != null && (
+                        <span className="ml-2 text-xs text-muted-foreground tabular-nums">PI {Number(s.index).toFixed(3)}</span>
+                      )}
+                    </div>
+                    <div className={`text-right tabular-nums text-xs font-medium ${s.data?.volume_effect_pct > 0 ? "text-emerald-600" : s.data?.volume_effect_pct < 0 ? "text-red-600" : "text-muted-foreground"}`}>
+                      {s.data?.volume_effect_pct != null ? `${s.data.volume_effect_pct > 0 ? "+" : ""}${s.data.volume_effect_pct.toFixed(1)}%` : "—"}
+                    </div>
+                    <div className="text-right tabular-nums">
+                      {s.data?.revenue != null ? `€${s.data.revenue.toLocaleString("nl-NL", { maximumFractionDigits: 0 })}` : "—"}
+                    </div>
+                    <div className="text-right tabular-nums">
+                      {s.data?.margin != null ? `€${s.data.margin.toLocaleString("nl-NL", { maximumFractionDigits: 0 })}` : "—"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {sim.baseline_30d && (
+              <p className="text-xs text-muted-foreground">
+                Basislijn laatste 30 dagen: {sim.baseline_30d.units} stuks · €{Number(sim.baseline_30d.revenue).toLocaleString("nl-NL", { maximumFractionDigits: 0 })} omzet.
+                {" "}{sim.note}
+              </p>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+const METHODE_KLEUREN: Record<string, string> = {
+  regressie: "bg-emerald-500/15 text-emerald-700 border-emerald-300",
+  heuristiek: "bg-amber-500/15 text-amber-700 border-amber-300",
+  default: "bg-slate-100 text-slate-500 border-slate-200",
+};
+
+const BETROUWBAARHEID_LABELS: Record<string, string> = {
+  hoog_betrouwbaar: "Hoog betrouwbaar",
+  bruikbaar: "Bruikbaar",
+  laag_betrouwbaar: "Laag betrouwbaar",
+};
+function ElasticiteitBadge({ elasticityUsed }: { elasticityUsed: any }) {
+  if (!elasticityUsed || !elasticityUsed.method) return null;
+  const method: string = elasticityUsed.method;
+  const r2 = elasticityUsed.regression_r2;
+  const conf: string | null = elasticityUsed.confidence_class ?? null;
+  const label = METHODE_LABELS[method] || method;
+  const kleur = METHODE_KLEUREN[method] || METHODE_KLEUREN.default;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <Badge
+        variant="outline"
+        className={`text-xs ${kleur}`}
+        title={`Elasticiteitsmethode: ${label}${r2 != null ? ` · R² = ${Number(r2).toFixed(2)}` : ""}`}
+      >
+        Elasticiteit: {label}
+        {r2 != null && <span className="ml-1 tabular-nums">(R² {Number(r2).toFixed(2)})</span>}
+      </Badge>
+      {conf && (
+        <Badge
+          variant="outline"
+          className={`text-xs ${BETROUWBAARHEID_KLEUREN[conf] || "bg-slate-100 text-slate-500 border-slate-200"}`}
+          title="Betrouwbaarheidsklasse van de gebruikte elasticiteit"
+        >
+          {BETROUWBAARHEID_LABELS[conf] || conf}
+        </Badge>
+      )}
+    </span>
+  );
+}
+
+function LageBetrouwbaarheidWaarschuwing({ elasticityUsed }: { elasticityUsed: any }) {
+  if (!elasticityUsed) return null;
+  const isDefault = elasticityUsed.method === "default" || elasticityUsed.source === "default";
+  const laag = isDefault || elasticityUsed.confidence_class === "laag_betrouwbaar";
+  if (!laag) return null;
+  const reden = isDefault
+    ? "Er is nog geen elasticiteit berekend voor deze SKU; er is een standaardwaarde gebruikt."
+    : elasticityUsed.method === "heuristiek"
+    ? "De elasticiteit is geschat met een heuristiek en heeft een lage betrouwbaarheid."
+    : "De berekende elasticiteit heeft een lage betrouwbaarheid.";
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-sm text-amber-800">
+      <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-amber-500" />
+      <span>
+        <strong>Lage betrouwbaarheid:</strong> {reden} Interpreteer de scenario-uitkomsten met voorzichtigheid.
+      </span>
+    </div>
+  );
+}
+
+const BETROUWBAARHEID_KLEUREN: Record<string, string> = {
+  hoog_betrouwbaar: "bg-emerald-500/15 text-emerald-700 border-emerald-300",
+  bruikbaar: "bg-blue-500/15 text-blue-700 border-blue-300",
+  laag_betrouwbaar: "bg-amber-500/15 text-amber-700 border-amber-300",
+};

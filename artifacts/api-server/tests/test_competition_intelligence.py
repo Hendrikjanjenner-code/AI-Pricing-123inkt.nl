@@ -1078,7 +1078,44 @@ def test_simulation_exposes_method_label(client, admin_headers, run_engines, see
     assert eu["method"] in ("regressie", "heuristiek", "default"), eu["method"]
     # regression_r2 is None bij heuristiek, float bij regressie
     assert "regression_r2" in eu
+    # betrouwbaarheidsklasse wordt meegegeven zodat het dashboard kan waarschuwen
+    assert "confidence_class" in eu, f"'confidence_class' ontbreekt: {eu}"
+    assert eu["confidence_class"] in (
+        "hoog_betrouwbaar", "bruikbaar", "laag_betrouwbaar", None), eu["confidence_class"]
+    if eu["method"] == "default":
+        assert eu["confidence_class"] is None
 
+def test_simulation_is_shop_scoped(client, admin_headers, run_engines, seed):
+    """Een sku_id uit een andere shop mag nooit gesimuleerd worden (404),
+    en de gerapporteerde method/R²/confidence horen bij de eigen shop."""
+    db = SessionLocal()
+    other_id = None
+    try:
+        other = models.DimShop(shop_code=f"{PFX}-other",
+                               name=f"{PFX} Other Shop", active=True)
+        db.add(other)
+        db.commit()
+        other_id = other.id
+        # Zelfde SKU opvragen binnen de verkeerde shop-scope → 404, geen data-lek
+        resp = client.post("/api/competition/simulate", headers=admin_headers,
+                           json={"sku_id": SKU_A, "change_pct": -0.05,
+                                 "shop_id": other_id})
+        assert resp.status_code == 404, resp.text
+        # Juiste shop: simulatie levert elasticiteitsmetadata voor déze shop
+        resp2 = client.post("/api/competition/simulate", headers=admin_headers,
+                            json={"sku_id": SKU_A, "change_pct": -0.05,
+                                  "shop_id": seed["shop_id"]})
+        assert resp2.status_code == 200, resp2.text
+        body = resp2.json()
+        assert body.get("shop_id") == seed["shop_id"]
+        eu = body.get("elasticity_used", {})
+        assert "method" in eu and "regression_r2" in eu and "confidence_class" in eu
+    finally:
+        if other_id is not None:
+            db.query(models.DimShop).filter(
+                models.DimShop.id == other_id).delete()
+            db.commit()
+        db.close()
 def test_elasticity_r2_gate_forces_heuristic_despite_negative_b():
     """R²-drempel (DETERMINISTISCH): engine kiest 'heuristiek' als R² < drempel,
     ook als b < 0 (correct negatief teken — de sign-check zou dus door mogen gaan).
