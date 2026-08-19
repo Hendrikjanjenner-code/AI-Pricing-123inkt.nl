@@ -300,6 +300,152 @@ VALID_SOURCES = {"DRS", "Leverancier", "Handmatig", "AI"}
 ADMIN_ROLES = ("admin", "pricing_manager")
 
 
+VALID_DATA_TYPES = {"text", "number", "boolean", "select"}
+
+
+def _validate_code(code: str) -> str:
+    code = (code or "").strip().lower()
+    if not code or not all(c.isalnum() or c in ("_", "-") for c in code):
+        raise HTTPException(
+            status_code=400,
+            detail="Code is verplicht en mag alleen letters, cijfers, '_' en '-' bevatten.")
+    return code
+
+
+class AttributeCreate(BaseModel):
+    code: str
+    name: str
+    data_type: str = "text"
+    unit: str | None = None
+    source_owner: str = "Handmatig"
+    is_required: bool = False
+    weight: float = 1.0
+
+
+@router.post("/attributes", status_code=201)
+def create_attribute(
+    body: AttributeCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role(*ADMIN_ROLES)),
+):
+    """Maak een nieuwe attribuutdefinitie aan (beheer, taak: nieuw toevoegen vanuit de app)."""
+    code = _validate_code(body.code)
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Naam is verplicht.")
+    if body.data_type not in VALID_DATA_TYPES:
+        raise HTTPException(status_code=400,
+                            detail=f"Ongeldig datatype. Kies uit: {', '.join(sorted(VALID_DATA_TYPES))}")
+    if body.source_owner not in VALID_SOURCES:
+        raise HTTPException(status_code=400,
+                            detail=f"Ongeldige eigenaar. Kies uit: {', '.join(sorted(VALID_SOURCES))}")
+    if body.weight <= 0:
+        raise HTTPException(status_code=400, detail="Gewicht moet positief zijn.")
+    if db.query(models.PimAttributeDefinition).filter(
+            models.PimAttributeDefinition.code == code).first():
+        raise HTTPException(status_code=409, detail=f"Attribuutcode '{code}' bestaat al.")
+    d = models.PimAttributeDefinition(
+        code=code, name=name, data_type=body.data_type,
+        unit=(body.unit or "").strip() or None,
+        source_owner=body.source_owner, is_required=body.is_required,
+        weight=body.weight, active=True)
+    db.add(d)
+    db.add(models.AuditLog(
+        entity_type="pim_attribute_definition", entity_id=code,
+        action="attribute_created", performed_by=current_user.username,
+        details=f"code={code}"))
+    db.commit()
+    db.refresh(d)
+    return {
+        "id": d.id, "code": d.code, "name": d.name, "data_type": d.data_type,
+        "unit": d.unit, "source_owner": d.source_owner,
+        "is_required": d.is_required, "weight": d.weight,
+        "dim_product_field": d.dim_product_field, "active": d.active,
+    }
+
+
+class ChannelCreate(BaseModel):
+    code: str
+    name: str
+    required_attribute_codes: list[str] = []
+    min_completeness_pct: float = 80.0
+
+
+@router.post("/channels", status_code=201)
+def create_channel(
+    body: ChannelCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role(*ADMIN_ROLES)),
+):
+    """Maak een nieuw channel aan."""
+    code = _validate_code(body.code)
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Naam is verplicht.")
+    if not (0.0 <= body.min_completeness_pct <= 100.0):
+        raise HTTPException(status_code=400, detail="Drempel moet tussen 0 en 100 liggen.")
+    existing_codes = {d.code for d in db.query(models.PimAttributeDefinition).all()}
+    unknown = [x for x in body.required_attribute_codes if x not in existing_codes]
+    if unknown:
+        raise HTTPException(status_code=400,
+                            detail=f"Onbekende attribuutcodes: {', '.join(unknown)}")
+    if db.query(models.PimChannel).filter(models.PimChannel.code == code).first():
+        raise HTTPException(status_code=409, detail=f"Channelcode '{code}' bestaat al.")
+    c = models.PimChannel(
+        code=code, name=name,
+        required_attribute_codes=body.required_attribute_codes,
+        min_completeness_pct=body.min_completeness_pct, active=True)
+    db.add(c)
+    db.add(models.AuditLog(
+        entity_type="pim_channel", entity_id=code,
+        action="channel_created", performed_by=current_user.username,
+        details=f"code={code}"))
+    db.commit()
+    db.refresh(c)
+    return {
+        "id": c.id, "code": c.code, "name": c.name,
+        "required_attribute_codes": c.required_attribute_codes or [],
+        "min_completeness_pct": c.min_completeness_pct, "active": c.active,
+    }
+
+
+class FamilyCreate(BaseModel):
+    code: str
+    name: str
+    category_patterns: list[str] = []
+
+
+@router.post("/families", status_code=201)
+def create_family(
+    body: FamilyCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role(*ADMIN_ROLES)),
+):
+    """Maak een nieuwe productfamilie aan."""
+    code = _validate_code(body.code)
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Naam is verplicht.")
+    if db.query(models.PimFamily).filter(models.PimFamily.code == code).first():
+        raise HTTPException(status_code=409, detail=f"Familiecode '{code}' bestaat al.")
+    f = models.PimFamily(
+        code=code, name=name,
+        category_patterns=[p.strip() for p in body.category_patterns if p.strip()],
+        active=True)
+    db.add(f)
+    db.add(models.AuditLog(
+        entity_type="pim_family", entity_id=code,
+        action="family_created", performed_by=current_user.username,
+        details=f"code={code}"))
+    db.commit()
+    db.refresh(f)
+    return {
+        "id": f.id, "code": f.code, "name": f.name,
+        "category_patterns": f.category_patterns or [],
+        "active": f.active,
+    }
+
+
 class AttributePatch(BaseModel):
     name: str | None = None
     is_required: bool | None = None

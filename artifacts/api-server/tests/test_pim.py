@@ -408,3 +408,94 @@ def test_patch_family_name_and_patterns(client, admin_headers, seeded_sku):
     # Herstel
     client.patch(f"/api/pim/families/{fam_id}", headers=admin_headers,
                  json={"name": "Papier", "category_patterns": ["Papier", "Kopieerpapier", "Printpapier"]})
+
+
+# ─── Task 55: aanmaken van attributen, channels en families vanuit de app ────
+
+def test_create_attribute_channel_family(client, admin_headers):
+    tag = uuid.uuid4().hex[:8]
+    db = SessionLocal()
+    try:
+        # Attribuut
+        r = client.post("/api/pim/attributes", headers=admin_headers, json={
+            "code": f"attr_{tag}", "name": "Testattribuut", "data_type": "number",
+            "unit": "mm", "source_owner": "Leverancier", "is_required": True,
+            "weight": 2.0})
+        assert r.status_code == 201, r.text
+        a = r.json()
+        assert a["code"] == f"attr_{tag}" and a["is_required"] is True and a["weight"] == 2.0
+
+        # Duplicaatcode → 409
+        r = client.post("/api/pim/attributes", headers=admin_headers, json={
+            "code": f"attr_{tag}", "name": "Dubbel"})
+        assert r.status_code == 409
+
+        # Ongeldige eigenaar / datatype / gewicht → 400
+        assert client.post("/api/pim/attributes", headers=admin_headers, json={
+            "code": f"x_{tag}", "name": "X", "source_owner": "Onzin"}).status_code == 400
+        assert client.post("/api/pim/attributes", headers=admin_headers, json={
+            "code": f"x_{tag}", "name": "X", "data_type": "blob"}).status_code == 400
+        assert client.post("/api/pim/attributes", headers=admin_headers, json={
+            "code": f"x_{tag}", "name": "X", "weight": 0}).status_code == 400
+
+        # Channel met het nieuwe attribuut als vereist
+        r = client.post("/api/pim/channels", headers=admin_headers, json={
+            "code": f"chan_{tag}", "name": "Testchannel",
+            "required_attribute_codes": [f"attr_{tag}"],
+            "min_completeness_pct": 75.0})
+        assert r.status_code == 201, r.text
+        c = r.json()
+        assert c["required_attribute_codes"] == [f"attr_{tag}"]
+
+        # Onbekende attribuutcode → 400
+        assert client.post("/api/pim/channels", headers=admin_headers, json={
+            "code": f"chan2_{tag}", "name": "X",
+            "required_attribute_codes": ["bestaat_niet"]}).status_code == 400
+        # Duplicaat → 409
+        assert client.post("/api/pim/channels", headers=admin_headers, json={
+            "code": f"chan_{tag}", "name": "Dubbel"}).status_code == 409
+
+        # Familie
+        r = client.post("/api/pim/families", headers=admin_headers, json={
+            "code": f"fam_{tag}", "name": "Testfamilie",
+            "category_patterns": ["Papier", " Kopieerpapier "]})
+        assert r.status_code == 201, r.text
+        f = r.json()
+        assert f["category_patterns"] == ["Papier", "Kopieerpapier"]
+        assert client.post("/api/pim/families", headers=admin_headers, json={
+            "code": f"fam_{tag}", "name": "Dubbel"}).status_code == 409
+
+        # Lege/ongeldige code → 400
+        assert client.post("/api/pim/families", headers=admin_headers, json={
+            "code": "  ", "name": "X"}).status_code == 400
+
+        # Nieuwe items zichtbaar in de lijst-endpoints
+        codes = [x["code"] for x in client.get("/api/pim/attributes", headers=admin_headers).json()]
+        assert f"attr_{tag}" in codes
+        codes = [x["code"] for x in client.get("/api/pim/channels", headers=admin_headers).json()]
+        assert f"chan_{tag}" in codes
+        codes = [x["code"] for x in client.get("/api/pim/families", headers=admin_headers).json()]
+        assert f"fam_{tag}" in codes
+    finally:
+        db.query(models.PimCompletenessScore).filter(
+            models.PimCompletenessScore.channel_code == f"chan_{tag}").delete(synchronize_session=False)
+        db.query(models.PimChannel).filter(models.PimChannel.code.like(f"chan%_{tag}")).delete(synchronize_session=False)
+        adef = db.query(models.PimAttributeDefinition).filter(
+            models.PimAttributeDefinition.code == f"attr_{tag}").first()
+        if adef:
+            db.query(models.PimAttributeValue).filter(
+                models.PimAttributeValue.attribute_id == adef.id).delete(synchronize_session=False)
+            db.delete(adef)
+        db.query(models.PimFamily).filter(models.PimFamily.code == f"fam_{tag}").delete(synchronize_session=False)
+        db.commit()
+        db.close()
+
+
+def test_create_requires_admin_role(client):
+    r = client.post("/api/auth/login", json={"username": "dev_viewer", "password": "viewer123"})
+    if r.status_code != 200:
+        pytest.skip("Geen viewer-account beschikbaar")
+    headers = {"Authorization": f"Bearer {r.json()['token']}"}
+    for path in ("/api/pim/attributes", "/api/pim/channels", "/api/pim/families"):
+        resp = client.post(path, headers=headers, json={"code": "x", "name": "X"})
+        assert resp.status_code == 403, f"{path}: {resp.status_code}"

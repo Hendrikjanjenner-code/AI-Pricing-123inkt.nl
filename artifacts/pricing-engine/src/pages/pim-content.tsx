@@ -10,7 +10,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   CheckCircle2, ChevronDown, ChevronUp, Loader2, RefreshCw, XCircle,
-  Settings, BarChart3, Save, X as XIcon,
+  Settings, BarChart3, Save, X as XIcon, Plus,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { getAuthHeaders } from "@/lib/auth";
@@ -104,6 +104,15 @@ async function patchApi(path: string, body: object): Promise<Response> {
   });
 }
 
+async function postApi(path: string, body: object): Promise<Response> {
+  return fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000),
+  });
+}
+
 // ─── DetailRij: expanded product attributes ───────────────────────────────────
 
 function DetailRij({ row }: { row: CompletenessRow }) {
@@ -166,6 +175,259 @@ function DetailRij({ row }: { row: CompletenessRow }) {
         )}
       </TableCell>
     </TableRow>
+  );
+}
+
+// ─── Nieuw-toevoegen forms ────────────────────────────────────────────────────
+
+function NieuwAttribuutForm({ onCreated }: { onCreated: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [code, setCode] = useState("");
+  const [naam, setNaam] = useState("");
+  const [dataType, setDataType] = useState("text");
+  const [eigenaar, setEigenaar] = useState("Handmatig");
+  const [vereist, setVereist] = useState(false);
+  const [gewicht, setGewicht] = useState("1");
+  const [saving, setSaving] = useState(false);
+  const [fout, setFout] = useState<string | null>(null);
+
+  function reset() {
+    setCode(""); setNaam(""); setDataType("text"); setEigenaar("Handmatig");
+    setVereist(false); setGewicht("1"); setFout(null);
+  }
+
+  async function aanmaken() {
+    setSaving(true);
+    setFout(null);
+    try {
+      const res = await postApi("/api/pim/attributes", {
+        code: code.trim(), name: naam.trim(), data_type: dataType,
+        source_owner: eigenaar, is_required: vereist,
+        weight: parseFloat(gewicht) || 1,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail ?? `HTTP ${res.status}`);
+      }
+      reset();
+      setOpen(false);
+      onCreated();
+    } catch (e: any) {
+      setFout(e?.message ?? "Aanmaken mislukt");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+        <Plus className="mr-1 h-4 w-4" /> Nieuw attribuut
+      </Button>
+    );
+  }
+
+  return (
+    <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+      <div className="text-sm font-medium">Nieuw attribuut</div>
+      {fout && <div className="text-sm text-red-600">{fout}</div>}
+      <div className="flex flex-wrap items-end gap-2">
+        <div>
+          <div className="text-xs text-muted-foreground mb-1">Code</div>
+          <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="bijv. kleur" className="h-8 text-sm w-36" />
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground mb-1">Naam</div>
+          <Input value={naam} onChange={(e) => setNaam(e.target.value)} placeholder="bijv. Kleur" className="h-8 text-sm w-44" />
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground mb-1">Type</div>
+          <Select value={dataType} onValueChange={setDataType}>
+            <SelectTrigger className="h-8 text-xs w-28"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {["text", "number", "boolean", "select"].map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground mb-1">Eigenaar</div>
+          <Select value={eigenaar} onValueChange={setEigenaar}>
+            <SelectTrigger className="h-8 text-xs w-32"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {["DRS", "Leverancier", "Handmatig", "AI"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col items-start">
+          <div className="text-xs text-muted-foreground mb-1">Vereist</div>
+          <Switch checked={vereist} onCheckedChange={setVereist} />
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground mb-1">Gewicht</div>
+          <Input type="number" min="0.1" step="0.1" value={gewicht} onChange={(e) => setGewicht(e.target.value)} className="h-8 text-sm w-20" />
+        </div>
+        <div className="flex gap-1">
+          <Button size="sm" className="h-8" onClick={aanmaken} disabled={saving || !code.trim() || !naam.trim()}>
+            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : "Toevoegen"}
+          </Button>
+          <Button size="sm" variant="ghost" className="h-8" onClick={() => { reset(); setOpen(false); }} disabled={saving}>
+            Annuleer
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NieuwChannelForm({ onCreated }: { onCreated: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [code, setCode] = useState("");
+  const [naam, setNaam] = useState("");
+  const [codesStr, setCodesStr] = useState("");
+  const [drempel, setDrempel] = useState("80");
+  const [saving, setSaving] = useState(false);
+  const [fout, setFout] = useState<string | null>(null);
+
+  function reset() {
+    setCode(""); setNaam(""); setCodesStr(""); setDrempel("80"); setFout(null);
+  }
+
+  async function aanmaken() {
+    setSaving(true);
+    setFout(null);
+    try {
+      const codes = codesStr.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+      const res = await postApi("/api/pim/channels", {
+        code: code.trim(), name: naam.trim(),
+        required_attribute_codes: codes,
+        min_completeness_pct: parseFloat(drempel) || 0,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail ?? `HTTP ${res.status}`);
+      }
+      reset();
+      setOpen(false);
+      onCreated();
+    } catch (e: any) {
+      setFout(e?.message ?? "Aanmaken mislukt");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+        <Plus className="mr-1 h-4 w-4" /> Nieuw channel
+      </Button>
+    );
+  }
+
+  return (
+    <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+      <div className="text-sm font-medium">Nieuw channel</div>
+      {fout && <div className="text-sm text-red-600">{fout}</div>}
+      <div className="flex flex-wrap items-end gap-2">
+        <div>
+          <div className="text-xs text-muted-foreground mb-1">Code</div>
+          <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="bijv. marketplace" className="h-8 text-sm w-36" />
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground mb-1">Naam</div>
+          <Input value={naam} onChange={(e) => setNaam(e.target.value)} placeholder="bijv. Marketplace" className="h-8 text-sm w-44" />
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground mb-1">Vereiste attributen</div>
+          <Input value={codesStr} onChange={(e) => setCodesStr(e.target.value)} placeholder="code1, code2, ..." className="h-8 text-xs w-64" />
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground mb-1">Drempel (%)</div>
+          <Input type="number" min="0" max="100" step="1" value={drempel} onChange={(e) => setDrempel(e.target.value)} className="h-8 text-sm w-20" />
+        </div>
+        <div className="flex gap-1">
+          <Button size="sm" className="h-8" onClick={aanmaken} disabled={saving || !code.trim() || !naam.trim()}>
+            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : "Toevoegen"}
+          </Button>
+          <Button size="sm" variant="ghost" className="h-8" onClick={() => { reset(); setOpen(false); }} disabled={saving}>
+            Annuleer
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NieuweFamilieForm({ onCreated }: { onCreated: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [code, setCode] = useState("");
+  const [naam, setNaam] = useState("");
+  const [patternsStr, setPatternsStr] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [fout, setFout] = useState<string | null>(null);
+
+  function reset() {
+    setCode(""); setNaam(""); setPatternsStr(""); setFout(null);
+  }
+
+  async function aanmaken() {
+    setSaving(true);
+    setFout(null);
+    try {
+      const patterns = patternsStr.split(",").map((s) => s.trim()).filter(Boolean);
+      const res = await postApi("/api/pim/families", {
+        code: code.trim(), name: naam.trim(),
+        category_patterns: patterns,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail ?? `HTTP ${res.status}`);
+      }
+      reset();
+      setOpen(false);
+      onCreated();
+    } catch (e: any) {
+      setFout(e?.message ?? "Aanmaken mislukt");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+        <Plus className="mr-1 h-4 w-4" /> Nieuwe familie
+      </Button>
+    );
+  }
+
+  return (
+    <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+      <div className="text-sm font-medium">Nieuwe familie</div>
+      {fout && <div className="text-sm text-red-600">{fout}</div>}
+      <div className="flex flex-wrap items-end gap-2">
+        <div>
+          <div className="text-xs text-muted-foreground mb-1">Code</div>
+          <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="bijv. papier" className="h-8 text-sm w-36" />
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground mb-1">Naam</div>
+          <Input value={naam} onChange={(e) => setNaam(e.target.value)} placeholder="bijv. Papier" className="h-8 text-sm w-44" />
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground mb-1">Categoriepatronen</div>
+          <Input value={patternsStr} onChange={(e) => setPatternsStr(e.target.value)} placeholder="Papier, Kopieerpapier, ..." className="h-8 text-xs w-64" />
+        </div>
+        <div className="flex gap-1">
+          <Button size="sm" className="h-8" onClick={aanmaken} disabled={saving || !code.trim() || !naam.trim()}>
+            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : "Toevoegen"}
+          </Button>
+          <Button size="sm" variant="ghost" className="h-8" onClick={() => { reset(); setOpen(false); }} disabled={saving}>
+            Annuleer
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -649,7 +911,8 @@ function BeheerTab() {
                   </span>
                 </CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-3">
+                <NieuwAttribuutForm onCreated={laad} />
                 <AttributenBeheer attrs={attrs} onChange={laad} />
               </CardContent>
             </Card>
@@ -665,7 +928,8 @@ function BeheerTab() {
                   </span>
                 </CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-3">
+                <NieuwChannelForm onCreated={laad} />
                 <ChannelsBeheer channels={channels} allAttrCodes={allAttrCodes} onChange={laad} />
               </CardContent>
             </Card>
@@ -681,7 +945,8 @@ function BeheerTab() {
                   </span>
                 </CardTitle>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-3">
+                <NieuweFamilieForm onCreated={laad} />
                 <FamiliesBeheer families={families} onChange={laad} />
               </CardContent>
             </Card>
