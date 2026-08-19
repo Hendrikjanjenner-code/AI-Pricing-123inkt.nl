@@ -996,5 +996,129 @@ class TestBudgetConfigValidation(unittest.TestCase):
         self.assertIn("users", r.json())
 
 
+# ─── Middernacht-overgang: dagbudget reset echt op middernacht ────────────────
+
+class TestMidnightRollover(unittest.TestCase):
+    """
+    Live-DB tests voor de dagovergang (§34):
+    - een vol slot van gisteren blokkeert een nieuwe call vandaag niet;
+    - reconciliatie van een call die vóór middernacht startte schrijft naar
+      het (oude) slot van gisteren, niet naar dat van vandaag.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        from database import SessionLocal
+        cls.SessionLocal = SessionLocal
+        # Controleer dat de DB bereikbaar is; zo niet, sla de klasse over.
+        try:
+            db = SessionLocal()
+            db.execute(__import__("sqlalchemy").text("SELECT 1"))
+            db.close()
+        except Exception as exc:
+            raise unittest.SkipTest(f"database niet bereikbaar: {exc}")
+
+    def setUp(self):
+        self.username = f"midnight_test_{uuid.uuid4().hex[:10]}"
+        self.db = self.SessionLocal()
+        self.addCleanup(self._cleanup)
+
+    def _cleanup(self):
+        try:
+            self.db.rollback()
+            self.db.query(models.AiBudgetSlot).filter(
+                models.AiBudgetSlot.username == self.username
+            ).delete(synchronize_session=False)
+            self.db.query(models.AiBudgetConfig).filter(
+                models.AiBudgetConfig.username == self.username
+            ).delete(synchronize_session=False)
+            self.db.commit()
+        finally:
+            self.db.close()
+
+    def _make_slot(self, slot_date, calls_reserved=0, tokens_reserved=0,
+                   tokens_actual=0):
+        slot = models.AiBudgetSlot(
+            username=self.username,
+            slot_date=slot_date,
+            calls_reserved=calls_reserved,
+            tokens_reserved=tokens_reserved,
+            tokens_actual=tokens_actual,
+        )
+        self.db.add(slot)
+        self.db.commit()
+        return slot
+
+    def _get_slot(self, slot_date):
+        return self.db.query(models.AiBudgetSlot).filter(
+            models.AiBudgetSlot.username == self.username,
+            models.AiBudgetSlot.slot_date == slot_date,
+        ).first()
+
+    def test_full_slot_yesterday_does_not_block_today(self):
+        """Een vol slot van gisteren mag een call vandaag niet blokkeren;
+        er wordt een nieuw slot voor vandaag aangemaakt."""
+        from datetime import timedelta
+        max_calls = 3
+        # Strikte per-gebruiker limiet
+        self.db.add(models.AiBudgetConfig(
+            username=self.username,
+            max_calls_per_day=max_calls,
+            max_tokens_per_day=ai_gateway._UPFRONT_TOKEN_RESERVATION * 10,
+        ))
+        yesterday = date.today() - timedelta(days=1)
+        # Gisteren volledig vol (zowel calls als tokens op de limiet)
+        self._make_slot(yesterday,
+                        calls_reserved=max_calls,
+                        tokens_reserved=ai_gateway._UPFRONT_TOKEN_RESERVATION * 10)
+
+        # Vandaag moet gewoon lukken — geen 429
+        slot_date, _max_tokens = ai_gateway.check_and_reserve_budget(
+            self.username, "viewer"
+        )
+        self.assertEqual(slot_date, date.today(),
+                         "reservering moet op het slot van vandaag geboekt worden")
+
+        self.db.expire_all()
+        today_slot = self._get_slot(date.today())
+        self.assertIsNotNone(today_slot, "er moet een nieuw slot voor vandaag zijn")
+        self.assertEqual(today_slot.calls_reserved, 1)
+        self.assertEqual(today_slot.tokens_reserved,
+                         ai_gateway._UPFRONT_TOKEN_RESERVATION)
+
+        # Het slot van gisteren blijft onaangeroerd
+        y_slot = self._get_slot(yesterday)
+        self.assertEqual(y_slot.calls_reserved, max_calls)
+
+    def test_reconcile_before_midnight_call_writes_to_old_slot(self):
+        """Een call die vóór middernacht startte (slot_date=gisteren) reconciliëert
+        naar het oude slot en corrumpeert het slot van vandaag niet."""
+        from datetime import timedelta
+        yesterday = date.today() - timedelta(days=1)
+        upfront = ai_gateway._UPFRONT_TOKEN_RESERVATION
+        self._make_slot(yesterday, calls_reserved=1, tokens_reserved=upfront)
+        self._make_slot(date.today(), calls_reserved=2,
+                        tokens_reserved=upfront * 2, tokens_actual=7)
+
+        actual = 1234
+        ai_gateway.reconcile_budget_slot(
+            self.db, self.username, actual, slot_date=yesterday
+        )
+        self.db.commit()
+        self.db.expire_all()
+
+        y_slot = self._get_slot(yesterday)
+        self.assertEqual(y_slot.tokens_actual, actual,
+                         "tokens_actual moet op het oude slot geboekt zijn")
+        self.assertEqual(y_slot.tokens_reserved, max(0, upfront + (actual - upfront)),
+                         "ongebruikte reservering moet op het oude slot vrijkomen")
+
+        today_slot = self._get_slot(date.today())
+        self.assertEqual(today_slot.tokens_actual, 7,
+                         "het slot van vandaag mag niet gewijzigd zijn")
+        self.assertEqual(today_slot.tokens_reserved, upfront * 2)
+        self.assertEqual(today_slot.calls_reserved, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
