@@ -143,7 +143,7 @@ def _detail_by_name(items, key="competitor_name"):
 
 
 def test_competition_detail_exposes_availability_fields(client, admin_headers, seed):
-    r = client.get(f"/api/competition/skus/{SKU}", headers=admin_headers)
+    r = client.get(f"/api/competition/skus/{SKU}?shop_id={seed}", headers=admin_headers)
     assert r.status_code == 200, r.text
     detail = _detail_by_name(r.json()["competitor_detail"])
 
@@ -159,7 +159,7 @@ def test_competition_detail_exposes_availability_fields(client, admin_headers, s
 
 
 def test_competition_detail_null_means_unknown_not_in_stock(client, admin_headers, seed):
-    r = client.get(f"/api/competition/skus/{SKU}", headers=admin_headers)
+    r = client.get(f"/api/competition/skus/{SKU}?shop_id={seed}", headers=admin_headers)
     c = _detail_by_name(r.json()["competitor_detail"])[COMP_UNKNOWN]
     assert c["in_stock"] is None          # onbekend, niet True/False
     assert c["delivery_days"] is None
@@ -169,7 +169,7 @@ def test_competition_detail_null_means_unknown_not_in_stock(client, admin_header
 
 def test_competition_detail_same_day_multi_source_is_deterministic(client, admin_headers, seed):
     """Bij meerdere records op dezelfde dag wint de recentste observed_at."""
-    r = client.get(f"/api/competition/skus/{SKU}", headers=admin_headers)
+    r = client.get(f"/api/competition/skus/{SKU}?shop_id={seed}", headers=admin_headers)
     c = _detail_by_name(r.json()["competitor_detail"])[COMP_MULTI]
     assert c["in_stock"] is True
     assert c["delivery_days"] == 1.0
@@ -196,3 +196,28 @@ def test_concurrentie_sku_exposes_availability_per_competitor(client, admin_head
     # deterministische keuze bij same-day multi-source
     assert conc[COMP_MULTI]["op_voorraad"] is True
     assert conc[COMP_MULTI]["levertijd_dagen"] == 1.0
+
+
+def test_competition_detail_foreign_shop_returns_404(client, admin_headers, seed):
+    """Een SKU van een andere winkel mag niet zichtbaar zijn in een vreemde scope."""
+    db = SessionLocal()
+    try:
+        other = models.DimShop(shop_code=f"{PFX}-other", name=f"{PFX} Other Shop", active=True)
+        db.add(other)
+        db.commit()
+        other_id = other.id
+    finally:
+        pass
+    try:
+        r = client.get(f"/api/competition/skus/{SKU}?shop_id={other_id}", headers=admin_headers)
+        assert r.status_code == 404, r.text
+    finally:
+        try:
+            cost_model = getattr(models, "CostUsageRecord", None)
+            if cost_model is not None and hasattr(cost_model, "shop_id"):
+                db.query(cost_model).filter(cost_model.shop_id == other_id).delete(synchronize_session=False)
+            db.query(models.DimShop).filter(models.DimShop.id == other_id).delete(synchronize_session=False)
+            db.commit()
+        except Exception:
+            db.rollback()
+        db.close()

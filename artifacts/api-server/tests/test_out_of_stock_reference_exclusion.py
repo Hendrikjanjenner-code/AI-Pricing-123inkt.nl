@@ -122,7 +122,7 @@ def _by_name(items, key):
 
 
 def test_competition_detail_excludes_out_of_stock(client, admin_headers, seed):
-    r = client.get(f"/api/competition/skus/{SKU}", headers=admin_headers)
+    r = client.get(f"/api/competition/skus/{SKU}?shop_id={seed}", headers=admin_headers)
     assert r.status_code == 200, r.text
     detail = _by_name(r.json()["competitor_detail"], "competitor_name")
 

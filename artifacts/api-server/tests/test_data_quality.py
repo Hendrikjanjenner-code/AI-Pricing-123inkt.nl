@@ -638,7 +638,7 @@ class TestFeedUnreachable:
     job verbergt het issue (meest-recente-job-semantiek)."""
 
     def _make_ps_job(self, db, status, error_message=None, delta_seconds=0,
-                     completed_delta_seconds=None):
+                     created_delta_seconds=None):
         """Hulp: maak een api_sync_priceshape ImportJob en geef het id terug."""
         from engine.import_engine import new_batch_id
         job = models.ImportJob(
@@ -653,11 +653,10 @@ class TestFeedUnreachable:
             error_message=error_message,
             error_log=([{"rij": None, "veld": None, "bericht": error_message}]
                        if error_message else []),
-            created_at=datetime.utcnow() + timedelta(seconds=delta_seconds),
-            completed_at=datetime.utcnow() + timedelta(
-                seconds=(completed_delta_seconds
-                         if completed_delta_seconds is not None
-                         else delta_seconds)),
+            created_at=datetime.utcnow() + timedelta(
+                seconds=created_delta_seconds
+                if created_delta_seconds is not None else delta_seconds),
+            completed_at=datetime.utcnow() + timedelta(seconds=delta_seconds),
         )
         db.add(job)
         db.commit()
@@ -728,15 +727,15 @@ class TestFeedUnreachable:
         """Feed >24u niet bereikt → severity stijgt naar 'error', ook als de
         mislukte poging zelf al dagen oud is (geen nieuwe pogingen gedaan)."""
         db = SessionLocal()
-        # Mislukte poging die 2 dagen geleden voltooide. created_at = nu zodat
-        # dit gegarandeerd de meest recente sync-poging is, óók op een dev-DB
-        # waar andere (geslaagde) PriceShape-jobs bestaan; detectie kijkt naar
-        # de laatste poging op created_at en naar completed_at als faalmoment.
+        # Mislukte poging van 2 dagen geleden; géén geslaagde sync sindsdien.
+        # created_at = nu zodat dit gegarandeerd de meest recente job is, ook
+        # als de dev-DB echte sync-jobs van vandaag bevat; completed_at blijft
+        # 2 dagen oud (de mislukte poging zelf is oud).
         fail_id = self._make_ps_job(
             db, "fout",
             error_message="PriceShape feed niet bereikbaar: timeout",
-            delta_seconds=0,
-            completed_delta_seconds=-2 * 24 * 3600)
+            delta_seconds=-2 * 24 * 3600,
+            created_delta_seconds=60)
         last_ok = (
             db.query(func.max(func.coalesce(
                 models.ImportJob.completed_at, models.ImportJob.created_at)))
@@ -759,21 +758,7 @@ class TestFeedUnreachable:
             pytest.skip("Dev-DB bevat een recentere echte sync-job; scenario "
                         "'oude mislukking zonder nieuwe pogingen' niet opbouwbaar")
         try:
-            # De detectie kijkt alleen naar de MEEST RECENTE PriceShape-job.
-            # Op een dev-DB met echte feed-data kan er een nieuwere (geslaagde)
-            # job bestaan dan onze 2 dagen oude kunstmatige fout; dan hoort er
-            # terecht géén FEED_UNREACHABLE-issue te zijn.
-            newest = (
-                db.query(models.ImportJob)
-                .filter(models.ImportJob.upload_type == "api_sync_priceshape")
-                .order_by(models.ImportJob.created_at.desc())
-                .first())
             detected = _detect_issues(db, db.query(models.DimProduct).count())
-            if newest is not None and newest.id != fail_id:
-                assert all(d["issue_code"] != "FEED_UNREACHABLE" for d in detected), (
-                    "FEED_UNREACHABLE mag niet vuren als de meest recente "
-                    "PriceShape-job niet de mislukte poging is")
-                return
             issue = next(d for d in detected if d["issue_code"] == "FEED_UNREACHABLE")
             if recent_success:
                 # Dev-DB bevat een echte recente sync; dan is warning correct.

@@ -130,22 +130,30 @@ def list_competition_skus(
 @router.get("/skus/{sku_id}")
 def get_sku_competition_detail(
     sku_id: str,
+    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
+    sid = _scope(db, shop_id)
+    product = db.query(models.DimProduct).filter(
+        models.DimProduct.sku_id == sku_id,
+        models.DimProduct.shop_id == sid,
+    ).first()
+    if not product:
+        raise HTTPException(404, "SKU niet gevonden voor deze winkel")
     score = (
         db.query(models.SkuCompetitionScore)
         .filter(models.SkuCompetitionScore.sku_id == sku_id)
         .order_by(models.SkuCompetitionScore.run_date.desc())
         .first()
     )
-    product = db.query(models.DimProduct).filter(models.DimProduct.sku_id == sku_id).first()
 
     recent_date = date.today() - timedelta(days=14)
     comp_prices = (
         db.query(models.FactCompetitorPriceDaily)
         .filter(
             models.FactCompetitorPriceDaily.sku_id == sku_id,
+            models.FactCompetitorPriceDaily.shop_id == sid,
             models.FactCompetitorPriceDaily.date >= recent_date,
         )
         .order_by(

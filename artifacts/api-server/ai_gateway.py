@@ -27,7 +27,7 @@ from datetime import date, datetime, timezone
 from typing import Generator, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, literal_column
 from sqlalchemy.orm import Session
 from database import SessionLocal
 
@@ -42,6 +42,7 @@ MAX_HISTORY_MESSAGES = 12
 SUMMARY_KEEP_RECENT = 4   # laatste N berichten niet meenemen in samenvatting (behoud context)
 LLM_TIMEOUT_SECONDS = 90
 FEWSHOT_LIMIT = 5        # max aantal few-shot voorbeelden uit positieve feedback
+FTS_MIN_RANK = 0.001     # minimale ts_rank; filtert ruis maar laat gedeeltelijke overlap door
 MAX_MEMORY_ITEMS = 20    # max AiUserMemory-regels in context
 MEMORY_EXTRACT_EVERY = 5 # na elk N-de user-bericht geheugen opslaan
 
@@ -1616,11 +1617,12 @@ def _fewshot_rows_fts(db: Session, question: str, limit: int) -> list[dict]:
     # OR-tsquery over de losse woorden; _WORD_RE laat alleen letters door,
     # dus de lexemen zijn veilig om te concateneren.
     tsquery = func.to_tsquery("dutch", " | ".join(dict.fromkeys(words)))
-    # Gebruik de opgeslagen generated column (GIN-geïndexeerd) i.p.v.
+    # Gebruik de opgeslagen generated column (GIN-geïndexeerd, aangemaakt via
+    # migrate.py; bewust niet in het ORM-model i.v.m. sqlite-tests) i.p.v.
     # to_tsvector per rij: blijft snel bij duizenden feedbackrijen. Als de
     # kolom in een oude DB nog ontbreekt gooit de query een exception en
     # valt de caller terug op woordoverlap.
-    tsvector = models.AiFeedback.question_tsv
+    tsvector = literal_column("ai_feedback.question_tsv")
     rank = func.ts_rank(tsvector, tsquery)
     rows = (db.query(models.AiFeedback, rank.label("rank"))
             .filter(models.AiFeedback.score > 0,

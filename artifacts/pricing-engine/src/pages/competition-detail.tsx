@@ -78,7 +78,7 @@ export default function ConcurrentieDetail() {
   if (!product || !score) return (
     <div className="flex flex-col items-center justify-center h-64 gap-4">
       <p className="text-muted-foreground">Geen concurrentiedata voor <strong>{skuId}</strong>.</p>
-      <Link href="/concurrentie"><Button variant="outline"><ArrowLeft className="h-4 w-4 mr-2" />Terug</Button></Link>
+      <Link href={`/concurrentie${shopId !== undefined ? `?shop_id=${shopId}` : ""}`}><Button variant="outline"><ArrowLeft className="h-4 w-4 mr-2" />Terug</Button></Link>
     </div>
   );
 
@@ -96,7 +96,7 @@ export default function ConcurrentieDetail() {
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-4">
-        <Link href="/concurrentie">
+        <Link href={`/concurrentie${shopId !== undefined ? `?shop_id=${shopId}` : ""}`}>
           <Button variant="ghost" size="sm" className="mt-1">
             <ArrowLeft className="h-4 w-4 mr-1" /> Terug
           </Button>

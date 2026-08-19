@@ -9,6 +9,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Refere
 import { TrendingDown, TrendingUp, Target, AlertTriangle } from "lucide-react";
 import { useState } from "react";
 import { InfoTooltip } from "@/components/InfoTooltip";
+import { useShopId, withShop } from "@/hooks/use-shop-id";
 
 const KLASSE_KLEUREN: Record<string, string> = {
   Critical: "bg-red-500/15 text-red-700 border-red-300",
@@ -42,25 +43,26 @@ function apiFetch(path: string) {
 export default function ConcurrentieIntelligence() {
   const [klasseFilter, setKlasseFilter] = useState("all");
   const [zoekterm, setZoekterm] = useState("");
+  const shopId = useShopId();
 
   const { data: samenvatting, isLoading: ladenSamenvatting } = useQuery({
-    queryKey: ["competition-summary"],
-    queryFn: () => apiFetch("/api/competition/summary"),
+    queryKey: ["competition-summary", shopId],
+    queryFn: () => apiFetch(`/api/competition/summary${shopId !== undefined ? `?shop_id=${shopId}` : ""}`),
   });
 
   const { data: skuData, isLoading: ladenSkus } = useQuery({
-    queryKey: ["competition-skus", klasseFilter],
-    queryFn: () => apiFetch(`/api/competition/skus?page_size=200${klasseFilter !== "all" ? `&competition_class=${klasseFilter}` : ""}`),
+    queryKey: ["competition-skus", klasseFilter, shopId],
+    queryFn: () => apiFetch(`/api/competition/skus?${withShop(`page_size=200${klasseFilter !== "all" ? `&competition_class=${klasseFilter}` : ""}`, shopId)}`),
   });
 
   const { data: verdelingData } = useQuery({
-    queryKey: ["competition-dist"],
-    queryFn: () => apiFetch("/api/competition/charts/pcis-distribution"),
+    queryKey: ["competition-dist", shopId],
+    queryFn: () => apiFetch(`/api/competition/charts/pcis-distribution${shopId !== undefined ? `?shop_id=${shopId}` : ""}`),
   });
 
   const { data: prijsIndexData } = useQuery({
-    queryKey: ["competition-price-index"],
-    queryFn: () => apiFetch("/api/competition/charts/price-index-by-category"),
+    queryKey: ["competition-price-index", shopId],
+    queryFn: () => apiFetch(`/api/competition/charts/price-index-by-category${shopId !== undefined ? `?shop_id=${shopId}` : ""}`),
   });
 
   const items = (skuData?.items || []).filter(
@@ -227,7 +229,7 @@ export default function ConcurrentieIntelligence() {
             ) : (
               <div className="divide-y max-h-[480px] overflow-y-auto">
                 {items.map((s: any) => (
-                  <Link key={s.sku_id} href={`/concurrentie/${s.sku_id}`}>
+                  <Link key={s.sku_id} href={`/concurrentie/${s.sku_id}${shopId !== undefined ? `?shop_id=${shopId}` : ""}`}>
                     <div className="grid grid-cols-12 items-center px-4 py-2.5 text-sm hover:bg-muted/50 cursor-pointer transition-colors">
                       <div className="col-span-3">
                         <div className="font-medium truncate pr-2">{s.product_name}</div>
