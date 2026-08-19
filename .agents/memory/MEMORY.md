@@ -27,4 +27,5 @@
 - [API curl paths in dev](api-curl-paths.md) — curl uvicorn's own port directly (`localhost:8080/api/...`); the port-80 preview proxy doubles the /api prefix and 404s.
 - [Test-shop teardown FK](test-suite-conventions.md) — request middleware writes cost-usage rows per shop; any teardown that deletes a shop must delete those rows first or FK-fails only in full-suite runs.
 - [PIM source ownership](pim-source-ownership.md) — attribute values keep a source; cross-source writes must warn, never silently overwrite (DRS stays master).
+- [Feed-sync failure visibility](feed-sync-visibility.md) — failed syncs reuse ConnectorConfig.last_test_* (no schema change); feed response diagnostics + sanity checks live in the connector, reset per read cycle.
 - [Stale lib d.ts vs artifact typecheck](typecheck-libs-stale.md) — TS2305 from @workspace pkgs means run root `pnpm run typecheck:libs` first; refs use built dist, not src.

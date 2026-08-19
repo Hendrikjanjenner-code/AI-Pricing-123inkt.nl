@@ -682,7 +682,9 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
                 # Runtime ConnectorError: netwerk onbereikbaar, HTTP-fout, auth-weigering,
                 # lege feed, … → persisteer als 'fout' zodat detectie FEED_UNREACHABLE kan vuren
                 status = "error"
-            message = exc_msg[:300]
+            # Ruim genoeg voor de responsdiagnostiek (status, content-type,
+            # bytes en ~200 tekens body-preview) bij een lege/afwijkende feed.
+            message = exc_msg[:600]
 
         # Persisteer een ImportJob zodat de sync zichtbaar is in de importgeschiedenis
         try:
@@ -713,7 +715,42 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
         except Exception:
             pass
 
+        # Connector-status bijwerken zodat de databronnen-/connector-schermen
+        # de uitkomst van de (automatische) sync weerspiegelen — ook een fout.
+        if status in ("ok", "error"):
+            try:
+                record_sync_status(name, status, message)
+            except Exception:
+                _log.warning("Sync-status voor %s niet kunnen opslaan.", name, exc_info=True)
+
         return {"status": status, "message": message, "counts": counts}
+
+
+def record_sync_status(name: str, status: str, message: str) -> None:
+    """Persisteer de uitkomst van de laatste sync in de connector-config
+    (atomische upsert op een eigen korte sessie — de sync-sessie kan na een
+    fout in een afgebroken transactie zitten). Een mislukte automatische sync
+    wordt zo zichtbaar als connectorstatus; een geslaagde sync zet hem terug."""
+    from database import SessionLocal
+    now = datetime.now(timezone.utc)
+    db_local = SessionLocal()
+    try:
+        stmt = (
+            _pg_insert(models.ConnectorConfig)
+            .values(connector_name=name, last_test_status=status,
+                    last_test_message=message[:600], last_tested_at=now,
+                    created_at=now, updated_at=now)
+            .on_conflict_do_update(
+                index_elements=["connector_name"],
+                set_={"last_test_status": status,
+                      "last_test_message": message[:600],
+                      "last_tested_at": now, "updated_at": now},
+            )
+        )
+        db_local.execute(stmt)
+        db_local.commit()
+    finally:
+        db_local.close()
 
 
 # ── Connector-specifieke testfuncties ──────────────────────────────────────

@@ -22,6 +22,11 @@ Omgevingsvariabelen:
   FEED_SYNC_INTERVAL     — sync-interval in seconden (standaard 21600 = 6 uur)
   FEED_SYNC_MAX_RETRIES  — pogingen per cyclus (standaard 3)
   FEED_SYNC_STARTUP_DELAY— aanloopvertraging in seconden (standaard 45)
+  FEED_SYNC_RETRY_BACKOFF— basis-backoff tussen pogingen in seconden
+                           (standaard 60; verdubbelt per poging, max 10 min).
+                           Ruim gespreid zodat een export-regeneratie (die de
+                           feed tijdelijk leeg maakt) binnen één cyclus
+                           vanzelf overleefd wordt.
 """
 from __future__ import annotations
 
@@ -36,6 +41,17 @@ logger = logging.getLogger("uvicorn.error")
 DEFAULT_INTERVAL_SECONDS = 6 * 60 * 60
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_STARTUP_DELAY = 45
+DEFAULT_RETRY_BACKOFF = 60          # basis-wachttijd tussen pogingen (seconden)
+MAX_RETRY_BACKOFF = 600             # bovengrens: 10 minuten
+
+
+def _backoff_seconds(attempt: int, base: int = DEFAULT_RETRY_BACKOFF) -> int:
+    """Exponentiële backoff: base, 2×base, 4×base … gemaximeerd op 10 minuten.
+
+    Bewust ruim gespreid (minuten i.p.v. seconden): een PriceShape-export die
+    net regenereert kan enkele minuten leeg zijn — drie pogingen binnen 40
+    seconden vallen dan alle drie in hetzelfde gat."""
+    return min(MAX_RETRY_BACKOFF, base * (2 ** (attempt - 1)))
 
 # Systeem-"gebruiker" voor de ImportJob-audit (heeft alleen een .username nodig).
 _SYSTEM_USER = SimpleNamespace(username="system-autosync")
@@ -99,7 +115,8 @@ def _run_sync_once() -> dict | None:
         db.close()
 
 
-def _run_sync_with_retries(max_retries: int) -> None:
+def _run_sync_with_retries(max_retries: int,
+                           backoff_base: int = DEFAULT_RETRY_BACKOFF) -> None:
     """
     Probeer de sync tot `max_retries` keer met exponentiële backoff. Een mislukte
     sync laat de bestaande data altijd intact (zie feed_ingest), dus opnieuw
@@ -133,7 +150,8 @@ def _run_sync_with_retries(max_retries: int) -> None:
             logger.exception("Feed-sync poging %d/%d gooide een fout: %s", attempt, max_retries, exc)
 
         if attempt < max_retries:
-            backoff = min(300, 10 * (2 ** (attempt - 1)))  # 10s, 20s, 40s … max 5 min
+            backoff = _backoff_seconds(attempt, backoff_base)  # 60s, 120s, 240s … max 10 min
+            logger.info("Feed-sync: volgende poging over %ds.", backoff)
             time.sleep(backoff)
 
     logger.error(
@@ -147,6 +165,7 @@ async def _scheduler_loop() -> None:
     interval = _int_env("FEED_SYNC_INTERVAL", DEFAULT_INTERVAL_SECONDS)
     max_retries = _int_env("FEED_SYNC_MAX_RETRIES", DEFAULT_MAX_RETRIES)
     startup_delay = _int_env("FEED_SYNC_STARTUP_DELAY", DEFAULT_STARTUP_DELAY)
+    backoff_base = _int_env("FEED_SYNC_RETRY_BACKOFF", DEFAULT_RETRY_BACKOFF)
 
     logger.info(
         "PriceShape feed-sync scheduler gestart (interval=%ds, retries=%d).",
@@ -162,7 +181,7 @@ async def _scheduler_loop() -> None:
 
     while True:
         try:
-            await asyncio.to_thread(_run_sync_with_retries, max_retries)
+            await asyncio.to_thread(_run_sync_with_retries, max_retries, backoff_base)
         except asyncio.CancelledError:
             logger.info("Feed-sync scheduler gestopt.")
             raise

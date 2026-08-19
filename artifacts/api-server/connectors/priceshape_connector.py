@@ -147,6 +147,113 @@ def _get_feed_config(db=None) -> dict:
 
 # ── Feed-modus: ophalen + formaatdetectie + parsing (CSV / JSON / XML) ──────
 
+# Responsdiagnostiek: metadata van de laatst opgehaalde feed-respons, zodat een
+# "0 producten"-uitkomst uitlegbaar is (HTTP-status, content-type, bytes en de
+# eerste ~200 tekens van de body — veilig afgekapt, zonder secrets).
+_LAST_FEED_RESPONSE: dict | None = None
+
+# Sanity-drempel: de PriceShape-export is normaal honderden MB's; een respons
+# kleiner dan deze drempel is vrijwel zeker een fout (lege export, foutpagina).
+_MIN_FEED_BYTES = int(os.environ.get("PRICESHAPE_FEED_MIN_BYTES", "1024") or "1024")
+
+_PREVIEW_CHARS = 200
+
+
+import re as _re_mod
+
+# Redactie vóór loggen/persisteren: foutpagina's en proxies echoën vaak de
+# aangevraagde URL (inclusief feed-token) terug in de body. Querystrings,
+# credential-achtige key=value/„key: value”-paren en lange opake tokens worden
+# daarom uit de preview gestript voordat die in logs, ImportJobs of de
+# connectorstatus terechtkomt.
+_REDACT_PATTERNS = (
+    # querystring achter een URL: ?a=b&token=... → ?[…]
+    (_re_mod.compile(r"\?[^\s\"'<>]+"), "?[…]"),
+    # credential-achtige sleutels: token=xyz, "api_key": "xyz", Authorization: Bearer xyz
+    (_re_mod.compile(
+        r"(?i)\b(authorization|auth|bearer|token|api[_-]?key|apikey|secret|"
+        r"password|passwd|pwd|signature|sig|access[_-]?token|refresh[_-]?token|"
+        r"session|cookie|credential[s]?)\b\s*[\"']?\s*[:=]\s*[\"']?"
+        r"(?:bearer\s+)?[^\s&\"'<>,;]+"),
+     r"\1=[…]"),
+    # lange opake hex/base64-achtige strings (20+ tekens) — vrijwel zeker tokens/ids
+    (_re_mod.compile(r"\b[A-Za-z0-9_\-]{20,}\b"), "[…]"),
+)
+
+
+def _redact(text: str) -> str:
+    """Verwijder tokens, querystrings en credential-achtige waarden uit tekst."""
+    for pattern, repl in _REDACT_PATTERNS:
+        text = pattern.sub(repl, text)
+    return text
+
+
+def _body_preview(data: bytes, limit: int = _PREVIEW_CHARS) -> str:
+    """Eerste ~200 tekens van de body: veilig afgekapt, zonder rare controls én
+    met geredigeerde tokens/querystrings (geen secrets in logs of statusvelden)."""
+    text = data[: limit * 4].decode("utf-8", "replace")
+    text = "".join(ch if ch.isprintable() or ch in "\n\t" else " " for ch in text)
+    return _redact(" ".join(text.split()))[:limit]
+
+
+def reset_last_feed_response() -> None:
+    global _LAST_FEED_RESPONSE
+    _LAST_FEED_RESPONSE = None
+
+
+def _record_feed_response(status: int | None, content_type: str,
+                          nbytes: int | None, head: bytes,
+                          complete: bool = True) -> dict:
+    """Bewaar metadata van de laatst opgehaalde feed-respons (voor diagnostiek)."""
+    global _LAST_FEED_RESPONSE
+    _LAST_FEED_RESPONSE = {
+        "status": status,
+        "content_type": (content_type or "").split(";")[0].strip(),
+        "bytes": nbytes,
+        "bytes_complete": complete,
+        "preview": _body_preview(head),
+    }
+    return _LAST_FEED_RESPONSE
+
+
+def describe_last_feed_response() -> str:
+    """Leesbare samenvatting van de laatst opgehaalde feed-respons."""
+    m = _LAST_FEED_RESPONSE
+    if not m:
+        return "geen responsmetadata beschikbaar"
+    size = "?" if m["bytes"] is None else (
+        f"{m['bytes']} bytes" if m["bytes_complete"] else f"≥{m['bytes']} bytes")
+    return (
+        f"HTTP {m['status'] if m['status'] is not None else '?'}, "
+        f"content-type '{m['content_type'] or 'onbekend'}', {size}, "
+        f"begin body: '{m['preview']}'"
+    )
+
+
+def _ensure_feed_looks_like_data(meta: dict, at_eof: bool) -> None:
+    """
+    Sanity-check vóór het parsen: een HTML-(fout)pagina met HTTP 200 of een
+    verdacht kleine body wordt als duidelijke ConnectorError gerapporteerd in
+    plaats van later als "0 producten".
+    """
+    ct = (meta.get("content_type") or "").lower()
+    preview = (meta.get("preview") or "").lstrip().lower()
+    if "html" in ct or preview.startswith(("<!doctype", "<html")):
+        raise ConnectorError(
+            "PriceShape feed gaf een HTML-pagina terug in plaats van CSV/JSON/XML "
+            "(vermoedelijk een foutpagina of rate-limit met HTTP 200). "
+            f"Respons: {describe_last_feed_response()}"
+        )
+    nbytes = meta.get("bytes")
+    if at_eof and nbytes is not None and nbytes < _MIN_FEED_BYTES:
+        raise ConnectorError(
+            f"PriceShape feed-antwoord is verdacht klein ({nbytes} bytes, "
+            f"drempel {_MIN_FEED_BYTES}) — vermoedelijk een lege of nog "
+            "regenererende export. "
+            f"Respons: {describe_last_feed_response()}"
+        )
+
+
 def _fetch_feed(feed_url: str) -> tuple[bytes, str]:
     """
     Haal de PriceShape output-feed op via één URL. Elke (redirect-)hop wordt tegen
@@ -164,7 +271,12 @@ def _fetch_feed(feed_url: str) -> tuple[bytes, str]:
                 "Controleer of de feed-URL (met token) nog geldig is."
             )
         resp.raise_for_status()
-        return resp.content, resp.headers.get("content-type", "")
+        content = resp.content
+        content_type = resp.headers.get("content-type", "")
+        meta = _record_feed_response(resp.status_code, content_type,
+                                     len(content), content[:2048])
+        _ensure_feed_looks_like_data(meta, at_eof=True)
+        return content, content_type
     except UnsafeURLError as exc:
         raise ConnectorError(str(exc)) from exc
     except httpx.HTTPStatusError as exc:
@@ -229,11 +341,18 @@ class _StreamReader:
         self._it = iter(chunk_iter)
         self._buf = bytearray()
         self._eof = False
+        self.total_bytes = 0  # totaal ontvangen bytes (diagnostiek)
+
+    @property
+    def at_eof(self) -> bool:
+        return self._eof
 
     def _fill(self, size: int) -> None:
         while len(self._buf) < size and not self._eof:
             try:
-                self._buf += next(self._it)
+                chunk = next(self._it)
+                self._buf += chunk
+                self.total_bytes += len(chunk)
             except StopIteration:
                 self._eof = True
 
@@ -241,6 +360,7 @@ class _StreamReader:
         if size is None or size < 0:
             for chunk in self._it:
                 self._buf += chunk
+                self.total_bytes += len(chunk)
             self._eof = True
             out = bytes(self._buf)
             self._buf = bytearray()
@@ -279,15 +399,31 @@ def stream_json_records(feed_url: str):
 
             reader = _StreamReader(resp.iter_bytes(65536))
             head = reader.read(65536)
-            first = head.lstrip(b"\xef\xbb\xbf").lstrip()[:1]
             reader.prepend(head)
+            meta = _record_feed_response(
+                resp.status_code, resp.headers.get("content-type", ""),
+                len(head), head[:2048], complete=reader.at_eof,
+            )
+            # Sanity vóór parsen: HTML-foutpagina of verdacht kleine body direct
+            # als duidelijke fout melden (niet via de gebufferde fallback nog
+            # eens downloaden).
+            _ensure_feed_looks_like_data(meta, at_eof=reader.at_eof)
+            first = head.lstrip(b"\xef\xbb\xbf").lstrip()[:1]
             if first != b"[":
                 raise NotStreamable(
                     "Feed is geen top-level JSON-array — gebufferd lezen vereist."
                 )
 
-            for record in ijson.items(reader, "item"):
-                yield record
+            try:
+                for record in ijson.items(reader, "item"):
+                    yield record
+            finally:
+                # Werk het bytetotaal bij zodat de diagnostiek bij "0 producten"
+                # het werkelijk gestreamde volume toont.
+                _record_feed_response(
+                    resp.status_code, resp.headers.get("content-type", ""),
+                    reader.total_bytes, head[:2048], complete=reader.at_eof,
+                )
     except UnsafeURLError as exc:
         raise ConnectorError(str(exc)) from exc
     except httpx.HTTPStatusError as exc:

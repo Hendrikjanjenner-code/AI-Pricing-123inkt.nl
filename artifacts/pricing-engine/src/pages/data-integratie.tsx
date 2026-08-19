@@ -71,6 +71,7 @@ interface DataSourceRow {
   open_issues: number;
   last_test_message?: string | null;
   last_job?: any;
+  last_failed_job?: { id: number; status: string; failed_at: string | null; reason: string | null } | null;
 }
 
 function verbindingBadge(status: string, configured: boolean) {
@@ -112,6 +113,7 @@ interface BronKaart {
   connStatus?: VerbindingStatus;
   connMessage?: string;
   nietGekoppeld?: boolean;
+  mislukteJob?: any | null;
 }
 
 const VERBINDING_LABEL: Record<VerbindingStatus, string> = {
@@ -156,6 +158,12 @@ function BronStatusCard({ kaart }: { kaart: BronKaart }) {
         )}
         {kaart.overrideMessage && (
           <p className="text-xs text-muted-foreground mt-1">{kaart.overrideMessage}</p>
+        )}
+        {kaart.mislukteJob && (
+          <p className="text-xs text-red-600 mt-1" title={kaart.mislukteJob.error_message ?? undefined}>
+            Mislukte poging: {formatDatum(kaart.mislukteJob.completed_at ?? kaart.mislukteJob.created_at)}
+            {kaart.mislukteJob.error_message ? ` — ${String(kaart.mislukteJob.error_message).slice(0, 160)}` : ""}
+          </p>
         )}
         {kaart.connStatus && (
           <p className={`text-xs mt-1 ${kaart.connStatus === "ok" ? "text-emerald-600" : "text-muted-foreground"}`}>
@@ -260,7 +268,11 @@ export default function DataIntegratie() {
     return gefilterd.reduce((a, b) => (new Date(a.created_at) > new Date(b.created_at) ? a : b));
   };
 
-  const laatstePriceShape = laatsteVoorBron((j) => j.source === "PriceShape");
+  // PriceShape-kaart: ook de (automatische) feed-syncs meenemen, zodat een
+  // mislukte poging van de scheduler zichtbaar is naast de laatste succesvolle sync.
+  const isPriceShapeJob = (j: any) => j.source === "PriceShape" || j.upload_type === "api_sync_priceshape";
+  const laatstePriceShape = laatsteVoorBron(isPriceShapeJob);
+  const laatstePriceShapeMislukt = laatsteVoorBron((j) => isPriceShapeJob(j) && FOUT_STATUSSEN.has(j.status));
   const laatsteDrs = laatsteVoorBron((j) => j.source === "DRS");
   const laatsteExcel = laatsteVoorBron((j) => j.source === "Handmatig" && ["xlsx", "xls"].includes(j.file_type));
   const laatsteCsv = laatsteVoorBron((j) => j.source === "Handmatig" && j.file_type === "csv");
@@ -272,6 +284,7 @@ export default function DataIntegratie() {
       label: "PriceShape",
       icon: Server,
       laatsteJob: laatstePriceShape,
+      mislukteJob: laatstePriceShapeMislukt,
       connStatus: loadingConn ? undefined : (priceshapeStatus?.status ?? "not_configured"),
       connMessage: priceshapeStatus?.message,
     },
@@ -366,7 +379,14 @@ export default function DataIntegratie() {
                       <div className="text-xs text-muted-foreground">{b.kind === "api" ? "API-connector" : "Handmatige upload"}</div>
                     </TableCell>
                     <TableCell>{verbindingBadge(b.connection_status, b.configured)}</TableCell>
-                    <TableCell className="text-sm">{formatDatum(b.last_sync_at)}</TableCell>
+                    <TableCell className="text-sm">
+                      {formatDatum(b.last_sync_at)}
+                      {b.last_failed_job && (
+                        <div className="text-xs text-red-600 mt-0.5" title={b.last_failed_job.reason ?? undefined}>
+                          Mislukte poging: {formatDatum(b.last_failed_job.failed_at)}
+                        </div>
+                      )}
+                    </TableCell>
                     <TableCell className="text-sm">
                       {b.next_sync_at ? formatDatum(b.next_sync_at) : <span className="text-muted-foreground">{b.sync_schedule === "handmatig" ? "Handmatig" : "—"}</span>}
                     </TableCell>

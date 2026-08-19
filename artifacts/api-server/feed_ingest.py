@@ -268,8 +268,13 @@ def _read_feed(db: Session, content: bytes | None = None,
                content_type: str = "") -> tuple[list[dict], list[dict]]:
     cfg = pc._get_feed_config(db=db)
 
+    # Diagnostiek: begin elke leescyclus met schone responsmetadata zodat een
+    # "0 producten"-melding nooit de metadata van een eerdere run toont.
+    pc.reset_last_feed_response()
+
     # Vooraf opgehaalde body (bijv. bulk-load van schijf): parse gebufferd.
     if content is not None:
+        pc._record_feed_response(None, content_type, len(content), content[:2048])
         fmt = pc._detect_feed_format(content, content_type, cfg["feed_format"])
         return _parse_content(content, content_type, fmt)
 
@@ -506,14 +511,20 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
     # concurrentprijzen breken we af vóór welke delete dan ook, zodat de app
     # blijft draaien op de laatst-goede data ("never break").
     if not catalog and not comp_rows:
+        # Neem de responsmetadata (HTTP-status, content-type, bytes, eerste
+        # ~200 tekens) op in log én fout, zodat de echte oorzaak (lege export,
+        # HTML-foutpagina met HTTP 200, rate limiting) vaststelbaar is.
+        response_info = pc.describe_last_feed_response()
         logger.error(
             "PriceShape feed leverde 0 producten en 0 concurrentprijzen op — "
             "sync afgebroken om bestaande catalogus en concurrentprijzen te beschermen "
-            "(last-known-good: bestaande data blijft ongewijzigd staan)."
+            "(last-known-good: bestaande data blijft ongewijzigd staan). "
+            "Ontvangen respons: %s", response_info,
         )
         raise ValueError(
             "PriceShape feed leverde 0 producten en 0 concurrentprijzen op — "
-            "sync afgebroken om bestaande data te beschermen (laatst-goede data blijft staan)."
+            "sync afgebroken om bestaande data te beschermen (laatst-goede data "
+            f"blijft staan). Ontvangen respons: {response_info}"
         )
 
     # 1. Producten: splits in nieuw vs bestaand.

@@ -37,6 +37,9 @@ def _job_stats(db: Session, filter_fn) -> dict:
     ).order_by(models.ImportJob.created_at.desc()).limit(200).all()
 
     last_job = jobs[0] if jobs else None
+    # Laatste mislukte poging apart, zodat een gefaalde (automatische) sync
+    # zichtbaar blijft naast de laatste succesvolle sync.
+    last_failed = next((j for j in jobs if j.status in ("fout", "failed")), None)
     warnings = sum(len(j.warnings_json or []) for j in jobs)
     errors = sum(1 for j in jobs if j.status in ("fout", "failed"))
     rows_failed = sum(j.rows_failed or 0 for j in jobs)
@@ -53,6 +56,12 @@ def _job_stats(db: Session, filter_fn) -> dict:
             "created_at": _iso(last_job.created_at),
             "completed_at": _iso(last_job.completed_at),
         } if last_job else None,
+        "last_failed_job": {
+            "id": last_failed.id,
+            "status": last_failed.status,
+            "failed_at": _iso(last_failed.completed_at or last_failed.created_at),
+            "reason": last_failed.error_message,
+        } if last_failed else None,
         "jobs_recent": len(jobs),
         "failed_jobs_recent": errors,
         "warnings_recent": warnings,
