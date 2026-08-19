@@ -234,6 +234,62 @@ def test_fewshot_retrieval_positive_only(db):
         db.commit()
 
 
+def test_fewshot_matches_reformulated_question(db):
+    """FTS met Nederlandse stemmer vindt anders geformuleerde vragen
+    (vervoegingen + stopwoorden) waar Jaccard-woordoverlap faalt."""
+    user = _admin_user(db)
+    tag = uuid.uuid4().hex[:8]
+    conv, _q, a = _make_conv_with_answer(
+        db, user, question=f"Onze marge lekt weg bij printerpapier {tag}")
+    db.add(models.AiFeedback(
+        message_id=a.id, user_id=user.id, username=user.username, score=1,
+        question=f"Onze marge lekt weg bij printerpapier {tag}",
+        answer_excerpt=f"Margeverlies zit vooral in categorie papier {tag}.",
+        conversation_id=conv.id))
+    db.commit()
+    try:
+        # Anders geformuleerd: geen letterlijke overlap behalve stam 'marge';
+        # Jaccard over woordsets zou hier onder de 0.25-drempel blijven.
+        ex = ai_gateway.get_fewshot_examples(
+            db, "Waar verliezen wij op dit moment de meeste marge bij papieren producten?")
+        assert any(tag in (e["answer"] or "") for e in ex), ex
+        # Volledig irrelevante vraag matcht niet
+        ex2 = ai_gateway.get_fewshot_examples(db, "hoeveel regent het morgen in Lutjebroek")
+        assert not any(tag in (e["question"] or "") for e in ex2)
+    finally:
+        db.query(models.AiFeedback).filter(
+            models.AiFeedback.message_id == a.id).delete(synchronize_session=False)
+        db.commit()
+
+
+def test_fewshot_fallback_on_fts_failure(db, monkeypatch):
+    """Als FTS niet beschikbaar is, valt retrieval fail-safe terug op
+    woordoverlap en blijft resultaat geven."""
+    user = _admin_user(db)
+    tag = uuid.uuid4().hex[:8]
+    conv, _q, a = _make_conv_with_answer(
+        db, user, question=f"Welke concurrent verlaagt prijzen agressief {tag}?")
+    db.add(models.AiFeedback(
+        message_id=a.id, user_id=user.id, username=user.username, score=1,
+        question=f"Welke concurrent verlaagt prijzen agressief {tag}?",
+        answer_excerpt=f"Concurrent Y verlaagt agressief {tag}.",
+        conversation_id=conv.id))
+    db.commit()
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("FTS kapot (test)")
+
+    monkeypatch.setattr(ai_gateway, "_fewshot_rows_fts", _boom)
+    try:
+        ex = ai_gateway.get_fewshot_examples(
+            db, f"welke concurrent verlaagt prijzen agressief {tag}")
+        assert any(tag in (e["answer"] or "") for e in ex), ex
+    finally:
+        db.query(models.AiFeedback).filter(
+            models.AiFeedback.message_id == a.id).delete(synchronize_session=False)
+        db.commit()
+
+
 # ─── Kwaliteitsdashboard & FAQ ───────────────────────────────────────────────
 
 def test_quality_dashboard_rbac_and_shape(client, admin_headers):

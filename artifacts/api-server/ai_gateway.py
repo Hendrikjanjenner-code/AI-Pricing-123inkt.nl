@@ -1427,28 +1427,14 @@ def get_memory_block(db: Session, user: models.User) -> Optional[str]:
     return ("Bekende voorkeuren en vaste context van deze gebruiker/organisatie "
             "(gebruik dit alleen als het relevant is voor de vraag):\n" + "\n".join(lines))
 
-def get_fewshot_examples(db: Session, question: str,
-                         limit: int = FEWSHOT_LIMIT) -> list[dict]:
-    """Zoek eerder positief beoordeelde, vergelijkbare vragen+antwoorden
-    (woordoverlap-similarity over recente positieve feedback)."""
-    try:
-        rows = (db.query(models.AiFeedback)
-                .filter(models.AiFeedback.score > 0,
-                        models.AiFeedback.question.isnot(None),
-                        models.AiFeedback.answer_excerpt.isnot(None))
-                .order_by(models.AiFeedback.created_at.desc())
-                .limit(200).all())
-    except Exception:
-        return []
-    scored = []
-    for r in rows:
-        sim = _similarity(question, r.question or "")
-        if sim >= 0.25:
-            scored.append((sim, r))
-    scored.sort(key=lambda t: t[0], reverse=True)
+def _dedupe_examples(scored_rows, limit: int) -> list[dict]:
+    """Ontdubbel op vraagtekst en knip af op `limit`.
+
+    `scored_rows` is een lijst (score, AiFeedback), al gesorteerd op
+    relevantie (hoogste eerst)."""
     seen: set[str] = set()
-    out = []
-    for _sim, r in scored:
+    out: list[dict] = []
+    for _score, r in scored_rows:
         key = (r.question or "").strip().lower()
         if key in seen:
             continue
@@ -1457,6 +1443,25 @@ def get_fewshot_examples(db: Session, question: str,
         if len(out) >= limit:
             break
     return out
+def get_fewshot_examples(db: Session, question: str,
+                         limit: int = FEWSHOT_LIMIT) -> list[dict]:
+    """Zoek eerder positief beoordeelde, vergelijkbare vragen+antwoorden.
+
+    Primair via Postgres full-text search met Nederlandse stemmer (vindt ook
+    anders geformuleerde vragen); fail-safe terugval op woordoverlap als de
+    zoekindex/FTS niet beschikbaar is."""
+    try:
+        return _fewshot_rows_fts(db, question, limit)
+    except Exception as exc:
+        logger.warning("Few-shot FTS niet beschikbaar, terugval op woordoverlap: %s", exc)
+        try:
+            db.rollback()  # mislukte FTS-query laat de transactie aborted achter
+        except Exception:
+            pass
+    try:
+        return _fewshot_rows_overlap(db, question, limit)
+    except Exception:
+        return []
 
 def _fewshot_block(examples: list[dict]) -> str:
     parts = ["Eerder goed beoordeelde antwoorden op vergelijkbare vragen "
@@ -1561,3 +1566,46 @@ def release_budget_slot_reservation(
             db.rollback()
         except Exception:
             pass
+
+def _fewshot_rows_overlap(db: Session, question: str, limit: int) -> list[dict]:
+    """Fallback-retrieval: Jaccard-woordoverlap over recente positieve
+    feedback (het oorspronkelijke gedrag). Fail-safe als FTS niet werkt."""
+    rows = (db.query(models.AiFeedback)
+            .filter(models.AiFeedback.score > 0,
+                    models.AiFeedback.question.isnot(None),
+                    models.AiFeedback.answer_excerpt.isnot(None))
+            .order_by(models.AiFeedback.created_at.desc())
+            .limit(200).all())
+    scored = []
+    for r in rows:
+        sim = _similarity(question, r.question or "")
+        if sim >= 0.25:
+            scored.append((sim, r))
+    scored.sort(key=lambda t: t[0], reverse=True)
+    return _dedupe_examples(scored, limit)
+
+def _fewshot_rows_fts(db: Session, question: str, limit: int) -> list[dict]:
+    """Primaire retrieval: Postgres full-text search met Nederlandse stemmer.
+
+    Vindt vergelijkbare vragen ook zonder letterlijke woordoverlap: de
+    'dutch'-configuratie stemt vervoegingen (verliezen → verlies) en negeert
+    stopwoorden ("waar", "we"), en de query gebruikt OR-semantiek over de
+    lexemen zodat gedeeltelijke overlap volstaat. Gooit een exception door
+    als FTS niet beschikbaar is (caller valt dan terug op woordoverlap)."""
+    words = _WORD_RE.findall(question.lower())
+    if not words:
+        return []
+    # OR-tsquery over de losse woorden; _WORD_RE laat alleen letters door,
+    # dus de lexemen zijn veilig om te concateneren.
+    tsquery = func.to_tsquery("dutch", " | ".join(dict.fromkeys(words)))
+    tsvector = func.to_tsvector("dutch", models.AiFeedback.question)
+    rank = func.ts_rank(tsvector, tsquery)
+    rows = (db.query(models.AiFeedback, rank.label("rank"))
+            .filter(models.AiFeedback.score > 0,
+                    models.AiFeedback.question.isnot(None),
+                    models.AiFeedback.answer_excerpt.isnot(None),
+                    tsvector.op("@@")(tsquery))
+            .order_by(rank.desc(), models.AiFeedback.created_at.desc())
+            .limit(50).all())
+    scored = [(float(r.rank), r[0]) for r in rows if float(r.rank) >= FTS_MIN_RANK]
+    return _dedupe_examples(scored, limit)
