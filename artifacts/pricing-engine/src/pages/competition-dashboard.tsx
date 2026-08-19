@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
-import { Search, TrendingDown, TrendingUp, Target, AlertTriangle, Circle } from "lucide-react";
+import { Search, TrendingDown, TrendingUp, Target, AlertTriangle, Circle, Minus, Sparkles } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState } from "react";
 import { useShopId, withShop } from "@/hooks/use-shop-id";
 
@@ -62,6 +63,18 @@ export default function CompetitionDashboard() {
     queryFn: () => apiFetch(`/api/competition/summary${shopId !== undefined ? `?shop_id=${shopId}` : ""}`),
   });
 
+  const [rankScope, setRankScope] = useState("overall");
+  const { data: rankData, isLoading: rankLoading } = useQuery({
+    queryKey: ["competition-rankings", rankScope, shopId],
+    queryFn: () => {
+      const p = new URLSearchParams({ scope: rankScope });
+      if (shopId !== undefined) p.set("shop_id", String(shopId));
+      return apiFetch(`/api/competition/rankings?${p}`);
+    },
+  });
+  const rankings = rankData?.rankings || [];
+  const rankScopes: string[] = rankData?.scopes?.length ? rankData.scopes : ["overall"];
+
   const categories = dashData?.categories || [];
   const allCategories = Array.from(new Set(categories.map((c: any) => c.category))) as string[];
 
@@ -100,6 +113,120 @@ export default function CompetitionDashboard() {
           </Card>
         </div>
       )}
+
+      {/* Concurrent-rankings (drie-scoremodel) */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <CardTitle className="text-base">Concurrent-rankings</CardTitle>
+              <CardDescription>
+                Rank, Competition Relevance, Price Relevance en Influence per concurrent
+                {rankData?.run_date ? ` — run van ${rankData.run_date}` : ""}
+              </CardDescription>
+            </div>
+            <Select value={rankScope} onValueChange={setRankScope}>
+              <SelectTrigger className="w-52"><SelectValue placeholder="Scope" /></SelectTrigger>
+              <SelectContent>
+                {rankScopes.map(s => (
+                  <SelectItem key={s} value={s}>{s === "overall" ? "Totaal (overall)" : s}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="border-t">
+            <div className="grid grid-cols-12 bg-muted/40 px-4 py-2 text-xs font-medium text-muted-foreground border-b">
+              <div className="col-span-1">Rank</div>
+              <div className="col-span-4">Concurrent</div>
+              <div className="col-span-2 text-right">Comp. relevance</div>
+              <div className="col-span-2 text-right">Price relevance</div>
+              <div className="col-span-2 text-right">Influence</div>
+              <div className="col-span-1 text-right">Totaal</div>
+            </div>
+            {rankLoading ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">Laden...</div>
+            ) : rankings.length === 0 ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">
+                Nog geen rankings beschikbaar. Draai de rankings-engine om deze lijst te vullen.
+              </div>
+            ) : (
+              <TooltipProvider delayDuration={150}>
+                <div className="divide-y max-h-[420px] overflow-y-auto">
+                  {rankings.map((r: any) => {
+                    const basis = r.evidence?.influence_basis;
+                    return (
+                      <div key={`${r.rank}-${r.competitor_name}`} className="grid grid-cols-12 items-center px-4 py-2.5 text-sm">
+                        <div className="col-span-1 flex items-center gap-1 tabular-nums font-medium">
+                          {r.rank}
+                          {r.trend === "up" && <TrendingUp className="h-3.5 w-3.5 text-emerald-600" />}
+                          {r.trend === "down" && <TrendingDown className="h-3.5 w-3.5 text-red-500" />}
+                          {r.trend === "stable" && <Minus className="h-3.5 w-3.5 text-muted-foreground" />}
+                          {r.trend === "new" && <Sparkles className="h-3.5 w-3.5 text-blue-500" />}
+                        </div>
+                        <div className="col-span-4 flex items-center gap-2 min-w-0">
+                          <Link href={`/competition/competitors/${encodeURIComponent(r.competitor_name)}`}>
+                            <span className="font-medium truncate hover:underline cursor-pointer">{r.competitor_name}</span>
+                          </Link>
+                        </div>
+                        <div className="col-span-2 text-right tabular-nums text-xs">
+                          {((r.competition_relevance_score || 0) * 100).toFixed(0)}
+                        </div>
+                        <div className="col-span-2 text-right tabular-nums text-xs">
+                          {((r.price_relevance_score || 0) * 100).toFixed(0)}
+                        </div>
+                        <div className="col-span-2 flex items-center justify-end gap-1.5">
+                          <span className="tabular-nums text-xs">{((r.influence_score || 0) * 100).toFixed(0)}</span>
+                          {basis === "profiel" && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/10 text-amber-700 border-amber-300 cursor-help">
+                                  profiel-baseline
+                                </Badge>
+                              </TooltipTrigger>
+                              <TooltipContent side="left" className="max-w-xs text-xs">
+                                {r.explanation || "Influence-score op basis van profiel; er is nog geen prijshistorie beschikbaar."}
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
+                          {basis === "geen_data" && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-slate-100 text-slate-500 border-slate-200 cursor-help">
+                                  geen data
+                                </Badge>
+                              </TooltipTrigger>
+                              <TooltipContent side="left" className="max-w-xs text-xs">
+                                {r.explanation || "Geen prijshistorie of profieldata beschikbaar voor de Influence-score."}
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
+                          {basis === "prijshistorie" && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-500/10 text-emerald-700 border-emerald-300 cursor-help">
+                                  prijshistorie
+                                </Badge>
+                              </TooltipTrigger>
+                              <TooltipContent side="left" className="max-w-xs text-xs">
+                                {r.explanation || "Influence-score op basis van werkelijke prijshistorie."}
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
+                        </div>
+                        <div className="col-span-1 text-right tabular-nums font-semibold">
+                          {((r.combined_score || 0) * 100).toFixed(0)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </TooltipProvider>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Filters */}
       <div className="flex gap-3 flex-wrap">

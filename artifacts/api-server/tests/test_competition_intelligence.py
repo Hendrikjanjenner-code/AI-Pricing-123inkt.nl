@@ -27,7 +27,6 @@ COMP_2 = f"{PFX}-shop2.nl"
 
 # Constanten voor warn_suspicious_matches-tests (taak 47)
 WM_PFX = f"WMTEST{uuid.uuid4().hex[:6]}"
-ED_PFX = f"EDTEST{uuid.uuid4().hex[:6]}"
 WM_SKU = f"{WM_PFX}-sku"
 WM_COMP = f"{WM_PFX}-comp.nl"
 

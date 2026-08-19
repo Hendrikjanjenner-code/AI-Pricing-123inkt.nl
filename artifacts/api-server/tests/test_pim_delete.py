@@ -199,13 +199,14 @@ def test_defaults_not_reseeded_after_deleting_final_record(tmp_path):
     from engine import pim_engine
 
     engine = create_engine(f"sqlite:///{tmp_path}/pimdel.db")
-    # Alleen de tabellen die deze test nodig heeft: het volledige schema bevat
-    # Postgres-only DDL (o.a. een TSVECTOR generated column) die SQLite niet
-    # kan renderen.
+    # Alleen de benodigde tabellen aanmaken: het volledige schema bevat
+    # Postgres-specifieke kolommen (bijv. de TSVECTOR generated column op
+    # ai_feedback) die sqlite niet kan renderen.
     needed = [models.PimAttributeDefinition.__table__,
               models.PimAttributeValue.__table__,
               models.PimChannel.__table__,
               models.PimFamily.__table__,
+              models.PimProductContent.__table__,
               models.AuditLog.__table__]
     Base.metadata.create_all(engine, tables=needed)
     TestSession = sessionmaker(bind=engine)
