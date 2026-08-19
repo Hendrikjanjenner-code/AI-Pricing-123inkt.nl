@@ -261,14 +261,21 @@ def customer_value_overview(
 
 
 @router.get("/liability")
-def liability(db: Session = Depends(get_db),
+def liability(shop_id: int | None = Query(None),
+              db: Session = Depends(get_db),
               current_user: models.User = Depends(get_current_user)):
-    summary = li.liability_summary(db)
+    if shop_id is not None:
+        from engine.signal_publisher import resolve_shop_id
+        shop_id = resolve_shop_id(db, shop_id)
+    summary = li.liability_summary(db, shop_id=shop_id)
     per_tier = []
     for t in db.query(models.LoyaltyTier).order_by(models.LoyaltyTier.rank).all():
-        pts = db.query(func.coalesce(func.sum(models.LoyaltyWallet.balance_points), 0)).join(
+        pts_q = db.query(func.coalesce(func.sum(models.LoyaltyWallet.balance_points), 0)).join(
             models.LoyaltyMember, models.LoyaltyMember.id == models.LoyaltyWallet.member_id
-        ).filter(models.LoyaltyMember.tier_code == t.code).scalar() or 0
+        ).filter(models.LoyaltyMember.tier_code == t.code)
+        if shop_id is not None:
+            pts_q = pts_q.filter(models.LoyaltyMember.shop_id == shop_id)
+        pts = pts_q.scalar() or 0
         per_tier.append({"tier": t.code, "name": t.name, "points": int(pts),
                          "liability_eur": round(int(pts) * li.POINT_VALUE_EUR, 2)})
     return {**summary, "per_tier": per_tier}
@@ -534,13 +541,17 @@ def seed_demo(
 
 @router.get("/expiry-policy")
 def get_expiry_policy(
+    shop_id: int | None = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    """Haal het huidige verloopbeleid voor punten op."""
-    policy = li._get_expiry_policy(db)
+    """Haal het verloopbeleid voor punten op (per shop; default de standaardshop)."""
+    from engine.signal_publisher import resolve_shop_id
+    sid = resolve_shop_id(db, shop_id)
+    policy = li._get_expiry_policy(db, sid)
     db.commit()
     return {
+        "shop_id": sid,
         "enabled": policy.enabled,
         "expiry_months": policy.expiry_months,
         "warn_days_before": policy.warn_days_before,
@@ -555,15 +566,18 @@ def get_expiry_policy(
 @router.put("/expiry-policy")
 def update_expiry_policy(
     body: dict,
+    shop_id: int | None = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role("admin", "pricing_manager")),
 ):
     """
-    Pas het verloopbeleid aan.
+    Pas het verloopbeleid van een shop aan (default de standaardshop).
 
     Body: { "enabled": bool, "expiry_months": int (1-120), "warn_days_before": int (7-180) }
     """
-    policy = li._get_expiry_policy(db)
+    from engine.signal_publisher import resolve_shop_id
+    sid = resolve_shop_id(db, shop_id)
+    policy = li._get_expiry_policy(db, sid)
     if "enabled" in body:
         policy.enabled = bool(body["enabled"])
     if "expiry_months" in body:
@@ -577,12 +591,13 @@ def update_expiry_policy(
             raise HTTPException(status_code=422, detail="warn_days_before moet tussen 7 en 180 liggen")
         policy.warn_days_before = v
     db.add(models.AuditLog(
-        entity_type="loyalty_expiry_policy", entity_id="1",
+        entity_type="loyalty_expiry_policy", entity_id=str(sid),
         action="update_expiry_policy", performed_by=current_user.username,
         details=str(body),
     ))
     db.commit()
     return {
+        "shop_id": sid,
         "enabled": policy.enabled,
         "expiry_months": policy.expiry_months,
         "warn_days_before": policy.warn_days_before,
@@ -591,17 +606,23 @@ def update_expiry_policy(
 
 @router.get("/expiring-soon")
 def expiring_soon(
+    shop_id: int | None = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     """
-    Leden met punten die binnenkort verlopen op basis van het verloopbeleid.
+    Leden met punten die binnenkort verlopen op basis van het verloopbeleid
+    van hun shop. Met `?shop_id=` beperkt tot één shop.
     Gesorteerd op urgentie (kortste vervaltijd eerst).
     """
-    items = li.expiring_soon_members(db)
-    policy = li._get_expiry_policy(db)
+    from engine.signal_publisher import resolve_shop_id
+    if shop_id is not None:
+        shop_id = resolve_shop_id(db, shop_id)
+    items = li.expiring_soon_members(db, shop_id=shop_id)
+    policy = li._get_expiry_policy(db, resolve_shop_id(db, shop_id))
     db.commit()
     return {
+        "shop_id": shop_id,
         "policy": {
             "enabled": policy.enabled,
             "expiry_months": policy.expiry_months,
@@ -615,16 +636,21 @@ def expiring_soon(
 @router.post("/run-expiry")
 def run_expiry(
     dry_run: bool = False,
+    shop_id: int | None = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role("admin", "pricing_manager")),
 ):
     """
     Voer een expiry-run uit: genereer expire-ledger-entries voor alle leden
-    waarvan punten de vervalgrens hebben overschreden.
+    waarvan punten de vervalgrens hebben overschreden (verloopbeleid per shop).
 
     Met `?dry_run=true` worden geen mutaties geschreven — alleen een vooruitblik.
+    Met `?shop_id=` beperkt tot leden van één shop.
     """
-    result = li.apply_expiry_run(db, dry_run=dry_run)
+    if shop_id is not None:
+        from engine.signal_publisher import resolve_shop_id
+        shop_id = resolve_shop_id(db, shop_id)
+    result = li.apply_expiry_run(db, dry_run=dry_run, shop_id=shop_id)
     if not dry_run:
         db.add(models.AuditLog(
             entity_type="loyalty_expiry", entity_id="run",

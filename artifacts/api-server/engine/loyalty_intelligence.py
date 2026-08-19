@@ -390,34 +390,54 @@ def _next_best_action(segment: str, churn: float, monetary: float, aov: float, r
 # Financial liability
 # ---------------------------------------------------------------------------
 
-def liability_summary(db: Session) -> dict:
-    outstanding = int(db.query(
+def liability_summary(db: Session, shop_id: int | None = None) -> dict:
+    """Liability-samenvatting; met shop_id beperkt tot leden/vouchers van die shop."""
+    outstanding_q = db.query(
         func.coalesce(func.sum(models.LoyaltyWallet.balance_points), 0)
-    ).scalar() or 0)
-    voucher_value = db.query(
+    )
+    voucher_value_q = db.query(
         func.coalesce(func.sum(models.LoyaltyVoucher.monetary_value), 0)
-    ).filter(models.LoyaltyVoucher.status == "issued").scalar() or 0
-    voucher_count = db.query(func.count(models.LoyaltyVoucher.id)).filter(
+    ).filter(models.LoyaltyVoucher.status == "issued")
+    voucher_count_q = db.query(func.count(models.LoyaltyVoucher.id)).filter(
         models.LoyaltyVoucher.status == "issued"
-    ).scalar() or 0
-    points_liability = round(outstanding * POINT_VALUE_EUR, 2)
+    )
     # 30d expiry: vouchers die binnen 30 dagen vervallen
     soon = date.today() + timedelta(days=30)
-    expiring_vouchers = db.query(func.count(models.LoyaltyVoucher.id)).filter(
+    expiring_vouchers_q = db.query(func.count(models.LoyaltyVoucher.id)).filter(
         models.LoyaltyVoucher.status == "issued",
         models.LoyaltyVoucher.expires_at != None,  # noqa: E711
         models.LoyaltyVoucher.expires_at <= soon,
-    ).scalar() or 0
+    )
+    if shop_id is not None:
+        outstanding_q = outstanding_q.join(
+            models.LoyaltyMember, models.LoyaltyMember.id == models.LoyaltyWallet.member_id
+        ).filter(models.LoyaltyMember.shop_id == shop_id)
+        voucher_value_q = voucher_value_q.join(
+            models.LoyaltyMember, models.LoyaltyMember.id == models.LoyaltyVoucher.member_id
+        ).filter(models.LoyaltyMember.shop_id == shop_id)
+        voucher_count_q = voucher_count_q.join(
+            models.LoyaltyMember, models.LoyaltyMember.id == models.LoyaltyVoucher.member_id
+        ).filter(models.LoyaltyMember.shop_id == shop_id)
+        expiring_vouchers_q = expiring_vouchers_q.join(
+            models.LoyaltyMember, models.LoyaltyMember.id == models.LoyaltyVoucher.member_id
+        ).filter(models.LoyaltyMember.shop_id == shop_id)
 
-    # Punten die binnenkort verlopen op basis van verloopbeleid
-    policy = _get_expiry_policy(db)
+    outstanding = int(outstanding_q.scalar() or 0)
+    voucher_value = voucher_value_q.scalar() or 0
+    voucher_count = voucher_count_q.scalar() or 0
+    expiring_vouchers = expiring_vouchers_q.scalar() or 0
+    points_liability = round(outstanding * POINT_VALUE_EUR, 2)
+
+    # Punten die binnenkort verlopen op basis van het verloopbeleid van de shop
+    policy = _get_expiry_policy(db, shop_id if shop_id is not None else 1)
     points_expiring_30d = 0
     points_expiring_90d = 0
     if policy.enabled:
-        points_expiring_30d = _compute_expiring_points(db, policy, warn_days=30)
-        points_expiring_90d = _compute_expiring_points(db, policy, warn_days=90)
+        points_expiring_30d = _compute_expiring_points(db, policy, warn_days=30, shop_id=shop_id)
+        points_expiring_90d = _compute_expiring_points(db, policy, warn_days=90, shop_id=shop_id)
 
     return {
+        "shop_id": shop_id,
         "outstanding_points": outstanding,
         "point_value_eur": POINT_VALUE_EUR,
         "points_liability_eur": points_liability,
@@ -443,14 +463,14 @@ DEFAULT_EXPIRY_MONTHS = 12
 DEFAULT_WARN_DAYS = 30
 
 
-def _get_expiry_policy(db: Session) -> models.LoyaltyExpiryPolicy:
-    """Haal het verloopbeleid op; maak het aan met standaardwaarden als het ontbreekt."""
+def _get_expiry_policy(db: Session, shop_id: int = 1) -> models.LoyaltyExpiryPolicy:
+    """Haal het verloopbeleid van een shop op; maak het aan met standaardwaarden als het ontbreekt."""
     policy = db.query(models.LoyaltyExpiryPolicy).filter(
-        models.LoyaltyExpiryPolicy.shop_id == 1
+        models.LoyaltyExpiryPolicy.shop_id == shop_id
     ).first()
     if not policy:
         policy = models.LoyaltyExpiryPolicy(
-            shop_id=1,
+            shop_id=shop_id,
             enabled=True,
             expiry_months=DEFAULT_EXPIRY_MONTHS,
             warn_days_before=DEFAULT_WARN_DAYS,
@@ -459,7 +479,14 @@ def _get_expiry_policy(db: Session) -> models.LoyaltyExpiryPolicy:
         db.flush()
     return policy
 
-
+def _wallet_query(db: Session, shop_id: int | None = None):
+    """Wallets, optioneel beperkt tot leden van één shop (wallets zelf hebben geen shop_id)."""
+    q = db.query(models.LoyaltyWallet)
+    if shop_id is not None:
+        q = q.join(
+            models.LoyaltyMember, models.LoyaltyMember.id == models.LoyaltyWallet.member_id
+        ).filter(models.LoyaltyMember.shop_id == shop_id)
+    return q
 def _fifo_expirable_points(
     db: Session,
     member_id: int,
@@ -524,10 +551,15 @@ def _fifo_expirable_points(
     return min(int(wallet.balance_points or 0), still_live_old)
 
 
-def _compute_expiring_points(db: Session, policy: models.LoyaltyExpiryPolicy, warn_days: int) -> int:
+def _compute_expiring_points(
+    db: Session,
+    policy: models.LoyaltyExpiryPolicy,
+    warn_days: int,
+    shop_id: int | None = None,
+) -> int:
     """
-    Totaal aantal punten (over alle leden) dat binnen `warn_days` dagen vervalt
-    op basis van het verloopbeleid.
+    Totaal aantal punten dat binnen `warn_days` dagen vervalt op basis van het
+    verloopbeleid; met shop_id beperkt tot leden van die shop.
     """
     today = date.today()
     # Punten verdiend vóór deze datum vervallen binnen warn_days
@@ -536,7 +568,7 @@ def _compute_expiring_points(db: Session, policy: models.LoyaltyExpiryPolicy, wa
     cutoff_full = today - timedelta(days=policy.expiry_months * 30)
 
     total = 0
-    for wallet in db.query(models.LoyaltyWallet).all():
+    for wallet in _wallet_query(db, shop_id).all():
         if not wallet.balance_points:
             continue
         pts = _fifo_expirable_points(
@@ -553,37 +585,28 @@ def apply_expiry_run(
     run_date: date | None = None,
     *,
     dry_run: bool = False,
+    shop_id: int | None = None,
 ) -> dict:
     """
     Genereer expire-ledger-entries (FIFO) voor alle leden waarvan punten
-    de vervalgrens hebben overschreden.
+    de vervalgrens hebben overschreden, volgens het verloopbeleid van de
+    shop van elk lid (niet één globaal beleid).
 
     - Gebruikt uitsluitend `apply_ledger_entry` zodat de ledger-integriteit
       gewaarborgd blijft (saldo nooit negatief, geen dubbele entries via
       external_ref-idempotentie).
     - Bij `dry_run=True` worden geen mutaties geschreven.
+    - Met `shop_id` beperkt tot leden van die shop.
     - Retourneert een samenvatting.
     """
     run_date = run_date or date.today()
-    policy = _get_expiry_policy(db)
 
-    if not policy.enabled:
-        return {
-            "run_date": run_date.isoformat(),
-            "policy_enabled": False,
-            "members_processed": 0,
-            "members_expired": 0,
-            "points_expired": 0,
-            "dry_run": dry_run,
-        }
-
-    expiry_cutoff = run_date - timedelta(days=policy.expiry_months * 30)
     members_expired = 0
     points_expired_total = 0
     skipped_duplicates = 0
     errors = 0
 
-    wallets = db.query(models.LoyaltyWallet).filter(
+    wallets = _wallet_query(db, shop_id).filter(
         models.LoyaltyWallet.balance_points > 0
     ).all()
     members_map = {
@@ -591,11 +614,35 @@ def apply_expiry_run(
             models.LoyaltyMember.id.in_([w.member_id for w in wallets])
         ).all()
     }
+    # Verloopbeleid per shop (lazy opgehaald per aangetroffen shop)
+    policies: dict[int, models.LoyaltyExpiryPolicy] = {}
 
+    def _policy_for(sid: int) -> models.LoyaltyExpiryPolicy:
+        if sid not in policies:
+            policies[sid] = _get_expiry_policy(db, sid)
+        return policies[sid]
+
+    if shop_id is not None and not _policy_for(shop_id).enabled:
+        return {
+            "run_date": run_date.isoformat(),
+            "policy_enabled": False,
+            "shop_id": shop_id,
+            "members_processed": 0,
+            "members_expired": 0,
+            "points_expired": 0,
+            "dry_run": dry_run,
+        }
+
+    members_processed = 0
     for wallet in wallets:
         member = members_map.get(wallet.member_id)
         if not member:
             continue
+        policy = _policy_for(int(member.shop_id or 1))
+        if not policy.enabled:
+            continue
+        members_processed += 1
+        expiry_cutoff = run_date - timedelta(days=policy.expiry_months * 30)
 
         pts_to_expire = _fifo_expirable_points(
             db, member.id, wallet, expiry_cutoff
@@ -636,12 +683,22 @@ def apply_expiry_run(
         "Expiry-run %s: %d leden, %d punten verlopen, %d duplicaten overgeslagen, %d fouten",
         run_date, members_expired, points_expired_total, skipped_duplicates, errors,
     )
+    # Contractvelden expiry_cutoff/expiry_months: gebaseerd op het beleid van
+    # de gescopede shop, of de default shop (1) bij een ongescopede run.
+    primary_policy = _policy_for(int(shop_id) if shop_id is not None else 1)
     return {
         "run_date": run_date.isoformat(),
-        "policy_enabled": True,
-        "expiry_cutoff": expiry_cutoff.isoformat(),
-        "expiry_months": policy.expiry_months,
-        "members_processed": len(wallets),
+        "policy_enabled": any(p.enabled for p in policies.values()) if policies else True,
+        "shop_id": shop_id,
+        "expiry_cutoff": (
+            run_date - timedelta(days=primary_policy.expiry_months * 30)
+        ).isoformat(),
+        "expiry_months": primary_policy.expiry_months,
+        "policies": {
+            sid: {"enabled": p.enabled, "expiry_months": p.expiry_months}
+            for sid, p in policies.items()
+        },
+        "members_processed": members_processed,
         "members_expired": members_expired,
         "points_expired": points_expired_total,
         "skipped_duplicates": skipped_duplicates,
@@ -650,22 +707,13 @@ def apply_expiry_run(
     }
 
 
-def expiring_soon_members(db: Session) -> list[dict]:
+def expiring_soon_members(db: Session, shop_id: int | None = None) -> list[dict]:
     """
-    Geef een lijst van leden met punten die binnenkort verlopen (op basis van
-    het verloopbeleid: standaard 30 dagen van tevoren).
+    Geef een lijst van leden met punten die binnenkort verlopen, volgens het
+    verloopbeleid van de shop van elk lid. Met `shop_id` beperkt tot die shop.
     """
-    policy = _get_expiry_policy(db)
-    if not policy.enabled:
-        return []
-
     today = date.today()
-    # Punten verdiend vóór deze datum verlopen binnen warn_days_before dagen
-    cutoff_soon = today - timedelta(days=policy.expiry_months * 30 - policy.warn_days_before)
-    # De eigenlijke vervalgrens
-    cutoff_full = today - timedelta(days=policy.expiry_months * 30)
-
-    wallets = db.query(models.LoyaltyWallet).filter(
+    wallets = _wallet_query(db, shop_id).filter(
         models.LoyaltyWallet.balance_points > 0
     ).all()
     members_map = {
@@ -673,12 +721,23 @@ def expiring_soon_members(db: Session) -> list[dict]:
             models.LoyaltyMember.id.in_([w.member_id for w in wallets])
         ).all()
     }
+    policies: dict[int, models.LoyaltyExpiryPolicy] = {}
 
     result = []
     for wallet in wallets:
         member = members_map.get(wallet.member_id)
         if not member:
             continue
+        sid = int(member.shop_id or 1)
+        if sid not in policies:
+            policies[sid] = _get_expiry_policy(db, sid)
+        policy = policies[sid]
+        if not policy.enabled:
+            continue
+        # Punten verdiend vóór deze datum verlopen binnen warn_days_before dagen
+        cutoff_soon = today - timedelta(days=policy.expiry_months * 30 - policy.warn_days_before)
+        # De eigenlijke vervalgrens
+        cutoff_full = today - timedelta(days=policy.expiry_months * 30)
         pts = _fifo_expirable_points(
             db, wallet.member_id, wallet,
             expiry_cutoff=cutoff_soon,
@@ -699,6 +758,7 @@ def expiring_soon_members(db: Session) -> list[dict]:
             ) if earliest else None
             result.append({
                 "member_id": member.id,
+                "shop_id": sid,
                 "pseudonymous_customer_id": member.pseudonymous_customer_id,
                 "tier_code": member.tier_code,
                 "balance_points": int(wallet.balance_points or 0),
@@ -728,10 +788,18 @@ def detect_fraud(db: Session, run_date: date | None = None) -> int:
     ).delete()
     n = 0
 
+    # Shop van elk lid: fraudesignalen krijgen de shop_id van het lid,
+    # niet de kolom-default (shop 1).
+    member_shop = {
+        mid: int(sid or 1)
+        for mid, sid in db.query(models.LoyaltyMember.id, models.LoyaltyMember.shop_id).all()
+    }
+
     def _add(member_id: int, fraud_type: str, severity: str, score: float,
              explanation: str, evidence: dict):
         nonlocal n
         db.add(models.LoyaltyFraudSignal(
+            shop_id=member_shop.get(member_id, 1),
             member_id=member_id, run_date=run_date, fraud_type=fraud_type,
             severity=severity, score=score, explanation=explanation, evidence=evidence,
         ))
@@ -846,6 +914,7 @@ def publish_signals(db: Session, run_date: date | None = None) -> int:
             continue
         _publish_signal(
             db,
+            shop_id=int(m.shop_id or 1),
             engine="loyalty",
             signal_type=f"nba_{s.next_best_action}",
             severity="medium" if s.value_segment == "at_risk" else "info",
@@ -885,6 +954,7 @@ def publish_signals(db: Session, run_date: date | None = None) -> int:
             continue
         _publish_signal(
             db,
+            shop_id=int(m.shop_id or 1),
             engine="loyalty",
             signal_type=f"fraud_{f.fraud_type}",
             severity=f.severity or "medium",
@@ -901,30 +971,32 @@ def publish_signals(db: Session, run_date: date | None = None) -> int:
         )
         published += 1
 
-    # Liability op shop-niveau
-    liab = liability_summary(db)
-    if liab["outstanding_points"] > 0:
-        _publish_signal(
-            db,
-            engine="loyalty",
-            signal_type="loyalty_liability_level",
-            severity="info",
-            direction="neutral",
-            entity_type="shop",
-            entity_id="1",
-            entity_name="Loyalty financial liability",
-            current_value=liab["total_liability_eur"],
-            confidence=0.95,
-            explanation=(
-                f"Openstaande loyaliteitsverplichting: {liab['outstanding_points']} punten "
-                f"(€{liab['points_liability_eur']:.2f}) + {liab['open_vouchers']} open vouchers "
-                f"(€{liab['voucher_liability_eur']:.2f}) = €{liab['total_liability_eur']:.2f}."
-            ),
-            evidence=liab,
-            sources=["loyalty_wallets", "loyalty_vouchers"],
-            suggested_action="monitor_liability",
-        )
-        published += 1
+    # Liability op shop-niveau: één signaal per shop met loyalty-leden
+    for sid in _loyalty_shop_ids(db):
+        liab = liability_summary(db, shop_id=sid)
+        if liab["outstanding_points"] > 0:
+            _publish_signal(
+                db,
+                shop_id=sid,
+                engine="loyalty",
+                signal_type="loyalty_liability_level",
+                severity="info",
+                direction="neutral",
+                entity_type="shop",
+                entity_id=str(sid),
+                entity_name="Loyalty financial liability",
+                current_value=liab["total_liability_eur"],
+                confidence=0.95,
+                explanation=(
+                    f"Openstaande loyaliteitsverplichting shop {sid}: {liab['outstanding_points']} punten "
+                    f"(€{liab['points_liability_eur']:.2f}) + {liab['open_vouchers']} open vouchers "
+                    f"(€{liab['voucher_liability_eur']:.2f}) = €{liab['total_liability_eur']:.2f}."
+                ),
+                evidence=liab,
+                sources=["loyalty_wallets", "loyalty_vouchers"],
+                suggested_action="monitor_liability",
+            )
+            published += 1
 
     return published
 
@@ -1224,3 +1296,8 @@ def publish_campaign_uplift_signals(db: Session, run_date: date | None = None) -
         db.flush()
         published += 1
     return published
+
+def _loyalty_shop_ids(db: Session) -> list[int]:
+    """Alle shop_ids waarvoor loyalty-leden bestaan."""
+    rows = db.query(func.distinct(models.LoyaltyMember.shop_id)).all()
+    return sorted(int(r[0] or 1) for r in rows)

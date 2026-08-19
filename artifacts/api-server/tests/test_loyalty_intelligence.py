@@ -33,6 +33,10 @@ def _cleanup_member_ids(mids):
     try:
         s.query(models.CustomerValueScore).filter(
             models.CustomerValueScore.member_id.in_(mids)).delete(synchronize_session=False)
+        s.query(models.LoyaltyFraudSignal).filter(
+            models.LoyaltyFraudSignal.member_id.in_(mids)).delete(synchronize_session=False)
+        s.query(models.LoyaltyVoucher).filter(
+            models.LoyaltyVoucher.member_id.in_(mids)).delete(synchronize_session=False)
         s.query(models.LoyaltyTransaction).filter(
             models.LoyaltyTransaction.member_id.in_(mids)).delete(synchronize_session=False)
         s.query(models.LoyaltyWallet).filter(
@@ -58,9 +62,9 @@ def db():
         _cleanup_member_ids(created_ids)
 
 
-def _mk_member(s, created_ids, **kw):
+def _mk_member(s, created_ids, shop_id=1, **kw):
     m = models.LoyaltyMember(
-        shop_id=1,
+        shop_id=shop_id,
         pseudonymous_customer_id=f"TEST-LI-{uuid.uuid4().hex[:10]}",
         tier_code="bronze", status="active", is_demo_data=False, **kw,
     )
@@ -69,9 +73,51 @@ def _mk_member(s, created_ids, **kw):
     created_ids.append(m.id)
     return m
 
-
-# ─── verify_ledger_integrity ─────────────────────────────────────────────────
-
+@pytest.fixture()
+def two_shops(db):
+    """Twee dedicated testshops mét eigen verloopbeleid; volledig opgeruimd."""
+    s, _ = db
+    pfx = f"TEST-LI-SHOP-{uuid.uuid4().hex[:8]}"
+    # Seed-data kan met expliciete ids zijn ingevoegd; zet de sequence gelijk
+    # zodat nieuwe shops geen duplicate-key op dim_shop_pkey geven.
+    from sqlalchemy import text as sa_text
+    s.execute(sa_text(
+        "SELECT setval('dim_shop_id_seq', (SELECT COALESCE(MAX(id), 1) FROM dim_shop))"))
+    shop_a = models.DimShop(shop_code=f"{pfx}-a", name=f"{pfx} A")
+    shop_b = models.DimShop(shop_code=f"{pfx}-b", name=f"{pfx} B")
+    s.add_all([shop_a, shop_b])
+    s.commit()
+    yield shop_a, shop_b
+    # Rollback eerst de gedeelde testsessie: die kan nog locks vasthouden
+    # (deze teardown draait vóór die van de db-fixture).
+    try:
+        s.rollback()
+    except Exception:
+        pass
+    s2 = SessionLocal()
+    try:
+        ids = [shop_a.id, shop_b.id]
+        mids = [r[0] for r in s2.query(models.LoyaltyMember.id).filter(
+            models.LoyaltyMember.shop_id.in_(ids)).all()]
+        if mids:
+            for model, col in [
+                (models.CustomerValueScore, models.CustomerValueScore.member_id),
+                (models.LoyaltyFraudSignal, models.LoyaltyFraudSignal.member_id),
+                (models.LoyaltyVoucher, models.LoyaltyVoucher.member_id),
+                (models.LoyaltyTransaction, models.LoyaltyTransaction.member_id),
+                (models.LoyaltyWallet, models.LoyaltyWallet.member_id),
+            ]:
+                s2.query(model).filter(col.in_(mids)).delete(synchronize_session=False)
+            s2.query(models.LoyaltyMember).filter(
+                models.LoyaltyMember.id.in_(mids)).delete(synchronize_session=False)
+        s2.query(models.LoyaltyExpiryPolicy).filter(
+            models.LoyaltyExpiryPolicy.shop_id.in_(ids)).delete(synchronize_session=False)
+        s2.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.shop_id.in_(ids)).delete(synchronize_session=False)
+        s2.query(models.DimShop).filter(models.DimShop.id.in_(ids)).delete(synchronize_session=False)
+        s2.commit()
+    finally:
+        s2.close()
 def test_integrity_detects_wallet_tampering(db):
     s, ids = db
     m = _mk_member(s, ids)
@@ -224,6 +270,19 @@ def test_process_transactions_invalid_rows_no_corruption(db):
     assert wallet.balance_points == 60
     assert s.query(models.LoyaltyTransaction).filter_by(member_id=m.id).count() == 2
     assert [x for x in li.verify_ledger_integrity(s) if x["member_id"] == m.id] == []
+
+def test_expiry_policy_per_shop(db, two_shops):
+    s, ids = db
+    shop_a, shop_b = two_shops
+    pa = li._get_expiry_policy(s, shop_a.id)
+    pb = li._get_expiry_policy(s, shop_b.id)
+    assert pa.shop_id == shop_a.id and pb.shop_id == shop_b.id
+    assert pa.id != pb.id
+    pa.expiry_months = 6
+    s.commit()
+    # Beleid van shop A raakt shop B niet
+    assert li._get_expiry_policy(s, shop_b.id).expiry_months == li.DEFAULT_EXPIRY_MONTHS
+    assert li._get_expiry_policy(s, shop_a.id).expiry_months == 6
 
 
 # ─── CampaignUpliftSnapshot: trend over meerdere runs ────────────────────────
@@ -396,3 +455,99 @@ def test_migration_drops_legacy_uplift_constraint_and_backfills_run_at(db):
         assert today_count == 2
     finally:
         _cleanup_campaign(c.id)
+
+def test_expiry_run_uses_per_shop_policy(db, two_shops):
+    s, ids = db
+    shop_a, shop_b = two_shops
+    ma = _mk_member(s, ids, shop_id=shop_a.id)
+    mb = _mk_member(s, ids, shop_id=shop_b.id)
+    old = date.today() - timedelta(days=li.DEFAULT_EXPIRY_MONTHS * 30 + 30)
+    li.apply_ledger_entry(s, ma, old, "earn", 200, commit=True)
+    li.apply_ledger_entry(s, mb, old, "earn", 200, commit=True)
+    pb = li._get_expiry_policy(s, shop_b.id)
+    pb.enabled = False
+    s.commit()
+
+    res_a = li.apply_expiry_run(s, dry_run=True, shop_id=shop_a.id)
+    assert res_a["members_expired"] == 1 and res_a["points_expired"] == 200
+    res_b = li.apply_expiry_run(s, dry_run=True, shop_id=shop_b.id)
+    assert res_b["policy_enabled"] is False and res_b["points_expired"] == 0
+
+def test_liability_summary_scoped_per_shop(db, two_shops):
+    s, ids = db
+    shop_a, shop_b = two_shops
+    ma = _mk_member(s, ids, shop_id=shop_a.id)
+    mb = _mk_member(s, ids, shop_id=shop_b.id)
+    li.apply_ledger_entry(s, ma, date.today(), "earn", 400, commit=True)
+    li.apply_ledger_entry(s, mb, date.today(), "earn", 150, commit=True)
+    s.add(models.LoyaltyVoucher(member_id=mb.id, code=f"TEST-LI-V-{uuid.uuid4().hex[:8]}",
+                                monetary_value=5.0, status="issued"))
+    s.commit()
+
+    la = li.liability_summary(s, shop_id=shop_a.id)
+    lb = li.liability_summary(s, shop_id=shop_b.id)
+    assert la["outstanding_points"] == 400 and la["open_vouchers"] == 0
+    assert lb["outstanding_points"] == 150 and lb["open_vouchers"] == 1
+    assert la["shop_id"] == shop_a.id and lb["shop_id"] == shop_b.id
+    # Ongescoped blijft alles optellen (>= som van beide shops)
+    assert li.liability_summary(s)["outstanding_points"] >= 550
+
+def test_fraud_and_nba_signals_carry_member_shop(db, two_shops):
+    s, ids = db
+    shop_a, shop_b = two_shops
+    mb = _mk_member(s, ids, shop_id=shop_b.id)
+    # Abnormale earn-rate: 500 punten op €50 (ratio 10 > 3)
+    li.apply_ledger_entry(s, mb, FRAUD_RUN_DATE - timedelta(days=10), "earn", 500,
+                          order_value=50.0, commit=True)
+    # Tweede aankoop zodat het lid mid_value wordt (monetary >= 150) en dus
+    # een NBA-signaal (loyalty_bonus) krijgt; earn-rate blijft abnormaal (>3).
+    li.apply_ledger_entry(s, mb, FRAUD_RUN_DATE - timedelta(days=20), "earn", 100,
+                          order_value=120.0, commit=True)
+    li.detect_fraud(s, run_date=FRAUD_RUN_DATE)
+    s.commit()
+    fs = s.query(models.LoyaltyFraudSignal).filter_by(
+        member_id=mb.id, run_date=FRAUD_RUN_DATE).all()
+    assert fs and all(f.shop_id == shop_b.id for f in fs)
+
+    # NBA-signaal krijgt de shop van het lid
+    li.compute_customer_value(s, run_date=FRAUD_RUN_DATE)
+    s.flush()
+    li.publish_signals(s, run_date=FRAUD_RUN_DATE)
+    s.commit()
+    sig = s.query(models.IntelligenceSignal).filter(
+        models.IntelligenceSignal.engine == "loyalty",
+        models.IntelligenceSignal.entity_id == mb.pseudonymous_customer_id,
+    ).order_by(models.IntelligenceSignal.id.desc()).first()
+    assert sig is not None and sig.shop_id == shop_b.id
+
+    # Liability-signaal per shop
+    liab_sig = s.query(models.IntelligenceSignal).filter(
+        models.IntelligenceSignal.signal_type == "loyalty_liability_level",
+        models.IntelligenceSignal.entity_id == str(shop_b.id),
+        models.IntelligenceSignal.status == "active",
+    ).first()
+    assert liab_sig is not None and liab_sig.shop_id == shop_b.id
+
+def test_expiring_soon_respects_shop_policy_and_filter(db, two_shops):
+    s, ids = db
+    shop_a, shop_b = two_shops
+    ma = _mk_member(s, ids, shop_id=shop_a.id)
+    mb = _mk_member(s, ids, shop_id=shop_b.id)
+    # Punten net vóór de standaard-vervalgrens (12m*30d - 15d) → 'expiring soon'
+    old = date.today() - timedelta(days=li.DEFAULT_EXPIRY_MONTHS * 30 - 15)
+    li.apply_ledger_entry(s, ma, old, "earn", 100, commit=True)
+    li.apply_ledger_entry(s, mb, old, "earn", 100, commit=True)
+    # Shop B schakelt het verloopbeleid uit
+    pb = li._get_expiry_policy(s, shop_b.id)
+    pb.enabled = False
+    li._get_expiry_policy(s, shop_a.id)  # zorg dat A een (enabled) beleid heeft
+    s.commit()
+
+    items_a = li.expiring_soon_members(s, shop_id=shop_a.id)
+    items_b = li.expiring_soon_members(s, shop_id=shop_b.id)
+    assert [i["member_id"] for i in items_a] == [ma.id]
+    assert items_a[0]["shop_id"] == shop_a.id
+    assert items_b == []  # beleid van shop B staat uit
+    # Ongescoped: lid van B ook afwezig (beleid per shop, niet globaal)
+    all_ids = [i["member_id"] for i in li.expiring_soon_members(s)]
+    assert ma.id in all_ids and mb.id not in all_ids
