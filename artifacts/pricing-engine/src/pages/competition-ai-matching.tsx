@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
-import { CheckCircle2, XCircle, Search, Link as LinkIcon, Check, X } from "lucide-react";
+import { CheckCircle2, XCircle, Search, Link as LinkIcon, Check, X, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useShopId, withShop } from "@/hooks/use-shop-id";
 
@@ -85,6 +85,23 @@ export default function CompetitionAiMatching() {
     queryFn: () => apiFetch(`/api/competition/match-quality${shopId !== undefined ? `?shop_id=${shopId}` : ""}`),
   });
 
+  // Actief 'suspicious_ai_matches'-signaal voor de huidige shop
+  const { data: signalsData } = useQuery({
+    queryKey: ["signals-suspicious-ai-matches", shopId],
+    queryFn: () => {
+      const p = new URLSearchParams({ status: "active", engine: "competition", entity_id: "ai-matching" });
+      if (shopId !== undefined) p.set("shop_id", String(shopId));
+      return apiFetch(`/api/signals?${p}`);
+    },
+    refetchInterval: 60_000,
+  });
+  const suspiciousSignal = (signalsData?.signals || []).find(
+    (s: any) => s.signal_type === "suspicious_ai_matches" && s.status === "active",
+  );
+  const suspiciousCount = suspiciousSignal
+    ? (suspiciousSignal.evidence?.suspicious_count ?? suspiciousSignal.current_value)
+    : null;
+
   // Statistieken
   const allItems = data?.items || [];
   const stats = ["Exact", "Sterk", "Functioneel", "Categorie_Alternatief", "Geen_Match"].map(mt => ({
@@ -98,6 +115,28 @@ export default function CompetitionAiMatching() {
         <h1 className="text-2xl font-bold tracking-tight">AI Matching</h1>
         <p className="text-muted-foreground mt-1">Automatisch herkende productkoppelingen tussen eigen SKU's en concurrent-aanbod — beoordeel en keur goed.</p>
       </div>
+
+      {/* Waarschuwingsbanner: actief suspicious_ai_matches-signaal */}
+      {suspiciousSignal && (
+        <div
+          className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4"
+          role="alert"
+          data-testid="banner-suspicious-matches"
+        >
+          <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="font-semibold text-amber-800">
+              {suspiciousCount != null
+                ? `${Math.round(Number(suspiciousCount))} verdachte AI-matches vereisen beoordeling`
+                : "Verdachte AI-matches vereisen beoordeling"}
+            </p>
+            <p className="text-sm text-amber-700 mt-0.5">
+              {suspiciousSignal.explanation
+                || "Er zijn openstaande matches met een prijsverschil boven de drempel. Controleer en keur ze goed of wijs ze af."}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Kwaliteits-KPI's */}
       {quality?.totals && (
