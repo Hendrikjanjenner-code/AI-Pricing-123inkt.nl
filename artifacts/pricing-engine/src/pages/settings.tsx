@@ -149,6 +149,17 @@ export default function Instellingen() {
     }
   };
 
+  // Scroll naar de AI-provider-sectie bij navigatie via #ai-provider
+  // (bijv. vanuit het AI-statusbadge in de navigatiebalk, Task #93).
+  useEffect(() => {
+    if (user?.role !== "admin") return;
+    if (window.location.hash !== "#ai-provider") return;
+    const t = setTimeout(() => {
+      document.getElementById("ai-provider")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 150);
+    return () => clearTimeout(t);
+  }, [user?.role]);
+
   useEffect(() => {
     if (user?.role === "admin") {
       laadMigraties();
@@ -338,7 +349,7 @@ export default function Instellingen() {
       </Card>
 
       {user?.role === "admin" && (
-        <Card>
+        <Card id="ai-provider" className="scroll-mt-4">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <RefreshCw className="w-5 h-5" />

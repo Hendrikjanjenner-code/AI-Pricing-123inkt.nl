@@ -62,6 +62,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConnectorHealthIndicator } from "@/components/layout/ConnectorHealthIndicator";
+import { AiStatusIndicator } from "@/components/layout/AiStatusIndicator";
 
 const navGroepen = [
   {
@@ -311,7 +312,10 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
       <main className="flex-1 flex flex-col overflow-hidden bg-background">
         <header className="h-16 border-b bg-card flex items-center justify-between px-8 shrink-0">
           <div className="font-semibold text-foreground">{huidigLabel}</div>
-          <ConnectorHealthIndicator />
+          <div className="flex items-center gap-2">
+            <AiStatusIndicator />
+            <ConnectorHealthIndicator />
+          </div>
         </header>
         <div className="flex-1 overflow-auto p-8">
           <div className="mx-auto max-w-7xl">
