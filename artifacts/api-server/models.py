@@ -2923,3 +2923,11 @@ class AiConversationSummary(Base):
     summary = Column(Text, nullable=False)
     upto_message_id = Column(Integer)              # laatste bericht in de samenvatting
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+@compiles(CreateColumn, "sqlite")
+def _skip_postgres_only_columns(element, compiler, **kw):
+    """Sla Postgres-specifieke kolommen (bijv. TSVECTOR generated columns)
+    over in SQLite-DDL, zodat testdatabases op SQLite blijven werken."""
+    if element.element.info.get("postgres_only"):
+        return None
+    return compiler.visit_create_column(element, **kw)

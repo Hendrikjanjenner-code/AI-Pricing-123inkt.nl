@@ -416,6 +416,25 @@ def test_bq_fetch_pg_rows_paginates_without_gaps_or_dupes(monkeypatch):
     finally:
         db.close()
 
+def test_bq_fetch_pg_rows_incremental_includes_null_watermarks():
+    """Incrementele sync (since gezet) mag rijen met een NULL-watermerk niet
+    overslaan: de MERGE is idempotent, dus opnieuw exporteren is veilig —
+    stilletjes overslaan betekent dat die rijen nooit in BigQuery komen."""
+    from bigquery import sync as bq_sync
+    from datetime import datetime as _dt
+    db = SessionLocal()
+    try:
+        null_ids = {r[0] for r in db.execute(__import__("sqlalchemy").text(
+            "SELECT id FROM dim_shop WHERE created_at IS NULL"))}
+        if not null_ids:
+            pytest.skip("geen dim_shop-rijen met NULL created_at in deze database")
+        # 'since' ver in de toekomst: alleen NULL-watermerk rijen mogen terugkomen
+        rows = bq_sync._fetch_pg_rows(db, "dim_shop", since=_dt(2999, 1, 1))
+        assert {r["id"] for r in rows} >= null_ids, (
+            "rijen met NULL-watermerk moeten meegaan in een incrementele sync")
+    finally:
+        db.close()
+
 def test_bq_fetch_pg_rows_null_watermarks_multipage(monkeypatch):
     """Rijen met een NULL-watermerk mogen niet buiten de paginering vallen
     én mogen geen oneindige lus veroorzaken als een hele pagina uit

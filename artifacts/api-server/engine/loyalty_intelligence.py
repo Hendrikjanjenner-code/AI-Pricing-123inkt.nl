@@ -685,11 +685,13 @@ def expiring_soon_members(db: Session) -> list[dict]:
             warn_window_end=cutoff_full,
         )
         if pts > 0:
-            # Schat de vervaldatum: vroegste earn-datum van punten die binnenkort verlopen
+            # Schat de vervaldatum: vroegste earn-datum van punten die binnenkort
+            # verlopen. Géén ondergrens op cutoff_full: punten die de vervalgrens
+            # al gepasseerd zijn (maar nog niet formeel verlopen) tellen mee en
+            # krijgen een vervaldatum in het verleden (days_until_expiry <= 0).
             earliest = db.query(func.min(models.LoyaltyTransaction.txn_date)).filter(
                 models.LoyaltyTransaction.member_id == member.id,
                 models.LoyaltyTransaction.txn_type.in_(list(_CREDIT_TYPES)),
-                models.LoyaltyTransaction.txn_date >= cutoff_full,
                 models.LoyaltyTransaction.txn_date < cutoff_soon,
             ).scalar()
             expires_on = (

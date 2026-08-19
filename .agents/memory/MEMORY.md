@@ -30,13 +30,15 @@
 - [Feed-sync failure visibility](feed-sync-visibility.md) — failed syncs reuse ConnectorConfig.last_test_* (no schema change); feed response diagnostics + sanity checks live in the connector, reset per read cycle.
 - [Parallel task merges vs validation](parallel-task-validation.md) — completion validation runs the full suite on merged state; sibling-task regressions (dropped constants, changed API shapes) land on you — fix minimally, note in drift_reason.
 - [Stale lib d.ts vs artifact typecheck](typecheck-libs-stale.md) — TS2305 from @workspace pkgs means run root `pnpm run typecheck:libs` first; refs use built dist, not src.
-- [Few-shot FTS retrieval](fewshot-fts.md) — dutch FTS primary + Jaccard fallback (fallback maskeert zelfs NameError); stemmer quirk: 'marges' stemt niet naar 'marg'; rank-drempel ≤0.005.
 - [DQ registry test isolation](dq-registry-test-isolation.md) — never call _sync_issue_registry/_detect_issues with a replaced/empty detection list in shared-DB tests; wrap the real detector and add a synthetic issue, or unrelated registry rows get auto-resolved.
 - [PIM defaults seed-once](pim-defaults-seeding.md) — "seed if empty" on list reads resurrects deleted reference data; use a persistent seeded-once marker.
 - [Reasoning-model tools 400](model-tools-reasoning-effort.md) — gpt-5.6-terra weigert tools + reasoning_effort op chat completions; gateway retryt met none; smoke-test tool-vragen na modelwissel.
+- [Few-shot FTS retrieval](fewshot-fts.md) — dutch FTS + Jaccard-fallback; fail-safe maskeert FTS-fouten; stemmer quirk: 'marges' stemt niet naar 'marg'.
 - [Signal dedupe per run](signal-dedupe-per-run.md) — max 1 signaal per dedupe-key per engine-run; uq_signal_active_dedupe komt uit canonical.py, niet uit create_all.
 - [API query-param codegen](api-param-codegen.md) — new query params need route + openapi.yaml + orval regen; client-side filtering over paged results gives wrong totals.
 - [Merge kan constanten stil droppen](merge-dropped-constants.md) — na een taak-rebase eerst greppen of gebruikte constanten nog gedefinieerd zijn; fail-safe fallbacks verzwelgen de NameError.
 - [Postgres-only kolommen vs SQLite-tests](pg-only-columns-sqlite.md) — markeer tsvector/GIN e.d. met info={"pg_only"}; de CreateColumn/CreateIndex-compilers in models.py slaan ze over in SQLite-DDL.
-- [BQ keyset NULL-watermerken](bq-keyset-null-watermark.md) — keyset-paginatie op (watermerk, pk) verliest rijen met NULL-watermerk; COALESCE naar epoch in filter én ORDER BY.
+- [Few-shot FTS retrieval](fewshot-fts.md) — dutch FTS + Jaccard-fallback; fail-safe fallback maskeert FTS-fouten (zelfs NameError); stemmer/rank-drempel quirks in topicfile.
+- [Keyset NULL watermark](keyset-null-watermark.md) — keyset pagination on (watermark, pk) silently skips rows with NULL watermark; backfill or coalesce.
 - [Run-registry status semantics](run-registry-latest-attempt.md) — laatste poging telt; oude succes-rij mag latere failure niet maskeren; run-historie-FK cascade.
+- [BQ keyset NULL-watermerken](bq-keyset-null-watermark.md) — keyset-paginatie op (watermerk, pk) verliest rijen met NULL-watermerk; COALESCE naar vroegst mogelijke timestamp in filter én ORDER BY.

@@ -250,8 +250,10 @@ def test_disabled_policy_is_noop(db, policy):
 
 
 def test_expiring_soon_members_window(db, policy):
-    """Alleen leden met punten binnen het waarschuwingsvenster verschijnen:
-    te nieuwe punten vallen erbuiten; al-verlopen (nog niet weggeboekte) punten tellen mee."""
+    """Leden met punten binnen het waarschuwingsvenster verschijnen; te nieuwe
+    punten vallen erbuiten. Punten die al over de vervalgrens zijn maar nog
+    niet formeel verlopen tellen óók mee (met vervaldatum in het verleden) —
+    ze vervallen bij de eerstvolgende expiry-run."""
     s, created = db
     today = date.today()
 
@@ -262,7 +264,8 @@ def test_expiring_soon_members_window(db, policy):
     # Te nieuw: pas over maanden aan de beurt.
     m_fresh = _make_member(s, created)
     li.apply_ledger_entry(s, m_fresh, today - timedelta(days=100), "earn", 600)
-    # Al over de vervalgrens: hoort in de expiry-run, niet in de waarschuwing.
+    # Al over de vervalgrens maar nog niet formeel verlopen: telt mee als
+    # 'binnenkort verlopend' met een vervaldatum in het verleden.
     m_late = _make_member(s, created)
     li.apply_ledger_entry(s, m_late, today - timedelta(days=EXPIRY_DAYS + 40), "earn", 600)
     s.commit()
@@ -277,11 +280,12 @@ def test_expiring_soon_members_window(db, policy):
     assert row["points_expiring_eur"] == round(600 * li.POINT_VALUE_EUR, 2)
 
     assert m_fresh.id not in rows, "te nieuwe punten horen niet in het waarschuwingsvenster"
-    # Sinds de liability-wijziging horen al-over-de-grens punten óók in het
-    # waarschuwingsvenster (ze zijn nog niet weggeboekt door de expiry-run).
-    assert m_late.id in rows, ("al-verlopen maar nog niet weggeboekte punten "
-                               "horen in het waarschuwingsvenster")
-    assert rows[m_late.id]["points_expiring"] == 600
+    assert m_late.id in rows, (
+        "al-overdue-maar-nog-niet-verlopen punten tellen mee als binnenkort verlopend")
+    late = rows[m_late.id]
+    assert late["points_expiring"] == 600
+    assert late["expires_on"] is not None
+    assert late["days_until_expiry"] <= 0, "vervaldatum ligt in het verleden"
 
 def test_expiring_soon_respects_fifo_redeems(db, policy):
     """Redeems consumeren FIFO eerst de window-punten als er niets ouders is:
