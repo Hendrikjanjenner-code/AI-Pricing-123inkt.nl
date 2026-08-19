@@ -65,7 +65,7 @@ def _own_conversation(db: Session, user: models.User, conversation_id: int) -> m
 
 @router.get("/status")
 def copilot_status(
-    _: models.User = Depends(auth_utils.get_current_user),
+    current_user: models.User = Depends(auth_utils.get_current_user),
     db: Session = Depends(get_db),
 ):
     """Beschikbaarheid van de AI-dienst + voorbeeldvragen (§26).
@@ -84,9 +84,13 @@ def copilot_status(
         "provider_error": probe_error,
         "model": ai_gateway.AI_MODEL,
         "example_questions": EXAMPLE_QUESTIONS,
+        # Alleen functies die deze gebruiker vanuit zijn afdelingsrechten mag
+        # gebruiken (taak 220) — zelfde allowlist als het toolaanbod in de
+        # gateway.
         "approved_functions": [
             {"name": name, "description": f.description}
             for name, f in ai_gateway.SEMANTIC_FUNCTIONS.items()
+            if name in ai_gateway.allowed_function_names(db, current_user)
         ],
         "data_freshness": ai_gateway.get_data_freshness(db),
     }
@@ -170,6 +174,19 @@ def send_message(
 
     conv = _own_conversation(db, current_user, conversation_id)
 
+    # Global Filter Context (taak 220): de frontend stuurt de actieve
+    # hiërarchie-selectie mee als default scope voor de tooldata. Alleen
+    # integere node-ids worden geaccepteerd; autorisatie blijft server-side
+    # (de semantic layer filtert enkel op actieve assignments).
+    ctx = payload.get("context") or {}
+    hierarchy_node_ids: list[int] = []
+    if isinstance(ctx, dict):
+        raw_ids = ctx.get("hierarchy_node_ids") or []
+        if isinstance(raw_ids, list):
+            hierarchy_node_ids = [int(v) for v in raw_ids[:50]
+                                  if isinstance(v, (int, str))
+                                  and str(v).lstrip("-").isdigit()]
+
     # Atomische budgetreservering vóór de SSE-stream (§34): gooit 429 als het
     # dagbudget op is. Hier (vóór StreamingResponse) zodat de client een echte
     # 429 ontvangt, niet een generiek SSE-foutantwoord na een 200-header.
@@ -233,6 +250,7 @@ def send_message(
                 slot_date=slot_date,
                 max_tokens=max_tokens,
                 budget_warning=budget_warning,
+                hierarchy_node_ids=hierarchy_node_ids or None,
             ):
                 if event.get("type") == "answer":
                     final_answer = event["answer"]

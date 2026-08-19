@@ -11,6 +11,7 @@ import {
   getListCopilotConversationsQueryKey,
 } from "@workspace/api-client-react";
 import { getAuthHeaders, useAuth } from "@/lib/auth";
+import { getGlobalFilters } from "@/lib/global-filters";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -745,7 +746,14 @@ export default function CopilotPage() {
       const res = await fetch(`${BASE}/api/copilot/conversations/${convId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-        body: JSON.stringify({ content: q }),
+        // Actieve Global Filter Context meesturen als default scope (taak 220):
+        // de server past de hiërarchie-selectie toe op de tooldata.
+        body: JSON.stringify({
+          content: q,
+          context: {
+            hierarchy_node_ids: getGlobalFilters().hierarchy.map((n) => n.id),
+          },
+        }),
         signal: AbortSignal.timeout(180_000),
       });
       // Race met de server-side budgetbewaking (429): toon dan een specifieke

@@ -474,6 +474,152 @@ def pii_scrub(obj):
     return obj
 
 
+# ─── Hierarchy-resolver: categorienaam → centrale hierarchy-node-ids ────────
+# De Copilot vertaalt namen uit vragen ("Wat gebeurt er binnen Coffee?") naar
+# node-ids uit de canonieke producthiërarchie — geen tekstmatching op
+# productvelden. Descendants tellen server-side automatisch mee (zelfde
+# semantiek als de Global Filter Context).
+
+_FUZZY_MATCH_CUTOFF = 0.75
+
+
+def resolve_hierarchy_name(db: Session, name: str) -> Optional[dict]:
+    """Zoek actieve hierarchy-node(s) bij een (categorie)naam.
+
+    Volgorde: exacte naam (case-insensitief) → substring op naam/pad →
+    fuzzy matching (difflib) op alle actieve nodenamen. Bij meerdere treffers
+    winnen de hoogste nodes (laagste level). Returns None als niets matcht.
+    """
+    term = (name or "").strip()
+    if not term:
+        return None
+    N = models.ProductHierarchyNode
+    base = db.query(N).filter(N.is_active.is_(True))
+
+    exact = base.filter(func.lower(N.name) == term.lower()).order_by(
+        N.level, N.name).all()
+    if exact:
+        match_type = "exact"
+        nodes = exact
+    else:
+        like = f"%{term}%"
+        partial = base.filter(
+            N.name.ilike(like) | N.path_names.ilike(like)
+        ).order_by(N.level, N.name).limit(10).all()
+        if partial:
+            match_type = "substring"
+            nodes = partial
+        else:
+            import difflib
+            all_names = [r[0] for r in db.query(N.name).filter(
+                N.is_active.is_(True)).distinct().all() if r[0]]
+            close = difflib.get_close_matches(
+                term, all_names, n=1, cutoff=_FUZZY_MATCH_CUTOFF)
+            if not close:
+                # Tweede kans: lowercase-vergelijking (difflib is case-gevoelig)
+                lower_map = {}
+                for n in all_names:
+                    lower_map.setdefault(n.lower(), n)
+                close_l = difflib.get_close_matches(
+                    term.lower(), list(lower_map), n=1, cutoff=_FUZZY_MATCH_CUTOFF)
+                close = [lower_map[c] for c in close_l]
+            if not close:
+                return None
+            match_type = "fuzzy"
+            nodes = base.filter(N.name == close[0]).order_by(
+                N.level, N.name).all()
+            if not nodes:
+                return None
+
+    # Beperk tot de hoogste nodes: descendants van een al gematchte node
+    # tellen server-side toch mee.
+    top: list = []
+    for n in sorted(nodes, key=lambda x: (x.level or 0, x.id)):
+        if not any(t.path and n.path and n.path.startswith(t.path) and n.id != t.id
+                   for t in top):
+            top.append(n)
+    top = top[:5]
+    return {
+        "query": term,
+        "match_type": match_type,
+        "node_ids": [n.id for n in top],
+        "matched_nodes": [{"id": n.id, "name": n.name,
+                           "path": n.path_names or n.name} for n in top],
+    }
+
+
+# ─── Department-permissies: functie-allowlist per afdeling (§ taak 220) ─────
+# Elke semantische functie is gekoppeld aan de authz-permissie van het
+# bijbehorende datadomein. De effectieve permissies van de gebruiker
+# (rol ∪ afdelingsdefaults ∪ extra's, authz.effective_permissions) bepalen
+# welke tools het model überhaupt aangeboden krijgt én welke calls de
+# gateway uitvoert (defense-in-depth: ook adversariële tool-calls op naam
+# van niet-toegestane functies worden geweigerd). None = elke ingelogde
+# gebruiker (basisdata die geen afdelingsgrens raakt).
+FUNCTION_PERMISSIONS: dict[str, Optional[str]] = {
+    "get_product_performance": None,
+    "get_category_performance": None,
+    "get_competitor_ranking": "competition.view",
+    "get_price_position": "competition.view",
+    "get_customer_switching": "catman.view",
+    "get_traffic_summary": "seo.view",
+    "get_active_signals": None,
+    "get_margin_erosion": "pricing.view",
+    "get_private_label_potential": "catman.view",
+    "get_promotion_effectiveness": "promotions.view",
+    "get_supplier_risk": "supplier.view",
+    "get_opportunities": "ai.view",
+    "simulate_price_change": "pricing.view",
+    "simulate_competitor_scenario": "competition.view",
+}
+
+
+def allowed_function_names(db: Session, user: models.User) -> set[str]:
+    """Functies die deze gebruiker vanuit zijn afdelingsrechten mag gebruiken.
+
+    Fail-safe: als de permissielaag onverhoopt niet leesbaar is, vallen we
+    terug op ALLEEN de functies zonder permissie-eis (nooit ruimer).
+    """
+    try:
+        import authz
+        perms = authz.effective_permissions(db, user)
+    except Exception as exc:
+        logger.warning("AI Gateway: effectieve permissies niet leesbaar (%s); "
+                       "alleen basisfuncties toegestaan.", exc)
+        perms = frozenset()
+    return {
+        name for name in SEMANTIC_FUNCTIONS
+        if FUNCTION_PERMISSIONS.get(name) is None
+        or FUNCTION_PERMISSIONS[name] in perms
+    }
+
+
+def primary_department_code(db: Session, user: models.User) -> Optional[str]:
+    """Code van de primaire afdeling van de gebruiker (of None)."""
+    try:
+        import authz
+        depts = authz.user_departments(db, user)
+        return depts[0].code if depts else None
+    except Exception as exc:
+        logger.warning("AI Gateway: afdeling niet leesbaar: %s", exc)
+        return None
+
+
+# Functies die een hiërarchie-scope accepteren (hierarchy_node_ids-parameter).
+HIERARCHY_CAPABLE_FUNCTIONS = {
+    "get_category_performance", "get_traffic_summary", "get_active_signals",
+    "get_margin_erosion", "get_private_label_potential",
+    "get_promotion_effectiveness", "get_supplier_risk", "get_opportunities",
+}
+
+_HIERARCHY_TOOL_PARAM = {
+    "type": "string",
+    "description": ("Optioneel: categorienaam uit de producthiërarchie "
+                    "(bv. 'Coffee'). Wordt server-side vertaald naar "
+                    "hiërarchie-nodes inclusief alle subcategorieën."),
+}
+
+
 # ─── Tool-definities: 1-op-1 afgeleid van de approved semantic functions ────
 
 _TOOL_PARAMETERS: dict[str, dict] = {
@@ -578,10 +724,18 @@ _TOOL_PARAMETERS: dict[str, dict] = {
 }
 
 
-def build_tools() -> list[dict]:
+def build_tools(allowed: Optional[set] = None) -> list[dict]:
+    """Toolschema's voor het model. `allowed` (functie-allowlist op basis van
+    afdelingspermissies) beperkt welke tools het model überhaupt te zien
+    krijgt; None = geen filtering (backwards compatible)."""
     tools = []
     for name, sem in SEMANTIC_FUNCTIONS.items():
+        if allowed is not None and name not in allowed:
+            continue
         params = _TOOL_PARAMETERS.get(name, {"type": "object", "properties": {}})
+        if name in HIERARCHY_CAPABLE_FUNCTIONS:
+            params = json.loads(json.dumps(params))  # kopie, muteer origineel niet
+            params.setdefault("properties", {})["hierarchy"] = _HIERARCHY_TOOL_PARAM
         tools.append({
             "type": "function",
             "function": {"name": name, "description": sem.description, "parameters": params},
@@ -730,19 +884,33 @@ def _default_answer(conclusion: str, warnings: list[str], freshness: dict) -> di
 
 
 def _execute_tool(db: Session, user: models.User, name: str, arguments: dict,
-                  shop_id: Optional[int] = None) -> tuple[dict, dict]:
+                  shop_id: Optional[int] = None,
+                  allowed_functions: Optional[set] = None,
+                  default_hierarchy_node_ids: Optional[list] = None,
+                  department: Optional[str] = None) -> tuple[dict, dict]:
     """Voer één approved semantische functie uit. Returns (result, callmeta).
 
     Argument-allowlisting: alleen parameters uit het gepubliceerde tool-schema
     worden doorgegeven; al het andere (m.n. een door het model geïnjecteerde
-    `shop_id`) wordt verworpen. De shop-scope komt uitsluitend server-side
-    uit de geautoriseerde request-context — nooit uit modeloutput.
+    `shop_id` of `hierarchy_node_ids`) wordt verworpen. De shop-scope komt
+    uitsluitend server-side uit de geautoriseerde request-context — nooit uit
+    modeloutput. De hiërarchie-scope komt óf uit de `hierarchy`-naam die het
+    model meegeeft (server-side geresolved naar node-ids), óf uit de actieve
+    Global Filter Context (`default_hierarchy_node_ids`).
+
+    `allowed_functions`: afdelingsgebonden functie-allowlist; calls buiten de
+    lijst worden geweigerd (defense-in-depth naast het gefilterde toolaanbod).
+    `department`: primaire afdelingscode; server-side geïnjecteerd in
+    get_active_signals voor afdelingsafhankelijke prioritering.
     """
     sem = SEMANTIC_FUNCTIONS.get(name)
     allowed_keys = set(_TOOL_PARAMETERS.get(name, {}).get("properties", {}).keys())
+    if name in HIERARCHY_CAPABLE_FUNCTIONS:
+        allowed_keys.add("hierarchy")
     dropped = sorted(set(arguments) - allowed_keys)
     arguments = {k: v for k, v in arguments.items() if k in allowed_keys}
-    meta = {"name": name, "arguments": arguments}
+    hierarchy_name = arguments.pop("hierarchy", None)
+    meta = {"name": name, "arguments": dict(arguments)}
     if dropped:
         logger.warning("AI Gateway: niet-toegestane tool-argumenten verworpen "
                        "voor %s: %s", name, dropped)
@@ -750,6 +918,39 @@ def _execute_tool(db: Session, user: models.User, name: str, arguments: dict,
     if sem is None:
         # Het model vroeg om een niet-bestaande/niet-goedgekeurde functie.
         return {"error": f"Functie '{name}' is niet goedgekeurd in de AI Gateway."}, meta
+    if allowed_functions is not None and name not in allowed_functions:
+        # Afdelingspermissies (taak 220): functie bestaat, maar deze gebruiker
+        # heeft er vanuit zijn afdeling(en) geen toegang toe.
+        required = FUNCTION_PERMISSIONS.get(name)
+        meta["denied"] = "department_permission"
+        return {
+            "error": (f"Geen toegang tot '{name}' vanuit jouw afdelingsrechten"
+                      + (f" (vereist: {required})" if required else "") + "."),
+            "data_available": False,
+        }, meta
+
+    # Hiërarchie-scope: naam uit de vraag → node-ids; anders de actieve
+    # Global Filter Context als default scope.
+    if name in HIERARCHY_CAPABLE_FUNCTIONS:
+        if hierarchy_name:
+            resolved = resolve_hierarchy_name(db, str(hierarchy_name))
+            if resolved is None:
+                meta["hierarchy"] = {"query": hierarchy_name, "resolved": False}
+                return {
+                    "error": (f"Geen hiërarchie-node gevonden voor "
+                              f"'{hierarchy_name}'. Noem dit als limitation; "
+                              "verzin geen data voor deze categorie."),
+                    "data_available": False,
+                }, meta
+            arguments["hierarchy_node_ids"] = resolved["node_ids"]
+            meta["hierarchy"] = {**resolved, "resolved": True, "source": "vraag"}
+        elif default_hierarchy_node_ids:
+            arguments["hierarchy_node_ids"] = list(default_hierarchy_node_ids)
+            meta["hierarchy"] = {"node_ids": list(default_hierarchy_node_ids),
+                                 "resolved": True, "source": "global_filter"}
+        if name == "get_active_signals" and department:
+            arguments["department"] = department
+
     t0 = time.time()
     try:
         result = sem.fn(db, user, shop_id=shop_id, **arguments)
@@ -807,6 +1008,7 @@ def run_copilot(
     slot_date: Optional[date] = None,
     max_tokens: Optional[int] = None,
     budget_warning: Optional[str] = None,
+    hierarchy_node_ids: Optional[list] = None,
 ) -> Generator[dict, None, None]:
     """
     Voer de volledige gateway-pipeline uit en yield events:
@@ -855,7 +1057,35 @@ def run_copilot(
         messages = build_messages(db, user, history, question,
                                   system_prompt=system_prompt,
                                   history_summary=history_summary)
-        tools = build_tools()
+
+        # Afdelingscontext (taak 220): functie-allowlist + primaire afdeling.
+        allowed_functions = allowed_function_names(db, user)
+        department = primary_department_code(db, user)
+        tools = build_tools(allowed_functions)
+
+        # Actieve context (afdeling + Global Filter Context) als systeembericht,
+        # zodat het model de gebruikte scope kan benoemen in het antwoord.
+        context_lines = []
+        if department:
+            context_lines.append(f"Afdeling van de gebruiker: {department}.")
+        hierarchy_context = None
+        if hierarchy_node_ids:
+            try:
+                N = models.ProductHierarchyNode
+                nodes = db.query(N).filter(N.id.in_(hierarchy_node_ids)).all()
+                paths = [(n.path_names or n.name) for n in nodes]
+            except Exception:
+                paths = []
+            hierarchy_context = {"node_ids": list(hierarchy_node_ids),
+                                 "paths": paths, "source": "global_filter"}
+            context_lines.append(
+                "Actieve hiërarchie-filter (Global Filter Context): "
+                + ("; ".join(paths) if paths else str(list(hierarchy_node_ids)))
+                + ". Deze scope wordt standaard op de tooldata toegepast; "
+                  "benoem de gebruikte scope in je antwoord.")
+        if context_lines:
+            messages.insert(1, {"role": "system",
+                                "content": pii_scrub(" ".join(context_lines))})
 
         try:
             yield {"type": "status", "message": "Vraag analyseren…"}
@@ -927,8 +1157,12 @@ def run_copilot(
                         except json.JSONDecodeError:
                             args = {}
                         yield {"type": "status", "message": f"Data ophalen: {tc.function.name}…"}
-                        result, meta = _execute_tool(db, user, tc.function.name, args,
-                                                     shop_id=shop_id)
+                        result, meta = _execute_tool(
+                            db, user, tc.function.name, args,
+                            shop_id=shop_id,
+                            allowed_functions=allowed_functions,
+                            default_hierarchy_node_ids=hierarchy_node_ids,
+                            department=department)
                         calls_meta.append(meta)
                         yield {"type": "tool", "name": tc.function.name,
                                "records": meta.get("records"), "data_source": meta.get("data_source")}
@@ -966,9 +1200,17 @@ def run_copilot(
         answer.setdefault("limitations", [])
         answer["sources"] = [
             {"function": m["name"], "data_source": m.get("data_source") or "postgresql",
-             "records": m.get("records")}
+             "records": m.get("records"),
+             **({"hierarchy": m["hierarchy"]} if m.get("hierarchy") else {})}
             for m in calls_meta
         ]
+        # Gebruikte hiërarchie-context: uit de vraag geresolvede scope wint
+        # boven de (default) Global Filter Context.
+        used_hierarchy = next(
+            (m["hierarchy"] for m in calls_meta
+             if m.get("hierarchy") and m["hierarchy"].get("resolved")), None)
+        answer["hierarchy_context"] = used_hierarchy or hierarchy_context
+        answer["department"] = department
         answer["data_freshness"] = freshness
         answer["records"] = sum(int(m.get("records") or 0) for m in calls_meta)
         if not calls_meta and status == "success":

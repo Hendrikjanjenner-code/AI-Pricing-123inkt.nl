@@ -197,6 +197,75 @@ def _check_access(user: models.User, required_roles: tuple) -> None:
         raise HTTPException(status_code=403, detail="Insufficient permissions for this data")
 
 
+def _hierarchy_scope(
+    db: Session, hierarchy_node_ids: Optional[list]
+) -> tuple[Optional[set], Optional[dict]]:
+    """Vertaal hierarchy-node-ids naar (sku_set, scope-beschrijving).
+
+    Descendant-inclusief via het gematerialiseerde pad (zelfde semantiek als
+    de Global Filter Context). Geen node-ids => (None, None) = geen filter.
+    Een geldige selectie zonder producten geeft een LEGE set (≠ None), zodat
+    de functie eerlijk 'geen data binnen deze scope' rapporteert.
+    """
+    if not hierarchy_node_ids:
+        return None, None
+    node_ids = [int(n) for n in hierarchy_node_ids]
+    N = models.ProductHierarchyNode
+    A = models.ProductHierarchyAssignment
+    nodes = db.query(N).filter(N.id.in_(node_ids)).all()
+    scope = {
+        "node_ids": [n.id for n in nodes],
+        "paths": [(n.path_names or n.name) for n in nodes],
+        "includes_descendants": True,
+    }
+    conds = [N.path.like(n.path + "%") for n in nodes if n.path]
+    if not conds:
+        scope["descendant_node_ids"] = [n.id for n in nodes]
+        return set(), scope
+    from sqlalchemy import or_
+    all_node_ids = [r[0] for r in db.query(N.id).filter(or_(*conds)).all()]
+    # Descendant-node-ids ook in de scope: filters op node-niveau (bv.
+    # categoriesignalen met hierarchy_node_id) moeten dezelfde
+    # descendant-semantiek volgen als het SKU-filter.
+    scope["descendant_node_ids"] = sorted(set(all_node_ids) | {n.id for n in nodes})
+    rows = (db.query(A.sku_id)
+            .filter(A.node_id.in_(all_node_ids), A.status == "active")
+            .distinct().all())
+    return {r[0] for r in rows}, scope
+
+
+# ─── Department-aware prioritering van signalen ─────────────────────────────
+# Trefwoorden per afdeling: signalen waarvan engine/signal_type een eerder
+# trefwoord bevat, krijgen voorrang. "Wat vraagt vandaag aandacht?" geeft zo
+# per afdeling andere prioriteiten (pricing vs. SEO vs. inkoop).
+DEPARTMENT_SIGNAL_PRIORITIES: dict[str, list[str]] = {
+    "pricing": ["pricing", "price", "prijs", "margin", "marge", "competition",
+                "concurrent", "elastic"],
+    "seo": ["traffic", "seo", "search", "conversie", "conversion", "promotion",
+            "promotie"],
+    "inkoop": ["procurement", "supplier", "leverancier", "inkoop", "cost",
+               "kostprijs"],
+    "supply_chain": ["supply", "stock", "voorraad", "levertijd", "lead_time"],
+    "catman": ["assortiment", "category", "categorie", "private_label",
+               "huismerk", "switch"],
+    "finance": ["margin", "marge", "cost", "kosten", "budget"],
+    "data_bi": ["data", "quality", "kwaliteit"],
+    "management": [],
+}
+
+_SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "warning": 2,
+                  "low": 3, "info": 4}
+
+
+def _department_priority_rank(department: str, signal: "models.IntelligenceSignal") -> int:
+    keywords = DEPARTMENT_SIGNAL_PRIORITIES.get(department, [])
+    haystack = f"{signal.engine or ''} {signal.signal_type or ''}".lower()
+    for i, kw in enumerate(keywords):
+        if kw in haystack:
+            return i
+    return len(keywords) + 1
+
+
 def _shop_scope(db: Session, shop_id: Optional[int]) -> int:
     """Bepaal de effectieve shop-scope; valt terug op de default shop."""
     if shop_id is not None:
@@ -287,7 +356,8 @@ def get_product_performance(db: Session, user: models.User, sku_id: str,
 
 def get_category_performance(db: Session, user: models.User, category: Optional[str] = None,
                              days: int = 30, shop_id: Optional[int] = None,
-                             limit: int = 50) -> dict:
+                             limit: int = 50,
+                             hierarchy_node_ids: Optional[list] = None) -> dict:
     """
     Omzet/marge/afzet per categorie over de periode (alle of één categorie).
 
@@ -296,11 +366,14 @@ def get_category_performance(db: Session, user: models.User, category: Optional[
     """
     _check_access(user, ALL_ROLES)
     sid = _shop_scope(db, shop_id)
+    sku_scope, hierarchy_scope = _hierarchy_scope(db, hierarchy_node_ids)
 
-    # BigQuery-routing voor historische queries
+    # BigQuery-routing voor historische queries. Bij een actieve
+    # hiërarchie-scope blijven we op PostgreSQL: de BQ-query kent de centrale
+    # hiërarchie(-assignments) niet en zou de scope stil negeren.
     bq_cats = None
     bq_used = False
-    if days > BQ_HISTORICAL_THRESHOLD_DAYS:
+    if days > BQ_HISTORICAL_THRESHOLD_DAYS and sku_scope is None:
         project, dataset = _get_bq_project_dataset()
         if project:
             bq_cats = _bq_route_category_performance(project, dataset, days, sid, category, limit, db)
@@ -324,6 +397,8 @@ def get_category_performance(db: Session, user: models.User, category: Optional[
         )
         if category:
             q = q.filter(models.DimProduct.category == category)
+        if sku_scope is not None:
+            q = q.filter(models.FactSalesDaily.sku_id.in_(sku_scope))
         rows = q.group_by(models.DimProduct.category).order_by(desc("revenue")).limit(limit).all()
         cats = [
             {
@@ -342,6 +417,7 @@ def get_category_performance(db: Session, user: models.User, category: Optional[
         "period_days": days,
         "data_available": len(cats) > 0,
         "categories": cats,
+        "hierarchy_scope": hierarchy_scope,
         "data_source": "bigquery" if bq_used else "postgresql",
         "bq_fallback": (days > BQ_HISTORICAL_THRESHOLD_DAYS and not bq_used),
     }
@@ -450,10 +526,12 @@ def get_customer_switching(db: Session, user: models.User, sku_id: Optional[str]
 
 
 def get_traffic_summary(db: Session, user: models.User, entity_id: Optional[str] = None,
-                        days: int = 30, shop_id: Optional[int] = None) -> dict:
+                        days: int = 30, shop_id: Optional[int] = None,
+                        hierarchy_node_ids: Optional[list] = None) -> dict:
     """Traffic/conversie (sessies, pageviews, orders, conversieratio)."""
     _check_access(user, ALL_ROLES)
     sid = _shop_scope(db, shop_id)
+    sku_scope, hierarchy_scope = _hierarchy_scope(db, hierarchy_node_ids)
     since = date.today() - timedelta(days=days)
     q = db.query(
         func.coalesce(func.sum(models.FactTrafficDaily.sessions), 0),
@@ -463,6 +541,10 @@ def get_traffic_summary(db: Session, user: models.User, entity_id: Optional[str]
     ).filter(models.FactTrafficDaily.date >= since)
     if entity_id:
         q = q.filter(models.FactTrafficDaily.entity_id == entity_id)
+    if sku_scope is not None:
+        # Hiërarchie-scope werkt op SKU-niveau: alleen per-SKU trafficrijen.
+        q = q.filter(models.FactTrafficDaily.entity_type == "SKU",
+                     models.FactTrafficDaily.entity_id.in_(sku_scope))
     sessions, pageviews, orders, records = q.first() or (0, 0, 0, 0)
     conv = safe_div(orders, sessions)
     return {
@@ -476,15 +558,26 @@ def get_traffic_summary(db: Session, user: models.User, entity_id: Optional[str]
         "pageviews": int(pageviews or 0),
         "orders": int(orders or 0),
         "conversion_rate_pct": round(conv * 100, 2) if conv is not None else None,
+        "hierarchy_scope": hierarchy_scope,
     }
 
 
 def get_active_signals(db: Session, user: models.User, engine: Optional[str] = None,
                        severity: Optional[str] = None, entity_id: Optional[str] = None,
-                       limit: int = 100, shop_id: Optional[int] = None) -> dict:
-    """Actieve IntelligenceSignals, gefilterd op engine/severity/entiteit."""
+                       limit: int = 100, shop_id: Optional[int] = None,
+                       hierarchy_node_ids: Optional[list] = None,
+                       department: Optional[str] = None) -> dict:
+    """Actieve IntelligenceSignals, gefilterd op engine/severity/entiteit.
+
+    `hierarchy_node_ids`: beperk tot signalen binnen de hiërarchie-scope
+    (SKU-signalen via de actieve assignments, node-signalen via node-id).
+    `department`: server-side geïnjecteerde afdelingscode van de gebruiker —
+    signalen die bij het werkveld van de afdeling horen komen bovenaan
+    ("Wat vraagt vandaag aandacht?" per afdeling anders geprioriteerd).
+    """
     _check_access(user, ALL_ROLES)
     sid = _shop_scope(db, shop_id)
+    sku_scope, hierarchy_scope = _hierarchy_scope(db, hierarchy_node_ids)
     q = db.query(models.IntelligenceSignal).filter(
         models.IntelligenceSignal.status == "active",
         models.IntelligenceSignal.shop_id == sid,
@@ -495,26 +588,45 @@ def get_active_signals(db: Session, user: models.User, engine: Optional[str] = N
         q = q.filter(models.IntelligenceSignal.severity == severity)
     if entity_id:
         q = q.filter(models.IntelligenceSignal.entity_id == entity_id)
+    if sku_scope is not None:
+        # Node-signalen (bv. categorieniveau) matchen op descendant-node-ids:
+        # zelfde descendant-semantiek als het SKU-filter.
+        node_ids = set((hierarchy_scope or {}).get("descendant_node_ids") or [])
+        q = q.filter(
+            models.IntelligenceSignal.entity_id.in_(sku_scope) |
+            models.IntelligenceSignal.hierarchy_node_id.in_(node_ids)
+        )
     rows = q.order_by(desc(models.IntelligenceSignal.observed_at)).limit(limit).all()
+    department_priority_applied = False
+    if department and department in DEPARTMENT_SIGNAL_PRIORITIES:
+        department_priority_applied = True
+        rows.sort(key=lambda s: (
+            _department_priority_rank(department, s),
+            _SEVERITY_RANK.get((s.severity or "info").lower(), 5),
+        ))
     return {
         "shop_id": sid,
         "shop_scope_applied": True,
         "data_available": len(rows) > 0,
+        "hierarchy_scope": hierarchy_scope,
+        "department_priority_applied": department if department_priority_applied else None,
         "signals": [signal_to_dict(s) for s in rows],
     }
 
 
 def get_margin_erosion(db: Session, user: models.User, days: int = 30,
-                       limit: int = 20, shop_id: Optional[int] = None) -> dict:
+                       limit: int = 20, shop_id: Optional[int] = None,
+                       hierarchy_node_ids: Optional[list] = None) -> dict:
     """Waar verliezen we marge: grootste margedalers t.o.v. de vorige periode."""
     _check_access(user, ALL_ROLES)
     sid = _shop_scope(db, shop_id)
+    sku_scope, hierarchy_scope = _hierarchy_scope(db, hierarchy_node_ids)
     today = date.today()
     cur_since = today - timedelta(days=days)
     prev_since = today - timedelta(days=days * 2)
 
     def _margin_by_sku(start, end):
-        rows = db.query(
+        q = db.query(
             models.FactSalesDaily.sku_id,
             func.coalesce(func.sum(models.FactSalesDaily.margin), 0).label("margin"),
             func.coalesce(func.sum(models.FactSalesDaily.revenue), 0).label("revenue"),
@@ -523,7 +635,10 @@ def get_margin_erosion(db: Session, user: models.User, days: int = 30,
             models.FactSalesDaily.shop_id == sid,
             models.FactSalesDaily.date >= start,
             models.FactSalesDaily.date < end,
-        ).group_by(models.FactSalesDaily.sku_id).all()
+        )
+        if sku_scope is not None:
+            q = q.filter(models.FactSalesDaily.sku_id.in_(sku_scope))
+        rows = q.group_by(models.FactSalesDaily.sku_id).all()
         return {r.sku_id: r for r in rows}
 
     cur = _margin_by_sku(cur_since, today + timedelta(days=1))
@@ -550,30 +665,41 @@ def get_margin_erosion(db: Session, user: models.User, days: int = 30,
         "shop_id": sid, "shop_scope_applied": True, "period_days": days,
         "comparison": f"laatste {days} dagen vs. {days} dagen daarvoor",
         "data_available": len(losers) > 0, "records": records,
+        "hierarchy_scope": hierarchy_scope,
         "margin_losers": losers,
     }
 
 
 def get_private_label_potential(db: Session, user: models.User, limit: int = 20,
-                                shop_id: Optional[int] = None) -> dict:
+                                shop_id: Optional[int] = None,
+                                hierarchy_node_ids: Optional[list] = None) -> dict:
     """Huismerkpotentie: top-SKU's op Private Label Value Score (PLSV)."""
     _check_access(user, ALL_ROLES)
     sid = _shop_scope(db, shop_id)
+    sku_scope, hierarchy_scope = _hierarchy_scope(db, hierarchy_node_ids)
     # FactPrivateLabelIntelligence heeft geen shop_id; scope via de SKU's
     # van de shop (DimProduct) zodat geen cross-shop-data lekt.
     shop_skus = db.query(models.DimProduct.sku_id).filter(
         models.DimProduct.shop_id == sid)
-    latest = db.query(func.max(models.FactPrivateLabelIntelligence.run_date)).filter(
-        models.FactPrivateLabelIntelligence.sku_id.in_(shop_skus)).scalar()
+    latest_q = db.query(func.max(models.FactPrivateLabelIntelligence.run_date)).filter(
+        models.FactPrivateLabelIntelligence.sku_id.in_(shop_skus))
+    if sku_scope is not None:
+        latest_q = latest_q.filter(
+            models.FactPrivateLabelIntelligence.sku_id.in_(sku_scope))
+    latest = latest_q.scalar()
     if not latest:
         return {"shop_id": sid, "shop_scope_applied": True, "data_available": False,
-                "records": 0, "items": []}
-    rows = db.query(models.FactPrivateLabelIntelligence).filter(
+                "records": 0, "hierarchy_scope": hierarchy_scope, "items": []}
+    q = db.query(models.FactPrivateLabelIntelligence).filter(
         models.FactPrivateLabelIntelligence.run_date == latest,
         models.FactPrivateLabelIntelligence.sku_id.in_(shop_skus),
-    ).order_by(desc(models.FactPrivateLabelIntelligence.private_label_value_score)).limit(limit).all()
+    )
+    if sku_scope is not None:
+        q = q.filter(models.FactPrivateLabelIntelligence.sku_id.in_(sku_scope))
+    rows = q.order_by(desc(models.FactPrivateLabelIntelligence.private_label_value_score)).limit(limit).all()
     return {
         "shop_id": sid, "shop_scope_applied": True, "run_date": str(latest),
+        "hierarchy_scope": hierarchy_scope,
         "data_available": len(rows) > 0, "records": len(rows),
         "items": [{
             "sku_id": r.sku_id,
@@ -589,20 +715,27 @@ def get_private_label_potential(db: Session, user: models.User, limit: int = 20,
 
 
 def get_promotion_effectiveness(db: Session, user: models.User, limit: int = 20,
-                                shop_id: Optional[int] = None) -> dict:
+                                shop_id: Optional[int] = None,
+                                hierarchy_node_ids: Optional[list] = None) -> dict:
     """Welke promotie werkte het best: gemeten promotie-effecten (§19)."""
     _check_access(user, ALL_ROLES)
     sid = _shop_scope(db, shop_id)
+    sku_scope, hierarchy_scope = _hierarchy_scope(db, hierarchy_node_ids)
     latest = db.query(func.max(models.FactPromotionEffect.run_date)).filter(
         models.FactPromotionEffect.shop_id == sid).scalar()
     if not latest:
-        return {"shop_id": sid, "shop_scope_applied": True, "data_available": False, "promotions": []}
-    rows = db.query(models.FactPromotionEffect).filter(
+        return {"shop_id": sid, "shop_scope_applied": True, "data_available": False,
+                "hierarchy_scope": hierarchy_scope, "promotions": []}
+    q = db.query(models.FactPromotionEffect).filter(
         models.FactPromotionEffect.shop_id == sid,
         models.FactPromotionEffect.run_date == latest,
-    ).order_by(desc(models.FactPromotionEffect.incremental_margin)).limit(limit).all()
+    )
+    if sku_scope is not None:
+        q = q.filter(models.FactPromotionEffect.sku_id.in_(sku_scope))
+    rows = q.order_by(desc(models.FactPromotionEffect.incremental_margin)).limit(limit).all()
     return {
         "shop_id": sid, "shop_scope_applied": True, "run_date": str(latest),
+        "hierarchy_scope": hierarchy_scope,
         "data_available": len(rows) > 0, "records": len(rows),
         "promotions": [{
             "promotion_id": r.promotion_id, "sku_id": r.sku_id,
@@ -619,25 +752,35 @@ def get_promotion_effectiveness(db: Session, user: models.User, limit: int = 20,
 
 
 def get_supplier_risk(db: Session, user: models.User, limit: int = 20,
-                      shop_id: Optional[int] = None) -> dict:
+                      shop_id: Optional[int] = None,
+                      hierarchy_node_ids: Optional[list] = None) -> dict:
     """Supplier-/inkooprisico: procurement-forecast met margedrukscores."""
     _check_access(user, ANALYST_UP)
     sid = _shop_scope(db, shop_id)
+    sku_scope, hierarchy_scope = _hierarchy_scope(db, hierarchy_node_ids)
     # FactProcurementForecastDaily heeft geen shop_id; scope via de SKU's
     # van de shop (DimProduct) zodat geen cross-shop-data lekt.
     shop_skus = db.query(models.DimProduct.sku_id).filter(
         models.DimProduct.shop_id == sid)
-    latest = db.query(func.max(models.FactProcurementForecastDaily.date)).filter(
-        models.FactProcurementForecastDaily.sku_id.in_(shop_skus)).scalar()
+    latest_q = db.query(func.max(models.FactProcurementForecastDaily.date)).filter(
+        models.FactProcurementForecastDaily.sku_id.in_(shop_skus))
+    if sku_scope is not None:
+        latest_q = latest_q.filter(
+            models.FactProcurementForecastDaily.sku_id.in_(sku_scope))
+    latest = latest_q.scalar()
     if not latest:
         return {"shop_id": sid, "shop_scope_applied": True, "data_available": False,
-                "records": 0, "items": []}
-    rows = db.query(models.FactProcurementForecastDaily).filter(
+                "records": 0, "hierarchy_scope": hierarchy_scope, "items": []}
+    q = db.query(models.FactProcurementForecastDaily).filter(
         models.FactProcurementForecastDaily.date == latest,
         models.FactProcurementForecastDaily.sku_id.in_(shop_skus),
-    ).order_by(desc(models.FactProcurementForecastDaily.future_margin_risk_score)).limit(limit).all()
+    )
+    if sku_scope is not None:
+        q = q.filter(models.FactProcurementForecastDaily.sku_id.in_(sku_scope))
+    rows = q.order_by(desc(models.FactProcurementForecastDaily.future_margin_risk_score)).limit(limit).all()
     return {
         "shop_id": sid, "shop_scope_applied": True, "run_date": str(latest),
+        "hierarchy_scope": hierarchy_scope,
         "data_available": len(rows) > 0, "records": len(rows),
         "items": [{
             "sku_id": r.sku_id, "sku_name": r.sku_name, "category": r.category,
@@ -654,16 +797,22 @@ def get_supplier_risk(db: Session, user: models.User, limit: int = 20,
 
 
 def get_opportunities(db: Session, user: models.User, limit: int = 20,
-                      shop_id: Optional[int] = None) -> dict:
+                      shop_id: Optional[int] = None,
+                      hierarchy_node_ids: Optional[list] = None) -> dict:
     """Top-opportunities uit de centrale Opportunity Engine (§24)."""
     _check_access(user, ALL_ROLES)
     sid = _shop_scope(db, shop_id)
-    rows = db.query(models.Opportunity).filter(
+    sku_scope, hierarchy_scope = _hierarchy_scope(db, hierarchy_node_ids)
+    q = db.query(models.Opportunity).filter(
         models.Opportunity.shop_id == sid,
         models.Opportunity.status == "open",
-    ).order_by(desc(models.Opportunity.priority_score)).limit(limit).all()
+    )
+    if sku_scope is not None:
+        q = q.filter(models.Opportunity.entity_id.in_(sku_scope))
+    rows = q.order_by(desc(models.Opportunity.priority_score)).limit(limit).all()
     return {
         "shop_id": sid, "shop_scope_applied": True,
+        "hierarchy_scope": hierarchy_scope,
         "data_available": len(rows) > 0, "records": len(rows),
         "opportunities": [{
             "id": r.id, "type": r.opportunity_type, "source_engine": r.source_engine,

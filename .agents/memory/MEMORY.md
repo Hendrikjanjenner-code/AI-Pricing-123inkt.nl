@@ -55,6 +55,7 @@
 - [Feed full-sync cleanup](feed-full-sync-cleanup.md) — feed-modus volledige sync ruimt historie van verdwenen concurrenten op; lege dag-snapshot of uitgevinkte concurrent nooit als verdwenen behandelen.
 - [Signal auto-resolve evaluability](signal-auto-resolve-evaluability.md) — resolve alleen per daadwerkelijk geëvalueerde entiteit én signaaltype; geen/gedeeltelijke data ≠ verholpen.
 - [Granular authz action permissions](authz-action-permissions.md) — write-methods need per-segment action perms; require_role defers to a matching permission rule; fresh test-viewers need grant_legacy_views.
+- [Copilot gateway authz & scope](copilot-gateway-authz.md) — afdelings-allowlist en hiërarchie-resolutie alleen in de gateway; scope-ids nooit modelgestuurd.
 - [Lifespan bootstrap once per process](test-startup-bootstrap.md) — DDL/migrations/seeding in main.py run once per process; keep new expensive startup work inside the guard.
 - [Budget-UI toelating](budget-ui-authoritative.md) — UI-blokkade moet de server-reserveringsregel (incl. upfront tokens) volgen via een exhausted-veld, niet eigen tellers.
 - [Export dubbel-uitvoer-guard](export-claim-atomic.md) — claim rijen atomisch (UPDATE...RETURNING) vóór job-aanmaak; post-hoc markeren faalt code review op race-safety.
