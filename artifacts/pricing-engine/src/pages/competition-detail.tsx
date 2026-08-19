@@ -10,7 +10,7 @@ import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, Tooltip, Cell
 } from "recharts";
-import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle, Calculator } from "lucide-react";
+import { ArrowLeft, CheckCircle2, XCircle, AlertTriangle, Calculator, ChevronDown, ChevronRight } from "lucide-react";
 import { useShopId } from "@/hooks/use-shop-id";
 
 const KLASSE_KLEUREN: Record<string, string> = {
@@ -287,18 +287,26 @@ export default function ConcurrentieDetail() {
   );
 }
 
+type VolgOverride = "follow" | "no_follow";
+
 function PrijsSimulatie({ skuId, shopId }: { skuId: string; shopId: number | undefined }) {
   const [changePctInput, setChangePctInput] = useState("-5");
+  const [overrides, setOverrides] = useState<Record<string, VolgOverride>>({});
+  const [toonConcurrenten, setToonConcurrenten] = useState(false);
 
   const simulate = useMutation({
-    mutationFn: async (changePct: number) => {
+    mutationFn: async ({ changePct, overrides }: { changePct: number; overrides: Record<string, VolgOverride> }) => {
       const token = localStorage.getItem("auth_token");
+      const assumeFollow = Object.keys(overrides).filter(k => overrides[k] === "follow");
+      const assumeNoFollow = Object.keys(overrides).filter(k => overrides[k] === "no_follow");
       const res = await fetch("/api/competition/simulate", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           sku_id: skuId,
           change_pct: changePct / 100,
+          ...(assumeFollow.length ? { assume_follow: assumeFollow } : {}),
+          ...(assumeNoFollow.length ? { assume_no_follow: assumeNoFollow } : {}),
           ...(shopId !== undefined ? { shop_id: shopId } : {}),
         }),
       });
@@ -347,7 +355,7 @@ function PrijsSimulatie({ skuId, shopId }: { skuId: string; shopId: number | und
           <Button
             size="sm"
             disabled={invalid || simulate.isPending}
-            onClick={() => simulate.mutate(parsed)}
+            onClick={() => simulate.mutate({ changePct: parsed, overrides })}
           >
             {simulate.isPending ? "Simuleren…" : "Simuleer"}
           </Button>
@@ -405,6 +413,84 @@ function PrijsSimulatie({ skuId, shopId }: { skuId: string; shopId: number | und
                 ))}
               </div>
             </div>
+
+            {Array.isArray(sim.competitors) && sim.competitors.length > 0 && (
+              <div className="border rounded-md overflow-hidden">
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 px-4 py-2.5 text-sm font-medium hover:bg-muted/50"
+                  onClick={() => setToonConcurrenten(v => !v)}
+                  aria-expanded={toonConcurrenten}
+                >
+                  {toonConcurrenten ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  Per concurrent: volgkans en verwachte prijs ({sim.competitors.length})
+                </button>
+                {toonConcurrenten && (
+                  <div>
+                    <div className="grid grid-cols-12 border-y bg-muted/50 px-4 py-2 text-xs font-medium text-muted-foreground">
+                      <div className="col-span-3">Concurrent</div>
+                      <div className="col-span-2">Strategie</div>
+                      <div className="col-span-2 text-right">Volgkans</div>
+                      <div className="col-span-1 text-right">Huidig</div>
+                      <div className="col-span-1 text-right">Verwacht</div>
+                      <div className="col-span-3 text-right">Aanname</div>
+                    </div>
+                    <div className="divide-y">
+                      {sim.competitors.map((c: any) => {
+                        const ov = overrides[c.competitor];
+                        const zetOverride = (val: VolgOverride) => {
+                          const next = { ...overrides };
+                          if (next[c.competitor] === val) delete next[c.competitor];
+                          else next[c.competitor] = val;
+                          setOverrides(next);
+                          if (!invalid) simulate.mutate({ changePct: parsed, overrides: next });
+                        };
+                        return (
+                          <div key={c.competitor} className="grid grid-cols-12 items-center px-4 py-2 text-sm">
+                            <div className="col-span-3 truncate" title={c.competitor}>{c.competitor}</div>
+                            <div className="col-span-2 text-xs text-muted-foreground truncate" title={c.strategy_label || undefined}>
+                              {c.strategy_label || "Onbekend"}
+                            </div>
+                            <div className="col-span-2 text-right tabular-nums font-medium">
+                              {c.follow_probability != null ? `${Math.round(c.follow_probability * 100)}%` : "—"}
+                            </div>
+                            <div className="col-span-1 text-right tabular-nums">
+                              {c.current_price != null ? `€${Number(c.current_price).toFixed(2)}` : "—"}
+                            </div>
+                            <div className="col-span-1 text-right tabular-nums">
+                              {c.expected_price != null ? `€${Number(c.expected_price).toFixed(2)}` : "—"}
+                            </div>
+                            <div className="col-span-3 flex justify-end gap-1">
+                              <Button
+                                size="sm"
+                                variant={ov === "follow" ? "default" : "outline"}
+                                className="h-7 px-2 text-xs"
+                                disabled={simulate.isPending}
+                                onClick={() => zetOverride("follow")}
+                              >
+                                Volgt zeker
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant={ov === "no_follow" ? "default" : "outline"}
+                                className="h-7 px-2 text-xs"
+                                disabled={simulate.isPending}
+                                onClick={() => zetOverride("no_follow")}
+                              >
+                                Volgt niet
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="border-t px-4 py-2 text-xs text-muted-foreground">
+                      Klik op “Volgt zeker” of “Volgt niet” om de aanname aan te passen; de simulatie wordt direct opnieuw berekend. Nogmaals klikken herstelt de geschatte volgkans.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
 
             {sim.baseline_30d && (
               <p className="text-xs text-muted-foreground">
