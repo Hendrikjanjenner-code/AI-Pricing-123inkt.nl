@@ -247,6 +247,27 @@ _PROBE_TTL_SECONDS = 300  # cache 5 minuten
 _probe_cache: dict = {}
 
 
+def _probe_via_chat(client) -> tuple[bool, Optional[str]]:
+    """Minimale chat-completion als bereikbaarheidstest voor providers
+    waarvan de proxy GET /models niet ondersteunt. Verifieert de capaciteit
+    die de Copilot daadwerkelijk gebruikt (auth + routering van completions)."""
+    try:
+        client.chat.completions.create(
+            model=AI_MODEL,
+            max_completion_tokens=16,
+            messages=[{"role": "user", "content": "ping"}],
+        )
+        return True, None
+    except Exception as exc:
+        # Reasoning-modellen kunnen het lage tokenbudget overschrijden en
+        # geven dan een 400 "output limit reached". De request is dan wél
+        # geauthenticeerd en gerouteerd — provider is bereikbaar.
+        msg = str(exc)
+        if getattr(exc, "status_code", None) == 400 and "output limit" in msg.lower():
+            return True, None
+        return False, msg
+
+
 def _run_probe(provider: str, timeout: float = 10.0) -> tuple[bool, Optional[str]]:
     """Voer een live bereikbaarheidstest uit voor één provider (geen cache)."""
     cfg = _env_config(provider)
@@ -261,6 +282,14 @@ def _run_probe(provider: str, timeout: float = 10.0) -> tuple[bool, Optional[str
         client.models.list()
         return True, None
     except Exception as exc:
+        # De Replit AI-gateway ondersteunt GET /models niet (404/405), terwijl
+        # chat completions wél werken. Alleen voor die provider vallen we dan
+        # terug op een minimale chat-completion om de daadwerkelijk gebruikte
+        # capaciteit te verifiëren (resultaat wordt 5 min gecachet, dus de
+        # kosten zijn begrensd). Voor openai_direct blijft 404/405 een fout.
+        status_code = getattr(exc, "status_code", None)
+        if provider == PROVIDER_REPLIT and status_code in (404, 405):
+            return _probe_via_chat(client)
         error_msg = str(exc)
         logger.warning("AI provider-probe (%s) mislukt: %s", provider, error_msg)
         return False, error_msg

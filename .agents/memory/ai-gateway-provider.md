@@ -13,3 +13,6 @@ Rules for the LLM boundary:
 
 ## Provider choice (persistent)
 The active LLM provider is a DB-backed admin setting (singleton `AiProviderSetting`): explicit choice wins with no silent fallback; auto mode prefers Replit AI when `AI_INTEGRATIONS_OPENAI_*` are set, else `OPENAI_API_KEY`. Probe cache is per provider and resets on switch. `setupReplitAIIntegrations` is NOT available in task environments — provisioning the Replit AI env vars must happen from the main session; once provisioned, auto mode activates Replit AI without code changes.
+
+## Reachability probe quirks
+The Replit AI proxy rejects GET /models with 405, so a models.list() probe false-negatives. Probe falls back (Replit provider only) to a minimal chat completion; reasoning models can hit the tiny token budget and return 400 "output limit reached" — that specific 400 counts as reachable (auth + routing proven). For openai_direct, 404/405 stays a failure.

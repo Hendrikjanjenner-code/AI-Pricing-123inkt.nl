@@ -9,6 +9,7 @@ import os
 import sys
 import types
 import unittest
+import unittest.mock
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -250,6 +251,62 @@ class TestCrossShopScoping(unittest.TestCase):
             res = fn(self.db, u, limit=500, shop_id=self.sid_b)
             skus = {i["sku_id"] for i in res.get("items", [])}
             self.assertIn(self.sku_b, skus)
+
+
+class TestProbe(unittest.TestCase):
+    """_run_probe: 404/405 op GET /models is alleen voor de Replit-gateway
+    acceptabel, en dan pas na een geslaagde minimale chat-completion."""
+
+    def _exc(self, status):
+        exc = Exception(f"Error code: {status}")
+        exc.status_code = status
+        return exc
+
+    def _fake_client(self, models_exc, chat_ok=True, chat_exc=None):
+        client = types.SimpleNamespace()
+        client.models = types.SimpleNamespace(
+            list=unittest.mock.Mock(side_effect=models_exc))
+        create = unittest.mock.Mock()
+        if not chat_ok:
+            create.side_effect = chat_exc or Exception("chat kapot")
+        client.chat = types.SimpleNamespace(
+            completions=types.SimpleNamespace(create=create))
+        return client
+
+    def _probe_with(self, provider, client):
+        cfg = {"base_url": "https://example", "api_key": "x", "provider": provider}
+        fake_openai = types.SimpleNamespace(OpenAI=lambda **kw: client)
+        with patch.object(ai_gateway, "_env_config", return_value=cfg), \
+             patch.dict(sys.modules, {"openai": fake_openai}):
+            return ai_gateway._run_probe(provider)
+
+    def test_replit_405_with_working_chat_is_reachable(self):
+        client = self._fake_client(self._exc(405), chat_ok=True)
+        ok, err = self._probe_with(ai_gateway.PROVIDER_REPLIT, client)
+        self.assertTrue(ok)
+        self.assertIsNone(err)
+        client.chat.completions.create.assert_called_once()
+
+    def test_replit_405_with_broken_chat_is_unreachable(self):
+        client = self._fake_client(self._exc(405), chat_ok=False,
+                                   chat_exc=self._exc(401))
+        ok, err = self._probe_with(ai_gateway.PROVIDER_REPLIT, client)
+        self.assertFalse(ok)
+        self.assertIn("401", err)
+
+    def test_direct_405_stays_unreachable(self):
+        client = self._fake_client(self._exc(405), chat_ok=True)
+        ok, err = self._probe_with(ai_gateway.PROVIDER_OPENAI, client)
+        self.assertFalse(ok)
+        self.assertIn("405", err)
+        client.chat.completions.create.assert_not_called()
+
+    def test_auth_error_stays_unreachable(self):
+        client = self._fake_client(self._exc(401))
+        ok, err = self._probe_with(ai_gateway.PROVIDER_REPLIT, client)
+        self.assertFalse(ok)
+        self.assertIn("401", err)
+        client.chat.completions.create.assert_not_called()
 
 
 if __name__ == "__main__":
