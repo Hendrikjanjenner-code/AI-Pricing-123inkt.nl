@@ -475,12 +475,97 @@ def test_rankings_influence_score_nonzero_after_run(client, admin_headers, seed_
     )
 
     # Explanation vermeldt het aantal SKU-invloedscores (> 0 voor minstens één)
+    # — behalve voor concurrenten met een profiel-baseline (geen prijshistorie).
     for r in nonzero_influence:
+        evidence = r.get("evidence", {})
+        if evidence.get("influence_basis") == "profiel":
+            continue
         explanation = r.get("explanation", "")
         assert "SKU-invloedscores" in explanation, (
             f"Explanation vermeldt SKU-invloedscores niet: {explanation!r}"
         )
-        evidence = r.get("evidence", {})
         assert evidence.get("cis_sku_count", 0) > 0, (
             f"evidence.cis_sku_count is 0 voor {r['competitor_name']}"
         )
+
+
+# ── Profiel-baseline: concurrent zonder prijshistorie ─────────────────────────
+
+def test_profile_baseline_influence_formula():
+    """Baseline uit profiel alleen: overlap, relevance_label en in_stock_rate."""
+    from engine.competitor_influence import profile_baseline_influence
+
+    class _P:
+        functional_overlap_score = 0.8
+        relevance_label = "HIGH"
+        in_stock_rate = 0.9
+
+    score = profile_baseline_influence(_P())
+    expected = round(0.5 * 0.8 + 0.3 * 0.9 + 0.2 * 0.9, 4)
+    assert score == expected
+    assert score > 0.0
+
+    class _Empty:
+        functional_overlap_score = None
+        relevance_label = None
+        in_stock_rate = None
+
+    # Zelfs een leeg profiel geeft een niet-nul baseline (labelscore 0.5 default)
+    assert profile_baseline_influence(_Empty()) > 0.0
+
+
+def test_rankings_profile_only_competitor_gets_baseline_influence(seed_data):
+    """
+    Een concurrent met alleen een profiel (geen prijshistorie) krijgt een
+    niet-nul influence_score op basis van het profiel, en de explanation en
+    evidence maken het onderscheid ('profiel' vs 'prijshistorie') expliciet.
+    """
+    from engine.competition_rankings import run_competitor_rankings
+
+    comp_new = f"{PFX}-nieuw.nl"
+    sid = seed_data["shop_id"]
+    db = SessionLocal()
+    try:
+        db.add(models.CompetitorProfile(
+            competitor_name=comp_new,
+            shop_id=sid,
+            run_date=seed_data["today"],
+            functional_overlap_score=0.7,
+            relevance_label="MONITOR",
+            in_stock_rate=0.85,
+        ))
+        db.commit()
+
+        # Zorg dat er CIS-rijen zijn voor de concurrenten mét prijshistorie
+        run_cis_engine(db, ref_date=seed_data["today"], sku_ids=[SKU_A, SKU_B])
+        run_competitor_rankings(db, ref_date=seed_data["today"], shop_id=sid)
+
+        rows = db.query(models.CompetitorRanking).filter(
+            models.CompetitorRanking.shop_id == sid,
+            models.CompetitorRanking.run_date == seed_data["today"],
+            models.CompetitorRanking.scope == "overall",
+        ).all()
+        by_name = {r.competitor_name: r for r in rows}
+
+        # Profiel-only concurrent: niet-nul influence, basis = profiel
+        assert comp_new in by_name, f"{comp_new} ontbreekt in rankings: {list(by_name)}"
+        r_new = by_name[comp_new]
+        assert (r_new.influence_score or 0) > 0.0, (
+            "Influence-score blijft 0 voor concurrent zonder prijshistorie"
+        )
+        assert (r_new.evidence or {}).get("influence_basis") == "profiel"
+        assert "profiel" in (r_new.explanation or ""), r_new.explanation
+        assert "prijshistorie" in (r_new.explanation or ""), r_new.explanation
+
+        # Concurrent mét prijshistorie: basis = prijshistorie
+        assert COMP_1 in by_name
+        r_hist = by_name[COMP_1]
+        assert (r_hist.evidence or {}).get("influence_basis") == "prijshistorie"
+        assert "prijshistorie" in (r_hist.explanation or "")
+    finally:
+        db.query(models.CompetitorProfile).filter(
+            models.CompetitorProfile.competitor_name == comp_new,
+            models.CompetitorProfile.shop_id == sid,
+        ).delete(synchronize_session=False)
+        db.commit()
+        db.close()

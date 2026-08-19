@@ -116,6 +116,41 @@ def get_layer_label(layer: str) -> str:
     }.get(layer, layer)
 
 
+# ── Profiel-baseline (geen prijshistorie) ───────────────────────────────────
+
+_RELEVANCE_LABEL_SCORE = {"HIGH": 0.9, "MONITOR": 0.6, "LOW": 0.3}
+
+
+def profile_baseline_influence(profile) -> float:
+    """
+    Baseline-influence (0..1) voor een concurrent met een profiel maar zónder
+    prijshistorie. Gebaseerd op profiel alleen:
+      - functional_overlap_score (0..1)
+      - relevance_label (HIGH/MONITOR/LOW)
+      - in_stock_rate (0..1 of 0..100)
+
+    Zo krijgen pas ontdekte concurrenten (of concurrenten waarvan de feed nog
+    niet draait) nooit stilletjes een Influence van 0 in de rankings.
+    """
+    overlap = float(profile.functional_overlap_score or 0.0)
+    if overlap > 1.0:
+        overlap = min(1.0, overlap / 100.0)
+
+    label = (profile.relevance_label or "").upper()
+    label_score = _RELEVANCE_LABEL_SCORE.get(label, 0.5)
+
+    in_stock = profile.in_stock_rate
+    if in_stock is None:
+        in_stock = 0.7
+    else:
+        in_stock = float(in_stock)
+        if in_stock > 1.0:
+            in_stock = min(1.0, in_stock / 100.0)
+
+    baseline = 0.5 * overlap + 0.3 * label_score + 0.2 * in_stock
+    return round(min(1.0, max(0.0, baseline)), 4)
+
+
 # ── DB-schrijfende engine ────────────────────────────────────────────────────
 
 _WINDOW_DAYS = 30   # aantal dagen prijshistorie om op te baseren

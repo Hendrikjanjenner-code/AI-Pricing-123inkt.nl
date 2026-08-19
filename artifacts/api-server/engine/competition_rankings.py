@@ -19,6 +19,7 @@ from datetime import date
 from sqlalchemy.orm import Session
 
 import models
+from engine.competitor_influence import profile_baseline_influence
 
 MODEL_VERSION = "rankings-v1.0.0"
 
@@ -123,7 +124,18 @@ def _run_for_shop(db: Session, today: date, sid: int) -> int:
         freq = min(1.0, float(prof.price_change_frequency or 0) / 100.0) if prof else 0.0
         price_relevance = round(0.70 * pricing_rel + 0.30 * freq, 4)
 
-        influence = round(_norm(_avg(cis_by_comp.get(name, []))), 4)
+        cis_values = cis_by_comp.get(name, [])
+        if cis_values:
+            influence = round(_norm(_avg(cis_values)), 4)
+            influence_basis = "prijshistorie"
+        elif prof is not None:
+            # Geen prijshistorie: baseline op basis van profiel alleen, zodat
+            # pas ontdekte concurrenten niet stilletjes op Influence 0 blijven.
+            influence = profile_baseline_influence(prof)
+            influence_basis = "profiel"
+        else:
+            influence = 0.0
+            influence_basis = "geen_data"
 
         combined = round(
             W_COMPETITION_RELEVANCE * competition_relevance
@@ -137,6 +149,7 @@ def _run_for_shop(db: Session, today: date, sid: int) -> int:
             "avg_pricing_relevance": round(pricing_rel, 4),
             "price_change_frequency": float(prof.price_change_frequency or 0) if prof else 0,
             "avg_cis_score": influence,
+            "influence_basis": influence_basis,
             "cis_sku_count": cis_count_by_comp.get(name, 0),
             "category_rows_used": len(scope_rows),
             "weights": {
@@ -169,11 +182,21 @@ def _run_for_shop(db: Session, today: date, sid: int) -> int:
             datapunten = ev["cis_sku_count"] + ev["category_rows_used"]
             confidence = round(min(0.95, 0.35 + 0.05 * min(datapunten, 12)), 2)
 
+            if ev.get("influence_basis") == "profiel":
+                influence_uitleg = (
+                    f"Influence-score op basis van profiel (geen prijshistorie beschikbaar); "
+                    f"gebaseerd op {ev['category_rows_used']} categoriescores."
+                )
+            else:
+                influence_uitleg = (
+                    f"Influence-score op basis van prijshistorie; gebaseerd op "
+                    f"{ev['category_rows_used']} categoriescores en "
+                    f"{ev['cis_sku_count']} SKU-invloedscores."
+                )
             explanation = (
                 f"{name} staat op rank {idx} in scope '{scope}' met gecombineerde score {comb:.2f} "
                 f"(competition relevance {cr:.2f}, price relevance {pr:.2f}, influence {infl:.2f}). "
-                f"Gebaseerd op {ev['category_rows_used']} categoriescores en "
-                f"{ev['cis_sku_count']} SKU-invloedscores."
+                + influence_uitleg
                 + (f" Vorige rank: {prev}." if prev else " Nieuw in de ranking.")
             )
 
