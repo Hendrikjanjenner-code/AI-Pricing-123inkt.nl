@@ -36,18 +36,6 @@ def get_sku_concurrentie(
     if laatste_datum:
         scores = [s for s in scores if s.run_date == laatste_datum]
 
-    # Gewogen mediaanreferentieprijs op basis van CIS-gewogen concurrenten
-    actieve = [s for s in scores if s.status == "Actief" and s.competitor_price is not None]
-    gewogen_ref = None
-    if actieve:
-        totaal_gewicht = sum(float(s.competitor_weight or s.cis_score or 0) for s in actieve)
-        if totaal_gewicht > 0:
-            gewogen_ref = round(
-                sum(float(s.competitor_price) * float(s.competitor_weight or s.cis_score or 0) for s in actieve)
-                / totaal_gewicht,
-                4
-            )
-
     # Recentste voorraad/levertijd per concurrent uit de dagelijkse feed-facts
     fact_rows = (
         db.query(FactCompetitorPriceDaily)
@@ -68,9 +56,30 @@ def get_sku_concurrentie(
                 "waargenomen_op": f.observed_at.isoformat() if f.observed_at else None,
             }
 
+    # Gewogen mediaanreferentieprijs op basis van CIS-gewogen concurrenten.
+    # Niet-leverbare concurrenten (op_voorraad=False) tellen niet mee;
+    # onbekende voorraad (None) telt wél mee (§task-116).
+    def _uit_voorraad(s) -> bool:
+        return beschikbaarheid.get(s.competitor_name, {}).get("op_voorraad") is False
+
+    actieve = [
+        s for s in scores
+        if s.status == "Actief" and s.competitor_price is not None and not _uit_voorraad(s)
+    ]
+    gewogen_ref = None
+    if actieve:
+        totaal_gewicht = sum(float(s.competitor_weight or s.cis_score or 0) for s in actieve)
+        if totaal_gewicht > 0:
+            gewogen_ref = round(
+                sum(float(s.competitor_price) * float(s.competitor_weight or s.cis_score or 0) for s in actieve)
+                / totaal_gewicht,
+                4
+            )
+
     concurrenten = []
     for s in scores:
         besch = beschikbaarheid.get(s.competitor_name, {})
+        uitgesloten = besch.get("op_voorraad") is False
         concurrenten.append({
             "id": s.id,
             "concurrent": s.competitor_name,
@@ -87,6 +96,9 @@ def get_sku_concurrentie(
             "concurrent_gewicht": round(float(s.competitor_weight or 0), 3),
             # Voorraad & levertijd uit de meest recente feed-waarneming
             "op_voorraad": besch.get("op_voorraad"),
+            # Uitsluiting van de gewogen referentieprijs
+            "uitgesloten_van_referentie": uitgesloten,
+            "uitsluitingsreden": "COMPETITOR_IGNORED_OUT_OF_STOCK" if uitgesloten else None,
             "levertijd_dagen": besch.get("levertijd_dagen"),
             "waargenomen_op": besch.get("waargenomen_op"),
             # CSRS sub-scores

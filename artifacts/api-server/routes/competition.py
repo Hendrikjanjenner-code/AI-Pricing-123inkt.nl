@@ -163,7 +163,12 @@ def get_sku_competition_detail(
             price = float(c.price) if c.price else None
             is_excluded = False
             exclusion_reason = None
-            if ref_price and price:
+            if c.in_stock is False:
+                # Niet-leverbare concurrent telt niet mee in de referentieprijs;
+                # onbekende voorraad (None) telt wél mee (§task-116).
+                is_excluded = True
+                exclusion_reason = "COMPETITOR_IGNORED_OUT_OF_STOCK"
+            elif ref_price and price:
                 deviation = abs(price - ref_price) / (ref_price + 0.001)
                 if deviation > 0.30:
                     is_excluded = True

@@ -212,6 +212,11 @@ export default function SkuConcurrentieAnalyse() {
                           }`}>
                             {c.op_voorraad === true ? "Op voorraad" : c.op_voorraad === false ? "Niet op voorraad" : "Voorraad onbekend"}
                           </Badge>
+                          {c.uitgesloten_van_referentie && (
+                            <Badge variant="outline" className="text-[10px] bg-red-500/10 text-red-600 border-red-200">
+                              Uitgesloten van referentieprijs
+                            </Badge>
+                          )}
                           <Badge variant="outline" className="text-[10px] bg-slate-100 text-slate-600 border-slate-200">
                             {c.levertijd_dagen != null
                               ? `Levertijd ${c.levertijd_dagen} ${c.levertijd_dagen === 1 ? "dag" : "dgn"}`

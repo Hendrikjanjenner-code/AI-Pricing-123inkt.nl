@@ -772,13 +772,20 @@ def score_competition(db: Session) -> int:
     from engine.competition_intelligence import rejected_pairs
     rejected = rejected_pairs(db)
     by_sku: dict[str, list[float]] = {}
+    # Niet-leverbare concurrenten (in_stock=False) tellen niet mee in de
+    # referentieprijs; onbekende voorraad (None) telt wél mee (§task-116).
+    out_of_stock_by_sku: dict[str, int] = {}
     rows = db.query(
         models.FactCompetitorPriceDaily.sku_id,
         models.FactCompetitorPriceDaily.competitor_name,
         models.FactCompetitorPriceDaily.price,
+        models.FactCompetitorPriceDaily.in_stock,
     ).filter(models.FactCompetitorPriceDaily.date == today).all()
-    for sku_id, competitor_name, price in rows:
+    for sku_id, competitor_name, price, in_stock in rows:
         if price is None or (sku_id, competitor_name) in rejected:
+            continue
+        if in_stock is False:
+            out_of_stock_by_sku[sku_id] = out_of_stock_by_sku.get(sku_id, 0) + 1
             continue
         by_sku.setdefault(sku_id, []).append(float(price))
 
@@ -794,6 +801,11 @@ def score_competition(db: Session) -> int:
         ref_price, used, excluded, reasons = ce.calculate_reference_price(prices)
         if ref_price is None or used == 0:
             continue
+        oos = out_of_stock_by_sku.get(sku_id, 0)
+        if oos:
+            excluded += oos
+            reasons = dict(reasons or {})
+            reasons[ce.EXCLUSION_OUT_OF_STOCK] = reasons.get(ce.EXCLUSION_OUT_OF_STOCK, 0) + oos
 
         own = float(prod.current_price) if prod.current_price else None
         price_index = round(own / ref_price, 4) if own and ref_price else None
