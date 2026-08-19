@@ -1163,3 +1163,176 @@ class TestResponseStructure:
         assert resp.status_code == 200
         for issue in resp.json():
             assert issue["severity"] == "error"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ROLLEN: viewer read-only scan, registry-schrijven alleen admin/pricing_manager
+# ══════════════════════════════════════════════════════════════════════════════
+
+VIEWER_LOGIN = {"username": "dev_viewer", "password": "viewer123"}
+
+
+@pytest.fixture(scope="module")
+def viewer_auth(client):
+    resp = client.post("/api/auth/login", json=VIEWER_LOGIN)
+    if resp.status_code != 200:
+        # Maak het viewer-account aan als het (nog) niet bestaat
+        import auth as auth_utils
+        db = SessionLocal()
+        try:
+            if not db.query(models.User).filter(
+                    models.User.username == VIEWER_LOGIN["username"]).first():
+                db.add(models.User(
+                    username=VIEWER_LOGIN["username"],
+                    email=f"{VIEWER_LOGIN['username']}@example.com",
+                    hashed_password=auth_utils.hash_password(VIEWER_LOGIN["password"]),
+                    role="viewer",
+                ))
+                db.commit()
+        finally:
+            db.close()
+        resp = client.post("/api/auth/login", json=VIEWER_LOGIN)
+    assert resp.status_code == 200, resp.text
+    return {"Authorization": f"Bearer {resp.json()['token']}"}
+
+
+ANALYST_LOGIN = {"username": "dev_analyst_dq70", "password": "analyst123"}
+
+
+def _login_or_create(client, login, role):
+    resp = client.post("/api/auth/login", json=login)
+    if resp.status_code != 200:
+        import auth as auth_utils
+        db = SessionLocal()
+        try:
+            if not db.query(models.User).filter(
+                    models.User.username == login["username"]).first():
+                db.add(models.User(
+                    username=login["username"],
+                    email=f"{login['username']}@example.com",
+                    hashed_password=auth_utils.hash_password(login["password"]),
+                    role=role,
+                ))
+                db.commit()
+        finally:
+            db.close()
+        resp = client.post("/api/auth/login", json=login)
+    assert resp.status_code == 200, resp.text
+    return {"Authorization": f"Bearer {resp.json()['token']}"}
+
+
+@pytest.fixture(scope="module")
+def analyst_auth(client):
+    return _login_or_create(client, ANALYST_LOGIN, "analyst")
+
+
+class TestViewerReadOnlyScan:
+    def test_viewer_can_scan_but_does_not_write_registry(self, client, auth, viewer_auth):
+        """Een viewer-GET mag de scan zien, maar mag statussen in de registry
+        niet overschrijven (geen upsert/auto-resolve)."""
+        db = SessionLocal()
+        code = f"{PFX}-VIEWER-RO"
+        try:
+            # Zet een kunstmatige registry-rij op 'in_behandeling' die niet
+            # meer gedetecteerd wordt — een schrijvende scan zou hem
+            # auto-resolven naar 'opgelost'.
+            row = models.DataQualityIssue(
+                issue_code=code, title="t", message="m", severity="info",
+                source="Test", module="Test", affected_count=1,
+                status="in_behandeling",
+                first_detected_at=datetime.utcnow(),
+                last_detected_at=datetime.utcnow(),
+            )
+            db.add(row)
+            db.commit()
+            row_id = row.id
+
+            resp = client.get("/api/data-quality", headers=viewer_auth)
+            assert resp.status_code == 200, resp.text
+
+            db.expire_all()
+            after = db.query(models.DataQualityIssue).filter(
+                models.DataQualityIssue.id == row_id).first()
+            assert after is not None
+            assert after.status == "in_behandeling", (
+                "Viewer-scan mag registry-statussen niet wijzigen; "
+                f"status werd {after.status!r}"
+            )
+
+            # Een admin-scan mag de rij wél auto-resolven
+            resp = client.get("/api/data-quality", headers=auth)
+            assert resp.status_code == 200
+            db.expire_all()
+            after = db.query(models.DataQualityIssue).filter(
+                models.DataQualityIssue.id == row_id).first()
+            assert after.status == "opgelost", (
+                "Admin-scan hoort verdwenen detecties te auto-resolven"
+            )
+        finally:
+            db.query(models.DataQualityIssue).filter(
+                models.DataQualityIssue.issue_code == code
+            ).delete(synchronize_session=False)
+            db.commit()
+            db.close()
+
+    def test_viewer_can_list_issues(self, client, viewer_auth):
+        resp = client.get("/api/data-quality/issues", headers=viewer_auth)
+        assert resp.status_code == 200
+        assert isinstance(resp.json(), list)
+
+    def test_viewer_cannot_patch_issue(self, client, auth, viewer_auth):
+        db = SessionLocal()
+        code = f"{PFX}-VIEWER-PATCH"
+        try:
+            row = models.DataQualityIssue(
+                issue_code=code, title="t", message="m", severity="info",
+                source="Test", module="Test", affected_count=1, status="open",
+                first_detected_at=datetime.utcnow(),
+                last_detected_at=datetime.utcnow(),
+            )
+            db.add(row)
+            db.commit()
+            resp = client.patch(
+                f"/api/data-quality/issues/{row.id}",
+                json={"status": "genegeerd"}, headers=viewer_auth)
+            assert resp.status_code == 403
+        finally:
+            db.query(models.DataQualityIssue).filter(
+                models.DataQualityIssue.issue_code == code
+            ).delete(synchronize_session=False)
+            db.commit()
+            db.close()
+
+    def test_analyst_cannot_patch_issue(self, client, analyst_auth):
+        """Schrijven op de issue-workflow is voorbehouden aan admin/pricing_manager;
+        ook een analyst krijgt 403 voor status- én owner-wijzigingen."""
+        db = SessionLocal()
+        code = f"{PFX}-ANALYST-PATCH"
+        try:
+            row = models.DataQualityIssue(
+                issue_code=code, title="t", message="m", severity="info",
+                source="Test", module="Test", affected_count=1, status="open",
+                first_detected_at=datetime.utcnow(),
+                last_detected_at=datetime.utcnow(),
+            )
+            db.add(row)
+            db.commit()
+            row_id = row.id
+            resp = client.patch(
+                f"/api/data-quality/issues/{row_id}",
+                json={"status": "genegeerd"}, headers=analyst_auth)
+            assert resp.status_code == 403
+            resp = client.patch(
+                f"/api/data-quality/issues/{row_id}",
+                json={"owner": "iemand"}, headers=analyst_auth)
+            assert resp.status_code == 403
+            db.expire_all()
+            after = db.query(models.DataQualityIssue).filter(
+                models.DataQualityIssue.id == row_id).first()
+            assert after.status == "open" and after.owner is None
+        finally:
+            db.query(models.DataQualityIssue).filter(
+                models.DataQualityIssue.issue_code == code
+            ).delete(synchronize_session=False)
+            db.commit()
+            db.close()

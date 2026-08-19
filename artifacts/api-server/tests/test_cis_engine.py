@@ -410,18 +410,19 @@ def test_combined_score_differs_with_vs_without_cis(seed_data):
             if infl_with <= 0 or name not in without_cis:
                 continue
             comb_without, infl_without = without_cis[name]
-            assert infl_without == 0.0, (
-                f"Influence van {name} is {infl_without} zonder CIS-rijen; verwacht 0"
-            )
-            assert comb_with != comb_without, (
-                f"REGRESSIE: combined_score van {name} identiek met en zonder CIS-data "
-                f"({comb_with}) — de Influence-factor telt niet meer mee"
-            )
-            expected_delta = W_INFLUENCE * infl_with
+            # Zonder CIS-rijen valt Influence terug op de profiel-baseline
+            # (of 0 zonder profiel) — niet langer hard 0 (zie taak
+            # "Influence-score niet stilletjes terug naar 0").
+            expected_delta = W_INFLUENCE * (infl_with - infl_without)
             assert abs((comb_with - comb_without) - expected_delta) < 0.001, (
                 f"combined_score-verschil {comb_with - comb_without:.4f} wijkt af van "
-                f"W_INFLUENCE*influence = {expected_delta:.4f} voor {name}"
+                f"W_INFLUENCE*(Δinfluence) = {expected_delta:.4f} voor {name}"
             )
+            if abs(infl_with - infl_without) > 1e-9:
+                assert comb_with != comb_without, (
+                    f"REGRESSIE: combined_score van {name} identiek met en zonder CIS-data "
+                    f"({comb_with}) — de Influence-factor telt niet meer mee"
+                )
     finally:
         # Herstel CIS-data voor volgende tests in de module
         try:

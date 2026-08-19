@@ -31,6 +31,10 @@ FAILED_IMPORT_WINDOW_DAYS = 14
 
 VALID_ISSUE_STATUSES = {"open", "in_behandeling", "genegeerd", "opgelost"}
 
+# Alleen deze rollen mogen de issue-registry beschrijven (upsert/auto-resolve)
+# tijdens een scan; alle andere rollen (bv. viewer) krijgen een read-only scan.
+REGISTRY_WRITE_ROLES = {"admin", "pricing_manager"}
+
 
 def _issue(code: str, severity: str, title: str, message: str, count: int,
            source: str, module: str, impact: str, action: str) -> dict:
@@ -482,7 +486,11 @@ def get_data_quality(
 ):
     total_skus = db.query(models.DimProduct).count()
     detected = _detect_issues(db, total_skus)
-    registry = _sync_issue_registry(db, detected)
+    if current_user.role in REGISTRY_WRITE_ROLES:
+        registry = _sync_issue_registry(db, detected)
+    else:
+        # Read-only scan: verrijk met bestaande registry-rijen zonder te schrijven
+        registry = {r.issue_code: r for r in db.query(models.DataQualityIssue).all()}
 
     # Verrijk detecties met workflow-status uit het register
     issues = []
@@ -556,7 +564,7 @@ def update_quality_issue(
     issue_id: int,
     body: IssueUpdateRequest,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager", "analyst")),
+    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
     """Workflow-update: eigenaar toewijzen en/of status wijzigen."""
     row = db.query(models.DataQualityIssue).filter(models.DataQualityIssue.id == issue_id).first()
