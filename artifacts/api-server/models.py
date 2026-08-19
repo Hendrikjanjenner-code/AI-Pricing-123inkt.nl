@@ -8,7 +8,27 @@ from sqlalchemy import (
     ForeignKey, Date, Numeric, JSON, Index, text, UniqueConstraint, Computed
 )
 from sqlalchemy.dialects.postgresql import TSVECTOR
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import relationship
+from sqlalchemy.schema import CreateColumn, CreateIndex
+
+
+@compiles(CreateColumn, "sqlite")
+def _skip_pg_only_columns(element, compiler, **kw):
+    """Sla Postgres-specifieke kolommen (tsvector + generated column) over in
+    SQLite-DDL, zodat testsuites die een verse SQLite-DB aanmaken niet crashen
+    op onbekende types/functies. Markeer zulke kolommen met info={'pg_only'}."""
+    if element.element.info.get("pg_only"):
+        return None
+    return compiler.visit_create_column(element, **kw)
+
+
+@compiles(CreateIndex, "sqlite")
+def _skip_pg_only_indexes(element, compiler, **kw):
+    """Idem voor indexen op pg_only-kolommen (bv. de GIN-index op de tsvector)."""
+    if element.element.info.get("pg_only"):
+        return "SELECT 1"  # no-op DDL: SQLite kent de kolom niet
+    return compiler.visit_create_index(element, **kw)
 from database import Base
 
 
@@ -2459,7 +2479,8 @@ class AiFeedback(Base):
         UniqueConstraint("message_id", "user_id", name="uq_ai_feedback_msg_user"),
         # GIN-index op de opgeslagen tsvector: houdt few-shot retrieval snel
         # bij duizenden feedbackrijen (geen to_tsvector per rij meer).
-        Index("ix_ai_feedback_question_tsv", "question_tsv", postgresql_using="gin"),
+        Index("ix_ai_feedback_question_tsv", "question_tsv", postgresql_using="gin",
+              info={"pg_only": True}),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -2479,6 +2500,7 @@ class AiFeedback(Base):
     question_tsv = Column(
         TSVECTOR,
         Computed("to_tsvector('dutch', coalesce(question, ''))", persisted=True),
+        info={"pg_only": True},  # niet aanmaken in SQLite-test-DB's
     )
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

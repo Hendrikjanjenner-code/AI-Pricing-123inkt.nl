@@ -737,6 +737,19 @@ class TestFeedUnreachable:
             .scalar())
         recent_success = (last_ok is not None
                           and (datetime.utcnow() - last_ok) <= timedelta(hours=24))
+        # De detector kijkt alleen naar de méést recente sync-poging. Op een
+        # dev-DB met echte feed-data kan er een nieuwere (geslaagde) job
+        # bestaan dan onze 2 dagen oude seed; dan is dit scenario niet
+        # opbouwbaar en slaan we de test over (§test-suite-conventies).
+        newest = (
+            db.query(models.ImportJob)
+            .filter(models.ImportJob.upload_type == "api_sync_priceshape")
+            .order_by(models.ImportJob.created_at.desc())
+            .first())
+        if newest is not None and newest.id != fail_id:
+            self._cleanup(db, fail_id)
+            pytest.skip("Dev-DB bevat een recentere echte sync-job; scenario "
+                        "'oude mislukking zonder nieuwe pogingen' niet opbouwbaar")
         try:
             detected = _detect_issues(db, db.query(models.DimProduct).count())
             issue = next(d for d in detected if d["issue_code"] == "FEED_UNREACHABLE")

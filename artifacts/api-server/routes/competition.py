@@ -155,6 +155,9 @@ def get_sku_competition_detail(
         .all()
     )
 
+    from services import import_settings as imps
+    imp_settings = imps.get_settings(db)
+
     seen: set = set()
     competitor_detail = []
     ref_price = float(score.reference_price) if score and score.reference_price else None
@@ -169,6 +172,11 @@ def get_sku_competition_detail(
                 # onbekende voorraad (None) telt wél mee (§task-116).
                 is_excluded = True
                 exclusion_reason = "COMPETITOR_IGNORED_OUT_OF_STOCK"
+            elif imps.delivery_excluded(imp_settings, c.delivery_days):
+                # Onwerkbaar lange levertijd telt niet mee in de referentieprijs;
+                # onbekende levertijd (None) telt wél mee (§task-174).
+                is_excluded = True
+                exclusion_reason = "COMPETITOR_IGNORED_BAD_DELIVERY"
             elif ref_price and price:
                 deviation = abs(price - ref_price) / (ref_price + 0.001)
                 if deviation > 0.30:

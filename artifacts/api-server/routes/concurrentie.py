@@ -59,12 +59,23 @@ def get_sku_concurrentie(
     # Gewogen mediaanreferentieprijs op basis van CIS-gewogen concurrenten.
     # Niet-leverbare concurrenten (op_voorraad=False) tellen niet mee;
     # onbekende voorraad (None) telt wél mee (§task-116).
-    def _uit_voorraad(s) -> bool:
-        return beschikbaarheid.get(s.competitor_name, {}).get("op_voorraad") is False
+    # Concurrenten met onwerkbaar lange levertijd (> drempel) tellen evenmin
+    # mee; onbekende levertijd (None) telt wél mee (§task-174).
+    from services import import_settings as imps
+    imp_settings = imps.get_settings(db)
+
+    def _uitsluitingsreden(naam: str):
+        besch = beschikbaarheid.get(naam, {})
+        if besch.get("op_voorraad") is False:
+            return "COMPETITOR_IGNORED_OUT_OF_STOCK"
+        if imps.delivery_excluded(imp_settings, besch.get("levertijd_dagen")):
+            return "COMPETITOR_IGNORED_BAD_DELIVERY"
+        return None
 
     actieve = [
         s for s in scores
-        if s.status == "Actief" and s.competitor_price is not None and not _uit_voorraad(s)
+        if s.status == "Actief" and s.competitor_price is not None
+        and _uitsluitingsreden(s.competitor_name) is None
     ]
     gewogen_ref = None
     if actieve:
@@ -79,7 +90,8 @@ def get_sku_concurrentie(
     concurrenten = []
     for s in scores:
         besch = beschikbaarheid.get(s.competitor_name, {})
-        uitgesloten = besch.get("op_voorraad") is False
+        reden = _uitsluitingsreden(s.competitor_name)
+        uitgesloten = reden is not None
         concurrenten.append({
             "id": s.id,
             "concurrent": s.competitor_name,
@@ -98,7 +110,7 @@ def get_sku_concurrentie(
             "op_voorraad": besch.get("op_voorraad"),
             # Uitsluiting van de gewogen referentieprijs
             "uitgesloten_van_referentie": uitgesloten,
-            "uitsluitingsreden": "COMPETITOR_IGNORED_OUT_OF_STOCK" if uitgesloten else None,
+            "uitsluitingsreden": reden,
             "levertijd_dagen": besch.get("levertijd_dagen"),
             "waargenomen_op": besch.get("waargenomen_op"),
             # CSRS sub-scores

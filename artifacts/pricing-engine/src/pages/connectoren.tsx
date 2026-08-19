@@ -94,6 +94,7 @@ function StatusDot({ status }: { status: ConnStatus | null | undefined }) {
 interface ImportSettings {
   components: Record<string, boolean>;
   component_labels: Record<string, string>;
+  max_delivery_days: number | null;
   disabled_competitors: string[];
   competitors: { name: string; enabled: boolean }[];
   updated_by: string | null;
@@ -162,6 +163,7 @@ function ImportSettingsPanel() {
         body: JSON.stringify({
           components: settings.components,
           disabled_competitors: settings.disabled_competitors,
+          max_delivery_days: settings.max_delivery_days,
         }),
       });
       if (!resp.ok) {
@@ -212,6 +214,30 @@ function ImportSettingsPanel() {
                     </label>
                   ))}
                 </div>
+              </div>
+
+              <div>
+                <Label className="text-xs font-medium">Levertijd-drempel referentieprijs</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Concurrenten met een langere levertijd (in dagen) tellen niet mee in de
+                  referentieprijs. Leeg laten = geen limiet; onbekende levertijd telt altijd mee.
+                </p>
+                <Input
+                  type="number"
+                  min={1}
+                  className="mt-1.5 h-8 w-32"
+                  placeholder="Geen limiet"
+                  value={settings.max_delivery_days ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSettings((s) => s && ({
+                      ...s,
+                      max_delivery_days: v === "" ? null : Math.max(1, Math.floor(Number(v))),
+                    }));
+                    setDirty(true);
+                    setFeedback(null);
+                  }}
+                />
               </div>
 
               <div>

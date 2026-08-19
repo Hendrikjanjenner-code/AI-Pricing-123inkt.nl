@@ -151,15 +151,21 @@ def _fetch_pg_rows(
     params: dict = {"lim": BATCH_SIZE}
 
     if wm_col:
+        # NULL-watermerken (bv. handmatig ingevoegde rijen zonder created_at)
+        # zouden met een kale (wm, pk) > (:lk_wm, :lk_pk)-vergelijking stil
+        # worden overgeslagen (NULL-vergelijking = unknown). COALESCE ze naar
+        # epoch zodat ze deterministisch vooraan sorteren en meegepagineerd
+        # worden.
+        wm_expr = f"COALESCE(CAST({wm_col} AS TIMESTAMP), TIMESTAMP 'epoch')"
         if since is not None:
             conds.append(f"CAST({wm_col} AS TIMESTAMP) >= :since")
             params["since"] = since
         if last_key is not None:
-            conds.append(
-                f"(CAST({wm_col} AS TIMESTAMP), {pk_col}) > (:lk_wm, :lk_pk)"
-            )
-            params["lk_wm"], params["lk_pk"] = last_key
-        order = f"CAST({wm_col} AS TIMESTAMP), {pk_col}"
+            conds.append(f"({wm_expr}, {pk_col}) > (:lk_wm, :lk_pk)")
+            lk_wm, lk_pk = last_key
+            params["lk_wm"] = lk_wm if lk_wm is not None else datetime(1970, 1, 1)
+            params["lk_pk"] = lk_pk
+        order = f"{wm_expr}, {pk_col}"
     else:
         if last_key is not None:
             conds.append(f"{pk_col} > :lk_pk")

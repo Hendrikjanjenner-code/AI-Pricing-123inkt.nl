@@ -28,6 +28,15 @@ const STATUS_KLEUREN: Record<string, string> = {
   "Negeren": "bg-slate-100 text-slate-500 border-slate-200",
 };
 
+const UITSLUITINGS_LABELS: Record<string, string> = {
+  COMPETITOR_IGNORED_OUT_OF_STOCK: "Niet op voorraad",
+  COMPETITOR_IGNORED_BAD_DELIVERY: "Onaanvaardbare levertijd",
+  COMPETITOR_IGNORED_OUTLIER: "Uitbijterprijs",
+  COMPETITOR_IGNORED_BAD_MATCH: "Slechte overeenkomst",
+  COMPETITOR_IGNORED_LOW_RELEVANCE: "Lage relevantie",
+  COMPETITOR_IGNORED_DIFFERENT_PACK_SIZE: "Andere verpakkingsgrootte",
+};
+
 const LAAG_LABELS: Record<string, string> = {
   direct: "Directe concurrentie",
   functioneel: "Functionele concurrentie",
@@ -214,7 +223,9 @@ export default function SkuConcurrentieAnalyse() {
                           </Badge>
                           {c.uitgesloten_van_referentie && (
                             <Badge variant="outline" className="text-[10px] bg-red-500/10 text-red-600 border-red-200">
-                              Uitgesloten van referentieprijs
+                              {c.uitsluitingsreden && UITSLUITINGS_LABELS[c.uitsluitingsreden]
+                                ? `Uitgesloten: ${UITSLUITINGS_LABELS[c.uitsluitingsreden]}`
+                                : "Uitgesloten van referentieprijs"}
                             </Badge>
                           )}
                           <Badge variant="outline" className="text-[10px] bg-slate-100 text-slate-600 border-slate-200">

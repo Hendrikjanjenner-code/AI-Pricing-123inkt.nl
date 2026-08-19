@@ -779,21 +779,30 @@ def score_competition(db: Session, shop_id: int = 1) -> int:
     by_sku: dict[str, list[float]] = {}
     # Niet-leverbare concurrenten (in_stock=False) tellen niet mee in de
     # referentieprijs; onbekende voorraad (None) telt wél mee (§task-116).
+    # Concurrenten met een onwerkbaar lange levertijd (> drempel) tellen
+    # evenmin mee; onbekende levertijd (None) telt wél mee (§task-174).
+    from services import import_settings as imps
+    settings = imps.get_settings(db)
     out_of_stock_by_sku: dict[str, int] = {}
+    bad_delivery_by_sku: dict[str, int] = {}
     rows = db.query(
         models.FactCompetitorPriceDaily.sku_id,
         models.FactCompetitorPriceDaily.competitor_name,
         models.FactCompetitorPriceDaily.price,
         models.FactCompetitorPriceDaily.in_stock,
+        models.FactCompetitorPriceDaily.delivery_days,
     ).filter(
         models.FactCompetitorPriceDaily.date == today,
         models.FactCompetitorPriceDaily.shop_id == shop_id,
     ).all()
-    for sku_id, competitor_name, price, in_stock in rows:
+    for sku_id, competitor_name, price, in_stock, delivery_days in rows:
         if price is None or (sku_id, competitor_name) in rejected:
             continue
         if in_stock is False:
             out_of_stock_by_sku[sku_id] = out_of_stock_by_sku.get(sku_id, 0) + 1
+            continue
+        if imps.delivery_excluded(settings, delivery_days):
+            bad_delivery_by_sku[sku_id] = bad_delivery_by_sku.get(sku_id, 0) + 1
             continue
         by_sku.setdefault(sku_id, []).append(float(price))
 
@@ -815,6 +824,11 @@ def score_competition(db: Session, shop_id: int = 1) -> int:
             excluded += oos
             reasons = dict(reasons or {})
             reasons[ce.EXCLUSION_OUT_OF_STOCK] = reasons.get(ce.EXCLUSION_OUT_OF_STOCK, 0) + oos
+        bad = bad_delivery_by_sku.get(sku_id, 0)
+        if bad:
+            excluded += bad
+            reasons = dict(reasons or {})
+            reasons[ce.EXCLUSION_BAD_DELIVERY] = reasons.get(ce.EXCLUSION_BAD_DELIVERY, 0) + bad
 
         own = float(prod.current_price) if prod.current_price else None
         price_index = round(own / ref_price, 4) if own and ref_price else None

@@ -38,3 +38,4 @@
 - [Signal dedupe per run](signal-dedupe-per-run.md) — max 1 signaal per dedupe-key per engine-run; uq_signal_active_dedupe komt uit canonical.py, niet uit create_all.
 - [API query-param codegen](api-param-codegen.md) — new query params need route + openapi.yaml + orval regen; client-side filtering over paged results gives wrong totals.
 - [Merge kan constanten stil droppen](merge-dropped-constants.md) — na een taak-rebase eerst greppen of gebruikte constanten nog gedefinieerd zijn; fail-safe fallbacks verzwelgen de NameError.
+- [Postgres-only kolommen vs SQLite-tests](pg-only-columns-sqlite.md) — markeer tsvector/GIN e.d. met info={"pg_only"}; de CreateColumn/CreateIndex-compilers in models.py slaan ze over in SQLite-DDL.

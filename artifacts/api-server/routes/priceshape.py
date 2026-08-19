@@ -553,7 +553,11 @@ async def update_import_settings(
     if not isinstance(components, dict) or not isinstance(disabled, list):
         raise HTTPException(400, "Ongeldige payload: components (object) en disabled_competitors (lijst) verwacht")
     try:
-        settings = imps.save_settings(db, components, disabled, current_user.username)
+        if "max_delivery_days" in payload:
+            settings = imps.save_settings(db, components, disabled, current_user.username,
+                                          max_delivery_days=payload.get("max_delivery_days"))
+        else:
+            settings = imps.save_settings(db, components, disabled, current_user.username)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     _log_audit(db, "feed_import_setting", "priceshape", "update", current_user.username,
