@@ -393,6 +393,29 @@ def run_migrations(engine, metadata) -> None:
             'ON ai_budget_config ((username IS NULL)) '
             'WHERE username IS NULL',
         ),
+        # Run-historie (scheduled_engine_runs) mag een shop-verwijdering nooit
+        # blokkeren: herzet de FK naar ON DELETE CASCADE als hij nog zonder
+        # cascade bestaat (idempotent via DO-blok).
+        (
+            "fk_scheduled_engine_runs_shop_cascade",
+            """
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM pg_constraint c
+                    WHERE c.conname = 'scheduled_engine_runs_shop_id_fkey'
+                      AND c.confdeltype <> 'c'
+                ) THEN
+                    ALTER TABLE scheduled_engine_runs
+                        DROP CONSTRAINT scheduled_engine_runs_shop_id_fkey;
+                    ALTER TABLE scheduled_engine_runs
+                        ADD CONSTRAINT scheduled_engine_runs_shop_id_fkey
+                        FOREIGN KEY (shop_id) REFERENCES dim_shop(id)
+                        ON DELETE CASCADE;
+                END IF;
+            END $$
+            """,
+        ),
     ]
     with engine.connect() as conn:
         for _idx_name, _idx_sql in _MANUAL_INDEXES:

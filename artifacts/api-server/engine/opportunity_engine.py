@@ -204,6 +204,59 @@ def _collect(db: Session, model_version: str, run_date: date, sid: int, cfg: dic
     return opps
 
 
+def _warn_if_forecast_stale(db: Session, run_date: date, sid: int, model_version: str) -> bool:
+    """
+    Waarschuw (signaal + logging) als er voor `run_date` geen forecast-rijen
+    bestaan terwijl er wél oudere forecast-data is. De opportunity-engine
+    aggregeert dan kansen op basis van verouderde (T-2 of ouder) data.
+    Retourneert True als de forecast-data verouderd is.
+    """
+    latest_fc = db.query(func.max(models.FactForecastDaily.run_date)).filter(
+        models.FactForecastDaily.shop_id == sid).scalar()
+    if latest_fc is not None and latest_fc >= run_date:
+        # Verse data: los een eventueel nog actief stale-signaal op, zodat er
+        # geen valse waarschuwing blijft staan na een succesvolle herstel-run.
+        db.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.shop_id == sid,
+            models.IntelligenceSignal.engine == "opportunity",
+            models.IntelligenceSignal.signal_type == "forecast_data_stale",
+            models.IntelligenceSignal.status == "active",
+        ).update({"status": "superseded"}, synchronize_session=False)
+        return False
+
+    if latest_fc is None:
+        lag_days = None
+        severity = "critical"
+        explanation = (f"Er is nog geen enkele forecast-run voor deze shop; de "
+                       f"forecast van vandaag ({run_date}) ontbreekt. De "
+                       "opportunity-engine mist daardoor forecast-gedreven kansen.")
+    else:
+        lag_days = (run_date - latest_fc).days
+        severity = "high" if lag_days == 1 else "critical"
+        explanation = (f"De forecast-run van vandaag ({run_date}) ontbreekt; de meest "
+                       f"recente forecast dateert van {latest_fc} ({lag_days} dag(en) oud). "
+                       "De opportunity-engine aggregeert daardoor kansen op basis van "
+                       "verouderde data.")
+
+    publish_signal(
+        db, shop_id=sid, engine="opportunity", signal_type="forecast_data_stale",
+        entity_type="shop", entity_id=str(sid), entity_name="Forecast-data",
+        severity=severity, direction="negative",
+        metric="forecast_lag_days",
+        current_value=float(lag_days) if lag_days is not None else None,
+        expected_value=0.0,
+        confidence=0.9,
+        explanation=explanation,
+        evidence={"expected_run_date": str(run_date),
+                  "latest_forecast_run_date": str(latest_fc) if latest_fc else None,
+                  "lag_days": lag_days},
+        sources=["fact_forecast_daily"],
+        suggested_action="Controleer de nachtelijke engine-run en herstart scheduled_engines.py",
+        model_version=model_version,
+    )
+    return True
+
+
 def run_opportunity_engine(db: Session, run_date: date | None = None,
                            shop_id: int | None = None) -> Dict[str, Any]:
     run_date = run_date or date.today()
@@ -211,6 +264,10 @@ def run_opportunity_engine(db: Session, run_date: date | None = None,
     model = ensure_active_model(db, "opportunity", description="Centrale opportunity-aggregator",
                                 default_config=OPPORTUNITY_DEFAULT_CONFIG)
     cfg = get_active_config(db, "opportunity", OPPORTUNITY_DEFAULT_CONFIG)
+
+    # Stale-data waakhond (taak 51): waarschuw als de forecast van vandaag
+    # ontbreekt — dan aggregeert deze run kansen op basis van verouderde data.
+    forecast_stale = _warn_if_forecast_stale(db, run_date, sid, model.version)
 
     raw = _collect(db, model.version, run_date, sid, cfg)
 
@@ -273,7 +330,8 @@ def run_opportunity_engine(db: Session, run_date: date | None = None,
                                            "superseded": int(superseded or 0)})
     db.commit()
     return {"opportunities": created, "superseded": int(superseded or 0),
-            "run_date": str(run_date), "shop_id": sid}
+            "run_date": str(run_date), "shop_id": sid,
+            "forecast_stale": forecast_stale}
 
 
 def get_opportunity_dashboard(db: Session, status: str = "open", limit: int = 200,

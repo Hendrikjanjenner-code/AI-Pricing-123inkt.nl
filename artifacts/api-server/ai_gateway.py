@@ -106,6 +106,9 @@ SUMMARY_KEEP_RECENT = 6
 MEMORY_EXTRACT_EVERY = 5
 # Few-shot hergebruik: maximaal N voorbeelden per vraag
 FEWSHOT_LIMIT = 3
+# Minimale ts_rank voordat een FTS-match als few-shot voorbeeld meetelt;
+# filtert toevalstreffers op één enkel veelvoorkomend lexeem weg.
+FTS_MIN_RANK = 0.005
 # Geheugen: maximaal N geheugenitems per gebruiker+organisatie
 MAX_MEMORY_ITEMS = 20
 

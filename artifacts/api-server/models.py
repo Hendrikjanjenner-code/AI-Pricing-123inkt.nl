@@ -331,7 +331,28 @@ class ModelRun(Base):
     error_message = Column(Text)
     run_metadata = Column(JSON)
 
+class ScheduledEngineRun(Base):
+    """
+    Uitkomst per engine per shop per nacht (§ taak 51). scheduled_engines.py
+    registreert hier succes/fout + tijdstip, zodat een herstart dezelfde dag
+    idempotent is: shops/engines met een recente succesvolle run worden
+    overgeslagen en alleen mislukte runs worden opnieuw geprobeerd.
+    """
+    __tablename__ = "scheduled_engine_runs"
 
+    id = Column(Integer, primary_key=True, index=True)
+    run_date = Column(Date, nullable=False, index=True)
+    # ondelete=CASCADE: run-historie is afgeleide administratie en mag een
+    # shop-verwijdering nooit blokkeren.
+    shop_id = Column(Integer, ForeignKey("dim_shop.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    engine_name = Column(String(50), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="running")  # running / success / failed
+    started_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime)
+    duration_seconds = Column(Float)
+    error_message = Column(Text)
+    result_summary = Column(JSON)
 class EngineRun(Base):
     """Run-log van de nachtelijke engines (scheduled_engines.py).
 

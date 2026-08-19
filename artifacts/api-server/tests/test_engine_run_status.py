@@ -49,6 +49,9 @@ def db():
     if shop_ids:
         s.query(models.EngineRun).filter(models.EngineRun.shop_id.in_(shop_ids)).delete(
             synchronize_session=False)
+        s.query(models.ScheduledEngineRun).filter(
+            models.ScheduledEngineRun.shop_id.in_(shop_ids)).delete(
+            synchronize_session=False)
         s.query(models.DimShop).filter(models.DimShop.id.in_(shop_ids)).delete(
             synchronize_session=False)
     s.commit()
@@ -167,8 +170,9 @@ def test_run_engine_logs_success_and_failure(db):
     def broken_engine(session, run_date, shop_id):
         raise RuntimeError("kapot")
 
-    assert _run_engine("basket", ok_engine, db, shop.id) is True
-    assert _run_engine("basket", broken_engine, db, shop.id) is False
+    from datetime import date as _date
+    assert _run_engine("basket", ok_engine, db, models, shop.id, _date.today()) is True
+    assert _run_engine("basket", broken_engine, db, models, shop.id, _date.today()) is False
 
     rows = (db.query(models.EngineRun)
             .filter(models.EngineRun.shop_id == shop.id,
