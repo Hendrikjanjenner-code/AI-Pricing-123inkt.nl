@@ -390,6 +390,94 @@ def list_budget_configs(
     } for r in rows]
 
 
+# ─── Copilot-geheugen: inzien en corrigeren (Task #44) ───────────────────────
+
+MEMORY_MANAGER_ROLES = ("admin", "pricing_manager")
+
+
+def _memory_out(m: models.AiUserMemory) -> dict:
+    return {
+        "id": m.id,
+        "key": m.key,
+        "value": m.value,
+        "scope": "organisatie" if m.user_id is None else "persoonlijk",
+        "source_conversation_id": m.source_conversation_id,
+        "created_at": m.created_at.isoformat() if m.created_at else None,
+        "updated_at": m.updated_at.isoformat() if m.updated_at else None,
+    }
+
+
+def _memory_item_for_edit(
+    db: Session, user: models.User, memory_id: int
+) -> models.AiUserMemory:
+    """Haal een geheugen-item op met RBAC voor bewerken/verwijderen:
+    eigen items altijd; organisatie-items (user_id NULL) alleen voor
+    admin/pricing_manager. Items van andere gebruikers → 404 (geen lek)."""
+    row = db.query(models.AiUserMemory).filter(
+        models.AiUserMemory.id == memory_id).first()
+    if not row or (row.user_id is not None and row.user_id != user.id):
+        raise HTTPException(status_code=404, detail="Geheugen-item niet gevonden")
+    if row.user_id is None and user.role not in MEMORY_MANAGER_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail="Organisatie-brede geheugen-items kunnen alleen door "
+                   "admin of pricing_manager worden beheerd",
+        )
+    return row
+
+
+@router.get("/memory")
+def list_memory(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """Wat de Copilot over je onthoudt: eigen items + organisatie-brede items.
+    `editable` geeft aan of de huidige gebruiker het item mag wijzigen."""
+    rows = (db.query(models.AiUserMemory)
+            .filter((models.AiUserMemory.user_id == current_user.id) |
+                    (models.AiUserMemory.user_id.is_(None)))
+            .order_by(desc(models.AiUserMemory.updated_at)).all())
+    can_manage_org = current_user.role in MEMORY_MANAGER_ROLES
+    out = []
+    for r in rows:
+        item = _memory_out(r)
+        item["editable"] = r.user_id is not None or can_manage_org
+        out.append(item)
+    return out
+
+
+@router.put("/memory/{memory_id}")
+def update_memory(
+    memory_id: int,
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """Corrigeer een geheugen-item (eigen items; organisatie-items admin/pm)."""
+    row = _memory_item_for_edit(db, current_user, memory_id)
+    value = ai_gateway.pii_scrub((payload.get("value") or "").strip())[:2000]
+    if not value:
+        raise HTTPException(status_code=400, detail="value is verplicht")
+    row.value = value
+    row.updated_at = models.datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    return _memory_out(row)
+
+
+@router.delete("/memory/{memory_id}")
+def delete_memory(
+    memory_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """Verwijder een geheugen-item (eigen items; organisatie-items admin/pm)."""
+    row = _memory_item_for_edit(db, current_user, memory_id)
+    db.delete(row)
+    db.commit()
+    return {"message": "Geheugen-item verwijderd"}
+
+
 # ─── Leerloop: feedback, FAQ en kwaliteitsdashboard ──────────────────────────
 
 @router.post("/messages/{message_id}/feedback")

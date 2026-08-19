@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Bot, Send, Plus, Trash2, Sparkles, AlertTriangle, Info,
   Database, Clock, Link2, Loader2, ShieldCheck, ThumbsUp, ThumbsDown,
+  Brain, Pencil,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -117,6 +118,170 @@ function FeedbackButtons({ messageId }: { messageId: number }) {
             Verstuur
           </Button>
         </form>
+      )}
+    </div>
+  );
+}
+
+type MemoryItem = {
+  id: number;
+  key: string;
+  value: string;
+  scope: "persoonlijk" | "organisatie";
+  editable: boolean;
+  updated_at?: string | null;
+};
+
+function MemorySection() {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<MemoryItem[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [busyId, setBusyId] = useState<number | null>(null);
+
+  const load = async () => {
+    setError(null);
+    try {
+      const res = await fetch(`${BASE}/api/copilot/memory`, { headers: getAuthHeaders() });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setItems((await res.json()) as MemoryItem[]);
+    } catch {
+      setError("Geheugen kon niet worden geladen.");
+    }
+  };
+
+  useEffect(() => {
+    if (open && items == null) void load();
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const remove = async (id: number) => {
+    setBusyId(id);
+    try {
+      const res = await fetch(`${BASE}/api/copilot/memory/${id}`, {
+        method: "DELETE",
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setItems((prev) => (prev || []).filter((i) => i.id !== id));
+    } catch {
+      setError("Verwijderen mislukt.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const saveEdit = async (id: number) => {
+    const value = editValue.trim();
+    if (!value) return;
+    setBusyId(id);
+    try {
+      const res = await fetch(`${BASE}/api/copilot/memory/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({ value }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const updated = (await res.json()) as MemoryItem;
+      setItems((prev) =>
+        (prev || []).map((i) => (i.id === id ? { ...i, value: updated.value } : i)),
+      );
+      setEditingId(null);
+    } catch {
+      setError("Opslaan mislukt.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="rounded-md border bg-muted/30 p-2 text-[11px] leading-snug">
+      <button
+        type="button"
+        className="flex w-full items-center gap-1 font-medium text-foreground"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Brain className="h-3 w-3" /> Wat de Copilot over je onthoudt
+        <span className="ml-auto text-muted-foreground">{open ? "−" : "+"}</span>
+      </button>
+      {open && (
+        <div className="mt-2 space-y-1.5">
+          {error && <p className="text-destructive">{error}</p>}
+          {items == null && !error && <Skeleton className="h-10 w-full" />}
+          {items != null && items.length === 0 && (
+            <p className="text-muted-foreground">
+              Nog niets onthouden. De Copilot leert duurzame voorkeuren uit je gesprekken.
+            </p>
+          )}
+          {(items || []).map((m) => (
+            <div key={m.id} className="rounded border bg-background p-1.5">
+              <div className="flex items-start gap-1.5">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1">
+                    <span className="truncate font-medium">{m.key}</span>
+                    {m.scope === "organisatie" && (
+                      <Badge variant="outline" className="h-4 px-1 text-[9px]">
+                        organisatie
+                      </Badge>
+                    )}
+                  </div>
+                  {editingId === m.id ? (
+                    <form
+                      className="mt-1 flex items-center gap-1"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void saveEdit(m.id);
+                      }}
+                    >
+                      <input
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        className="h-6 flex-1 rounded border bg-background px-1.5 text-[11px]"
+                        maxLength={2000}
+                        autoFocus
+                      />
+                      <Button
+                        type="submit"
+                        size="sm"
+                        variant="outline"
+                        className="h-6 px-2 text-[10px]"
+                        disabled={busyId === m.id || !editValue.trim()}
+                      >
+                        Opslaan
+                      </Button>
+                    </form>
+                  ) : (
+                    <p className="mt-0.5 break-words text-muted-foreground">{m.value}</p>
+                  )}
+                </div>
+                {m.editable && editingId !== m.id && (
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <button
+                      type="button"
+                      aria-label="Bewerk geheugen-item"
+                      className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      onClick={() => {
+                        setEditingId(m.id);
+                        setEditValue(m.value);
+                      }}
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Verwijder geheugen-item"
+                      className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-destructive"
+                      disabled={busyId === m.id}
+                      onClick={() => void remove(m.id)}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -403,6 +568,7 @@ export default function CopilotPage() {
             <p className="px-2 py-4 text-xs text-muted-foreground">Nog geen gesprekken.</p>
           )}
         </div>
+        <MemorySection />
         <div className="rounded-md border bg-muted/30 p-2 text-[11px] leading-snug text-muted-foreground">
           <div className="mb-1 flex items-center gap-1 font-medium text-foreground">
             <ShieldCheck className="h-3 w-3" /> AI Gateway
