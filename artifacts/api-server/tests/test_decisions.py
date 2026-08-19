@@ -201,10 +201,11 @@ def test_category_decisions_derived_from_sku_signals(client, admin_headers, db):
         # voor dezelfde categorie (validatieomgeving kan dirty state hebben).
         _pre_cleanup_cat(db, cat)
 
-        # Beide SKU's in dezelfde categorie
+        # Beide SKU's in dezelfde categorie; één huismerk voor huismerkaandeel
         for sku in (sku1, sku2):
             db.add(models.DimProduct(
                 sku_id=sku, product_name=f"Catproduct {sku}", category=cat,
+                subcategory="TestSub", is_private_label=(sku == sku1),
                 current_price=15.0, cost_price=8.0, min_price=10.0, max_price=20.0,
                 stock_quantity=50, lifecycle_status="active", shop_id=1,
             ))
@@ -242,6 +243,29 @@ def test_category_decisions_derived_from_sku_signals(client, admin_headers, db):
         types = {s["scenario_type"] for s in det["scenarios"]}
         assert "promotion" in types
         assert "no_action" in types
+
+        # Categoriecontext (task: geaggregeerde omzet-/marge-impact op detailpagina)
+        ctx = det.get("category_context")
+        assert ctx is not None, "category_context moet aanwezig zijn voor categoriebeslissingen"
+        assert ctx["sku_count"] == 2
+        assert ctx["private_label_sku_count"] == 1
+        assert ctx["private_label_share_skus"] == 0.5
+        # 2 SKU's × 30 dagen × €45 omzet / €21 marge
+        assert ctx["total_revenue_30d"] == pytest.approx(2700.0)
+        assert ctx["total_margin_30d"] == pytest.approx(1260.0)
+        assert ctx["private_label_share_revenue"] == pytest.approx(0.5)
+        assert {"name": "TestSub", "sku_count": 2} in ctx["subcategories"]
+        # Scenario-parameters bevatten de huismerk-SKU's (mix-shift scenario)
+        mix = [s for s in det["scenarios"] if s["parameters"].get("private_label_skus")]
+        assert mix and sku1 in mix[0]["parameters"]["private_label_skus"]
+
+        # SKU-beslissingen krijgen géén category_context
+        sku_items = client.get(
+            "/api/decisions", params={"entity_type": "sku", "entity_id": sku1}, headers=admin_headers
+        ).json()["items"]
+        if sku_items:
+            sku_det = client.get(f"/api/decisions/{sku_items[0]['id']}", headers=admin_headers).json()
+            assert "category_context" not in sku_det
 
         # entity_type_counts in de lijstrespons
         resp = client.get("/api/decisions", headers=admin_headers).json()

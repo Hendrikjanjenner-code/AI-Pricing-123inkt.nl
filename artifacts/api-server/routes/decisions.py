@@ -185,7 +185,92 @@ def get_decision(
     d = _get_or_404(decision_id, db, shop_id)
     out = _decision_out(d, include_scenarios=True, db=db)
     out["signal_snapshot"] = d.signal_snapshot or []
+    if d.entity_type == "category":
+        out["category_context"] = _category_context(db, d.shop_id, d.entity_id)
     return out
+
+
+def _category_context(db: Session, sid: int, category: str) -> dict:
+    """Geaggregeerde categoriecontext voor category-beslissingen:
+    aantal SKU's, omzet/marge (laatste 30 dagen), huismerkaandeel en
+    subcategorie-verdeling. Ontbrekende data blijft expliciet None."""
+    from sqlalchemy import func
+    from datetime import timedelta
+
+    products = (
+        db.query(models.DimProduct)
+        .filter(models.DimProduct.category == category, models.DimProduct.shop_id == sid)
+        .all()
+    )
+    n_skus = len(products)
+    pl_skus = [p.sku_id for p in products if p.is_private_label]
+    n_pl = len(pl_skus)
+
+    # Subcategorie-verdeling (op SKU-telling)
+    sub_counts: dict[str, int] = {}
+    for p in products:
+        key = p.subcategory or "Onbekend"
+        sub_counts[key] = sub_counts.get(key, 0) + 1
+    subcategories = [
+        {"name": k, "sku_count": v}
+        for k, v in sorted(sub_counts.items(), key=lambda kv: -kv[1])
+    ]
+
+    # Omzet/marge over de laatste 30 dagen t.o.v. de meest recente verkoopdatum
+    total_units = total_revenue = total_margin = None
+    pl_revenue = None
+    sku_ids = [p.sku_id for p in products]
+    if sku_ids:
+        max_date = (
+            db.query(func.max(models.FactSalesDaily.date))
+            .filter(
+                models.FactSalesDaily.shop_id == sid,
+                models.FactSalesDaily.sku_id.in_(sku_ids),
+            )
+            .scalar()
+        )
+        if max_date:
+            cutoff = max_date - timedelta(days=29)
+            base = db.query(
+                func.coalesce(func.sum(models.FactSalesDaily.units_sold), 0),
+                func.coalesce(func.sum(models.FactSalesDaily.revenue), 0.0),
+                func.coalesce(func.sum(models.FactSalesDaily.margin), 0.0),
+            ).filter(
+                models.FactSalesDaily.shop_id == sid,
+                models.FactSalesDaily.date >= cutoff,
+                models.FactSalesDaily.sku_id.in_(sku_ids),
+            )
+            units, rev, mar = base.first()
+            total_units, total_revenue, total_margin = int(units or 0), float(rev or 0.0), float(mar or 0.0)
+            if pl_skus:
+                pl_rev = (
+                    db.query(func.coalesce(func.sum(models.FactSalesDaily.revenue), 0.0))
+                    .filter(
+                        models.FactSalesDaily.shop_id == sid,
+                        models.FactSalesDaily.date >= cutoff,
+                        models.FactSalesDaily.sku_id.in_(pl_skus),
+                    )
+                    .scalar()
+                )
+                pl_revenue = float(pl_rev or 0.0)
+            else:
+                pl_revenue = 0.0
+
+    return {
+        "category": category,
+        "sku_count": n_skus,
+        "private_label_sku_count": n_pl,
+        "private_label_share_skus": round(n_pl / n_skus, 4) if n_skus else None,
+        "private_label_share_revenue": (
+            round(pl_revenue / total_revenue, 4)
+            if pl_revenue is not None and total_revenue else None
+        ),
+        "total_units_30d": total_units,
+        "total_revenue_30d": total_revenue,
+        "total_margin_30d": total_margin,
+        "subcategories": subcategories,
+        "horizon_days": 30,
+    }
 
 
 @router.get("/{decision_id}/history")

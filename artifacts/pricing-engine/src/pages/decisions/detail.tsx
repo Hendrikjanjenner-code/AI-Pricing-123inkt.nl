@@ -95,6 +95,8 @@ export default function BeslissingDetail() {
   }
 
   const canReview = ["proposed", "in_review"].includes(data.status);
+  const isCategory = data.entity_type === "category";
+  const catCtx = data.category_context;
   const scenarios = [...(data.scenarios || [])].sort((a: any, b: any) => (b.is_recommended ? 1 : 0) - (a.is_recommended ? 1 : 0) || b.score - a.score);
   const recommended = scenarios.find((s: any) => s.is_recommended);
 
@@ -108,7 +110,7 @@ export default function BeslissingDetail() {
             </Link>
             <h1 className="text-2xl font-bold">{data.title}</h1>
             <div className="flex items-center gap-2 mt-2 flex-wrap">
-              <Badge variant="outline">{data.entity_id}</Badge>
+              <Badge variant="outline">{isCategory ? "Categorie" : "SKU"} · {data.entity_id}</Badge>
               <Badge className={STATUS_STYLE[data.status] || ""}>{data.status_nl}</Badge>
               <span className="text-sm text-muted-foreground">
                 Voorgesteld door {data.proposed_by} ({data.ai_model_version}) op {data.run_date}
@@ -153,6 +155,55 @@ export default function BeslissingDetail() {
         {data.summary && (
           <Card className="border-primary/40">
             <CardContent className="py-4 text-sm">{data.summary}</CardContent>
+          </Card>
+        )}
+
+        {/* Categoriecontext — alleen voor categoriebeslissingen */}
+        {isCategory && catCtx && (
+          <Card data-testid="card-category-context">
+            <CardHeader><CardTitle className="text-base">Categoriecontext — {catCtx.category}</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
+                <div>
+                  <div className="text-xs text-muted-foreground">SKU's in categorie</div>
+                  <div className="font-medium" data-testid="text-cat-sku-count">{num(catCtx.sku_count)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Omzet ({catCtx.horizon_days}d)</div>
+                  <div className="font-medium" data-testid="text-cat-revenue">{eur(catCtx.total_revenue_30d)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Marge ({catCtx.horizon_days}d)</div>
+                  <div className="font-medium" data-testid="text-cat-margin">{eur(catCtx.total_margin_30d)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Huismerkaandeel (SKU's)</div>
+                  <div className="font-medium" data-testid="text-cat-pl-share">
+                    {catCtx.private_label_share_skus != null
+                      ? `${Math.round(catCtx.private_label_share_skus * 100)}% (${catCtx.private_label_sku_count} SKU's)`
+                      : <span className="text-muted-foreground italic">data unavailable</span>}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Huismerkaandeel (omzet)</div>
+                  <div className="font-medium">
+                    {catCtx.private_label_share_revenue != null
+                      ? `${Math.round(catCtx.private_label_share_revenue * 100)}%`
+                      : <span className="text-muted-foreground italic">data unavailable</span>}
+                  </div>
+                </div>
+              </div>
+              {catCtx.subcategories?.length > 0 && (
+                <div>
+                  <div className="text-xs text-muted-foreground mb-1">Subcategorieën</div>
+                  <div className="flex flex-wrap gap-2">
+                    {catCtx.subcategories.map((sc: any) => (
+                      <Badge key={sc.name} variant="secondary">{sc.name} ({sc.sku_count})</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
           </Card>
         )}
 
@@ -211,6 +262,33 @@ export default function BeslissingDetail() {
                     <div><div className="text-xs text-muted-foreground">Omzet</div><div className="font-medium">{eur(s.expected_revenue)}</div></div>
                     <div><div className="text-xs text-muted-foreground">Marge</div><div className="font-medium">{eur(s.expected_margin)}</div></div>
                   </div>
+                  {isCategory && s.parameters && Object.keys(s.parameters).length > 0 && (
+                    <div className="rounded-md bg-muted/50 p-2 text-xs space-y-1" data-testid={`params-scenario-${s.id}`}>
+                      <div className="font-semibold">Scenario-parameters</div>
+                      {s.parameters.discount_pct != null && (
+                        <div><span className="font-medium">Korting:</span> {Math.round(s.parameters.discount_pct * 100)}%</div>
+                      )}
+                      {s.parameters.duration_days != null && (
+                        <div><span className="font-medium">Duur:</span> {s.parameters.duration_days} dagen</div>
+                      )}
+                      {s.parameters.n_skus != null && (
+                        <div><span className="font-medium">Aantal SKU's:</span> {num(s.parameters.n_skus)}</div>
+                      )}
+                      {s.parameters.pl_ratio_current != null && (
+                        <div><span className="font-medium">Huidig huismerkaandeel:</span> {Math.round(s.parameters.pl_ratio_current * 100)}%</div>
+                      )}
+                      {Array.isArray(s.parameters.private_label_skus) && s.parameters.private_label_skus.length > 0 && (
+                        <div>
+                          <span className="font-medium">Huismerk-SKU's:</span>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {s.parameters.private_label_skus.map((sku: string) => (
+                              <Badge key={sku} variant="outline" className="text-[10px]">{sku}</Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div className="space-y-1 text-xs">
                     <div><span className="font-medium">Klant:</span> {s.customer_impact}</div>
                     <div><span className="font-medium">Basket:</span> {s.basket_impact}</div>
