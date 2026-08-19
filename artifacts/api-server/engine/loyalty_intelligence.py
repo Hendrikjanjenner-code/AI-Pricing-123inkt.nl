@@ -1004,7 +1004,10 @@ def compute_campaign_uplift(
         if not treatment_ids or not control_ids:
             continue
 
-        # Bepaal meetperiode: campagneperiode, of 365 dagen als fallback
+        # Bepaal meetperiode: campagneperiode, of 365 dagen als fallback.
+        # Als datums ontbreken is de periode GESCHAT — markeer dat expliciet
+        # zodat de gebruiker weet dat het resultaat vertekend kan zijn.
+        period_estimated = c.start_date is None or c.end_date is None
         start = c.start_date or (date.today() - timedelta(days=365))
         end = c.end_date or date.today()
 
@@ -1081,8 +1084,15 @@ def compute_campaign_uplift(
         else:
             direction = "neutral"
 
+        period_warning = None
+        if period_estimated:
+            period_warning = (
+                "Meetperiode geschat; voeg campagnedatums toe voor nauwkeurige analyse"
+            )
+
         explanation = (
-            f"Campagne '{c.name}' ({start} – {end}): "
+            f"Campagne '{c.name}' ({start} – {end}"
+            f"{', periode geschat' if period_estimated else ''}): "
             f"treatment (n={n_t}) vs. control (n={n_c}). "
             f"Besteding/lid: €{t['spend_per_member']:.2f} vs. €{ctrl['spend_per_member']:.2f} "
             f"({'+' if (spend_uplift or 0) >= 0 else ''}{spend_uplift if spend_uplift is not None else '—'}%). "
@@ -1099,6 +1109,8 @@ def compute_campaign_uplift(
             "campaign_type": c.campaign_type,
             "start_date": start.isoformat(),
             "end_date": end.isoformat(),
+            "period_estimated": period_estimated,
+            "period_warning": period_warning,
             "direction": direction,
             "treatment": t,
             "control": ctrl,

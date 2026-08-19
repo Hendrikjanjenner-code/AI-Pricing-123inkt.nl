@@ -352,6 +352,8 @@ def campaign_uplift(
     return {
         **_campaign_dict(c, db),
         "uplift": u,
+        "period_estimated": bool(u.get("period_estimated")),
+        "period_warning": u.get("period_warning"),
     }
 @router.post("/run")
 def run_engine(

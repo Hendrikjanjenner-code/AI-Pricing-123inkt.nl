@@ -155,6 +155,11 @@ function CampaignUpliftDetail({ campaignId }: { campaignId: number }) {
 
   return (
     <div className="px-3 pb-3 space-y-3">
+      {(u.period_estimated || data?.period_estimated) && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 text-amber-800 px-3 py-2 text-xs">
+          {u.period_warning ?? data?.period_warning ?? "Meetperiode geschat; voeg campagnedatums toe voor nauwkeurige analyse"}
+        </div>
+      )}
       {/* Uplift metrics */}
       <div className={`rounded-md border p-3 text-xs ${dirColor}`}>
         <div className="font-semibold mb-2 text-sm">
