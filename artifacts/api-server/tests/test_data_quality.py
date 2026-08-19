@@ -17,6 +17,8 @@ import os
 import sys
 import uuid
 from datetime import date, datetime, timedelta
+
+from sqlalchemy import func
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -682,10 +684,72 @@ class TestFeedUnreachable:
                 "FEED_UNREACHABLE moet zichtbaar zijn als de meest recente "
                 "api_sync_priceshape job is mislukt met een netwerk-/verbindingsfout")
             issue = next(d for d in detected if d["issue_code"] == "FEED_UNREACHABLE")
-            assert issue["severity"] == "error"
+            # Severity hangt af van hoe lang de feed al niet bereikt is:
+            # >24u (of nooit) geslaagd = error, recente storing = warning.
+            last_ok = (
+                db.query(func.max(func.coalesce(
+                    models.ImportJob.completed_at, models.ImportJob.created_at)))
+                .filter(models.ImportJob.upload_type == "api_sync_priceshape",
+                        models.ImportJob.status == "geimporteerd")
+                .scalar())
+            expected = "error"
+            if last_ok is not None and (datetime.utcnow() - last_ok) <= timedelta(hours=24):
+                expected = "warning"
+            assert issue["severity"] == expected
             assert issue["affected_count"] == 1
+            # Het bericht toont wanneer de laatste mislukte poging was.
+            assert "geleden" in issue["message"]
+            assert "mislukt op" in issue["message"]
         finally:
             self._cleanup(db, job_id)
+
+    def test_recent_success_downgrades_to_warning(self, client, auth):
+        """Feed <24u geleden nog bereikt → severity 'warning' (recente storing)."""
+        db = SessionLocal()
+        ok_id = self._make_ps_job(db, "geimporteerd", delta_seconds=-3600)
+        fail_id = self._make_ps_job(
+            db, "fout",
+            error_message="PriceShape feed niet bereikbaar: connection refused")
+        try:
+            detected = _detect_issues(db, db.query(models.DimProduct).count())
+            issue = next(d for d in detected if d["issue_code"] == "FEED_UNREACHABLE")
+            assert issue["severity"] == "warning", (
+                "Bij een geslaagde sync <24u geleden is de storing recent en "
+                "hoort de severity 'warning' te zijn")
+            assert "laatste geslaagde sync" in issue["message"]
+        finally:
+            self._cleanup(db, ok_id, fail_id)
+
+    def test_old_failure_stays_error_without_recent_success(self, client, auth):
+        """Feed >24u niet bereikt → severity stijgt naar 'error', ook als de
+        mislukte poging zelf al dagen oud is (geen nieuwe pogingen gedaan)."""
+        db = SessionLocal()
+        # Mislukte poging van 2 dagen geleden; géén geslaagde sync sindsdien.
+        fail_id = self._make_ps_job(
+            db, "fout",
+            error_message="PriceShape feed niet bereikbaar: timeout",
+            delta_seconds=-2 * 24 * 3600)
+        last_ok = (
+            db.query(func.max(func.coalesce(
+                models.ImportJob.completed_at, models.ImportJob.created_at)))
+            .filter(models.ImportJob.upload_type == "api_sync_priceshape",
+                    models.ImportJob.status == "geimporteerd")
+            .scalar())
+        recent_success = (last_ok is not None
+                          and (datetime.utcnow() - last_ok) <= timedelta(hours=24))
+        try:
+            detected = _detect_issues(db, db.query(models.DimProduct).count())
+            issue = next(d for d in detected if d["issue_code"] == "FEED_UNREACHABLE")
+            if recent_success:
+                # Dev-DB bevat een echte recente sync; dan is warning correct.
+                assert issue["severity"] == "warning"
+            else:
+                assert issue["severity"] == "error", (
+                    "Als de feed >24u niet bereikt is, moet de severity 'error' "
+                    "zijn ongeacht het aantal pogingen")
+            assert "dagen" in issue["message"] or "uur" in issue["message"]
+        finally:
+            self._cleanup(db, fail_id)
 
     def test_empty_feed_guard_triggers_feed_unreachable(self, client, auth):
         """Lege-feed-guard (0 producten en 0 concurrentprijzen) triggert ook FEED_UNREACHABLE."""

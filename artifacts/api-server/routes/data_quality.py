@@ -53,6 +53,15 @@ def _issue(code: str, severity: str, title: str, message: str, count: int,
     }
 
 
+def _format_age(hours: float) -> str:
+    """Menselijk leesbare leeftijd: 'minder dan een uur', 'N uur' of 'N dagen'."""
+    if hours < 1:
+        return "minder dan een uur"
+    if hours < 48:
+        return f"{int(hours)} uur"
+    return f"{int(hours // 24)} dagen"
+
+
 def _detect_issues(db: Session, total_skus: int) -> list[dict]:  # noqa: C901
     issues: list[dict] = []
     P = models.DimProduct
@@ -278,11 +287,43 @@ def _detect_issues(db: Session, total_skus: int) -> list[dict]:  # noqa: C901
         )
         is_network = any(kw in err_lower for kw in _NETWORK_KEYWORDS)
         if is_network:
+            now = datetime.utcnow()
+            failed_at = last_ps_job.completed_at or last_ps_job.created_at
+            failed_hours = max(0.0, (now - failed_at).total_seconds() / 3600.0)
+            # Hoe lang is de feed al niet meer bereikt? Kijk naar de laatste
+            # geslaagde sync — niet alleen naar de laatste poging. Een sync die
+            # 2 dagen geleden mislukte en daarna niet is herprobeerd, betekent
+            # dat de feed al 2 dagen niet bereikt is.
+            last_ok = (
+                db.query(func.max(
+                    func.coalesce(models.ImportJob.completed_at,
+                                  models.ImportJob.created_at)))
+                .filter(models.ImportJob.upload_type == "api_sync_priceshape",
+                        models.ImportJob.status == "geimporteerd")
+                .scalar()
+            )
+            if last_ok is not None:
+                unreached_hours = max(0.0, (now - last_ok).total_seconds() / 3600.0)
+                reach_txt = (
+                    f"laatste geslaagde sync {_format_age(unreached_hours)} geleden"
+                )
+            else:
+                unreached_hours = None
+                reach_txt = "er is nog nooit een geslaagde sync geweest"
+            # Severity: >24u niet bereikt (of nooit bereikt) = error,
+            # anders warning (recente storing, mogelijk tijdelijk).
+            severity = (
+                "error"
+                if unreached_hours is None or unreached_hours > 24.0
+                else "warning"
+            )
             issues.append(_issue(
-                "FEED_UNREACHABLE", "error",
+                "FEED_UNREACHABLE", severity,
                 "PriceShape feed niet bereikbaar",
                 (
-                    f"De laatste feed-sync is mislukt: "
+                    f"De laatste feed-sync is mislukt op "
+                    f"{failed_at.strftime('%d-%m-%Y %H:%M')} UTC "
+                    f"({_format_age(failed_hours)} geleden; {reach_txt}): "
                     f"{last_ps_job.error_message or 'onbekende fout'}"
                 ),
                 1,
