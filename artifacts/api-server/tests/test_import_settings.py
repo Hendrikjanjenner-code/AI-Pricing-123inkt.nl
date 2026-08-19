@@ -426,3 +426,40 @@ def test_vervangen_mode_never_deletes_disabled_competitor_rows(client, admin_hea
         assert remaining == 1, "vervangen-modus mag uitgevinkte concurrent niet wissen"
     finally:
         db.close()
+
+
+def test_rest_sync_respects_import_settings(monkeypatch):
+    """REST-modus van de connector past dezelfde importinstellingen toe."""
+    from routes import connectors as conn_routes
+    from connectors import priceshape_connector
+
+    monkeypatch.setattr(priceshape_connector, "_get_raw_config", lambda db=None: {"mode": "rest"})
+    monkeypatch.setattr(priceshape_connector, "_get_mode", lambda raw: "rest")
+    monkeypatch.setattr(priceshape_connector, "_get_credentials", lambda db=None: {})
+    monkeypatch.setattr(priceshape_connector, "fetch_competitor_prices", lambda db=None: [
+        {"sku_id": "IMPSET-SKU-1", "competitor_name": "compa.nl", "competitor_price": 8.99},
+        {"sku_id": "IMPSET-SKU-1", "competitor_name": "compb.nl", "competitor_price": 10.49},
+    ])
+
+    class FakeUser:
+        username = "test"
+
+    db = SessionLocal()
+    try:
+        imps.save_settings(db, {}, ["compb.nl"], "test")
+        res = conn_routes._run_sync("priceshape", db, FakeUser())
+        assert res["status"] == "ok", res
+        assert res["counts"]["price_records"] == 1
+        assert res["counts"]["overgeslagen_door_instellingen"] == 1
+        assert "importinstellingen" in res["message"]
+
+        # Onderdeel volledig uit: alles overgeslagen.
+        imps.save_settings(db, {"competitor_prices": False}, [], "test")
+        res = conn_routes._run_sync("priceshape", db, FakeUser())
+        assert res["counts"]["price_records"] == 0
+        assert res["counts"]["overgeslagen_door_instellingen"] == 2
+
+        # Herstel standaardinstellingen voor andere tests.
+        imps.save_settings(db, {"competitor_prices": True}, [], "test")
+    finally:
+        db.close()

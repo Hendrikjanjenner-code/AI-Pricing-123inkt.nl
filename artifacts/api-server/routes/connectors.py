@@ -626,8 +626,30 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
                 else:
                     priceshape_connector._get_credentials(db=db)
                     prices = priceshape_connector.fetch_competitor_prices(db=db)
+                    # Pas dezelfde importinstellingen toe als de feed-sync en de
+                    # handmatige upload: uitgevinkte onderdelen/concurrenten worden
+                    # overgeslagen — bestaande data wordt hierbij nooit gewist.
+                    from services import import_settings as imps
+                    settings = imps.get_settings(db, "priceshape")
+                    total = len(prices)
+                    if not imps.component_enabled(settings, "competitor_prices"):
+                        prices = []
+                    else:
+                        prices = [
+                            p for p in prices
+                            if not imps.competitor_disabled(settings, str(p.get("competitor_name") or ""))
+                        ]
+                    skipped_by_settings = total - len(prices)
                     counts["price_records"] = len(prices)
-                    message = f"PriceShape sync voltooid: {len(prices)} prijzen opgehaald."
+                    counts["overgeslagen_door_instellingen"] = skipped_by_settings
+                    skipped_note = (
+                        f" {skipped_by_settings} rijen overgeslagen door importinstellingen."
+                        if skipped_by_settings else ""
+                    )
+                    message = (
+                        f"PriceShape sync voltooid: {len(prices)} prijzen opgehaald."
+                        + skipped_note
+                    )
 
             elif name == "drs":
                 from connectors import drs_connector
