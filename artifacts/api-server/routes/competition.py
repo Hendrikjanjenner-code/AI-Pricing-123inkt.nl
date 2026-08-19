@@ -15,6 +15,7 @@ from database import get_db
 import models
 import auth as auth_utils
 from engine import competition_intelligence
+from routes.global_filters import resolve_sku_filter
 
 router = APIRouter(prefix="/api/competition", tags=["competition"])
 
@@ -24,6 +25,8 @@ router = APIRouter(prefix="/api/competition", tags=["competition"])
 @router.get("/summary")
 def get_competition_summary(
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -31,6 +34,9 @@ def get_competition_summary(
     shop_sku_ids = [r.sku_id for r in
                     db.query(models.DimProduct.sku_id)
                     .filter(models.DimProduct.shop_id == sid).all()]
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is not None:
+        shop_sku_ids = [s for s in shop_sku_ids if s in _gf]
     scores = db.query(models.SkuCompetitionScore).filter(
         models.SkuCompetitionScore.sku_id.in_(shop_sku_ids)
     ).all()
@@ -93,14 +99,19 @@ def list_competition_skus(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     sid = _scope(db, shop_id)
-    # Begrens tot SKU's van deze shop
+    # Begrens tot SKU's van deze shop (en de globale filtercontext)
     shop_sku_ids = [r.sku_id for r in
                     db.query(models.DimProduct.sku_id)
                     .filter(models.DimProduct.shop_id == sid).all()]
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is not None:
+        shop_sku_ids = [s for s in shop_sku_ids if s in _gf]
     q = db.query(models.SkuCompetitionScore).filter(
         models.SkuCompetitionScore.sku_id.in_(shop_sku_ids)
     )
@@ -236,6 +247,8 @@ def get_sku_competition_detail(
 @router.get("/charts/pcis-distribution")
 def get_pcis_distribution(
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -243,6 +256,9 @@ def get_pcis_distribution(
     shop_sku_ids = [r.sku_id for r in
                     db.query(models.DimProduct.sku_id)
                     .filter(models.DimProduct.shop_id == sid).all()]
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is not None:
+        shop_sku_ids = [s for s in shop_sku_ids if s in _gf]
     classes = ["Critical", "Strong", "Influence", "Monitor", "Ignore"]
     return [
         {
@@ -259,6 +275,8 @@ def get_pcis_distribution(
 @router.get("/charts/price-index-by-category")
 def get_price_index_by_category(
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -266,6 +284,9 @@ def get_price_index_by_category(
     shop_sku_ids = {r.sku_id for r in
                    db.query(models.DimProduct.sku_id)
                    .filter(models.DimProduct.shop_id == sid).all()}
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is not None:
+        shop_sku_ids = shop_sku_ids & _gf
     scores = db.query(models.SkuCompetitionScore).filter(
         models.SkuCompetitionScore.price_index.isnot(None),
         models.SkuCompetitionScore.sku_id.in_(shop_sku_ids),
@@ -294,6 +315,8 @@ def get_price_index_by_category(
 @router.get("/charts/sub-scores-by-class")
 def get_sub_scores_by_class(
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -301,6 +324,9 @@ def get_sub_scores_by_class(
     shop_sku_ids = [r.sku_id for r in
                     db.query(models.DimProduct.sku_id)
                     .filter(models.DimProduct.shop_id == sid).all()]
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is not None:
+        shop_sku_ids = [s for s in shop_sku_ids if s in _gf]
     classes = ["Critical", "Strong", "Influence", "Monitor", "Ignore"]
     result = []
     for cls in classes:

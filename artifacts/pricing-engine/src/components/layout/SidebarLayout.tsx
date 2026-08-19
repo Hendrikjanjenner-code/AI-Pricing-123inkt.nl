@@ -62,6 +62,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConnectorHealthIndicator } from "@/components/layout/ConnectorHealthIndicator";
+import { useGlobalFilters, useFilterUrlSync } from "@/hooks/use-global-filters";
+import { activeContextSummary } from "@/components/filters/GlobalFilterBar";
 import { ShopSwitcher } from "@/components/layout/ShopSwitcher";
 import { AiStatusIndicator } from "@/components/layout/AiStatusIndicator";
 import { NotificationBell } from "@/components/layout/NotificationBell";
@@ -252,6 +254,11 @@ const ROL_LABELS: Record<string, string> = {
 export function SidebarLayout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const [location] = useLocation();
+  const globalFilters = useGlobalFilters();
+  const contextSummary = activeContextSummary(globalFilters);
+  // Houd de f_-URL-params op élke route in sync (deelbare deep links),
+  // ook op schermen zonder GlobalFilterBar.
+  useFilterUrlSync();
 
   if (!user) return null;
 
@@ -314,7 +321,15 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
 
       <main className="flex-1 flex flex-col overflow-hidden bg-background">
         <header className="h-16 border-b bg-card flex items-center justify-between px-8 shrink-0">
-          <div className="font-semibold text-foreground">{huidigLabel}</div>
+          <div className="min-w-0">
+            <div className="font-semibold text-foreground truncate">{huidigLabel}</div>
+            {contextSummary && (
+              <div className="text-xs text-muted-foreground truncate" data-testid="header-context-summary"
+                title={contextSummary}>
+                Context: {contextSummary}
+              </div>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             {user.role === "admin" && <ShopSwitcher />}
             <AiStatusIndicator />

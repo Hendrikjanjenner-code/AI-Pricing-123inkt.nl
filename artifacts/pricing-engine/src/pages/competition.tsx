@@ -10,6 +10,9 @@ import { TrendingDown, TrendingUp, Target, AlertTriangle } from "lucide-react";
 import { useState } from "react";
 import { InfoTooltip } from "@/components/InfoTooltip";
 import { useShopId, withShop } from "@/hooks/use-shop-id";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const KLASSE_KLEUREN: Record<string, string> = {
   Critical: "bg-red-500/15 text-red-700 border-red-300",
@@ -45,27 +48,39 @@ export default function ConcurrentieIntelligence() {
   const [zoekterm, setZoekterm] = useState("");
   const shopId = useShopId();
 
+  // Global Filter Context (taak #216): hiërarchie/merk gaan als queryparams
+  // mee; de server expandeert parent-selecties naar alle descendants.
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
+  const metFilters = (qs: string) =>
+    [qs, filterQs].filter(Boolean).join("&");
+
   const { data: samenvatting, isLoading: ladenSamenvatting } = useQuery({
-    queryKey: ["competition-summary", shopId],
-    queryFn: () => apiFetch(`/api/competition/summary${shopId !== undefined ? `?shop_id=${shopId}` : ""}`),
+    queryKey: ["competition-summary", shopId, filterQs],
+    queryFn: () => apiFetch(`/api/competition/summary?${metFilters(shopId !== undefined ? `shop_id=${shopId}` : "")}`),
   });
 
   const { data: skuData, isLoading: ladenSkus } = useQuery({
-    queryKey: ["competition-skus", klasseFilter, shopId],
-    queryFn: () => apiFetch(`/api/competition/skus?${withShop(`page_size=200${klasseFilter !== "all" ? `&competition_class=${klasseFilter}` : ""}`, shopId)}`),
+    queryKey: ["competition-skus", klasseFilter, shopId, filterQs],
+    queryFn: () => apiFetch(`/api/competition/skus?${metFilters(withShop(`page_size=200${klasseFilter !== "all" ? `&competition_class=${klasseFilter}` : ""}`, shopId))}`),
   });
 
   const { data: verdelingData } = useQuery({
-    queryKey: ["competition-dist", shopId],
-    queryFn: () => apiFetch(`/api/competition/charts/pcis-distribution${shopId !== undefined ? `?shop_id=${shopId}` : ""}`),
+    queryKey: ["competition-dist", shopId, filterQs],
+    queryFn: () => apiFetch(`/api/competition/charts/pcis-distribution?${metFilters(shopId !== undefined ? `shop_id=${shopId}` : "")}`),
   });
 
   const { data: prijsIndexData } = useQuery({
-    queryKey: ["competition-price-index", shopId],
-    queryFn: () => apiFetch(`/api/competition/charts/price-index-by-category${shopId !== undefined ? `?shop_id=${shopId}` : ""}`),
+    queryKey: ["competition-price-index", shopId, filterQs],
+    queryFn: () => apiFetch(`/api/competition/charts/price-index-by-category?${metFilters(shopId !== undefined ? `shop_id=${shopId}` : "")}`),
   });
 
+  const globalSku = globalFilters.skuQuery.trim().toLowerCase();
   const items = (skuData?.items || []).filter(
+    (s: any) => !globalSku
+      || s.product_name?.toLowerCase().includes(globalSku)
+      || s.sku_id?.toLowerCase().includes(globalSku)
+  ).filter(
     (s: any) => !zoekterm
       || s.product_name?.toLowerCase().includes(zoekterm.toLowerCase())
       || s.sku_id?.toLowerCase().includes(zoekterm.toLowerCase())
@@ -82,6 +97,8 @@ export default function ConcurrentieIntelligence() {
         </h1>
         <p className="text-muted-foreground mt-1">PCIS-scores, concurrentenrelevantie en prijspositionering per SKU.</p>
       </div>
+
+      <GlobalFilterBar />
 
       {ladenSamenvatting ? (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

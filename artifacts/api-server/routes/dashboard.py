@@ -1,43 +1,67 @@
-"""Dashboard KPI summary and chart data endpoints."""
+"""Dashboard KPI summary and chart data endpoints.
+
+Ondersteunt de Global Filter Bar (taak #216): optionele `hierarchy_node_ids`
+en `brands` query-parameters; parent-selectie telt server-side automatisch
+alle descendants mee (zie routes/global_filters.py).
+"""
 import logging
-from fastapi import APIRouter, Depends
+from typing import Optional
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, text
+from sqlalchemy import func
 from database import get_db
 import models
 import auth as auth_utils
+from routes.global_filters import resolve_sku_filter
 
 logger = logging.getLogger("uvicorn.error")
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
+def _apply_sku_filter(q, col, sku_filter: Optional[set]):
+    if sku_filter is None:
+        return q
+    return q.filter(col.in_(sku_filter))
+
 
 @router.get("/summary")
 def get_dashboard_summary(
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     logger.info("dashboard API started: /summary user_id=%s", current_user.id)
-    recs = db.query(models.FactPricingRecommendationDaily)
+    R = models.FactPricingRecommendationDaily
+    sku_filter = resolve_sku_filter(db, hierarchy_node_ids, brands)
+
+    recs = _apply_sku_filter(db.query(R), R.sku_id, sku_filter)
 
     total = recs.count()
-    approved = recs.filter(models.FactPricingRecommendationDaily.approval_status == "approved").count()
-    rejected = recs.filter(models.FactPricingRecommendationDaily.approval_status == "rejected").count()
-    pending = recs.filter(models.FactPricingRecommendationDaily.approval_status == "pending").count()
-    warnings = recs.filter(models.FactPricingRecommendationDaily.safety_status.in_(["warning", "blocked"])).count()
+    approved = recs.filter(R.approval_status == "approved").count()
+    rejected = recs.filter(R.approval_status == "rejected").count()
+    pending = recs.filter(R.approval_status == "pending").count()
+    warnings = recs.filter(R.safety_status.in_(["warning", "blocked"])).count()
 
-    margin_uplift = db.query(func.sum(models.FactPricingRecommendationDaily.expected_margin_uplift)).scalar() or 0
-    revenue_impact = db.query(func.sum(models.FactPricingRecommendationDaily.expected_revenue)).scalar() or 0
-    margin_impact = db.query(func.sum(models.FactPricingRecommendationDaily.expected_margin)).scalar() or 0
-    avg_conf = db.query(func.avg(models.FactPricingRecommendationDaily.confidence_score)).scalar() or 0
+    def _agg(fn, col):
+        q = _apply_sku_filter(db.query(fn(col)), R.sku_id, sku_filter)
+        return q.scalar() or 0
+
+    margin_uplift = _agg(func.sum, R.expected_margin_uplift)
+    revenue_impact = _agg(func.sum, R.expected_revenue)
+    margin_impact = _agg(func.sum, R.expected_margin)
+    avg_conf = _agg(func.avg, R.confidence_score)
 
     last_run = db.query(models.ModelRun).order_by(models.ModelRun.started_at.desc()).first()
 
-    # Data quality: % of SKUs with cost_price
-    total_skus = db.query(models.DimProduct).count()
-    skus_with_cost = db.query(models.DimProduct).filter(models.DimProduct.cost_price.isnot(None)).count()
+    # Data quality: % of SKUs with cost_price (binnen de actieve filtercontext)
+    P = models.DimProduct
+    prod_q = _apply_sku_filter(db.query(P), P.sku_id, sku_filter)
+    total_skus = prod_q.count()
+    skus_with_cost = prod_q.filter(P.cost_price.isnot(None)).count()
     dq_score = round(skus_with_cost / total_skus, 2) if total_skus > 0 else 1.0
-    total_competitor_prices = db.query(models.FactCompetitorPriceDaily).count()
+    C = models.FactCompetitorPriceDaily
+    total_competitor_prices = _apply_sku_filter(db.query(C), C.sku_id, sku_filter).count()
 
     logger.info("dashboard API completed: /summary user_id=%s total_recs=%s", current_user.id, total)
     return {
@@ -60,18 +84,25 @@ def get_dashboard_summary(
 
 @router.get("/charts/margin-by-category")
 def get_margin_by_category(
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    rows = (
+    R = models.FactPricingRecommendationDaily
+    sku_filter = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    q = (
         db.query(
             models.DimProduct.category,
-            func.sum(models.FactPricingRecommendationDaily.expected_margin_uplift).label("margin_uplift"),
-            func.count(models.FactPricingRecommendationDaily.id).label("recommendation_count"),
+            func.sum(R.expected_margin_uplift).label("margin_uplift"),
+            func.count(R.id).label("recommendation_count"),
         )
-        .join(models.DimProduct, models.FactPricingRecommendationDaily.sku_id == models.DimProduct.sku_id)
-        .group_by(models.DimProduct.category)
-        .order_by(func.sum(models.FactPricingRecommendationDaily.expected_margin_uplift).desc())
+        .join(models.DimProduct, R.sku_id == models.DimProduct.sku_id)
+    )
+    q = _apply_sku_filter(q, R.sku_id, sku_filter)
+    rows = (
+        q.group_by(models.DimProduct.category)
+        .order_by(func.sum(R.expected_margin_uplift).desc())
         .all()
     )
     return [
@@ -86,18 +117,20 @@ def get_margin_by_category(
 
 @router.get("/charts/recs-by-strategy")
 def get_recs_by_strategy(
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    rows = (
-        db.query(
-            models.FactPricingRecommendationDaily.strategy_type,
-            func.count(models.FactPricingRecommendationDaily.id).label("count"),
-            func.avg(models.FactPricingRecommendationDaily.confidence_score).label("avg_confidence"),
-        )
-        .group_by(models.FactPricingRecommendationDaily.strategy_type)
-        .all()
+    R = models.FactPricingRecommendationDaily
+    sku_filter = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    q = db.query(
+        R.strategy_type,
+        func.count(R.id).label("count"),
+        func.avg(R.confidence_score).label("avg_confidence"),
     )
+    q = _apply_sku_filter(q, R.sku_id, sku_filter)
+    rows = q.group_by(R.strategy_type).all()
     return [
         {
             "strategy_type": r.strategy_type or "UNKNOWN",
@@ -110,9 +143,13 @@ def get_recs_by_strategy(
 
 @router.get("/charts/confidence-distribution")
 def get_confidence_distribution(
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
+    R = models.FactPricingRecommendationDaily
+    sku_filter = resolve_sku_filter(db, hierarchy_node_ids, brands)
     buckets = [
         ("0-20%", 0, 0.2),
         ("20-40%", 0.2, 0.4),
@@ -122,19 +159,24 @@ def get_confidence_distribution(
     ]
     result = []
     for label, low, high in buckets:
-        count = db.query(models.FactPricingRecommendationDaily).filter(
-            models.FactPricingRecommendationDaily.confidence_score >= low,
-            models.FactPricingRecommendationDaily.confidence_score < high,
-        ).count()
-        result.append({"bucket": label, "count": count})
+        q = db.query(R).filter(
+            R.confidence_score >= low,
+            R.confidence_score < high,
+        )
+        q = _apply_sku_filter(q, R.sku_id, sku_filter)
+        result.append({"bucket": label, "count": q.count()})
     return result
 
 
 @router.get("/charts/price-change-distribution")
 def get_price_change_distribution(
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
+    R = models.FactPricingRecommendationDaily
+    sku_filter = resolve_sku_filter(db, hierarchy_node_ids, brands)
     buckets = [
         ("<-5%", None, -5),
         ("-5% to -2%", -5, -2),
@@ -146,10 +188,11 @@ def get_price_change_distribution(
     ]
     result = []
     for label, low, high in buckets:
-        q = db.query(models.FactPricingRecommendationDaily)
+        q = db.query(R)
         if low is not None:
-            q = q.filter(models.FactPricingRecommendationDaily.recommended_change_pct >= low)
+            q = q.filter(R.recommended_change_pct >= low)
         if high is not None:
-            q = q.filter(models.FactPricingRecommendationDaily.recommended_change_pct < high)
+            q = q.filter(R.recommended_change_pct < high)
+        q = _apply_sku_filter(q, R.sku_id, sku_filter)
         result.append({"bucket": label, "count": q.count()})
     return result

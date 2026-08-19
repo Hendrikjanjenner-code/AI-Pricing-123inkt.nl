@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
-import { useGetDashboardSummary, useGetMarginByCategory, useGetRecsByStrategy, useGetConfidenceDistribution, useGetPriceChangeDistribution } from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from "recharts";
 import { ArrowUpRight, ArrowDownRight, AlertTriangle, CheckCircle2, ShieldAlert } from "lucide-react";
@@ -304,11 +307,26 @@ const STRATEGIE_LABELS: Record<string, string> = {
 };
 
 export default function Dashboard() {
-  const { data: summary, isLoading: loadingSummary, isError: summaryError } = useGetDashboardSummary();
-  const { data: marginData, isLoading: loadingMargin, isError: marginError } = useGetMarginByCategory();
-  const { data: recsData, isLoading: loadingRecs, isError: recsError } = useGetRecsByStrategy();
-  const { data: confData, isLoading: loadingConf, isError: confError } = useGetConfidenceDistribution();
-  const { data: priceData, isLoading: loadingPrice, isError: priceError } = useGetPriceChangeDistribution();
+  // Global Filter Context (taak #216): alle widgets op dit scherm respecteren
+  // dezelfde context; de server expandeert parent-selecties naar descendants.
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
+  const dash = (path: string) => async () => {
+    const url = `${BASE}/api/dashboard/${path}${filterQs ? `?${filterQs}` : ""}`;
+    const resp = await fetch(url, { headers: getAuthHeaders() });
+    if (!resp.ok) throw new Error(`Dashboard-API fout (${resp.status})`);
+    return resp.json();
+  };
+  const { data: summary, isLoading: loadingSummary, isError: summaryError } =
+    useQuery<any>({ queryKey: ["dashboard-summary", filterQs], queryFn: dash("summary") });
+  const { data: marginData, isLoading: loadingMargin, isError: marginError } =
+    useQuery<any[]>({ queryKey: ["dashboard-margin-by-category", filterQs], queryFn: dash("charts/margin-by-category") });
+  const { data: recsData, isLoading: loadingRecs, isError: recsError } =
+    useQuery<any[]>({ queryKey: ["dashboard-recs-by-strategy", filterQs], queryFn: dash("charts/recs-by-strategy") });
+  const { data: confData, isLoading: loadingConf, isError: confError } =
+    useQuery<any[]>({ queryKey: ["dashboard-confidence-dist", filterQs], queryFn: dash("charts/confidence-distribution") });
+  const { data: priceData, isLoading: loadingPrice, isError: priceError } =
+    useQuery<any[]>({ queryKey: ["dashboard-price-change-dist", filterQs], queryFn: dash("charts/price-change-distribution") });
 
   if (summaryError) {
     console.error("[dashboard] failed to load summary");
@@ -322,6 +340,8 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <h1 className="text-3xl font-bold tracking-tight">Dagelijks overzicht</h1>
+
+      <GlobalFilterBar />
 
       <DatabronnenStrip />
 

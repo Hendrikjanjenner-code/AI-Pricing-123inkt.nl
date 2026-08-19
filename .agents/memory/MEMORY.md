@@ -29,7 +29,6 @@
 - [PIM source ownership](pim-source-ownership.md) — attribute values keep a source; cross-source writes must warn, never silently overwrite (DRS stays master).
 - [Feed-sync failure visibility](feed-sync-visibility.md) — failed syncs reuse ConnectorConfig.last_test_* (no schema change); feed response diagnostics + sanity checks live in the connector, reset per read cycle.
 - [Parallel task merges vs validation](parallel-task-validation.md) — completion validation runs the full suite on merged state; sibling-task regressions (dropped constants, changed API shapes) land on you — fix minimally, note in drift_reason.
-- [Full-suite gate vs moving main](suite-green-gate.md) — completion validation reruns the whole suite after rebase; unrelated bad merges (undefined constants) or data-dependent tests can block; fix minimally.
 - [Stale lib d.ts vs artifact typecheck](typecheck-libs-stale.md) — TS2305 from @workspace pkgs means run root `pnpm run typecheck:libs` first; refs use built dist, not src.
 - [DQ registry test isolation](dq-registry-test-isolation.md) — never call _sync_issue_registry/_detect_issues with a replaced/empty detection list in shared-DB tests; wrap the real detector and add a synthetic issue, or unrelated registry rows get auto-resolved.
 - [PIM defaults seed-once](pim-defaults-seeding.md) — "seed if empty" on list reads resurrects deleted reference data; use a persistent seeded-once marker.
@@ -51,6 +50,7 @@
 - [Test-shop teardown FK](test-suite-conventions.md) — request middleware writes cost-usage rows per shop; any teardown that deletes a shop must delete those rows first or FK-fails only in full-suite runs.
 - [Keyset pagination & NULL watermarks](keyset-pagination-nulls.md) — row-tuple keyset compare drops NULL-watermark rows; coalesce both sides to a fixed minimum.
 - [Canonieke producthiërarchie](product-hierarchy.md) — staged niet-destructieve import; padtabel-sync verplicht bij elke boommutatie; apply claimt job atomisch.
+- [Global Filter Context](global-filter-context.md) — hierarchy/brand filter: server expands descendants via resolve_sku_filter (None≠empty set); store+sessionStorage survives wouter dropping f_-URL-params.
 - [Shared-DB test isolation](shared-db-test-isolation.md) — future-dated max(date) seeds, purge residue for most-recent semantics, always set shop_id explicitly.
 - [Feed full-sync cleanup](feed-full-sync-cleanup.md) — feed-modus volledige sync ruimt historie van verdwenen concurrenten op; lege dag-snapshot of uitgevinkte concurrent nooit als verdwenen behandelen.
 - [Signal auto-resolve evaluability](signal-auto-resolve-evaluability.md) — resolve alleen per daadwerkelijk geëvalueerde entiteit én signaaltype; geen/gedeeltelijke data ≠ verholpen.
