@@ -843,6 +843,89 @@ def test_warn_suspicious_matches_below_threshold():
         db.commit()
         db.close()
 
+def test_warn_suspicious_matches_auto_resolves_after_review(client):
+    """Zodra alle verdachte matches beoordeeld zijn (geen PENDING meer boven de
+    drempel), moet een actief suspicious_ai_matches-signaal automatisch op
+    'resolved' gezet worden. Idempotent: een tweede run publiceert niet opnieuw."""
+    from engine.competition_intelligence import warn_suspicious_matches
+    db = SessionLocal()
+    pfx = f"WMRES{uuid.uuid4().hex[:6]}"
+    sid = None
+    skus: list[str] = []
+    try:
+        shop = models.DimShop(shop_code=pfx, name=f"{pfx}-shop", active=True)
+        db.add(shop)
+        db.flush()
+        sid = shop.id
+        for i in range(6):
+            sku_id = f"{pfx}-SKU-{i}"
+            db.add(models.DimProduct(
+                sku_id=sku_id, product_name=f"Res {i}",
+                current_price=10.0, shop_id=sid))
+            skus.append(sku_id)
+        db.flush()
+        for sku_id in skus:
+            db.add(models.AiMatchResult(
+                own_sku_id=sku_id, competitor_name=f"{pfx}-comp",
+                match_type="Exact", confidence=0.9,
+                explanation_nl="test", status="PENDING",
+                run_date=date.today(), own_price=10.0,
+                competitor_price=17.0, price_diff_pct=70.0,
+            ))
+        db.commit()
+
+        # Run 1: signaal wordt gepubliceerd
+        n = warn_suspicious_matches(db, date.today(), shop_id=sid)
+        assert n == 1
+        sig = db.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.signal_type == "suspicious_ai_matches",
+            models.IntelligenceSignal.shop_id == sid,
+            models.IntelligenceSignal.status == "active",
+        ).one()
+
+        # Analist beoordeelt alle verdachte matches
+        db.query(models.AiMatchResult).filter(
+            models.AiMatchResult.own_sku_id.in_(skus),
+        ).update({"status": "APPROVED"}, synchronize_session=False)
+        db.commit()
+
+        # Run 2: signaal wordt automatisch resolved, geen nieuw signaal
+        n = warn_suspicious_matches(db, date.today(), shop_id=sid)
+        assert n == 0
+        db.refresh(sig)
+        assert sig.status == "resolved"
+
+        # Run 3: idempotent — resolved signaal blijft resolved, niets nieuws
+        n = warn_suspicious_matches(db, date.today(), shop_id=sid)
+        assert n == 0
+        statuses = [s.status for s in db.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.signal_type == "suspicious_ai_matches",
+            models.IntelligenceSignal.shop_id == sid,
+        ).all()]
+        assert statuses == ["resolved"], f"Verwacht exact één resolved signaal, kreeg {statuses}"
+    finally:
+        if skus:
+            for sku_id in skus:
+                db.query(models.AiMatchResult).filter(
+                    models.AiMatchResult.own_sku_id == sku_id,
+                ).delete(synchronize_session=False)
+            db.query(models.DimProduct).filter(
+                models.DimProduct.sku_id.in_(skus),
+            ).delete(synchronize_session=False)
+        if sid is not None:
+            db.query(models.IntelligenceSignal).filter(
+                models.IntelligenceSignal.shop_id == sid,
+            ).delete(synchronize_session=False)
+            db.query(models.CostUsageRecord).filter(
+                models.CostUsageRecord.shop_id == sid,
+            ).delete(synchronize_session=False)
+            db.query(models.DimShop).filter(
+                models.DimShop.id == sid,
+            ).delete(synchronize_session=False)
+        db.commit()
+        db.close()
+
+
 def test_run_all_includes_suspicious_match_signals(suspicious_seed):
     """run_all retourneert suspicious_match_signals in de samenvatting."""
     sid, _skus = suspicious_seed

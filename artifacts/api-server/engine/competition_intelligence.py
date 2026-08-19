@@ -828,12 +828,27 @@ def warn_suspicious_matches(db: Session, run_date: Optional[date] = None,
     if shop_id is not None:
         susp_q = susp_q.filter(models.DimProduct.shop_id == shop_id)
     rows = susp_q.all()
+    counts = {(row_shop_id or 1): cnt for row_shop_id, cnt in rows}
+
+    # Auto-resolve: actieve signalen waarvan het aantal openstaande verdachte
+    # PENDING-matches inmiddels onder de drempel ligt, worden op resolved gezet.
+    # Idempotent: een al-resolved signaal wordt niet nog eens aangeraakt.
+    resolve_q = db.query(models.IntelligenceSignal).filter(
+        models.IntelligenceSignal.signal_type == "suspicious_ai_matches",
+        models.IntelligenceSignal.entity_id == "ai-matching",
+        models.IntelligenceSignal.status == "active",
+    )
+    if shop_id is not None:
+        resolve_q = resolve_q.filter(models.IntelligenceSignal.shop_id == shop_id)
+    for sig in resolve_q.all():
+        if counts.get(sig.shop_id, 0) < min_count:
+            sig.status = "resolved"
 
     n_signals = 0
-    for shop_id, cnt in rows:
+    for row_shop_id, cnt in rows:
         if cnt < min_count:
             continue
-        sid = shop_id or 1
+        sid = row_shop_id or 1
         # Idempotentie: één signaal per shop per run_date
         if _already_signaled(db, "suspicious_ai_matches", "ai-matching", sid,
                              "run_date", str(rd)):
