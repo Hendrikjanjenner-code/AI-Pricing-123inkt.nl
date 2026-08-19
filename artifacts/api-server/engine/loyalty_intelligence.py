@@ -331,7 +331,10 @@ def compute_customer_value(db: Session, run_date: date | None = None) -> int:
         # Next Best Action + vergelijking met generieke prijsverlaging (§22)
         nba, nba_reason, nba_ev, alt_cost = _next_best_action(segment, churn, monetary, aov, retention)
 
-        db.add(models.CustomerValueScore(
+        # Per-lid savepoint: een lid dat tussen de select en de insert door een
+        # concurrente sessie is verwijderd (bijv. test-teardown of retentie-
+        # opruiming) mag de hele run niet laten crashen op de FK-constraint.
+        row = models.CustomerValueScore(
             shop_id=m.shop_id or 1,
             member_id=m.id,
             run_date=run_date,
@@ -350,7 +353,16 @@ def compute_customer_value(db: Session, run_date: date | None = None) -> int:
             nba_expected_value=nba_ev,
             nba_alternative="generieke_prijsverlaging_2pct",
             nba_alternative_cost=alt_cost,
-        ))
+        )
+        try:
+            with db.begin_nested():
+                db.add(row)
+                db.flush()
+        except IntegrityError:
+            logger.warning(
+                "compute_customer_value: lid %s verdween tijdens de run "
+                "(FK-violatie); rij overgeslagen", m.id)
+            continue
         n += 1
     return n
 
@@ -815,8 +827,6 @@ def expiring_soon_members(db: Session, shop_id: int | None = None) -> list[dict]
             })
     result.sort(key=lambda r: r["days_until_expiry"] if r["days_until_expiry"] is not None else 9999)
     return result
-
-
 
 
 # ---------------------------------------------------------------------------

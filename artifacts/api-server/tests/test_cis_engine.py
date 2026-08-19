@@ -335,6 +335,54 @@ def test_idempotent_rerun(seed_data):
         db.close()
 
 
+# ── Levertijd-drempel weegt mee in CSRS-leversnelheid ─────────────────────────
+
+def test_delivery_speed_score_uses_configured_threshold(seed_data):
+    """
+    De CSRS-leversnelheidscore normaliseert op de configureerbare
+    max_delivery_days-drempel: een strengere drempel verlaagt de score voor
+    dezelfde levertijd. Onbekende levertijd (geen profiel) blijft de default
+    van 3 dagen gebruiken.
+    """
+    from services import import_settings as imps
+
+    db = SessionLocal()
+    try:
+        original = imps.get_settings(db)["max_delivery_days"]
+
+        def _score(comp):
+            return float(db.query(models.CompetitorInfluenceScore).filter(
+                models.CompetitorInfluenceScore.sku_id == SKU_A,
+                models.CompetitorInfluenceScore.competitor_name == comp,
+                models.CompetitorInfluenceScore.run_date == seed_data["today"],
+            ).first().delivery_speed_score)
+
+        # Ruime drempel (20d): COMP_1 heeft avg_delivery_days=2 → 1 - 2/20
+        imps.save_settings(db, {}, [], "cis-test", max_delivery_days=20)
+        run_cis_engine(db, ref_date=seed_data["today"], sku_ids=[SKU_A, SKU_B])
+        assert _score(COMP_1) == pytest.approx(1.0 - 2 / 20, abs=1e-3)
+        # Onbekende levertijd (COMP_2 zonder profiel) → default 3 dagen
+        assert _score(COMP_2) == pytest.approx(1.0 - 3 / 20, abs=1e-3)
+
+        # Strengere drempel (5d) → lagere score voor dezelfde levertijd
+        imps.save_settings(db, {}, [], "cis-test", max_delivery_days=5)
+        run_cis_engine(db, ref_date=seed_data["today"], sku_ids=[SKU_A, SKU_B])
+        assert _score(COMP_1) == pytest.approx(1.0 - 2 / 5, abs=1e-3)
+
+        # Geen limiet (None) → legacy 14d-schaal
+        imps.save_settings(db, {}, [], "cis-test", max_delivery_days=None)
+        run_cis_engine(db, ref_date=seed_data["today"], sku_ids=[SKU_A, SKU_B])
+        assert _score(COMP_1) == pytest.approx(1.0 - 2 / 14, abs=1e-3)
+    finally:
+        try:
+            imps.save_settings(db, {}, [], "cis-test",
+                               max_delivery_days=original)
+            run_cis_engine(db, ref_date=seed_data["today"],
+                           sku_ids=[SKU_A, SKU_B])
+        finally:
+            db.close()
+
+
 # ── Regressie: Influence mag niet stilletjes terugvallen naar 0 ───────────────
 
 def _overall_rankings(db, sid, run_date):

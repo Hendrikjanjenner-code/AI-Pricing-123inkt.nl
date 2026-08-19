@@ -283,9 +283,11 @@ def test_expiring_soon_members_window(db, policy):
     # Al-overdue punten blijven zichtbaar tot de expiry-run ze laat vervallen.
     assert m_late.id in rows
     assert rows[m_late.id]["points_expiring"] == 600
-    # Overdue punten hebben geen zinvolle toekomstige vervaldatum meer:
-    # de engine begrenst de schatting op het waarschuwingsvenster.
-    assert rows[m_late.id]["expires_on"] is None
+    # Overdue punten krijgen een geschatte vervaldatum in het verleden
+    # (FIFO-consistent met de liability-cijfers): ze vervallen bij de
+    # eerstvolgende expiry-run en sorteren bovenaan.
+    assert rows[m_late.id]["expires_on"] is not None
+    assert rows[m_late.id]["days_until_expiry"] <= 0
 
 def test_expiring_soon_overdue_plus_window_gets_past_expiry(db, policy):
     """Een lid met zowel levende overdue-punten als punten binnen het
@@ -367,8 +369,12 @@ def test_liability_summary_unscoped_uses_each_shops_policy(db, policy):
         after = li.liability_summary(s)
         assert after["points_expiring_90d"] - before["points_expiring_90d"] == 500
         assert after["points_expiring_30d"] - before["points_expiring_30d"] == 500
-        delta = [a["points"] - b["points"]
-                 for a, b in zip(after["expiry_forecast"], before["expiry_forecast"])]
+        # Robuust tegen een lege baseline (dev-DB zonder loyaltydata vooraf):
+        # vergelijk per maand-sleutel in plaats van te zippen op positie.
+        before_map = {f["month"]: f["points"] for f in before["expiry_forecast"]}
+        delta = [f["points"] - before_map.get(f["month"], 0)
+                 for f in after["expiry_forecast"]]
+        assert delta, "expiry_forecast is leeg na toevoegen van shop B-punten"
         # Overdue punten van shop B vallen in de eerste maand; shop C telt niet mee.
         assert delta[0] == 500
         assert sum(delta) == 500
@@ -399,3 +405,27 @@ def test_expiring_soon_respects_fifo_redeems(db, policy):
     rows = {r["member_id"]: r for r in li.expiring_soon_members(s)}
     assert m.id in rows
     assert rows[m.id]["points_expiring"] == 300
+
+def test_expiring_soon_date_skips_fully_redeemed_old_credits(db, policy):
+    """Oude, volledig ingewisselde credits mogen de geschatte vervaldatum
+    niet naar het verleden trekken: de datum komt van de oudste nog niet via
+    FIFO geconsumeerde tranche (hier: de window-punten) en ligt dus in de
+    toekomst, binnen het waarschuwingsvenster."""
+    s, created = db
+    today = date.today()
+    m = _make_member(s, created)
+    # Heel oude credit die volledig is ingewisseld (FIFO consumeert deze eerst)
+    li.apply_ledger_entry(s, m, today - timedelta(days=EXPIRY_DAYS + 200), "earn", 400)
+    li.apply_ledger_entry(s, m, today - timedelta(days=EXPIRY_DAYS + 100), "redeem", -400)
+    # Resterende punten binnen het waarschuwingsvenster
+    li.apply_ledger_entry(
+        s, m, today - timedelta(days=EXPIRY_DAYS - WARN_DAYS + 10), "earn", 600)
+    s.commit()
+
+    rows = {r["member_id"]: r for r in li.expiring_soon_members(s)}
+    assert m.id in rows
+    row = rows[m.id]
+    assert row["points_expiring"] == 600
+    assert row["expires_on"] is not None
+    # Vervaldatum komt van de window-tranche: toekomstig, binnen het venster
+    assert 0 <= row["days_until_expiry"] <= WARN_DAYS, row

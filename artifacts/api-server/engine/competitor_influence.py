@@ -172,6 +172,14 @@ def run_cis_engine(db, ref_date: date | None = None,
     - dim_product                  → eigen huidige prijs (prijsafwijking)
     """
     from sqlalchemy.orm import Session  # noqa: F401 – type-hint only
+    from services import import_settings as imps
+
+    # Configureerbare levertijd-drempel (import-instellingen). Zelfde
+    # referentiepunt als de referentieprijs-uitsluiting: op/boven de drempel
+    # scoort leversnelheid 0. Drempel None (geen limiet) → legacy 14d-schaal.
+    _settings = imps.get_settings(db)
+    _mdd = _settings.get("max_delivery_days")
+    delivery_scale = float(_mdd) if _mdd else 14.0
 
     today = ref_date or date.today()
     since = today - timedelta(days=_WINDOW_DAYS)
@@ -269,9 +277,11 @@ def run_cis_engine(db, ref_date: date | None = None,
 
         # ── CSRS sub-scores (beschikbaarheid & betrouwbaarheid) ───────────
         availability_rate = round(min(1.0, days_with_data / _WINDOW_DAYS), 4)
-        # Leversnelheid: normaliseer avg_delivery_days 0→1 op schaal tot 14d
+        # Leversnelheid: normaliseer avg_delivery_days 0→1 op de configureerbare
+        # levertijd-drempel (max_delivery_days); onbekende levertijd (None)
+        # behoudt de bestaande default van 3 dagen.
         avg_days = float(profile.avg_delivery_days or 3) if profile else 3.0
-        delivery_speed_score = round(max(0.0, 1.0 - avg_days / 14.0), 4)
+        delivery_speed_score = round(max(0.0, 1.0 - avg_days / delivery_scale), 4)
         stock_stability_score = round(min(1.0, availability_rate * 1.1), 4)
         # in_stock_rate uit profiel geeft listing-consistentie
         in_stock = float(profile.in_stock_rate or 0.7) if profile and profile.in_stock_rate else 0.7
