@@ -478,6 +478,12 @@ def liability_summary(db: Session, shop_id: int | None = None) -> dict:
         # curve leeg (geen speculatieve buckets).
         expiry_forecast = _expiry_forecast_monthly(db, policy, months=6, shop_id=-1)
 
+    if not expiry_forecast and policy.enabled:
+        # Beleid aan maar (nog) geen shops met loyalty-leden: lever toch een
+        # dekkende (nul-)maandcurve zodat consumenten altijd `months` buckets
+        # krijgen. Bij uitgeschakeld beleid blijft de curve bewust leeg.
+        expiry_forecast = _expiry_forecast_monthly(db, policy, months=6, shop_id=-1)
+
     return {
         "shop_id": shop_id,
         "outstanding_points": outstanding,
@@ -848,8 +854,7 @@ def expiring_soon_members(db: Session, shop_id: int | None = None) -> list[dict]
                 "is_demo_data": bool(member.is_demo_data),
             })
     result.sort(key=lambda r: r["days_until_expiry"] if r["days_until_expiry"] is not None else 9999)
-    return result
-# ---------------------------------------------------------------------------
+    return result# ---------------------------------------------------------------------------
 # Fraude
 # ---------------------------------------------------------------------------
 

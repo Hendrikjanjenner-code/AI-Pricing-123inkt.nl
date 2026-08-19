@@ -54,3 +54,4 @@
 - [Shared-DB test isolation](shared-db-test-isolation.md) — future-dated max(date) seeds, purge residue for most-recent semantics, always set shop_id explicitly.
 - [Feed full-sync cleanup](feed-full-sync-cleanup.md) — feed-modus volledige sync ruimt historie van verdwenen concurrenten op; lege dag-snapshot of uitgevinkte concurrent nooit als verdwenen behandelen.
 - [Signal auto-resolve evaluability](signal-auto-resolve-evaluability.md) — resolve alleen per daadwerkelijk geëvalueerde entiteit én signaaltype; geen/gedeeltelijke data ≠ verholpen.
+- [Lifespan bootstrap once per process](test-startup-bootstrap.md) — DDL/migrations/seeding in main.py run once per process; keep new expensive startup work inside the guard.

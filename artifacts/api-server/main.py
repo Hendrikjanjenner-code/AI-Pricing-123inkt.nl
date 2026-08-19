@@ -61,6 +61,10 @@ APP_VERSION = "1.0.0"
 
 # Populated during lifespan startup; surfaced via /api/healthz and /api/health
 # so operators can see the last startup error without digging through logs.
+# Eén keer per proces: DDL, migraties en seeding. Herhaalde lifespans in
+# hetzelfde proces (bv. TestClient per testmodule) slaan deze stappen over.
+_db_bootstrap_done = False
+
 startup_state: dict = {
     "backend_status": "starting",
     "database_status": "unknown",
@@ -74,22 +78,29 @@ startup_state: dict = {
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Startup: backend starting (version %s).", APP_VERSION)
+    global _db_bootstrap_done
     try:
-        # 1. Create any brand-new tables
-        Base.metadata.create_all(bind=engine)
-        logger.info("Startup: database tables ensured (create_all complete).")
+        # De DDL/seed-stappen (1 t/m 4) zijn idempotent maar niet gratis:
+        # elke run kost ~1-2s aan schema-introspectie. In productie start het
+        # proces één keer, maar in de testsuite maakt elke testmodule een
+        # eigen TestClient die deze lifespan opnieuw draait. Binnen hetzelfde
+        # proces (zelfde DB-configuratie) is één keer bootstrappen voldoende.
+        if not _db_bootstrap_done:
+            # 1. Create any brand-new tables
+            Base.metadata.create_all(bind=engine)
+            logger.info("Startup: database tables ensured (create_all complete).")
 
-        # 2. Add missing columns to existing tables (idempotent)
-        run_migrations(engine, Base.metadata)
-        logger.info("Startup: migrations applied.")
+            # 2. Add missing columns to existing tables (idempotent)
+            run_migrations(engine, Base.metadata)
+            logger.info("Startup: migrations applied.")
 
-        # 2a. BigQuery kostenmeting-tabel aanmaken (idempotent, faalveilig)
-        try:
-            from bigquery.cost_tracker import ensure_cost_table
-            ensure_cost_table(engine)
-            logger.info("Startup: BigQuery kostenmeting-tabel ensured.")
-        except Exception as _bq_exc:
-            logger.warning("Startup: BigQuery kostenmeting-tabel aanmaken mislukt (niet kritiek): %s", _bq_exc)
+            # 2a. BigQuery kostenmeting-tabel aanmaken (idempotent, faalveilig)
+            try:
+                from bigquery.cost_tracker import ensure_cost_table
+                ensure_cost_table(engine)
+                logger.info("Startup: BigQuery kostenmeting-tabel ensured.")
+            except Exception as _bq_exc:
+                logger.warning("Startup: BigQuery kostenmeting-tabel aanmaken mislukt (niet kritiek): %s", _bq_exc)
 
         # 2b. Confirm the database is actually reachable (not just configured)
         with engine.connect() as conn:
@@ -98,32 +109,35 @@ async def lifespan(app: FastAPI):
         startup_state["database_status"] = "connected"
         logger.info("Startup: database connected.")
 
-        # 2c. Canonical model: default shop aanmaken + shop_id backfill
-        from canonical import ensure_default_shop
-        ensure_default_shop()
-        logger.info("Startup: default shop ensured en shop_id backfill uitgevoerd.")
+        if not _db_bootstrap_done:
+            # 2c. Canonical model: default shop aanmaken + shop_id backfill
+            from canonical import ensure_default_shop
+            ensure_default_shop()
+            logger.info("Startup: default shop ensured en shop_id backfill uitgevoerd.")
 
-        # 3. Always ensure the 4 demo user accounts exist (needed for login)
-        from seed import seed_users_only
-        seed_users_only()
-        logger.info("Startup: demo user accounts ensured.")
+            # 3. Always ensure the 4 demo user accounts exist (needed for login)
+            from seed import seed_users_only
+            seed_users_only()
+            logger.info("Startup: demo user accounts ensured.")
 
-        # 3a. Dev-only safety net: guarantee a recoverable admin login exists
-        # locally without ever touching/deleting existing data (no-op in prod).
-        from auth import create_default_admin_if_missing
-        create_default_admin_if_missing()
+            # 3a. Dev-only safety net: guarantee a recoverable admin login exists
+            # locally without ever touching/deleting existing data (no-op in prod).
+            from auth import create_default_admin_if_missing
+            create_default_admin_if_missing()
 
-        # 3b. Idempotently ensure the configured real owner admin account exists
-        # (OWNER_ADMIN_EMAIL + OWNER_ADMIN_PASSWORD). No-op when unset; runs in
-        # dev and production so the same login works on the published app.
-        from seed import ensure_owner_admin
-        ensure_owner_admin()
-        logger.info("Startup: owner admin account ensured (if configured).")
+            # 3b. Idempotently ensure the configured real owner admin account exists
+            # (OWNER_ADMIN_EMAIL + OWNER_ADMIN_PASSWORD). No-op when unset; runs in
+            # dev and production so the same login works on the published app.
+            from seed import ensure_owner_admin
+            ensure_owner_admin()
+            logger.info("Startup: owner admin account ensured (if configured).")
 
-        # 4. Only seed demo product/price/sales data when explicitly requested
-        if os.environ.get("SEED_DEMO_DATA", "false").lower() in ("1", "true", "yes"):
-            seed_database()
-            logger.info("Startup: demo product/sales data seeded (SEED_DEMO_DATA=true).")
+            # 4. Only seed demo product/price/sales data when explicitly requested
+            if os.environ.get("SEED_DEMO_DATA", "false").lower() in ("1", "true", "yes"):
+                seed_database()
+                logger.info("Startup: demo product/sales data seeded (SEED_DEMO_DATA=true).")
+
+            _db_bootstrap_done = True
 
         logger.info("Startup: routes loaded (%d routers registered).", len(app.routes))
 

@@ -11,6 +11,10 @@ import os
 os.environ.setdefault("DISABLE_HEALTH_MONITOR", "true")
 os.environ.setdefault("DISABLE_FEED_SYNC", "true")
 os.environ.setdefault("DISABLE_DQ_SCAN", "true")
+# Let op: de in-app scheduler in main.py leest DISABLE_DATA_QUALITY_SCAN
+# (de losse scan-scheduler leest DISABLE_DQ_SCAN); zet beide, anders start
+# de scan na de 90s-aanloop alsnog middenin een volledige suite-run.
+os.environ.setdefault("DISABLE_DATA_QUALITY_SCAN", "true")
 os.environ.setdefault("DISABLE_AI_BUDGET_CLEANUP", "true")
 os.environ.setdefault("DISABLE_AI_KEY_MONITOR", "true")
 os.environ.setdefault("DISABLE_SCRAPE_SCHEDULER", "true")

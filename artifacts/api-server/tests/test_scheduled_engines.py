@@ -40,7 +40,8 @@ def active_shop():
     yield shop_id
     # Teardown: eventuele per-shop usage- en run-registratierijen eerst weg
     # (FK), dan de shop.
-    for table in ("ai_cost_usage", "scheduled_engine_runs", "engine_runs"):
+    for table in ("ai_cost_usage", "cost_usage_records",
+                  "scheduled_engine_runs", "engine_runs"):
         try:
             db.execute(
                 models.Base.metadata.tables[table].delete().where(
