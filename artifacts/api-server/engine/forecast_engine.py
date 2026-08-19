@@ -9,6 +9,7 @@ Risk: risicosignalen (competitor, supplier, stock, margin, traffic, demand)
 gepubliceerd als IntelligenceSignals.
 """
 from __future__ import annotations
+import time
 from datetime import date, timedelta
 from typing import Any, Dict, Optional
 
@@ -16,8 +17,13 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import models
+import logging
+
 from engine.signal_publisher import publish_signal, resolve_shop_id
 from engine.model_governance import ensure_active_model, record_run_metrics, get_active_config
+from engine.run_profiling import RunProfiler, check_slow_run
+
+logger = logging.getLogger(__name__)
 
 # Default modelconfiguratie — vastgelegd per registry-versie (governance §54).
 FORECAST_DEFAULT_CONFIG = {
@@ -27,6 +33,10 @@ FORECAST_DEFAULT_CONFIG = {
     "demand_trend_threshold_pct": -15.0,   # sterker dalend dan dit = demand-risico
     "price_index_risk_threshold": 1.10,    # prijsindex boven dit = competitor-risico
     "stock_days_high_severity": 14,        # minder dagen dekking dan dit = severity high
+    # Trage runs: maximale totale wandkloktijd (seconden) van een volledige
+    # run voordat een engine_slow_run-signaal wordt gepubliceerd. Expliciet
+    # shop-gescopeerde runs (tests) zijn uitgezonderd. <= 0 schakelt uit.
+    "slow_run_threshold_seconds": 60.0,
 }
 
 
@@ -102,20 +112,23 @@ def run_forecast_engine(db: Session, run_date: date | None = None,
     cfg = get_active_config(db, "forecast_risk", FORECAST_DEFAULT_CONFIG)
     min_hist = int(cfg["min_history_days"])
 
+    prof = RunProfiler("Forecast engine", logger)
+
     since = run_date - timedelta(days=int(cfg["history_days"]))
-    sales = (
+    sales = prof.timed("load_sales", lambda: (
         db.query(models.FactSalesDaily)
         .filter(models.FactSalesDaily.date >= since,
                 models.FactSalesDaily.shop_id == sid)
         .all()
-    )
+    ))
     by_sku: Dict[str, list] = {}
     for r in sales:
         by_sku.setdefault(r.sku_id, []).append(r)
 
-    products = {p.sku_id: p for p in db.query(models.DimProduct).filter(
-        models.DimProduct.shop_id == sid,
-        models.DimProduct.is_active.isnot(False)).all()}
+    products = prof.timed("load_products", lambda: {
+        p.sku_id: p for p in db.query(models.DimProduct).filter(
+            models.DimProduct.shop_id == sid,
+            models.DimProduct.is_active.isnot(False)).all()})
 
     db.query(models.FactForecastDaily).filter(
         models.FactForecastDaily.run_date == run_date,
@@ -124,6 +137,7 @@ def run_forecast_engine(db: Session, run_date: date | None = None,
 
     forecast_count = 0
     risk_count = 0
+    _t_forecasts = time.monotonic()
     for sku_id, rows in by_sku.items():
         prod = products.get(sku_id)
         if not prod:
@@ -173,13 +187,33 @@ def run_forecast_engine(db: Session, run_date: date | None = None,
         if fc30:
             risk_count += _detect_sku_risks(db, prod, fc30, run_date, model.version, sid, cfg)
 
+    prof.timings["forecasts"] = round(time.monotonic() - _t_forecasts, 3)
+    logger.info("Forecast engine stap 'forecasts' duurde %.3fs",
+                prof.timings["forecasts"])
+
     record_run_metrics(db, "forecast_risk", {
         "skus": len(by_sku), "forecasts": forecast_count, "risk_signals": risk_count,
         "shop_id": sid,
     })
     db.commit()
-    return {"skus": len(by_sku), "forecasts": forecast_count,
-            "risk_signals": risk_count, "run_date": str(run_date), "shop_id": sid}
+    result = {"skus": len(by_sku), "forecasts": forecast_count,
+              "risk_signals": risk_count, "run_date": str(run_date), "shop_id": sid,
+              "timings_seconds": prof.timings, "total_seconds": prof.total_seconds()}
+
+    # Trage-run-bewaking. De nachtelijke scheduler draait deze engine per shop
+    # (scheduled_engines.py), dus juist de gescopeerde run is het productiepad:
+    # het signaal is shop-gescopeerd (dedupe per shop). Drempel via governance;
+    # <= 0 schakelt uit (bijv. voor test-omgevingen).
+    threshold = float(cfg.get("slow_run_threshold_seconds",
+                              FORECAST_DEFAULT_CONFIG["slow_run_threshold_seconds"]))
+    if check_slow_run(db, prof, engine="forecast_risk",
+                      entity_name="Forecast & Risk Engine", run_date=run_date,
+                      threshold_seconds=threshold, model_version=model.version,
+                      total_seconds=result["total_seconds"],
+                      shop_id=sid, entity_id=str(sid)):
+        db.commit()
+        result["slow_run_signal"] = True
+    return result
 
 
 def _detect_sku_risks(db: Session, prod: models.DimProduct, fc30: dict, run_date: date,

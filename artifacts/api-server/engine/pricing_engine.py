@@ -7,6 +7,8 @@ For each SKU:
 3. Apply safety rules
 4. Persist recommendations to fact_pricing_recommendation_daily
 """
+import logging
+
 import numpy as np
 import pandas as pd
 from datetime import date, datetime, timedelta
@@ -15,8 +17,22 @@ import models
 from engine import strategies
 from engine.safety_rules import apply_safety_rules
 from engine.competitor_strategy_engine import analyseer_alle_concurrenten
+from engine.model_governance import get_active_config
+from engine.run_profiling import RunProfiler, check_slow_run
+
+logger = logging.getLogger(__name__)
 
 MODEL_VERSION = "v1.0.0"
+
+# Default modelconfiguratie (governance §54). Drempel voor trage-run-bewaking
+# van de volledige nachtelijke pricing-run (seconden); <= 0 schakelt uit.
+PRICING_DEFAULT_CONFIG = {
+    "slow_run_threshold_seconds": 60.0,
+}
+
+
+def _cfg(db: Session) -> dict:
+    return get_active_config(db, "pricing", PRICING_DEFAULT_CONFIG)
 
 
 def _py(v):
@@ -38,18 +54,21 @@ def run_pricing_engine(db: Session) -> tuple[int, int]:
     Returns (processed_count, skipped_count).
     """
     today = date.today()
-    products = db.query(models.DimProduct).filter(
+    prof = RunProfiler("Pricing engine", logger)
+
+    products = prof.timed("load_products", lambda: db.query(models.DimProduct).filter(
         models.DimProduct.lifecycle_status != "discontinued"
-    ).all()
+    ).all())
 
     # Preload all fact data into DataFrames for speed
-    sales_df = _load_sales(db)
-    price_df = _load_prices(db)
-    comp_df = _load_competitor_prices(db)
-    inventory_df = _load_inventory(db)
-    basket_df = _load_basket_affinity(db)
-    substitution_map = _load_substitutions(db)
-    competitor_strategies = _load_competitor_strategies(db)
+    sales_df = prof.timed("load_sales", lambda: _load_sales(db))
+    price_df = prof.timed("load_prices", lambda: _load_prices(db))
+    comp_df = prof.timed("load_competitor_prices", lambda: _load_competitor_prices(db))
+    inventory_df = prof.timed("load_inventory", lambda: _load_inventory(db))
+    basket_df = prof.timed("load_basket_affinity", lambda: _load_basket_affinity(db))
+    substitution_map = prof.timed("load_substitutions", lambda: _load_substitutions(db))
+    competitor_strategies = prof.timed("load_competitor_strategies",
+                                       lambda: _load_competitor_strategies(db))
 
     # Pre-group per SKU into dicts for O(1) lookup. With tens of thousands of
     # products and hundreds of thousands of competitor rows, boolean-masking each
@@ -81,67 +100,83 @@ def run_pricing_engine(db: Session) -> tuple[int, int]:
     rec_maps: list[dict] = []
     processed, skipped = 0, 0
 
-    for product in products:
-        try:
-            if product.sku_id in locked:
+    def _generate_recommendations() -> None:
+        nonlocal processed, skipped
+        for product in products:
+            try:
+                if product.sku_id in locked:
+                    skipped += 1
+                    continue
+
+                sku_inv = inv_by.get(product.sku_id, empty_inv)
+                context = {
+                    "product": product,
+                    "sales": sales_by.get(product.sku_id, empty_sales),
+                    "prices": price_by.get(product.sku_id, empty_price),
+                    "competitors": comp_by.get(product.sku_id, empty_comp),
+                    "inventory": sku_inv,
+                    "basket": basket_by.get(product.sku_id, empty_basket),
+                    "substitutions": substitution_map.get(product.sku_id, []),
+                    "all_products": all_products,
+                    "competitor_strategies": competitor_strategies,
+                }
+
+                # Route to strategy
+                strategy = product.strategy_type or "MARGIN_OPTIMIZATION"
+                result = _run_strategy(strategy, context)
+
+                if result is None:
+                    skipped += 1
+                    continue
+
+                # Apply safety rules
+                result = apply_safety_rules(product, result, sku_inv)
+
+                rec_maps.append({
+                    "date": today,
+                    "sku_id": product.sku_id,
+                    "current_price": float(product.current_price) if product.current_price else None,
+                    "recommended_price": _py(result["recommended_price"]),
+                    "recommended_change_pct": _py(result["change_pct"]),
+                    "expected_units": _py(result.get("expected_units")),
+                    "expected_revenue": _py(result.get("expected_revenue")),
+                    "expected_margin": _py(result.get("expected_margin")),
+                    "expected_margin_uplift": _py(result.get("expected_margin_uplift")),
+                    "confidence_score": _py(result["confidence"]),
+                    "reason_code": result["reason_code"],
+                    "strategy_type": strategy,
+                    "competitor_strategy_signal": result.get("competitor_strategy_signal"),
+                    "safety_status": result.get("safety_status", "ok"),
+                    "approval_status": "pending",
+                    "model_version": MODEL_VERSION,
+                })
+                processed += 1
+
+            except Exception:
                 skipped += 1
                 continue
 
-            sku_inv = inv_by.get(product.sku_id, empty_inv)
-            context = {
-                "product": product,
-                "sales": sales_by.get(product.sku_id, empty_sales),
-                "prices": price_by.get(product.sku_id, empty_price),
-                "competitors": comp_by.get(product.sku_id, empty_comp),
-                "inventory": sku_inv,
-                "basket": basket_by.get(product.sku_id, empty_basket),
-                "substitutions": substitution_map.get(product.sku_id, []),
-                "all_products": all_products,
-                "competitor_strategies": competitor_strategies,
-            }
+    prof.timed("recommendations", _generate_recommendations)
 
-            # Route to strategy
-            strategy = product.strategy_type or "MARGIN_OPTIMIZATION"
-            result = _run_strategy(strategy, context)
+    def _persist() -> None:
+        for i in range(0, len(rec_maps), 5_000):
+            db.bulk_insert_mappings(models.FactPricingRecommendationDaily, rec_maps[i:i + 5_000])
+        db.commit()
 
-            if result is None:
-                skipped += 1
-                continue
-
-            # Apply safety rules
-            result = apply_safety_rules(product, result, sku_inv)
-
-            rec_maps.append({
-                "date": today,
-                "sku_id": product.sku_id,
-                "current_price": float(product.current_price) if product.current_price else None,
-                "recommended_price": _py(result["recommended_price"]),
-                "recommended_change_pct": _py(result["change_pct"]),
-                "expected_units": _py(result.get("expected_units")),
-                "expected_revenue": _py(result.get("expected_revenue")),
-                "expected_margin": _py(result.get("expected_margin")),
-                "expected_margin_uplift": _py(result.get("expected_margin_uplift")),
-                "confidence_score": _py(result["confidence"]),
-                "reason_code": result["reason_code"],
-                "strategy_type": strategy,
-                "competitor_strategy_signal": result.get("competitor_strategy_signal"),
-                "safety_status": result.get("safety_status", "ok"),
-                "approval_status": "pending",
-                "model_version": MODEL_VERSION,
-            })
-            processed += 1
-
-        except Exception:
-            skipped += 1
-            continue
-
-    for i in range(0, len(rec_maps), 5_000):
-        db.bulk_insert_mappings(models.FactPricingRecommendationDaily, rec_maps[i:i + 5_000])
-    db.commit()
+    prof.timed("persist", _persist)
 
     # Publiceer gestandaardiseerde IntelligenceSignals (§7-§8)
     from engine.signal_emitters import emit_for_engine
-    emit_for_engine(db, "pricing")
+    prof.timed("signals", lambda: emit_for_engine(db, "pricing"))
+
+    # Trage-run-bewaking: de pricing-run is altijd een volledige catalogus-run;
+    # drempel configureerbaar via model-governance (model 'pricing').
+    threshold = float(_cfg(db).get("slow_run_threshold_seconds",
+                                   PRICING_DEFAULT_CONFIG["slow_run_threshold_seconds"]))
+    if check_slow_run(db, prof, engine="pricing",
+                      entity_name="Pricing Engine", run_date=today,
+                      threshold_seconds=threshold, model_version=MODEL_VERSION):
+        db.commit()
 
     return processed, skipped
 

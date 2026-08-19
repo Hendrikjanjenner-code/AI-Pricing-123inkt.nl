@@ -11,9 +11,21 @@ Faalveilig (§56): ontbrekende signalen of data leiden tot expliciete
 "data unavailable"-vermeldingen, nooit tot een crash of stille aanname.
 Human approval blijft verplicht — deze engine voert nooit iets uit.
 """
+import logging
+
 from datetime import date, datetime
 from sqlalchemy.orm import Session
 import models
+from engine.model_governance import get_active_config
+from engine.run_profiling import RunProfiler, check_slow_run
+
+logger = logging.getLogger(__name__)
+
+# Default modelconfiguratie (governance §54). Drempel voor trage-run-bewaking
+# van de volledige nachtelijke decision-run (seconden); <= 0 schakelt uit.
+DECISION_DEFAULT_CONFIG = {
+    "slow_run_threshold_seconds": 60.0,
+}
 
 DECISION_MODEL_VERSION = "decision-v1.0.0"
 AI_PROPOSER = "decision-engine"
@@ -61,7 +73,9 @@ def run_decision_engine(db: Session, shop_id: int | None = None) -> dict:
     sid = _shop_scope(db, shop_id)
     today = date.today()
 
-    signals = (
+    prof = RunProfiler("Decision engine", logger)
+
+    signals = prof.timed("load_signals", lambda: (
         db.query(models.IntelligenceSignal)
         .filter(
             models.IntelligenceSignal.status == "active",
@@ -69,7 +83,7 @@ def run_decision_engine(db: Session, shop_id: int | None = None) -> dict:
         )
         .order_by(models.IntelligenceSignal.observed_at.desc())
         .all()
-    )
+    ))
 
     # Groepeer signalen per entiteitstype + entiteitsid
     per_sku: dict[str, list] = {}
@@ -118,22 +132,26 @@ def run_decision_engine(db: Session, shop_id: int | None = None) -> dict:
             products_by_category.setdefault(p.category, []).append(p)
 
     # ── SKU-beslissingen ────────────────────────────────────────────────────
-    sku_budget = MAX_DECISIONS_PER_RUN
-    for entity_id, sigs in ranked_sku[:sku_budget]:
-        if entity_id in locked_entities:
-            skipped += 1
-            continue
-        try:
-            with db.begin_nested():
-                decision, n_gaps = _build_decision(db, today, sid, entity_id, sigs, products.get(entity_id))
-            if decision is None:
+    def _sku_decisions() -> None:
+        nonlocal created, skipped, gaps_total
+        sku_budget = MAX_DECISIONS_PER_RUN
+        for entity_id, sigs in ranked_sku[:sku_budget]:
+            if entity_id in locked_entities:
                 skipped += 1
                 continue
-            created += 1
-            gaps_total += n_gaps
-        except Exception:
-            skipped += 1
-            continue
+            try:
+                with db.begin_nested():
+                    decision, n_gaps = _build_decision(db, today, sid, entity_id, sigs, products.get(entity_id))
+                if decision is None:
+                    skipped += 1
+                    continue
+                created += 1
+                gaps_total += n_gaps
+            except Exception:
+                skipped += 1
+                continue
+
+    prof.timed("sku_decisions", _sku_decisions)
 
     # ── Categorie-beslissingen ──────────────────────────────────────────────
     # Leid categorie-beslissingen af uit de actieve SKU-signalen: groepeer de
@@ -155,32 +173,56 @@ def run_decision_engine(db: Session, shop_id: int | None = None) -> dict:
     # geteld en gerapporteerd als categories_deferred.
     cat_budget = max(10, MAX_DECISIONS_PER_RUN - created)
     categories_deferred = max(0, len(ranked_cat) - cat_budget)
-    for category_id, cat_sigs in ranked_cat[:cat_budget]:
-        if category_id in locked_entities:
-            skipped += 1
-            continue
-        try:
-            with db.begin_nested():
-                cat_products = products_by_category.get(category_id, [])
-                decision, n_gaps = _build_category_decision(
-                    db, today, sid, category_id, cat_sigs, cat_products
-                )
-            if decision is None:
+
+    def _category_decisions() -> None:
+        nonlocal created, skipped, gaps_total
+        for category_id, cat_sigs in ranked_cat[:cat_budget]:
+            if category_id in locked_entities:
                 skipped += 1
                 continue
-            created += 1
-            gaps_total += n_gaps
-        except Exception:
-            skipped += 1
-            continue
+            try:
+                with db.begin_nested():
+                    cat_products = products_by_category.get(category_id, [])
+                    decision, n_gaps = _build_category_decision(
+                        db, today, sid, category_id, cat_sigs, cat_products
+                    )
+                if decision is None:
+                    skipped += 1
+                    continue
+                created += 1
+                gaps_total += n_gaps
+            except Exception:
+                skipped += 1
+                continue
+
+    prof.timed("category_decisions", _category_decisions)
 
     db.commit()
-    return {
+    result = {
         "decisions_created": created,
         "entities_skipped": skipped,
         "data_gaps_total": gaps_total,
         "categories_deferred": categories_deferred,
+        "timings_seconds": prof.timings,
+        "total_seconds": prof.total_seconds(),
     }
+
+    # Trage-run-bewaking. De decision-run is altijd effectief shop-gescopeerd
+    # (valt terug op de default shop), dus het signaal is shop-gescopeerd en
+    # de bewaking geldt voor elke run. Drempel via governance; <= 0 schakelt
+    # uit (bijv. voor test-omgevingen).
+    threshold = float(get_active_config(db, "decision", DECISION_DEFAULT_CONFIG)
+                      .get("slow_run_threshold_seconds",
+                           DECISION_DEFAULT_CONFIG["slow_run_threshold_seconds"]))
+    if check_slow_run(db, prof, engine="decision",
+                      entity_name="Commercial Decision Engine", run_date=today,
+                      threshold_seconds=threshold,
+                      model_version=DECISION_MODEL_VERSION,
+                      total_seconds=result["total_seconds"],
+                      shop_id=sid, entity_id=str(sid)):
+        db.commit()
+        result["slow_run_signal"] = True
+    return result
 
 
 def _build_category_decision(

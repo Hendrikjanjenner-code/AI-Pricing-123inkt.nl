@@ -10,9 +10,24 @@ Berekent per SKU / categorie:
 
 Schrijft resultaten naar fact_traffic_intelligence_daily.
 """
+import logging
+import time
+
 from datetime import date, timedelta
 from sqlalchemy.orm import Session
 import models
+from engine.model_governance import get_active_config
+from engine.run_profiling import RunProfiler, check_slow_run
+
+logger = logging.getLogger(__name__)
+
+TRAFFIC_MODEL_VERSION = "traffic-v1.0.0"
+
+# Default modelconfiguratie (governance §54). Drempel voor trage-run-bewaking
+# van de volledige nachtelijke traffic-run (seconden); <= 0 schakelt uit.
+TRAFFIC_DEFAULT_CONFIG = {
+    "slow_run_threshold_seconds": 60.0,
+}
 
 
 # ─── Basisberekeningen ────────────────────────────────────────────────────────
@@ -304,18 +319,25 @@ def run_traffic_engine(db: Session) -> tuple[int, int]:
     cutoff_30 = today - timedelta(days=30)
     cutoff_60 = today - timedelta(days=60)
 
-    products = db.query(models.DimProduct).all()
-    traffic_rows = db.query(models.FactTrafficDaily).filter(
-        models.FactTrafficDaily.date >= cutoff_60
-    ).all()
-    search_rows = db.query(models.FactSearchDemandDaily).all()
-    pcis_rows = {r.sku_id: r for r in db.query(models.SkuCompetitionScore).all()}
-    inventory = db.query(models.FactInventoryDaily).filter(
-        models.FactInventoryDaily.date == today
-    ).all()
-    stock_map = {r.sku_id: r.quantity_on_hand for r in inventory}
+    prof = RunProfiler("Traffic engine", logger)
+
+    def _load() -> tuple:
+        products = db.query(models.DimProduct).all()
+        traffic_rows = db.query(models.FactTrafficDaily).filter(
+            models.FactTrafficDaily.date >= cutoff_60
+        ).all()
+        search_rows = db.query(models.FactSearchDemandDaily).all()
+        pcis_rows = {r.sku_id: r for r in db.query(models.SkuCompetitionScore).all()}
+        inventory = db.query(models.FactInventoryDaily).filter(
+            models.FactInventoryDaily.date == today
+        ).all()
+        stock_map = {r.sku_id: r.quantity_on_hand for r in inventory}
+        return products, traffic_rows, search_rows, pcis_rows, stock_map
+
+    products, traffic_rows, search_rows, pcis_rows, stock_map = prof.timed("load_data", _load)
 
     processed, skipped = 0, 0
+    _t_scores = time.monotonic()
 
     for product in products:
         try:
@@ -391,10 +413,24 @@ def run_traffic_engine(db: Session) -> tuple[int, int]:
             skipped += 1
             continue
 
-    db.commit()
+    prof.timings["scores"] = round(time.monotonic() - _t_scores, 3)
+    logger.info("Traffic engine stap 'scores' duurde %.3fs", prof.timings["scores"])
+
+    prof.timed("persist", db.commit)
 
     # Publiceer gestandaardiseerde IntelligenceSignals (§7-§8)
     from engine.signal_emitters import emit_for_engine
-    emit_for_engine(db, "traffic")
+    prof.timed("signals", lambda: emit_for_engine(db, "traffic"))
+
+    # Trage-run-bewaking: de traffic-run is altijd een volledige catalogus-run;
+    # drempel configureerbaar via model-governance (model 'traffic').
+    threshold = float(get_active_config(db, "traffic", TRAFFIC_DEFAULT_CONFIG)
+                      .get("slow_run_threshold_seconds",
+                           TRAFFIC_DEFAULT_CONFIG["slow_run_threshold_seconds"]))
+    if check_slow_run(db, prof, engine="traffic",
+                      entity_name="Traffic Intelligence Engine", run_date=today,
+                      threshold_seconds=threshold,
+                      model_version=TRAFFIC_MODEL_VERSION):
+        db.commit()
 
     return processed, skipped

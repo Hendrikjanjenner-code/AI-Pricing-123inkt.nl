@@ -46,4 +46,4 @@
 - [Loyalty expiry semantics](loyalty-expiry-semantics.md) — overdue points count as "expiring soon"; policy is per shop but apply_expiry_run keeps legacy expiry_cutoff/expiry_months fields.
 - [Schedulers uit in tests](test-scheduler-isolation.md) — TestClient start de lifespan; conftest zet alle DISABLE_*-vlaggen of full-suite runs krijgen StaleDataError/verdwenen rijen.
 - [Signal auto-resolve scoping](signal-auto-resolve.md) — auto_resolve_signals is shop-gescoped (default shop); emitters moeten brondata óók shop-filteren of cross-shop rijen uitsluiten, anders resolve je andermans signalen.
-- [Test-shop teardown FK](test-suite-conventions.md) — request middleware writes cost-usage rows per shop; any teardown that deletes a shop must delete those rows first or FK-fails only in full-suite runs.
+- [Slow-run monitoring](slow-run-monitoring.md) — per-shop scheduled runs are the production path: publish shop-scoped engine_slow_run, never exempt scoped runs; round timings to µs or mocked tests can never trigger.
