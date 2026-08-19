@@ -23,6 +23,9 @@ import type {
   Category,
   CategoryMarginItem,
   CategoryStrategy,
+  CompetitorScoreDetail,
+  CompetitorScoreRankings,
+  CompetitorScoresList,
   ConfidenceBucket,
   CopilotAskRequest,
   CopilotConversation,
@@ -44,11 +47,14 @@ import type {
   ExportRecommendationsParams,
   ExportResult,
   FileUploadRequest,
+  GetCompetitorScoreDetailParams,
+  GetCompetitorScoreRankingsParams,
   GetExportHistoryParams,
   HealthStatus,
   ImportJob,
   IntelligenceSignal,
   ListAuthzPermissions200,
+  ListCompetitorScoresParams,
   ListCopilotModelCallsParams,
   ListProductsParams,
   ListRecommendationsParams,
@@ -69,6 +75,8 @@ import type {
   RejectRequest,
   RolesMatrixResponse,
   RolesMatrixUpdateRequest,
+  RunCompetitorScores200,
+  RunCompetitorScoresParams,
   Shop,
   ShopListResponse,
   SignalCatalog,
@@ -5468,6 +5476,443 @@ export function useListCopilotModelCalls<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getListCopilotModelCallsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Meest recente concurrentscores per concurrent (shop-gescoped)
+ */
+export const getListCompetitorScoresUrl = (
+  params?: ListCompetitorScoresParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/competition/competitor-scores?${stringifiedParams}`
+    : `/api/competition/competitor-scores`;
+};
+
+export const listCompetitorScores = async (
+  params?: ListCompetitorScoresParams,
+  options?: RequestInit,
+): Promise<CompetitorScoresList> => {
+  return customFetch<CompetitorScoresList>(getListCompetitorScoresUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListCompetitorScoresQueryKey = (
+  params?: ListCompetitorScoresParams,
+) => {
+  return [
+    `/api/competition/competitor-scores`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getListCompetitorScoresQueryOptions = <
+  TData = Awaited<ReturnType<typeof listCompetitorScores>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListCompetitorScoresParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listCompetitorScores>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListCompetitorScoresQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listCompetitorScores>>
+  > = ({ signal }) =>
+    listCompetitorScores(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listCompetitorScores>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListCompetitorScoresQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listCompetitorScores>>
+>;
+export type ListCompetitorScoresQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Meest recente concurrentscores per concurrent (shop-gescoped)
+ */
+
+export function useListCompetitorScores<
+  TData = Awaited<ReturnType<typeof listCompetitorScores>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListCompetitorScoresParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listCompetitorScores>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListCompetitorScoresQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Aparte rankings op score-dimensies (o.a. Procurement Power, Future Threat)
+ */
+export const getGetCompetitorScoreRankingsUrl = (
+  params?: GetCompetitorScoreRankingsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/competition/competitor-scores/rankings?${stringifiedParams}`
+    : `/api/competition/competitor-scores/rankings`;
+};
+
+export const getCompetitorScoreRankings = async (
+  params?: GetCompetitorScoreRankingsParams,
+  options?: RequestInit,
+): Promise<CompetitorScoreRankings> => {
+  return customFetch<CompetitorScoreRankings>(
+    getGetCompetitorScoreRankingsUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetCompetitorScoreRankingsQueryKey = (
+  params?: GetCompetitorScoreRankingsParams,
+) => {
+  return [
+    `/api/competition/competitor-scores/rankings`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetCompetitorScoreRankingsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCompetitorScoreRankings>>,
+  TError = ErrorType<void>,
+>(
+  params?: GetCompetitorScoreRankingsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCompetitorScoreRankings>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetCompetitorScoreRankingsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getCompetitorScoreRankings>>
+  > = ({ signal }) =>
+    getCompetitorScoreRankings(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCompetitorScoreRankings>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetCompetitorScoreRankingsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCompetitorScoreRankings>>
+>;
+export type GetCompetitorScoreRankingsQueryError = ErrorType<void>;
+
+/**
+ * @summary Aparte rankings op score-dimensies (o.a. Procurement Power, Future Threat)
+ */
+
+export function useGetCompetitorScoreRankings<
+  TData = Awaited<ReturnType<typeof getCompetitorScoreRankings>>,
+  TError = ErrorType<void>,
+>(
+  params?: GetCompetitorScoreRankingsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCompetitorScoreRankings>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetCompetitorScoreRankingsQueryOptions(
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Herbereken de concurrentscores voor de shop (synchroon)
+ */
+export const getRunCompetitorScoresUrl = (
+  params?: RunCompetitorScoresParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/competition/competitor-scores/run?${stringifiedParams}`
+    : `/api/competition/competitor-scores/run`;
+};
+
+export const runCompetitorScores = async (
+  params?: RunCompetitorScoresParams,
+  options?: RequestInit,
+): Promise<RunCompetitorScores200> => {
+  return customFetch<RunCompetitorScores200>(
+    getRunCompetitorScoresUrl(params),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getRunCompetitorScoresMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof runCompetitorScores>>,
+    TError,
+    { params?: RunCompetitorScoresParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof runCompetitorScores>>,
+  TError,
+  { params?: RunCompetitorScoresParams },
+  TContext
+> => {
+  const mutationKey = ["runCompetitorScores"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof runCompetitorScores>>,
+    { params?: RunCompetitorScoresParams }
+  > = (props) => {
+    const { params } = props ?? {};
+
+    return runCompetitorScores(params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RunCompetitorScoresMutationResult = NonNullable<
+  Awaited<ReturnType<typeof runCompetitorScores>>
+>;
+
+export type RunCompetitorScoresMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Herbereken de concurrentscores voor de shop (synchroon)
+ */
+export const useRunCompetitorScores = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof runCompetitorScores>>,
+    TError,
+    { params?: RunCompetitorScoresParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof runCompetitorScores>>,
+  TError,
+  { params?: RunCompetitorScoresParams },
+  TContext
+> => {
+  return useMutation(getRunCompetitorScoresMutationOptions(options));
+};
+
+/**
+ * @summary Volledige score-uitleg per concurrent (factoren, gewichten, bronnen, confidence)
+ */
+export const getGetCompetitorScoreDetailUrl = (
+  competitorName: string,
+  params?: GetCompetitorScoreDetailParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/competition/competitor-scores/${competitorName}?${stringifiedParams}`
+    : `/api/competition/competitor-scores/${competitorName}`;
+};
+
+export const getCompetitorScoreDetail = async (
+  competitorName: string,
+  params?: GetCompetitorScoreDetailParams,
+  options?: RequestInit,
+): Promise<CompetitorScoreDetail> => {
+  return customFetch<CompetitorScoreDetail>(
+    getGetCompetitorScoreDetailUrl(competitorName, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetCompetitorScoreDetailQueryKey = (
+  competitorName: string,
+  params?: GetCompetitorScoreDetailParams,
+) => {
+  return [
+    `/api/competition/competitor-scores/${competitorName}`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetCompetitorScoreDetailQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCompetitorScoreDetail>>,
+  TError = ErrorType<void>,
+>(
+  competitorName: string,
+  params?: GetCompetitorScoreDetailParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCompetitorScoreDetail>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetCompetitorScoreDetailQueryKey(competitorName, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getCompetitorScoreDetail>>
+  > = ({ signal }) =>
+    getCompetitorScoreDetail(competitorName, params, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!competitorName,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCompetitorScoreDetail>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetCompetitorScoreDetailQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCompetitorScoreDetail>>
+>;
+export type GetCompetitorScoreDetailQueryError = ErrorType<void>;
+
+/**
+ * @summary Volledige score-uitleg per concurrent (factoren, gewichten, bronnen, confidence)
+ */
+
+export function useGetCompetitorScoreDetail<
+  TData = Awaited<ReturnType<typeof getCompetitorScoreDetail>>,
+  TError = ErrorType<void>,
+>(
+  competitorName: string,
+  params?: GetCompetitorScoreDetailParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCompetitorScoreDetail>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetCompetitorScoreDetailQueryOptions(
+    competitorName,
+    params,
+    options,
+  );
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

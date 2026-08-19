@@ -5,6 +5,78 @@
  * AI Pricing Decision Engine API
  * OpenAPI spec version: 0.1.0
  */
+export interface CompetitorScoreSummary {
+  competitor_name: string;
+  run_date: string;
+  /** @nullable */
+  company_size_class?: string | null;
+  /** @nullable */
+  company_size_confidence?: number | null;
+  /** @nullable */
+  geographic_scale_class?: string | null;
+  /** @nullable */
+  geographic_scale_confidence?: number | null;
+  /** @nullable */
+  fulfilment_model_class?: string | null;
+  /** @nullable */
+  fulfilment_model_confidence?: number | null;
+  /** @nullable */
+  operational_strength_score?: number | null;
+  /** @nullable */
+  financial_health_score?: number | null;
+  /** @nullable */
+  financial_health_status?: string | null;
+  /** @nullable */
+  financial_data_confidence?: number | null;
+  /** @nullable */
+  business_strength_score?: number | null;
+  /** @nullable */
+  procurement_power_score?: number | null;
+  /** @nullable */
+  future_threat_score?: number | null;
+  /** @nullable */
+  data_completeness_pct?: number | null;
+  /** @nullable */
+  model_version?: string | null;
+}
+
+export interface CompetitorScoresList {
+  shop_id: number;
+  count: number;
+  scores: CompetitorScoreSummary[];
+}
+
+export type CompetitorScoreRankingsRankingsItem = {
+  rank: number;
+  competitor_name: string;
+  score: number;
+  run_date?: string;
+  /** @nullable */
+  data_completeness_pct?: number | null;
+  details?: unknown;
+};
+
+export type CompetitorScoreRankingsUnknownItem = {
+  competitor_name: string;
+  run_date?: string;
+  /** @nullable */
+  data_completeness_pct?: number | null;
+  /** @nullable */
+  reason?: string | null;
+};
+
+export interface CompetitorScoreRankings {
+  shop_id: number;
+  dimension: string;
+  rankings: CompetitorScoreRankingsRankingsItem[];
+  unknown: CompetitorScoreRankingsUnknownItem[];
+}
+
+export type CompetitorScoreDetail = CompetitorScoreSummary & {
+  shop_id?: number;
+  details?: unknown;
+};
+
 export interface CopilotCreateConversationRequest {
   /** @nullable */
   title?: string | null;
@@ -1048,4 +1120,50 @@ export type ListCopilotModelCallsParams = {
    * @nullable
    */
   limit?: number | null;
+};
+
+export type ListCompetitorScoresParams = {
+  /**
+   * @nullable
+   */
+  shop_id?: number | null;
+};
+
+export type GetCompetitorScoreRankingsParams = {
+  dimension?: GetCompetitorScoreRankingsDimension;
+  /**
+   * @nullable
+   */
+  shop_id?: number | null;
+};
+
+export type GetCompetitorScoreRankingsDimension =
+  (typeof GetCompetitorScoreRankingsDimension)[keyof typeof GetCompetitorScoreRankingsDimension];
+
+export const GetCompetitorScoreRankingsDimension = {
+  procurement_power: "procurement_power",
+  future_threat: "future_threat",
+  business_strength: "business_strength",
+  operational_strength: "operational_strength",
+  financial_health: "financial_health",
+} as const;
+
+export type RunCompetitorScoresParams = {
+  /**
+   * @nullable
+   */
+  shop_id?: number | null;
+};
+
+export type RunCompetitorScores200 = {
+  shop_id?: number;
+  rows_written?: number;
+  shops?: number;
+};
+
+export type GetCompetitorScoreDetailParams = {
+  /**
+   * @nullable
+   */
+  shop_id?: number | null;
 };

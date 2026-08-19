@@ -64,6 +64,7 @@ def stub_shop_engines(monkeypatch):
     monkeypatch.setattr("engine.promotion_engine.run_promotion_engine", noop)
     monkeypatch.setattr("engine.forecast_engine.run_forecast_engine", noop)
     monkeypatch.setattr("engine.opportunity_engine.run_opportunity_engine", noop)
+    monkeypatch.setattr("engine.competitor_scores.run_competitor_scores", noop)
 
 
 # ── Tests ─────────────────────────────────────────────────────────────────────

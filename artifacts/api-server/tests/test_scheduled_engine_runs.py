@@ -66,6 +66,7 @@ def test_main_entrypoint_draait_met_actieve_shop(db, shop, monkeypatch):
     import engine.basket_engine, engine.promotion_engine
     import engine.forecast_engine, engine.opportunity_engine
     import engine.competitor_influence, engine.competition_rankings
+    import engine.competitor_scores
 
     calls: list[str] = []
 
@@ -79,6 +80,8 @@ def test_main_entrypoint_draait_met_actieve_shop(db, shop, monkeypatch):
     monkeypatch.setattr(engine.promotion_engine, "run_promotion_engine", make_fn("promotion"))
     monkeypatch.setattr(engine.forecast_engine, "run_forecast_engine", make_fn("forecast"))
     monkeypatch.setattr(engine.opportunity_engine, "run_opportunity_engine", make_fn("opportunity"))
+    monkeypatch.setattr(engine.competitor_scores, "run_competitor_scores",
+                        make_fn("competitor_scores"))
     monkeypatch.setattr(engine.competitor_influence, "run_cis_engine", lambda d: 0)
     monkeypatch.setattr(engine.competition_rankings, "run_competitor_rankings", lambda d: 0)
 
@@ -93,7 +96,8 @@ def test_main_entrypoint_draait_met_actieve_shop(db, shop, monkeypatch):
         # run-registraties worden voorzien.
         own = [c for c in calls if c.endswith(f":{shop.id}")]
         assert own == [f"{n}:{shop.id}" for n in
-                       ("basket", "promotion", "forecast", "opportunity")]
+                       ("basket", "promotion", "forecast", "opportunity",
+                        "competitor_scores")]
         # Tweede aanroep dezelfde dag: idempotent, geen nieuwe engine-runs
         # voor deze shop.
         assert scheduled_engines.main() == 0
@@ -101,7 +105,9 @@ def test_main_entrypoint_draait_met_actieve_shop(db, shop, monkeypatch):
         recs = db.query(models.ScheduledEngineRun).filter(
             models.ScheduledEngineRun.shop_id == shop.id,
             models.ScheduledEngineRun.run_date == today).all()
-        assert {r.engine_name for r in recs} == {"basket", "promotion", "forecast", "opportunity"}
+        assert {r.engine_name for r in recs} == {
+            "basket", "promotion", "forecast", "opportunity",
+            "competitor_scores"}
         assert all(r.status == "success" for r in recs)
     finally:
         shop.active = False

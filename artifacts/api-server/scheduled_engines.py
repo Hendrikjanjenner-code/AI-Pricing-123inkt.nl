@@ -122,12 +122,16 @@ def main() -> int:
         from engine.promotion_engine import run_promotion_engine
         from engine.forecast_engine import run_forecast_engine
         from engine.opportunity_engine import run_opportunity_engine
+        from engine.competitor_scores import run_competitor_scores
 
         engines = [
             ("basket",    run_basket_engine),
             ("promotion", run_promotion_engine),
             ("forecast",  run_forecast_engine),
             ("opportunity", run_opportunity_engine),
+            # Concurrentscores vóór de globale rankings-stap: de rankings
+            # gebruiken Business Strength als ondersteunende dimensie.
+            ("competitor_scores", run_competitor_scores),
         ]
 
         run_date = date.today()

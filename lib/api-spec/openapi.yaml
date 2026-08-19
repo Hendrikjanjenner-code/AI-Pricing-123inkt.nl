@@ -37,6 +37,8 @@ tags:
     description: Intelligence Signals (gestandaardiseerde engine-signalen)
   - name: shops
     description: Shop dimension (multi-shop)
+  - name: competition
+    description: Competition Intelligence (concurrentscores & rankings)
   - name: copilot
     description: Commercial AI Copilot (AI Gateway)
 
@@ -1321,8 +1323,202 @@ paths:
                 items:
                   $ref: "#/components/schemas/CopilotModelCall"
 
+  /competition/competitor-scores:
+    get:
+      operationId: listCompetitorScores
+      tags: [competition]
+      summary: Meest recente concurrentscores per concurrent (shop-gescoped)
+      parameters:
+        - name: shop_id
+          in: query
+          schema:
+            type: ["integer", "null"]
+      responses:
+        "200":
+          description: Classificaties en scores per concurrent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompetitorScoresList"
+
+  /competition/competitor-scores/rankings:
+    get:
+      operationId: getCompetitorScoreRankings
+      tags: [competition]
+      summary: Aparte rankings op score-dimensies (o.a. Procurement Power, Future Threat)
+      parameters:
+        - name: dimension
+          in: query
+          schema:
+            type: string
+            enum: [procurement_power, future_threat, business_strength, operational_strength, financial_health]
+        - name: shop_id
+          in: query
+          schema:
+            type: ["integer", "null"]
+      responses:
+        "200":
+          description: Ranking op de gevraagde dimensie; Unknown-scores staan apart
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompetitorScoreRankings"
+        "422":
+          description: Onbekende dimensie
+
+  /competition/competitor-scores/run:
+    post:
+      operationId: runCompetitorScores
+      tags: [competition]
+      summary: Herbereken de concurrentscores voor de shop (synchroon)
+      parameters:
+        - name: shop_id
+          in: query
+          schema:
+            type: ["integer", "null"]
+      responses:
+        "200":
+          description: Run-resultaat
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shop_id:
+                    type: integer
+                  rows_written:
+                    type: integer
+                  shops:
+                    type: integer
+
+  /competition/competitor-scores/{competitor_name}:
+    get:
+      operationId: getCompetitorScoreDetail
+      tags: [competition]
+      summary: Volledige score-uitleg per concurrent (factoren, gewichten, bronnen, confidence)
+      parameters:
+        - name: competitor_name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: shop_id
+          in: query
+          schema:
+            type: ["integer", "null"]
+      responses:
+        "200":
+          description: Score-detail incl. details-JSON per score
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompetitorScoreDetail"
+        "404":
+          description: Geen scores voor deze concurrent in deze shop
+
 components:
   schemas:
+    CompetitorScoreSummary:
+      type: object
+      required: [competitor_name, run_date]
+      properties:
+        competitor_name:
+          type: string
+        run_date:
+          type: string
+        company_size_class:
+          type: ["string", "null"]
+        company_size_confidence:
+          type: ["number", "null"]
+        geographic_scale_class:
+          type: ["string", "null"]
+        geographic_scale_confidence:
+          type: ["number", "null"]
+        fulfilment_model_class:
+          type: ["string", "null"]
+        fulfilment_model_confidence:
+          type: ["number", "null"]
+        operational_strength_score:
+          type: ["number", "null"]
+        financial_health_score:
+          type: ["number", "null"]
+        financial_health_status:
+          type: ["string", "null"]
+        financial_data_confidence:
+          type: ["number", "null"]
+        business_strength_score:
+          type: ["number", "null"]
+        procurement_power_score:
+          type: ["number", "null"]
+        future_threat_score:
+          type: ["number", "null"]
+        data_completeness_pct:
+          type: ["number", "null"]
+        model_version:
+          type: ["string", "null"]
+
+    CompetitorScoresList:
+      type: object
+      required: [shop_id, count, scores]
+      properties:
+        shop_id:
+          type: integer
+        count:
+          type: integer
+        scores:
+          type: array
+          items:
+            $ref: "#/components/schemas/CompetitorScoreSummary"
+
+    CompetitorScoreRankings:
+      type: object
+      required: [shop_id, dimension, rankings, unknown]
+      properties:
+        shop_id:
+          type: integer
+        dimension:
+          type: string
+        rankings:
+          type: array
+          items:
+            type: object
+            required: [rank, competitor_name, score]
+            properties:
+              rank:
+                type: integer
+              competitor_name:
+                type: string
+              score:
+                type: number
+              run_date:
+                type: string
+              data_completeness_pct:
+                type: ["number", "null"]
+              details: {}
+        unknown:
+          type: array
+          items:
+            type: object
+            required: [competitor_name]
+            properties:
+              competitor_name:
+                type: string
+              run_date:
+                type: string
+              data_completeness_pct:
+                type: ["number", "null"]
+              reason:
+                type: ["string", "null"]
+
+    CompetitorScoreDetail:
+      allOf:
+        - $ref: "#/components/schemas/CompetitorScoreSummary"
+        - type: object
+          properties:
+            shop_id:
+              type: integer
+            details: {}
+
     CopilotCreateConversationRequest:
       type: object
       properties:

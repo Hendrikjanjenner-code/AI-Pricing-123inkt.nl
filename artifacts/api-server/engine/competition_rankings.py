@@ -21,12 +21,19 @@ from sqlalchemy.orm import Session
 import models
 from engine.competitor_influence import profile_baseline_influence
 
-MODEL_VERSION = "rankings-v1.0.0"
+MODEL_VERSION = "rankings-v1.1.0"
 
 # Gewichten voor de gecombineerde score
 W_COMPETITION_RELEVANCE = 0.40
 W_PRICE_RELEVANCE = 0.30
 W_INFLUENCE = 0.30
+
+# Business Strength (taak #247) is een ONDERSTEUNENDE dimensie: de combined
+# score wordt (1-W)*basis + W*business_strength, met W ruim onder elk primair
+# gewicht — categorie-gebaseerde Competition Relevance blijft dus dominant.
+# Zonder score-rij verandert er niets. Price Relevance blijft ongewijzigd en
+# weegt financiële grootte bewust vrijwel niet mee (alleen prijsgedrag).
+W_BUSINESS_STRENGTH_SUPPORT = 0.10
 
 
 def _avg(values: list[float]) -> float:
@@ -71,6 +78,10 @@ def _run_for_shop(db: Session, today: date, sid: int) -> int:
 
     if not profiles and not cat_rows and not cis_rows:
         return 0
+
+    # Ondersteunende Business Strength-scores (taak #247), indien aanwezig.
+    from engine.competitor_scores import latest_scores_by_competitor
+    strength_by_comp = latest_scores_by_competitor(db, sid)
 
     # Aggregaties per concurrent
     cat_by_comp: dict[str, list[models.CategoryCompetitorRelevance]] = {}
@@ -150,10 +161,22 @@ def _run_for_shop(db: Session, today: date, sid: int) -> int:
             influence = 0.0
             influence_basis = "geen_data"
 
-        combined = round(
+        base_combined = round(
             W_COMPETITION_RELEVANCE * competition_relevance
             + W_PRICE_RELEVANCE * price_relevance
             + W_INFLUENCE * influence, 4)
+
+        # Business Strength als ONDERSTEUNENDE dimensie (nooit dominant):
+        # klein vast gewicht, alleen als er een score bekend is. Unknown
+        # verandert de ranking niet (geen impliciete 0).
+        strength_row = strength_by_comp.get(name)
+        bs = (strength_row.business_strength_score
+              if strength_row is not None else None)
+        if bs is not None:
+            combined = round((1.0 - W_BUSINESS_STRENGTH_SUPPORT) * base_combined
+                             + W_BUSINESS_STRENGTH_SUPPORT * (float(bs) / 100.0), 4)
+        else:
+            combined = base_combined
 
         evidence = {
             "functional_overlap_score": round(overlap, 4),
@@ -171,6 +194,14 @@ def _run_for_shop(db: Session, today: date, sid: int) -> int:
                 "influence": W_INFLUENCE,
             },
         }
+        if bs is not None:
+            evidence["business_strength_support"] = {
+                "business_strength_score": float(bs),
+                "support_weight": W_BUSINESS_STRENGTH_SUPPORT,
+                "base_combined": base_combined,
+                "note": ("ondersteunend, nooit dominant; categorie-gebaseerde "
+                         "Competition Relevance blijft primair"),
+            }
         return competition_relevance, price_relevance, influence, combined, evidence
 
     def _write_scope(scope: str, names: set[str], rows_for=lambda n: cat_by_comp.get(n, [])) -> None:

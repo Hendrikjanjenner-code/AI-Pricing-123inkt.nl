@@ -3469,3 +3469,48 @@ class CompetitorFreshnessRule(Base):
     max_age_days = Column(Integer, nullable=False)
     updated_by = Column(String(100))
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CompetitorScoreResult(Base):
+    """
+    Concurrentscore-resultaat per (shop, concurrent, run-datum) — taak #247.
+
+    Classificaties (company size, geographic scale, fulfilment model) en
+    scores (operational strength, financial health, business strength,
+    procurement power, future threat), elk 0–100 of NULL (= Unknown; nooit
+    automatisch 0 bij ontbrekende data). `details` bevat per classificatie/
+    score de factoren, gewichten, bronnen en confidence (volledige
+    uitlegbaarheid) plus de gedocumenteerde feature-dependencies.
+    """
+    __tablename__ = "competitor_score_result"
+    __table_args__ = (
+        UniqueConstraint("shop_id", "competitor_name", "run_date",
+                         name="uq_comp_score_shop_name_date"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    competitor_name = Column(String(255), nullable=False, index=True)
+    run_date = Column(Date, nullable=False, index=True)
+
+    # Classificaties
+    company_size_class = Column(String(30))       # micro / klein / middelgroot / groot / enterprise / NULL=unknown
+    company_size_confidence = Column(Float)
+    geographic_scale_class = Column(String(30))   # lokaal / nationaal / regionaal / internationaal / globaal / NULL=unknown
+    geographic_scale_confidence = Column(Float)
+    fulfilment_model_class = Column(String(40))   # eigen_voorraad / dropship / hybride / marketplace / NULL=unknown
+    fulfilment_model_confidence = Column(Float)
+
+    # Scores 0–100; NULL = Unknown (ontbrekende data is nooit score 0)
+    operational_strength_score = Column(Float)
+    financial_health_score = Column(Float)
+    financial_health_status = Column(String(30))  # gezond / aandacht / zwak / unknown
+    financial_data_confidence = Column(Float)     # aparte confidence voor financiële data
+    business_strength_score = Column(Float)
+    procurement_power_score = Column(Float)
+    future_threat_score = Column(Float)
+
+    data_completeness_pct = Column(Float)         # 0–100: hoeveel input-secties beschikbaar
+    details = Column(JSON)                        # per score: factoren/gewichten/bronnen/confidence
+    model_version = Column(String(50))
+    created_at = Column(DateTime, default=datetime.utcnow)

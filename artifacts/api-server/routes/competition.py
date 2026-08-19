@@ -1710,3 +1710,136 @@ def update_competition_settings(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return {"shop_id": sid, "settings": effective}
+
+
+# ── NIEUW: Concurrentscores — kracht, inkoopmacht & Future Threat (taak #247) ─
+
+_SCORE_RANK_DIMENSIONS = {
+    "procurement_power": "procurement_power_score",
+    "future_threat": "future_threat_score",
+    "business_strength": "business_strength_score",
+    "operational_strength": "operational_strength_score",
+    "financial_health": "financial_health_score",
+}
+
+
+def _score_row_summary(r) -> dict:
+    return {
+        "competitor_name": r.competitor_name,
+        "run_date": str(r.run_date),
+        "company_size_class": r.company_size_class,
+        "company_size_confidence": r.company_size_confidence,
+        "geographic_scale_class": r.geographic_scale_class,
+        "geographic_scale_confidence": r.geographic_scale_confidence,
+        "fulfilment_model_class": r.fulfilment_model_class,
+        "fulfilment_model_confidence": r.fulfilment_model_confidence,
+        "operational_strength_score": r.operational_strength_score,
+        "financial_health_score": r.financial_health_score,
+        "financial_health_status": r.financial_health_status,
+        "financial_data_confidence": r.financial_data_confidence,
+        "business_strength_score": r.business_strength_score,
+        "procurement_power_score": r.procurement_power_score,
+        "future_threat_score": r.future_threat_score,
+        "data_completeness_pct": r.data_completeness_pct,
+        "model_version": r.model_version,
+    }
+
+
+@router.get("/competitor-scores")
+def list_competitor_scores(
+    shop_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """Meest recente concurrentscores per concurrent (shop-gescoped).
+    Ontbrekende data is 'Unknown' (score null + data completeness), nooit 0."""
+    from engine.competitor_scores import latest_scores_by_competitor
+    sid = _scope(db, shop_id)
+    rows = latest_scores_by_competitor(db, sid)
+    return {
+        "shop_id": sid,
+        "count": len(rows),
+        "scores": [_score_row_summary(r) for _, r in sorted(rows.items())],
+    }
+
+
+@router.get("/competitor-scores/rankings")
+def get_competitor_score_rankings(
+    dimension: str = Query("procurement_power"),
+    shop_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """Aparte rankings op score-dimensies (o.a. Procurement Power Ranking en
+    Future Threat Ranking). Unknown-scores worden niet gerangschikt maar wel
+    apart teruggegeven (nooit impliciet als 0 onderaan gezet)."""
+    from engine.competitor_scores import latest_scores_by_competitor
+    if dimension not in _SCORE_RANK_DIMENSIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Onbekende dimensie '{dimension}'. Kies uit: "
+                   f"{', '.join(sorted(_SCORE_RANK_DIMENSIONS))}")
+    sid = _scope(db, shop_id)
+    attr = _SCORE_RANK_DIMENSIONS[dimension]
+    rows = list(latest_scores_by_competitor(db, sid).values())
+    known = [r for r in rows if getattr(r, attr) is not None]
+    unknown = [r for r in rows if getattr(r, attr) is None]
+    known.sort(key=lambda r: float(getattr(r, attr)), reverse=True)
+    return {
+        "shop_id": sid,
+        "dimension": dimension,
+        "rankings": [
+            {
+                "rank": idx,
+                "competitor_name": r.competitor_name,
+                "score": float(getattr(r, attr)),
+                "run_date": str(r.run_date),
+                "data_completeness_pct": r.data_completeness_pct,
+                "details": (r.details or {}).get(dimension),
+            }
+            for idx, r in enumerate(known, start=1)
+        ],
+        "unknown": [
+            {
+                "competitor_name": r.competitor_name,
+                "run_date": str(r.run_date),
+                "data_completeness_pct": r.data_completeness_pct,
+                "reason": ((r.details or {}).get(dimension) or {}).get("explanation"),
+            }
+            for r in sorted(unknown, key=lambda x: x.competitor_name)
+        ],
+    }
+
+
+@router.post("/competitor-scores/run")
+def run_competitor_scores_endpoint(
+    shop_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
+):
+    """Herbereken de concurrentscores voor de shop (synchrone run)."""
+    from engine.competitor_scores import run_competitor_scores
+    sid = _scope(db, shop_id)
+    result = run_competitor_scores(db, shop_id=sid)
+    return {"shop_id": sid, **result}
+
+
+@router.get("/competitor-scores/{competitor_name}")
+def get_competitor_score_detail(
+    competitor_name: str,
+    shop_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """Volledige uitleg per concurrent: factoren, gewichten, bronnen,
+    confidence per score + feature-dependency-gebruik. 404 buiten de shop."""
+    sid = _scope(db, shop_id)
+    row = (db.query(models.CompetitorScoreResult)
+           .filter(models.CompetitorScoreResult.shop_id == sid,
+                   models.CompetitorScoreResult.competitor_name == competitor_name)
+           .order_by(models.CompetitorScoreResult.run_date.desc())
+           .first())
+    if row is None:
+        raise HTTPException(status_code=404,
+                            detail="Geen concurrentscores voor deze concurrent in deze shop")
+    return {**_score_row_summary(row), "shop_id": sid, "details": row.details}

@@ -1703,3 +1703,126 @@ export const ListCopilotModelCallsResponseItem = zod.object({
 export const ListCopilotModelCallsResponse = zod.array(
   ListCopilotModelCallsResponseItem,
 );
+
+/**
+ * @summary Meest recente concurrentscores per concurrent (shop-gescoped)
+ */
+export const ListCompetitorScoresQueryParams = zod.object({
+  shop_id: zod.coerce.number().nullish(),
+});
+
+export const ListCompetitorScoresResponse = zod.object({
+  shop_id: zod.number(),
+  count: zod.number(),
+  scores: zod.array(
+    zod.object({
+      competitor_name: zod.string(),
+      run_date: zod.string(),
+      company_size_class: zod.string().nullish(),
+      company_size_confidence: zod.number().nullish(),
+      geographic_scale_class: zod.string().nullish(),
+      geographic_scale_confidence: zod.number().nullish(),
+      fulfilment_model_class: zod.string().nullish(),
+      fulfilment_model_confidence: zod.number().nullish(),
+      operational_strength_score: zod.number().nullish(),
+      financial_health_score: zod.number().nullish(),
+      financial_health_status: zod.string().nullish(),
+      financial_data_confidence: zod.number().nullish(),
+      business_strength_score: zod.number().nullish(),
+      procurement_power_score: zod.number().nullish(),
+      future_threat_score: zod.number().nullish(),
+      data_completeness_pct: zod.number().nullish(),
+      model_version: zod.string().nullish(),
+    }),
+  ),
+});
+
+/**
+ * @summary Aparte rankings op score-dimensies (o.a. Procurement Power, Future Threat)
+ */
+export const GetCompetitorScoreRankingsQueryParams = zod.object({
+  dimension: zod
+    .enum([
+      "procurement_power",
+      "future_threat",
+      "business_strength",
+      "operational_strength",
+      "financial_health",
+    ])
+    .optional(),
+  shop_id: zod.coerce.number().nullish(),
+});
+
+export const GetCompetitorScoreRankingsResponse = zod.object({
+  shop_id: zod.number(),
+  dimension: zod.string(),
+  rankings: zod.array(
+    zod.object({
+      rank: zod.number(),
+      competitor_name: zod.string(),
+      score: zod.number(),
+      run_date: zod.string().optional(),
+      data_completeness_pct: zod.number().nullish(),
+      details: zod.unknown().optional(),
+    }),
+  ),
+  unknown: zod.array(
+    zod.object({
+      competitor_name: zod.string(),
+      run_date: zod.string().optional(),
+      data_completeness_pct: zod.number().nullish(),
+      reason: zod.string().nullish(),
+    }),
+  ),
+});
+
+/**
+ * @summary Herbereken de concurrentscores voor de shop (synchroon)
+ */
+export const RunCompetitorScoresQueryParams = zod.object({
+  shop_id: zod.coerce.number().nullish(),
+});
+
+export const RunCompetitorScoresResponse = zod.object({
+  shop_id: zod.number().optional(),
+  rows_written: zod.number().optional(),
+  shops: zod.number().optional(),
+});
+
+/**
+ * @summary Volledige score-uitleg per concurrent (factoren, gewichten, bronnen, confidence)
+ */
+export const GetCompetitorScoreDetailParams = zod.object({
+  competitor_name: zod.coerce.string(),
+});
+
+export const GetCompetitorScoreDetailQueryParams = zod.object({
+  shop_id: zod.coerce.number().nullish(),
+});
+
+export const GetCompetitorScoreDetailResponse = zod
+  .object({
+    competitor_name: zod.string(),
+    run_date: zod.string(),
+    company_size_class: zod.string().nullish(),
+    company_size_confidence: zod.number().nullish(),
+    geographic_scale_class: zod.string().nullish(),
+    geographic_scale_confidence: zod.number().nullish(),
+    fulfilment_model_class: zod.string().nullish(),
+    fulfilment_model_confidence: zod.number().nullish(),
+    operational_strength_score: zod.number().nullish(),
+    financial_health_score: zod.number().nullish(),
+    financial_health_status: zod.string().nullish(),
+    financial_data_confidence: zod.number().nullish(),
+    business_strength_score: zod.number().nullish(),
+    procurement_power_score: zod.number().nullish(),
+    future_threat_score: zod.number().nullish(),
+    data_completeness_pct: zod.number().nullish(),
+    model_version: zod.string().nullish(),
+  })
+  .and(
+    zod.object({
+      shop_id: zod.number().optional(),
+      details: zod.unknown().optional(),
+    }),
+  );
