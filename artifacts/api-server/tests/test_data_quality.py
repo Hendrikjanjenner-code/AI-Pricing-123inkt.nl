@@ -637,6 +637,21 @@ class TestFeedUnreachable:
     job is mislukt met een netwerk-/verbindingsfout.  Een nieuwe succesvolle
     job verbergt het issue (meest-recente-job-semantiek)."""
 
+    @pytest.fixture(autouse=True)
+    def _isolate_ps_jobs(self):
+        """Deterministisch op een gedeelde DB: verwijder bestaande
+        api_sync_priceshape-jobs (residu van andere tests/suites) zodat de
+        'meest recente job'-semantiek alleen naar de eigen test-jobs kijkt."""
+        db = SessionLocal()
+        try:
+            db.query(models.ImportJob).filter(
+                models.ImportJob.upload_type == "api_sync_priceshape").delete(
+                synchronize_session=False)
+            db.commit()
+        finally:
+            db.close()
+        yield
+
     def _make_ps_job(self, db, status, error_message=None, delta_seconds=0,
                      created_delta_seconds=None):
         """Hulp: maak een api_sync_priceshape ImportJob en geef het id terug."""

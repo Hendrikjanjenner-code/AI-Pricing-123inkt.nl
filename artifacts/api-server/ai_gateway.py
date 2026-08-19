@@ -140,7 +140,6 @@ PROVIDER_LABELS = {
 _SETTING_TTL_SECONDS = 30
 _setting_cache: dict = {"value": None, "loaded": False, "checked_at": 0.0}
 
-
 def _env_config(provider: str) -> Optional[dict]:
     """Env-configuratie voor één provider, of None als niet geconfigureerd."""
     if provider == PROVIDER_REPLIT:

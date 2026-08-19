@@ -166,7 +166,7 @@ def test_max_delivery_days_persistent_and_validated():
 # ── API: competition-detail ─────────────────────────────────────────────────
 
 def test_competition_detail_excludes_bad_delivery(client, admin_headers, seed):
-    r = client.get(f"/api/competition/skus/{SKU}", headers=admin_headers)
+    r = client.get(f"/api/competition/skus/{SKU}", params={"shop_id": seed}, headers=admin_headers)
     assert r.status_code == 200, r.text
     detail = _by_name(r.json()["competitor_detail"], "competitor_name")
 
@@ -181,7 +181,7 @@ def test_competition_detail_excludes_bad_delivery(client, admin_headers, seed):
 
 
 def test_weighted_reference_excludes_bad_delivery(client, admin_headers, seed):
-    r = client.get(f"/api/concurrentie/sku/{SKU}", headers=admin_headers)
+    r = client.get(f"/api/concurrentie/sku/{SKU}", params={"shop_id": seed}, headers=admin_headers)
     assert r.status_code == 200, r.text
     body = r.json()
 

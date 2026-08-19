@@ -115,19 +115,24 @@ def seed(client):
 
         # AI-matches van vandaag
         db.add_all([
+            # Let op: shop_id expliciet zetten. De kolom default naar shop 1;
+            # zonder scoping wist een match-rebuild voor shop 1 (door een
+            # andere test/module) deze rijen, en mist build_ai_matches de
+            # REJECTED-beoordeling bij het herbouwen voor de test-shop.
             models.AiMatchResult(own_sku_id=SKU_A, competitor_name=COMP_1,
                                  match_type="Exact", confidence=1.0,
                                  explanation_nl="test", status="PENDING",
                                  run_date=today, own_price=20.0,
-                                 competitor_price=18.9, price_diff_pct=5.8),
+                                 competitor_price=18.9, price_diff_pct=5.8,
+                                 shop_id=shop_id),
             models.AiMatchResult(own_sku_id=SKU_A, competitor_name=COMP_2,
                                  match_type="Exact", confidence=1.0,
                                  explanation_nl="test", status="PENDING",
-                                 run_date=today),
+                                 run_date=today, shop_id=shop_id),
             models.AiMatchResult(own_sku_id=SKU_B, competitor_name=COMP_1,
                                  match_type="Exact", confidence=1.0,
                                  explanation_nl="test", status="REJECTED",
-                                 run_date=today),
+                                 run_date=today, shop_id=shop_id),
         ])
         strat = models.CompetitorStrategyResult(
             competitor_name=COMP_1, run_date=today, shop_id=shop_id,
@@ -427,7 +432,7 @@ def test_multi_shop_isolation(client, admin_headers, run_engines):
         db.add(models.AiMatchResult(own_sku_id=sku_b2, competitor_name=COMP_1,
                                     match_type="Exact", confidence=1.0,
                                     explanation_nl="test", status="APPROVED",
-                                    run_date=today))
+                                    run_date=today, shop_id=shop_b))
         db.commit()
 
         resp = client.post("/api/competition/intelligence/run", headers=admin_headers)
@@ -461,7 +466,8 @@ def test_multi_shop_isolation(client, admin_headers, run_engines):
                 db.add(models.AiMatchResult(
                     own_sku_id=sku_b2, competitor_name=COMP_1,
                     match_type="Exact", confidence=1.0,
-                    explanation_nl="test", status="APPROVED", run_date=today))
+                    explanation_nl="test", status="APPROVED", run_date=today,
+                    shop_id=shop_b))
             db.commit()
             resp = client.post("/api/competition/intelligence/run",
                                json={"shop_id": shop_b}, headers=admin_headers)
@@ -708,6 +714,7 @@ def suspicious_seed():
                 explanation_nl="test", status="PENDING",
                 run_date=today, own_price=10.0,
                 competitor_price=17.0, price_diff_pct=70.0,
+                shop_id=sid,
             ))
         # 1 match met klein verschil — telt NIET mee
         db.add(models.AiMatchResult(
@@ -716,6 +723,7 @@ def suspicious_seed():
             explanation_nl="test", status="PENDING",
             run_date=today, own_price=10.0,
             competitor_price=10.5, price_diff_pct=5.0,
+            shop_id=sid,
         ))
         db.commit()
         yield sid, skus
@@ -862,6 +870,7 @@ def test_warn_suspicious_matches_below_threshold():
                 explanation_nl="test", status="PENDING",
                 run_date=date.today(), own_price=10.0,
                 competitor_price=17.0, price_diff_pct=70.0,
+                shop_id=sid,
             ))
         db.commit()
 
@@ -926,6 +935,7 @@ def test_warn_suspicious_matches_auto_resolves_after_review(client):
                 explanation_nl="test", status="PENDING",
                 run_date=date.today(), own_price=10.0,
                 competitor_price=17.0, price_diff_pct=70.0,
+                shop_id=sid,
             ))
         db.commit()
 

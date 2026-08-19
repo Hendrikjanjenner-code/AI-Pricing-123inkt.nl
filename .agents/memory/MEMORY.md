@@ -47,3 +47,8 @@
 - [Schedulers uit in tests](test-scheduler-isolation.md) — TestClient start de lifespan; conftest zet alle DISABLE_*-vlaggen of full-suite runs krijgen StaleDataError/verdwenen rijen.
 - [Signal auto-resolve scoping](signal-auto-resolve.md) — auto_resolve_signals is shop-gescoped (default shop); emitters moeten brondata óók shop-filteren of cross-shop rijen uitsluiten, anders resolve je andermans signalen.
 - [Slow-run monitoring](slow-run-monitoring.md) — per-shop scheduled runs are the production path: publish shop-scoped engine_slow_run, never exempt scoped runs; round timings to µs or mocked tests can never trigger.
+// hint: Structural and logic conflict. Both design and behavior differ.
+- [Test-shop teardown FK](test-suite-conventions.md) — request middleware writes cost-usage rows per shop; any teardown that deletes a shop must delete those rows first or FK-fails only in full-suite runs.
+// hint: Logic changed on both sides. Requires understanding intent of each change.
+- [Keyset pagination & NULL watermarks](keyset-pagination-nulls.md) — row-tuple keyset compare drops NULL-watermark rows; coalesce both sides to a fixed minimum.
+- [Shared-DB test isolation](shared-db-test-isolation.md) — future-dated max(date) seeds, purge residue for most-recent semantics, always set shop_id explicitly.

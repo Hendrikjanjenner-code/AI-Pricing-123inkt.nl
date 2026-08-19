@@ -26,6 +26,8 @@ from routes.uploads import _process_loyalty_members, _process_loyalty_transactio
 # Vaste, historische run_date zodat compute_customer_value-tests geen
 # dagelijkse productie-runs van vandaag wegvagen (delete op run_date).
 CVS_RUN_DATE = date(2001, 1, 15)
+# Vaste run-datum voor fraude/NBA-signaaltests (los van vandaag)
+FRAUD_RUN_DATE = date(2001, 2, 15)
 
 
 def _cleanup_member_ids(mids):

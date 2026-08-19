@@ -283,8 +283,9 @@ def test_expiring_soon_members_window(db, policy):
     # Al-overdue punten blijven zichtbaar tot de expiry-run ze laat vervallen.
     assert m_late.id in rows
     assert rows[m_late.id]["points_expiring"] == 600
-    # Geen earn-datum binnen het venster → geen geschatte vervaldatum.
-    assert rows[m_late.id]["expires_on"] is None
+    # Overdue punten krijgen een geschatte vervaldatum in het verleden.
+    assert rows[m_late.id]["expires_on"] is not None
+    assert rows[m_late.id]["days_until_expiry"] <= 0
 
 def test_expiring_soon_respects_fifo_redeems(db, policy):
     """Redeems consumeren FIFO eerst de window-punten als er niets ouders is:

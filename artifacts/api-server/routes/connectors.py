@@ -682,6 +682,13 @@ def _full_sync_interval_days() -> int:
         return val if val > 0 else DEFAULT_FULL_SYNC_DAYS
     except ValueError:
         return DEFAULT_FULL_SYNC_DAYS
+# Retry-instellingen voor de feed-ingest zelf: een tijdelijke verbindingsfout
+# (netwerkhik, CDN-piek) mag de nachtelijke sync niet laten mislukken tot de
+# volgende nacht. Standaard 3 retries met exponentiële backoff (5 min basis).
+_INGEST_DEFAULT_MAX_RETRIES = 3
+_INGEST_DEFAULT_RETRY_BACKOFF = 300  # seconden (5 minuten)
+
+
 def _ingest_env_int(name: str, default: int) -> int:
     import os
     raw = (os.environ.get(name) or "").strip()

@@ -439,7 +439,6 @@ def test_combined_score_differs_with_vs_without_cis(seed_data):
         finally:
             db.close()
 
-
 # ── Integratie: rankings/run-endpoint vult Influence-score ────────────────────
 
 def test_rankings_run_returns_cis_count(client, admin_headers, seed_data):

@@ -550,11 +550,57 @@ class TestBcgEmitter:
             db.query(models.FactBcgClassificationDaily).filter_by(entity_id=eid).delete()
             db.commit()
 
+class TestTrafficEmitter:
+    def test_traffic_signal_contract(self, clean_db):
+        """FactTrafficIntelligenceDaily-rij met reason_code ≠ NO_SIGNAL → signal
+        met explanation, evidence, confidence, model_version."""
+        from engine.signal_emitters import emit_traffic_signals
 
-# ══════════════════════════════════════════════════════════════════════════════
-# emit_all_signals — emitter-fout crasht de run NIET
-# ══════════════════════════════════════════════════════════════════════════════
+        db, ids = clean_db
+        uid = _unique()
+        eid = f"SKU-TRAF-{uid}"
+        # Eén dag in de toekomst: de emitter selecteert alléén rijen op de
+        # max-datum. Zo is deze testrij gegarandeerd de enige kandidaat en kan
+        # echte (of parallel geseede) data van vandaag de top-N niet verdringen.
+        run_date = date_type.today() + timedelta(days=1)
 
+        row = models.FactTrafficIntelligenceDaily(
+            date=run_date,
+            entity_type="SKU",
+            entity_id=eid,
+            entity_name=f"Traffic testproduct {uid}",
+            demand_signal_score=0.9,
+            conversion_health_score=0.2,
+            traffic_opportunity_score=0.95,   # hoog → altijd in top-selectie, ook met echte data
+            conversion_risk_score=0.95,
+            search_gap_score=0.4,
+            traffic_growth=0.35,
+            conversion_trend=-0.20,
+            reason_code="CONVERSION_DROP_DETECTED",
+            explanation_nl="Conversie daalt terwijl traffic stijgt.",
+        )
+        db.add(row)
+        db.commit()
+
+        try:
+            db2 = SessionLocal()
+            try:
+                n = emit_traffic_signals(db2)
+                assert n >= 1
+                db2.flush()  # autoflush=False
+                sigs = db2.query(models.IntelligenceSignal).filter(
+                    models.IntelligenceSignal.entity_id == eid,
+                    models.IntelligenceSignal.engine == "traffic",
+                ).all()
+                assert sigs, "Geen traffic-signaal aangemaakt"
+                for sig in sigs:
+                    _assert_signal_contract(sig)
+                    ids.append(sig.id)
+            finally:
+                db2.close()
+        finally:
+            db.query(models.FactTrafficIntelligenceDaily).filter_by(entity_id=eid).delete()
+            db.commit()
 class TestEmitAllSignalsRollback:
     # run_competitor_rankings is een lazy import BINNEN emit_all_signals:
     #   from engine.competition_rankings import run_competitor_rankings
@@ -727,3 +773,147 @@ class TestRefreshRouteFailedEngines:
         body = resp.json()
         assert set(body["failed_engines"]) == {"only_broken", "rankings"}
         assert body["status"] == "gedeeltelijk_mislukt"
+
+class TestCostEmitter:
+    def test_below_break_even_signal_contract(self, clean_db):
+        """FactCostDaily met net_margin_pct < 0 → below_break_even-signaal met
+        alle vereiste velden."""
+        from engine.signal_emitters import emit_cost_signals
+
+        db, ids = clean_db
+        uid = _unique()
+        sku_id = f"SKU-COST-{uid}"
+        today = date_type.today()
+
+        row = models.FactCostDaily(
+            date=today,
+            sku_id=sku_id,
+            sku_name=f"Cost testproduct {uid}",
+            total_direct_cost=9.00,
+            total_indirect_cost=3.50,
+            total_cost=12.50,
+            selling_price=10.00,
+            net_margin=-2.50,
+            net_margin_pct=-999.0,   # extreem negatief → altijd in top-MAX_PER_TYPE (order by asc)
+            cost_signal="MARGIN_CRITICAL",
+        )
+        db.add(row)
+        db.commit()
+
+        try:
+            db2 = SessionLocal()
+            try:
+                n = emit_cost_signals(db2)
+                assert n >= 1
+                db2.flush()  # autoflush=False
+                sigs = db2.query(models.IntelligenceSignal).filter(
+                    models.IntelligenceSignal.entity_id == sku_id,
+                    models.IntelligenceSignal.engine == "cost",
+                    models.IntelligenceSignal.signal_type == "below_break_even",
+                ).all()
+                assert sigs, "Geen below_break_even-signaal aangemaakt"
+                for sig in sigs:
+                    _assert_signal_contract(sig)
+                    ids.append(sig.id)
+            finally:
+                db2.close()
+        finally:
+            db.query(models.FactCostDaily).filter_by(sku_id=sku_id).delete()
+            db.commit()
+
+class TestProcurementEmitter:
+    def test_buy_now_signal_contract(self, clean_db):
+        """FactProcurementForecastDaily-rij met signal_code BUY_NOW → contract-check."""
+        from engine.signal_emitters import emit_procurement_signals
+
+        db, ids = clean_db
+        uid = _unique()
+        sku_id = f"SKU-PROC-{uid}"
+        # Eén dag in de toekomst: de emitter kijkt alleen naar de max-datum,
+        # dus deze rij is gegarandeerd de enige kandidaat (geen top-N-verdringing
+        # door gedeelde DB-data van vandaag).
+        run_date = date_type.today() + timedelta(days=1)
+
+        row = models.FactProcurementForecastDaily(
+            date=run_date,
+            sku_id=sku_id,
+            sku_name=f"Procurement testproduct {uid}",
+            current_purchase_price=8.50,
+            current_stock_days=20,
+            lead_time_days=14,
+            forecast_purchase_price_90d=9.60,
+            price_change_pct_30d=4.0,
+            price_change_pct_90d=12.9,
+            procurement_opportunity_score=0.99,   # hoog → altijd in top-selectie
+            future_margin_risk_score=0.95,
+            signal_code="BUY_NOW",
+            signal_label_nl="Nu inkopen",
+            recommended_order_qty=500,
+            recommended_action_nl="Bestel nu vóór de prijsstijging.",
+        )
+        db.add(row)
+        db.commit()
+
+        try:
+            db2 = SessionLocal()
+            try:
+                n = emit_procurement_signals(db2)
+                assert n >= 1
+                db2.flush()  # autoflush=False
+                sigs = db2.query(models.IntelligenceSignal).filter(
+                    models.IntelligenceSignal.entity_id == sku_id,
+                    models.IntelligenceSignal.engine == "procurement",
+                ).all()
+                assert sigs, "Geen procurement-signaal aangemaakt"
+                for sig in sigs:
+                    _assert_signal_contract(sig)
+                    ids.append(sig.id)
+            finally:
+                db2.close()
+        finally:
+            db.query(models.FactProcurementForecastDaily).filter_by(sku_id=sku_id).delete()
+            db.commit()
+
+class TestSwitchingEmitter:
+    def test_cannibalisation_signal_contract(self, clean_db):
+        """InternalCompetitionScore met switch-kans ≥ 0.3 → contract-check."""
+        from engine.signal_emitters import emit_switching_signals
+
+        db, ids = clean_db
+        uid = _unique()
+        sku_id = f"SKU-SWIT-{uid}"
+        today = date_type.today()
+
+        row = models.InternalCompetitionScore(
+            sku_id=sku_id,
+            paired_sku_id=f"SKU-PL-{uid}",
+            run_date=today,
+            internal_switch_probability=0.55,
+            internal_margin_gap=2.40,
+            isv=999.0,   # extreem hoog → altijd in top-MAX_PER_TYPE (order by isv desc)
+            recommended_internal_action="PRIVATE_LABEL_PUSH",
+            a_brand_price=12.99,
+            private_label_price=8.99,
+        )
+        db.add(row)
+        db.commit()
+
+        try:
+            db2 = SessionLocal()
+            try:
+                n = emit_switching_signals(db2)
+                assert n >= 1
+                db2.flush()  # autoflush=False
+                sigs = db2.query(models.IntelligenceSignal).filter(
+                    models.IntelligenceSignal.entity_id == sku_id,
+                    models.IntelligenceSignal.engine == "switching",
+                ).all()
+                assert sigs, "Geen switching-signaal aangemaakt"
+                for sig in sigs:
+                    _assert_signal_contract(sig)
+                    ids.append(sig.id)
+            finally:
+                db2.close()
+        finally:
+            db.query(models.InternalCompetitionScore).filter_by(sku_id=sku_id).delete()
+            db.commit()
