@@ -603,6 +603,7 @@ def list_ai_matches(
     min_confidence: float = Query(0.0, ge=0.0, le=1.0),
     status: Optional[str] = Query(None),
     sku_id: Optional[str] = Query(None),
+    suspect: bool = Query(False),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     shop_id: Optional[int] = Query(None),
@@ -625,6 +626,14 @@ def list_ai_matches(
         q = q.filter(models.AiMatchResult.status == status)
     if sku_id:
         q = q.filter(models.AiMatchResult.own_sku_id == sku_id)
+    if suspect:
+        # Verdachte matches: |prijsverschil| > 40% en nog PENDING
+        q = q.filter(
+            models.AiMatchResult.status == "PENDING",
+            models.AiMatchResult.price_diff_pct.isnot(None),
+            (models.AiMatchResult.price_diff_pct > 40)
+            | (models.AiMatchResult.price_diff_pct < -40),
+        )
 
     total = q.count()
     items = (

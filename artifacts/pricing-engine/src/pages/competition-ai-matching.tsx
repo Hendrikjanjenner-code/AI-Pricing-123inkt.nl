@@ -46,13 +46,15 @@ export default function CompetitionAiMatching() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [minConfidence, setMinConfidence] = useState(0);
   const [zoekterm, setZoekterm] = useState("");
+  const [suspectFilter, setSuspectFilter] = useState(false);
 
   const { data, isLoading } = useQuery({
-    queryKey: ["competition-ai-matching", matchTypeFilter, statusFilter, minConfidence, shopId],
+    queryKey: ["competition-ai-matching", matchTypeFilter, statusFilter, minConfidence, shopId, suspectFilter],
     queryFn: () => {
       const p = new URLSearchParams({ page_size: "100", min_confidence: (minConfidence / 100).toString() });
       if (matchTypeFilter !== "all") p.set("match_type", matchTypeFilter);
       if (statusFilter !== "all") p.set("status", statusFilter);
+      if (suspectFilter) p.set("suspect", "true");
       if (shopId !== undefined) p.set("shop_id", String(shopId));
       return apiFetch(`/api/competition/ai-matching?${p}`);
     },
@@ -124,7 +126,7 @@ export default function CompetitionAiMatching() {
           data-testid="banner-suspicious-matches"
         >
           <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
-          <div>
+          <div className="flex-1">
             <p className="font-semibold text-amber-800">
               {suspiciousCount != null
                 ? `${Math.round(Number(suspiciousCount))} verdachte AI-matches vereisen beoordeling`
@@ -135,6 +137,15 @@ export default function CompetitionAiMatching() {
                 || "Er zijn openstaande matches met een prijsverschil boven de drempel. Controleer en keur ze goed of wijs ze af."}
             </p>
           </div>
+          <Button
+            variant={suspectFilter ? "default" : "outline"}
+            size="sm"
+            className={suspectFilter ? "" : "border-amber-400 text-amber-800 hover:bg-amber-100"}
+            onClick={() => setSuspectFilter(v => !v)}
+            data-testid="button-toggle-suspect-filter"
+          >
+            {suspectFilter ? "Filter uitzetten" : "Toon verdachte matches"}
+          </Button>
         </div>
       )}
 
@@ -245,6 +256,16 @@ export default function CompetitionAiMatching() {
             <Slider value={[minConfidence]} onValueChange={v => setMinConfidence(v[0])} min={0} max={90} step={5} />
           </div>
         </div>
+        {suspectFilter && (
+          <Badge
+            variant="outline"
+            className="bg-amber-50 border-amber-300 text-amber-800 cursor-pointer hover:bg-amber-100 gap-1"
+            onClick={() => setSuspectFilter(false)}
+            data-testid="badge-suspect-filter-active"
+          >
+            Verdachte matches <X className="h-3 w-3" />
+          </Badge>
+        )}
       </div>
 
       <Card>

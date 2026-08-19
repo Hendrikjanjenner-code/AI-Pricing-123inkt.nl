@@ -757,7 +757,28 @@ def test_warn_suspicious_matches_publishes_signal(suspicious_seed):
     finally:
         db.close()
 
-
+def test_ai_matching_suspect_filter(client, admin_headers, suspicious_seed):
+    """suspect=true filtert de lijst tot PENDING matches met |price_diff_pct| > 40."""
+    sid, skus = suspicious_seed
+    # Zonder filter: alle 7 matches van deze shop
+    resp = client.get(f"/api/competition/ai-matching?shop_id={sid}&page_size=100",
+                      headers=admin_headers)
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 7
+    # Met suspect=true: alleen de 6 verdachte
+    resp = client.get(f"/api/competition/ai-matching?shop_id={sid}&suspect=true&page_size=100",
+                      headers=admin_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 6
+    for item in data["items"]:
+        assert item["status"] == "PENDING"
+        assert abs(item["price_diff_pct"]) > 40
+    # suspect=false gedraagt zich als geen filter
+    resp = client.get(f"/api/competition/ai-matching?shop_id={sid}&suspect=false&page_size=100",
+                      headers=admin_headers)
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 7
 def test_warn_suspicious_matches_idempotent(suspicious_seed):
     """Tweede aanroep op dezelfde run_date mag geen extra signaal aanmaken
     (test_warn_suspicious_matches_publishes_signal heeft al één signaal aangemaakt)."""
