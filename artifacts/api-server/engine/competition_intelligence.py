@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from datetime import date, timedelta
 from statistics import mean, pstdev
 from typing import Optional
@@ -65,6 +66,10 @@ DEFAULTS = {
     "suspicious_match_price_diff_pct": 40.0,
     # Verdachte matches: minimaal aantal verdachte matches voor een signaal
     "suspicious_match_min_count": 5,
+    # Trage runs: maximale totale wandkloktijd (seconden) van een volledige
+    # run_all voordat een engine_slow_run-signaal wordt gepubliceerd.
+    # Shop-gescopeerde runs (tests) zijn uitgezonderd van deze drempel.
+    "slow_run_threshold_seconds": 60.0,
 }
 
 
@@ -964,26 +969,85 @@ def run_all(db: Session, run_date: Optional[date] = None,
     rd = run_date or date.today()
     from engine import competitor_profiling
 
-    if shop_id is not None:
-        profiles_count = len(competitor_profiling.build_all_profiles(db, shop_id=shop_id))
-    else:
-        profiles_count = sum(
+    timings: dict[str, float] = {}
+    run_start = time.monotonic()
+
+    def _timed(step: str, fn):
+        t0 = time.monotonic()
+        out = fn()
+        timings[step] = round(time.monotonic() - t0, 3)
+        logger.info("Competition intelligence stap '%s' duurde %.3fs",
+                    step, timings[step])
+        return out
+
+    def _profiles() -> int:
+        if shop_id is not None:
+            return len(competitor_profiling.build_all_profiles(db, shop_id=shop_id))
+        return sum(
             len(competitor_profiling.build_all_profiles(db, shop_id=sid))
             for (sid,) in db.query(models.DimProduct.shop_id).distinct().all()
             if sid is not None
         )
 
+    profiles_count = _timed("profiles", _profiles)
+
     result = {
         "run_date": str(rd),
-        "coverage_rows": run_coverage(db, rd, shop_id=shop_id),
-        "price_events": detect_price_events(db, rd, shop_id=shop_id),
-        "promo_events": detect_promo_events(db, rd, shop_id=shop_id),
-        "availability_competitors": update_availability(db, rd, shop_id=shop_id),
-        "elasticity_skus": run_elasticity(db, rd, shop_id=shop_id),
-        "strategy_results": run_strategies(db, rd, shop_id=shop_id),
+        "coverage_rows": _timed("coverage", lambda: run_coverage(db, rd, shop_id=shop_id)),
+        "price_events": _timed("price_events", lambda: detect_price_events(db, rd, shop_id=shop_id)),
+        "promo_events": _timed("promo_events", lambda: detect_promo_events(db, rd, shop_id=shop_id)),
+        "availability_competitors": _timed("availability", lambda: update_availability(db, rd, shop_id=shop_id)),
+        "elasticity_skus": _timed("elasticity", lambda: run_elasticity(db, rd, shop_id=shop_id)),
+        "strategy_results": _timed("strategies", lambda: run_strategies(db, rd, shop_id=shop_id)),
         "profiles": profiles_count,
-        "suspicious_match_signals": warn_suspicious_matches(db, rd, shop_id=shop_id),
+        "suspicious_match_signals": _timed("suspicious_matches", lambda: warn_suspicious_matches(db, rd, shop_id=shop_id)),
         "model_version": MODEL_VERSION,
     }
-    logger.info("Competition intelligence run: %s", result)
+
+    total_seconds = round(time.monotonic() - run_start, 3)
+    result["timings_seconds"] = timings
+    result["total_seconds"] = total_seconds
+    logger.info("Competition intelligence run (%.3fs totaal): %s",
+                total_seconds, result)
+
+    # Trage-run-bewaking: alleen voor volledige (niet shop-gescopeerde) runs,
+    # zodat gescopeerde test-runs nooit signalen genereren of vertragen.
+    if shop_id is None:
+        threshold = float(_cfg(db).get("slow_run_threshold_seconds",
+                                       DEFAULTS["slow_run_threshold_seconds"]))
+        if threshold > 0 and total_seconds > threshold:
+            slowest = max(timings, key=timings.get) if timings else None
+            publish_signal(
+                db, engine="competition", signal_type="engine_slow_run",
+                entity_type="shop", entity_id="all",
+                entity_name="Competition Intelligence Engine",
+                severity="medium", direction="negative",
+                metric="engine_run_seconds",
+                current_value=total_seconds, expected_value=threshold,
+                confidence=1.0,
+                explanation=(
+                    f"De volledige competition-intelligence-run van {rd} duurde "
+                    f"{total_seconds:.1f}s; dat overschrijdt de drempel van "
+                    f"{threshold:.0f}s. Langzaamste stap: "
+                    f"{slowest or 'onbekend'} "
+                    f"({timings.get(slowest, 0):.1f}s)."
+                    if slowest else
+                    f"De volledige competition-intelligence-run van {rd} duurde "
+                    f"{total_seconds:.1f}s; dat overschrijdt de drempel van "
+                    f"{threshold:.0f}s."),
+                evidence={
+                    "run_date": str(rd),
+                    "total_seconds": total_seconds,
+                    "threshold_seconds": threshold,
+                    "timings_seconds": timings,
+                    "slowest_step": slowest,
+                },
+                sources=["engine_run_profiling"],
+                suggested_action=(
+                    "Onderzoek de langzaamste stap; controleer datavolume en "
+                    "query-plannen voordat de vertraging gebruikers raakt"),
+                model_version=MODEL_VERSION,
+            )
+            db.commit()
+            result["slow_run_signal"] = True
     return result

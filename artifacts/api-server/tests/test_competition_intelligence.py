@@ -1085,3 +1085,68 @@ def test_elasticity_unique_price_gate_forces_heuristic():
     finally:
         _cleanup_elast_sku(db, sku)
         db.close()
+
+
+# ── Trage-run-bewaking (taak 100) ────────────────────────────────────────────
+
+def test_run_all_reports_timings_and_scoped_run_has_no_slow_signal(run_engines, seed):
+    """Gescopeerde runs rapporteren per-stap-timings maar zijn uitgezonderd
+    van de slow-run-drempel."""
+    assert "timings_seconds" in run_engines
+    assert "total_seconds" in run_engines
+    timings = run_engines["timings_seconds"]
+    for step in ("profiles", "coverage", "price_events", "promo_events",
+                 "availability", "elasticity", "strategies",
+                 "suspicious_matches"):
+        assert step in timings, timings
+    assert "slow_run_signal" not in run_engines
+
+    db = SessionLocal()
+    try:
+        n = db.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.signal_type == "engine_slow_run",
+            models.IntelligenceSignal.shop_id == seed["shop_id"],
+        ).count()
+        assert n == 0
+    finally:
+        db.close()
+
+
+def test_slow_full_run_publishes_engine_slow_run_signal(monkeypatch):
+    """Een volledige (niet-gescopeerde) run boven de drempel publiceert een
+    engine_slow_run-signaal met timings als evidence."""
+    from engine import competition_intelligence as ci
+    from engine import competitor_profiling
+
+    monkeypatch.setattr(ci, "run_coverage", lambda db, rd, shop_id=None: 0)
+    monkeypatch.setattr(ci, "detect_price_events", lambda db, rd, shop_id=None: 0)
+    monkeypatch.setattr(ci, "detect_promo_events", lambda db, rd, shop_id=None: 0)
+    monkeypatch.setattr(ci, "update_availability", lambda db, rd, shop_id=None: 0)
+    monkeypatch.setattr(ci, "run_elasticity", lambda db, rd, shop_id=None: 0)
+    monkeypatch.setattr(ci, "run_strategies", lambda db, rd, shop_id=None: 0)
+    monkeypatch.setattr(ci, "warn_suspicious_matches", lambda db, rd, shop_id=None: 0)
+    monkeypatch.setattr(competitor_profiling, "build_all_profiles",
+                        lambda db, shop_id=None: [])
+    # Drempel praktisch op nul: elke run is dan "te traag"
+    monkeypatch.setattr(ci, "_cfg", lambda db: dict(
+        ci.DEFAULTS, slow_run_threshold_seconds=0.000001))
+
+    db = SessionLocal()
+    try:
+        result = ci.run_all(db, shop_id=None)
+        assert result.get("slow_run_signal") is True
+        sig = (db.query(models.IntelligenceSignal)
+               .filter(models.IntelligenceSignal.signal_type == "engine_slow_run",
+                       models.IntelligenceSignal.status == "active")
+               .order_by(models.IntelligenceSignal.id.desc())
+               .first())
+        assert sig is not None
+        assert sig.evidence["threshold_seconds"] == pytest.approx(0.000001)
+        assert "timings_seconds" in sig.evidence
+        assert sig.explanation
+    finally:
+        db.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.signal_type == "engine_slow_run",
+        ).delete(synchronize_session=False)
+        db.commit()
+        db.close()
