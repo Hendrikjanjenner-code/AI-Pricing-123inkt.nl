@@ -2258,6 +2258,31 @@ class LoyaltyCampaign(Base):
     is_demo_data = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class CampaignUpliftSnapshot(Base):
+    """
+    Historische uplift-snapshot per campagne per engine-run (§22).
+    Elke loyalty-run bewaart de kernmetrics zodat de trend over meerdere
+    runs zichtbaar wordt (wordt de campagne beter of slechter?).
+    Eén rij per RUN (run_at is de run-identiteit): ook meerdere runs op
+    dezelfde dag blijven afzonderlijk bewaard en vergelijkbaar.
+    """
+    __tablename__ = "campaign_uplift_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    campaign_id = Column(Integer, ForeignKey("loyalty_campaigns.id"), nullable=False, index=True)
+    run_date = Column(Date, nullable=False, index=True)
+    run_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    spend_uplift_pct = Column(Float)          # besteding/lid uplift % (None als control 0)
+    orders_uplift_pct = Column(Float)         # frequentie/lid uplift %
+    retention_uplift_pct = Column(Float)      # retentie uplift %
+    retention_confidence = Column(Float, default=0.0)
+    combined_confidence = Column(Float, default=0.0)
+    direction = Column(String(20))            # positive / negative / neutral
+    treatment_n = Column(Integer, default=0)
+    control_n = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
 class LoyaltyWallet(Base):
     """
     Wallet per lid. balance_points is een gedenormaliseerd saldo dat ALLEEN

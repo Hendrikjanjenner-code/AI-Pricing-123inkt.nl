@@ -387,6 +387,25 @@ def run_migrations(engine, metadata) -> None:
             'CREATE INDEX IF NOT EXISTS ix_ai_feedback_question_tsv '
             'ON ai_feedback USING gin (question_tsv)',
         ),
+        # Campagne-uplift snapshots: het oude schema had een unieke constraint
+        # per (campaign_id, run_date); sinds run_at (run-identiteit) mogen
+        # meerdere runs per dag bewaard blijven — drop beide legacy-vormen en
+        # backfill run_at voor bestaande rijen (created_at, anders run_date).
+        (
+            "drop_uq_campaign_uplift_run",
+            'ALTER TABLE campaign_uplift_snapshots '
+            'DROP CONSTRAINT IF EXISTS uq_campaign_uplift_run',
+        ),
+        (
+            "drop_ix_uq_campaign_uplift_run",
+            'DROP INDEX IF EXISTS uq_campaign_uplift_run',
+        ),
+        (
+            "backfill_campaign_uplift_run_at",
+            'UPDATE campaign_uplift_snapshots '
+            'SET run_at = COALESCE(created_at, run_date::timestamp) '
+            'WHERE run_at IS NULL',
+        ),
         (
             "uq_ai_budget_config_global_singleton",
             'CREATE UNIQUE INDEX IF NOT EXISTS uq_ai_budget_config_global_singleton '

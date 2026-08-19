@@ -340,11 +340,41 @@ def campaign_uplift(
         raise HTTPException(status_code=404, detail="Campagne niet gevonden")
 
     uplift_list = li.compute_campaign_uplift(db, campaign_id=campaign_id)
+
+    # Historische snapshots (één per engine-run) zodat de trend over
+    # meerdere runs zichtbaar is. Pak de 90 MEEST RECENTE runs (desc) en
+    # draai ze om, zodat de sparkline oudste→nieuwste toont en na lange
+    # historie niet aan verouderde data blijft hangen.
+    recent = db.query(models.CampaignUpliftSnapshot).filter(
+        models.CampaignUpliftSnapshot.campaign_id == campaign_id
+    ).order_by(
+        # NULLS LAST: rijen van vóór de run_at-migratie (nog niet gebackfilld)
+        # mogen het venster met recente runs niet verdringen.
+        models.CampaignUpliftSnapshot.run_at.desc().nulls_last(),
+        models.CampaignUpliftSnapshot.id.desc(),
+    ).limit(90).all()
+    history = [
+        {
+            "run_date": s.run_date.isoformat(),
+            "run_at": s.run_at.isoformat() if s.run_at else None,
+            "spend_uplift_pct": s.spend_uplift_pct,
+            "orders_uplift_pct": s.orders_uplift_pct,
+            "retention_uplift_pct": s.retention_uplift_pct,
+            "retention_confidence": s.retention_confidence,
+            "combined_confidence": s.combined_confidence,
+            "direction": s.direction,
+            "treatment_n": s.treatment_n,
+            "control_n": s.control_n,
+        }
+        for s in reversed(recent)
+    ]
+
     if not uplift_list:
         # Campagne bestaat maar heeft geen treatment én control leden
         return {
             **_campaign_dict(c, db),
             "uplift": None,
+            "history": history,
             "message": "Geen uplift-analyse beschikbaar — campagne heeft geen treatment- én control-leden.",
         }
 
@@ -352,6 +382,7 @@ def campaign_uplift(
     return {
         **_campaign_dict(c, db),
         "uplift": u,
+        "history": history,
         "period_estimated": bool(u.get("period_estimated")),
         "period_warning": u.get("period_warning"),
     }

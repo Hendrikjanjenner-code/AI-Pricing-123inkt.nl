@@ -123,9 +123,38 @@ function UpliftPill({ value }: { value: number | null | undefined }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Campaign uplift detail card
-// ---------------------------------------------------------------------------
+function UpliftSparkline({ history }: { history: any[] }) {
+  const points = (history || []).filter((h: any) => h.spend_uplift_pct != null);
+  if (points.length < 2) return null;
+
+  const w = 160, h = 36, pad = 3;
+  const vals = points.map((p: any) => p.spend_uplift_pct as number);
+  const min = Math.min(...vals, 0);
+  const max = Math.max(...vals, 0);
+  const range = max - min || 1;
+  const x = (i: number) => pad + (i / (points.length - 1)) * (w - 2 * pad);
+  const y = (v: number) => h - pad - ((v - min) / range) * (h - 2 * pad);
+  const path = vals.map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const zeroY = y(0);
+  const last = vals[vals.length - 1];
+  const lineColor = last > 0 ? "#059669" : last < 0 ? "#dc2626" : "#64748b";
+
+  return (
+    <div className="flex items-center gap-2" data-testid="uplift-sparkline">
+      <svg width={w} height={h} className="shrink-0">
+        {zeroY >= pad && zeroY <= h - pad && (
+          <line x1={pad} x2={w - pad} y1={zeroY} y2={zeroY} stroke="#cbd5e1" strokeWidth={1} strokeDasharray="2,2" />
+        )}
+        <path d={path} fill="none" stroke={lineColor} strokeWidth={1.5} />
+        <circle cx={x(points.length - 1)} cy={y(last)} r={2.5} fill={lineColor} />
+      </svg>
+      <div className="text-[10px] text-muted-foreground leading-tight">
+        Trend besteding-uplift over {points.length} runs<br />
+        ({points[0].run_date} → {points[points.length - 1].run_date})
+      </div>
+    </div>
+  );
+}
 function CampaignUpliftDetail({ campaignId }: { campaignId: number }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["campaign-uplift", campaignId],
@@ -179,6 +208,11 @@ function CampaignUpliftDetail({ campaignId }: { campaignId: number }) {
             </div>
           ))}
         </div>
+        {(data?.history?.length ?? 0) >= 2 && (
+          <div className="mt-3 pt-2 border-t border-black/5">
+            <UpliftSparkline history={data.history} />
+          </div>
+        )}
       </div>
 
       {/* Treatment vs control tabel */}

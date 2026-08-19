@@ -1159,6 +1159,23 @@ def publish_campaign_uplift_signals(db: Session, run_date: date | None = None) -
     for u in uplift_list:
         campaign_entity_id = str(u["campaign_id"])
 
+        # Bewaar een historische snapshot per run zodat de trend over
+        # meerdere runs zichtbaar blijft. Elke run (run_at) krijgt een eigen
+        # rij — ook herhaalde runs op dezelfde dag blijven vergelijkbaar.
+        db.add(models.CampaignUpliftSnapshot(
+            shop_id=u.get("shop_id") or 1,
+            campaign_id=u["campaign_id"],
+            run_date=run_date,
+            spend_uplift_pct=u["uplift"]["spend_per_member_pct"],
+            orders_uplift_pct=u["uplift"]["orders_per_member_pct"],
+            retention_uplift_pct=u["uplift"]["retention_rate_pct"],
+            retention_confidence=u["retention_confidence"],
+            combined_confidence=u["combined_confidence"],
+            direction=u["direction"],
+            treatment_n=u["treatment"]["n"],
+            control_n=u["control"]["n"],
+        ))
+
         # Supersede alle actieve uplift-signalen voor deze campagne,
         # ongeacht de richting — zo blijft er altijd maar één actief.
         db.query(models.IntelligenceSignal).filter(
@@ -1199,5 +1216,9 @@ def publish_campaign_uplift_signals(db: Session, run_date: date | None = None) -
             dedupe_key=dedupe_key,
             model_version=MODEL_VERSION,
         ))
+        # Expliciete flush (sessie draait met autoflush=False): een volgende
+        # run binnen dezelfde sessie moet dit signaal kunnen superseden,
+        # anders klapt de partiële unieke index op actieve dedupe_keys.
+        db.flush()
         published += 1
     return published

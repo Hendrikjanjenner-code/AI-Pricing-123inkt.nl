@@ -251,7 +251,7 @@ def test_disabled_policy_is_noop(db, policy):
 
 def test_expiring_soon_members_window(db, policy):
     """Alleen leden met punten binnen het waarschuwingsvenster verschijnen:
-    te nieuwe punten en al-verlopen punten vallen erbuiten."""
+    te nieuwe punten vallen erbuiten; al-verlopen (nog niet weggeboekte) punten tellen mee."""
     s, created = db
     today = date.today()
 
@@ -277,12 +277,10 @@ def test_expiring_soon_members_window(db, policy):
     assert row["points_expiring_eur"] == round(600 * li.POINT_VALUE_EUR, 2)
 
     assert m_fresh.id not in rows, "te nieuwe punten horen niet in het waarschuwingsvenster"
-    # Sinds de liability-wijziging tellen punten die al over de vervalgrens
-    # zijn (maar nog niet door de expiry-run verwerkt) óók als 'binnenkort
-    # verlopend': ze verschijnen in het venster tot de expiry-run ze afboekt.
-    assert m_late.id in rows, (
-        "al-over-de-grens punten horen (tot de expiry-run) in het "
-        "waarschuwingsvenster")
+    # Sinds de liability-wijziging horen al-over-de-grens punten óók in het
+    # waarschuwingsvenster (ze zijn nog niet weggeboekt door de expiry-run).
+    assert m_late.id in rows, ("al-verlopen maar nog niet weggeboekte punten "
+                               "horen in het waarschuwingsvenster")
     assert rows[m_late.id]["points_expiring"] == 600
 
 def test_expiring_soon_respects_fifo_redeems(db, policy):

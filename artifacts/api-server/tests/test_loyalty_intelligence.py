@@ -224,3 +224,175 @@ def test_process_transactions_invalid_rows_no_corruption(db):
     assert wallet.balance_points == 60
     assert s.query(models.LoyaltyTransaction).filter_by(member_id=m.id).count() == 2
     assert [x for x in li.verify_ledger_integrity(s) if x["member_id"] == m.id] == []
+
+
+# ─── CampaignUpliftSnapshot: trend over meerdere runs ────────────────────────
+
+def _mk_campaign_with_groups(s, ids, shop_id=1):
+    """Campagne met 2 treatment- en 2 control-leden + earn-transacties."""
+    c = models.LoyaltyCampaign(
+        shop_id=shop_id, name=f"TEST-UPLIFT-{uuid.uuid4().hex[:8]}",
+        campaign_type="bonus_points",
+        start_date=date.today() - timedelta(days=30),
+        end_date=date.today(), status="completed",
+        is_demo_data=False,
+    )
+    s.add(c)
+    s.commit()
+    for i in range(4):
+        m = _mk_member(s, ids)
+        group = "treatment" if i < 2 else "control"
+        s.add(models.LoyaltyCampaignMembership(
+            campaign_id=c.id, member_id=m.id, group_type=group))
+        # treatment besteedt meer dan control
+        li.apply_ledger_entry(
+            s, m, date.today() - timedelta(days=10), "earn",
+            200 if group == "treatment" else 100,
+            order_value=(200 if group == "treatment" else 100),
+            order_reference=f"TEST-UPL-{c.id}-{i}",
+        )
+    s.commit()
+    return c
+
+
+def _cleanup_campaign(cid):
+    s = SessionLocal()
+    try:
+        s.query(models.CampaignUpliftSnapshot).filter_by(campaign_id=cid).delete()
+        s.query(models.IntelligenceSignal).filter(
+            models.IntelligenceSignal.entity_type == "campaign",
+            models.IntelligenceSignal.entity_id == str(cid),
+        ).delete()
+        s.query(models.LoyaltyCampaignMembership).filter_by(campaign_id=cid).delete()
+        s.query(models.LoyaltyCampaign).filter_by(id=cid).delete()
+        s.commit()
+    finally:
+        s.close()
+
+
+def test_uplift_snapshot_persisted_per_run_including_same_day(db):
+    s, ids = db
+    # Niet-default winkel: snapshots moeten de winkel van de campagne dragen
+    shop = models.DimShop(shop_code=f"UPL{uuid.uuid4().hex[:6]}",
+                          name="Uplift-testshop", active=True)
+    s.add(shop)
+    s.commit()
+    c = _mk_campaign_with_groups(s, ids, shop_id=shop.id)
+    try:
+        li.publish_campaign_uplift_signals(s)
+        s.commit()
+        li.publish_campaign_uplift_signals(s)  # tweede run op dezelfde dag
+        s.commit()
+        snaps = s.query(models.CampaignUpliftSnapshot).filter_by(
+            campaign_id=c.id).order_by(models.CampaignUpliftSnapshot.id).all()
+        # Elke run bewaart een eigen snapshot — ook op dezelfde dag
+        assert len(snaps) == 2
+        for snap in snaps:
+            assert snap.run_date == date.today()
+            assert snap.run_at is not None
+            assert snap.shop_id == shop.id, (
+                "snapshot moet de winkel van de campagne dragen, niet shop 1")
+            assert snap.direction == "positive"       # treatment besteedt 2x zoveel
+            assert snap.spend_uplift_pct == 100.0
+            assert snap.treatment_n == 2 and snap.control_n == 2
+            assert 0 <= (snap.combined_confidence or 0) <= 1
+    finally:
+        _cleanup_campaign(c.id)
+
+
+def test_uplift_endpoint_history_returns_recent_runs_chronologically(db):
+    from datetime import datetime as _dt
+    from routes.loyalty import campaign_uplift
+    s, ids = db
+    c = _mk_campaign_with_groups(s, ids)
+    try:
+        # 95 kunstmatige historische snapshots + 1 echte run van vandaag
+        base = _dt(2020, 1, 1, 3, 0, 0)
+        for i in range(95):
+            s.add(models.CampaignUpliftSnapshot(
+                shop_id=1, campaign_id=c.id,
+                run_date=date(2020, 1, 1) + timedelta(days=i),
+                run_at=base + timedelta(days=i),
+                spend_uplift_pct=float(i), combined_confidence=0.5,
+                retention_confidence=0.5, direction="neutral",
+                treatment_n=2, control_n=2,
+            ))
+        s.commit()
+        li.publish_campaign_uplift_signals(s)
+        s.commit()
+
+        resp = campaign_uplift(c.id, db=s, current_user=None)
+        hist = resp["history"]
+        # Cap op 90 en de MEEST RECENTE runs, oudste→nieuwste voor de sparkline
+        assert len(hist) == 90
+        run_ats = [h["run_at"] for h in hist]
+        assert run_ats == sorted(run_ats)
+        # De nieuwste snapshot (van de echte run zojuist) zit erin ...
+        assert hist[-1]["run_date"] == date.today().isoformat()
+        # ... en de oudste kunstmatige rijen zijn eruit gevallen (geen stale window)
+        assert hist[0]["run_at"] > "2020-01-01T03:00:00"
+    finally:
+        _cleanup_campaign(c.id)
+
+
+def test_migration_drops_legacy_uplift_constraint_and_backfills_run_at(db):
+    """
+    Regressietest voor de rollout vanaf het oude schema: legacy unieke
+    constraint (campaign_id, run_date) moet worden gedropt en bestaande rijen
+    zonder run_at moeten worden gebackfilld, zodat meerdere runs per dag
+    bewaard kunnen worden en de historie-volgorde klopt.
+    """
+    from sqlalchemy import text as sa_sql
+    from database import engine
+    import migrate
+
+    s, ids = db
+    c = _mk_campaign_with_groups(s, ids)
+    try:
+        with engine.connect() as conn:
+            # Simuleer het oude schema. Onder dat schema konden duplicaten per
+            # (campaign_id, run_date) niet bestaan — dedupliceer eerst zodat
+            # de legacy constraint kan worden aangelegd op de dev-database.
+            conn.execute(sa_sql(
+                "DELETE FROM campaign_uplift_snapshots a USING campaign_uplift_snapshots b "
+                "WHERE a.id < b.id AND a.campaign_id = b.campaign_id "
+                "AND a.run_date = b.run_date"))
+            # Legacy constraint + rij zonder run_at
+            conn.execute(sa_sql(
+                "ALTER TABLE campaign_uplift_snapshots "
+                "ADD CONSTRAINT uq_campaign_uplift_run UNIQUE (campaign_id, run_date)"))
+            conn.execute(sa_sql(
+                "ALTER TABLE campaign_uplift_snapshots ALTER COLUMN run_at DROP NOT NULL"))
+            conn.execute(sa_sql(
+                "INSERT INTO campaign_uplift_snapshots "
+                "(shop_id, campaign_id, run_date, run_at, spend_uplift_pct, direction, "
+                " treatment_n, control_n, created_at) "
+                "VALUES (1, :cid, '2024-05-01', NULL, 1.0, 'neutral', 2, 2, "
+                "        '2024-05-01T04:00:00')"), {"cid": c.id})
+            conn.commit()
+
+        migrate.run_migrations(engine, models.Base.metadata)
+
+        with engine.connect() as conn:
+            # Constraint is weg …
+            n = conn.execute(sa_sql(
+                "SELECT count(*) FROM pg_constraint WHERE conname = 'uq_campaign_uplift_run'"
+            )).scalar()
+            assert n == 0
+            # … en run_at is deterministisch gebackfilld vanaf created_at
+            run_at = conn.execute(sa_sql(
+                "SELECT run_at FROM campaign_uplift_snapshots "
+                "WHERE campaign_id = :cid AND run_date = '2024-05-01'"), {"cid": c.id}
+            ).scalar()
+            assert run_at is not None and str(run_at).startswith("2024-05-01 04:00:00")
+
+        # Meerdere runs op dezelfde dag zijn nu toegestaan
+        li.publish_campaign_uplift_signals(s)
+        s.commit()
+        li.publish_campaign_uplift_signals(s)
+        s.commit()
+        today_count = s.query(models.CampaignUpliftSnapshot).filter_by(
+            campaign_id=c.id, run_date=date.today()).count()
+        assert today_count == 2
+    finally:
+        _cleanup_campaign(c.id)
