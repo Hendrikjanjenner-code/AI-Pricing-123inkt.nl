@@ -1336,3 +1336,186 @@ class TestViewerReadOnlyScan:
             ).delete(synchronize_session=False)
             db.commit()
             db.close()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NACHTSCAN (run_scan_once): alleen alarm bij echt nieuwe of heropende issues
+#
+# Isolatie: _detect_issues wordt NIET vervangen maar gewrapt — de echte
+# detecties blijven meedraaien en er wordt één synthetisch test-issue aan
+# toegevoegd. Zo blijft de registrystatus van echte issues onaangetast.
+# De notifier is gemockt (geen echte e-mail/webhook) en assertions filteren
+# op de eigen issue-code. ImportJobs worden per test op exact id opgeruimd,
+# nadat op inhoud is geverifieerd dat de job door deze test is aangemaakt.
+# ══════════════════════════════════════════════════════════════════════════════
+
+from services.data_quality_scan_scheduler import run_scan_once, SCAN_JOB_TYPE
+
+_REAL_DETECT_ISSUES = dq_module._detect_issues
+
+
+class TestNightScanAlerts:
+    """Regressietests voor run_scan_once() alert-gedrag en job-registratie."""
+
+    def _cleanup(self, db, code, job_ids):
+        db.query(models.DataQualityIssue).filter(
+            models.DataQualityIssue.issue_code == code
+        ).delete(synchronize_session=False)
+        if job_ids:
+            db.query(models.ImportJob).filter(
+                models.ImportJob.id.in_(list(job_ids))
+            ).delete(synchronize_session=False)
+        db.commit()
+
+    def _newest_scan_job(self, db, since_id):
+        db.expire_all()
+        return (db.query(models.ImportJob)
+                .filter(models.ImportJob.upload_type == SCAN_JOB_TYPE,
+                        models.ImportJob.id > since_id)
+                .order_by(models.ImportJob.id.desc()).first())
+
+    def _max_job_id(self, db):
+        from sqlalchemy import func
+        return db.query(func.coalesce(func.max(models.ImportJob.id), 0)).scalar()
+
+    def _run(self, code, calls):
+        """Draai run_scan_once; echte detecties + één synthetisch issue.
+
+        `calls` verzamelt (issue_code, kind)-tupels van de gemockte notifier,
+        vastgelegd op het moment van de call (de registry-row raakt daarna
+        detached van de gesloten sessie)."""
+        def detect(db, total_skus):
+            return _REAL_DETECT_ISSUES(db, total_skus) + [
+                _make_issue_dict(code, "error", 4)
+            ]
+
+        def notify(_db, row, kind):
+            calls.append((row.issue_code, kind))
+
+        with patch.object(dq_module, "_detect_issues", side_effect=detect), \
+             patch("services.data_quality_scan_scheduler._notify_issue", notify):
+            return run_scan_once()
+
+    def test_new_issue_sends_single_alert(self, client):
+        code = f"TEST_SCAN_NEW_{uuid.uuid4().hex[:8]}"
+        db = SessionLocal()
+        job_ids = set()
+        since = self._max_job_id(db)
+        try:
+            calls = []
+            summary = self._run(code, calls)
+
+            assert code in summary["new"]
+            assert code not in summary["reopened"]
+            own_calls = [c for c in calls if c[0] == code]
+            assert own_calls == [(code, "new")], \
+                "Nieuw issue moet precies één 'new'-alert sturen"
+
+            # Succesvolle run registreert een 'geimporteerd' ImportJob.
+            job = self._newest_scan_job(db, since)
+            assert job is not None
+            assert code in (job.warnings_json or {}).get("new_issues", []), \
+                "Nieuwste scan-job hoort bij deze test (bevat de test-issuecode)"
+            assert job.status == "geimporteerd"
+            job_ids.add(job.id)
+        finally:
+            self._cleanup(db, code, job_ids)
+            db.close()
+
+    def test_persistent_issue_sends_no_repeat_alert(self, client):
+        code = f"TEST_SCAN_PERSIST_{uuid.uuid4().hex[:8]}"
+        db = SessionLocal()
+        job_ids = set()
+        since = self._max_job_id(db)
+        try:
+            # Run 1: nieuw → alert
+            calls1 = []
+            self._run(code, calls1)
+            assert (code, "new") in calls1
+            job = self._newest_scan_job(db, since)
+            if job is not None and code in (job.warnings_json or {}).get("new_issues", []):
+                job_ids.add(job.id)
+                since = job.id
+
+            # Run 2: hetzelfde issue nog steeds open → GEEN alert voor deze code
+            calls2 = []
+            summary = self._run(code, calls2)
+            assert code not in summary["new"]
+            assert code not in summary["reopened"]
+            assert [c for c in calls2 if c[0] == code] == [], \
+                "Aanhoudend open issue mag geen herhaalde alert sturen"
+            job2 = self._newest_scan_job(db, since)
+            if job2 is not None and job2.uploaded_by == "system-dq-scan":
+                job_ids.add(job2.id)
+        finally:
+            self._cleanup(db, code, job_ids)
+            db.close()
+
+    def test_reopened_issue_sends_alert_again(self, client):
+        code = f"TEST_SCAN_REOPEN_{uuid.uuid4().hex[:8]}"
+        db = SessionLocal()
+        job_ids = set()
+        since = self._max_job_id(db)
+        try:
+            # Run 1: nieuw
+            self._run(code, [])
+            job = self._newest_scan_job(db, since)
+            if job is not None and code in (job.warnings_json or {}).get("new_issues", []):
+                job_ids.add(job.id)
+                since = job.id
+
+            # Markeer ALLEEN dit test-issue als opgelost (gericht, geen
+            # _sync_issue_registry(db, []) — dat zou echte issues resolven).
+            row = db.query(models.DataQualityIssue).filter(
+                models.DataQualityIssue.issue_code == code).first()
+            assert row is not None
+            row.status = "opgelost"
+            row.resolved_at = datetime.utcnow()
+            db.commit()
+
+            # Run 2: issue keert terug → 'reopened'-alert
+            calls = []
+            summary = self._run(code, calls)
+            assert code in summary["reopened"]
+            assert code not in summary["new"]
+            assert [c for c in calls if c[0] == code] == [(code, "reopened")], \
+                "Heropend issue moet precies één 'reopened'-alert sturen"
+            job2 = self._newest_scan_job(db, since)
+            if job2 is not None and code in (job2.warnings_json or {}).get("reopened_issues", []):
+                job_ids.add(job2.id)
+        finally:
+            self._cleanup(db, code, job_ids)
+            db.close()
+
+    def test_failed_scan_registers_fout_importjob(self, client):
+        db = SessionLocal()
+        job_ids = set()
+        since = self._max_job_id(db)
+        boom_msg = f"detectie kapot (test {uuid.uuid4().hex[:8]})"
+        try:
+            calls = []
+
+            def notify(_db, row, kind):
+                calls.append((row.issue_code, kind))
+
+            with patch.object(dq_module, "_detect_issues",
+                              side_effect=RuntimeError(boom_msg)), \
+                 patch("services.data_quality_scan_scheduler._notify_issue", notify):
+                with pytest.raises(RuntimeError):
+                    run_scan_once()
+
+            assert calls == [], "Mislukte scan mag geen alerts sturen"
+            job = self._newest_scan_job(db, since)
+            assert job is not None, "Mislukte scan moet als ImportJob zichtbaar zijn"
+            assert boom_msg in (job.error_message or ""), \
+                "Nieuwste scan-job hoort bij deze test (unieke foutmelding)"
+            assert job.status == "fout"
+            assert job.completed_at is not None
+            job_ids.add(job.id)
+        finally:
+            if job_ids:
+                db.query(models.ImportJob).filter(
+                    models.ImportJob.id.in_(list(job_ids))
+                ).delete(synchronize_session=False)
+                db.commit()
+            db.close()
