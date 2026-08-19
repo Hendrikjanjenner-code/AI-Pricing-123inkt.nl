@@ -1594,7 +1594,6 @@ def _fewshot_rows_overlap(db: Session, question: str, limit: int) -> list[dict]:
             scored.append((sim, r))
     scored.sort(key=lambda t: t[0], reverse=True)
     return _dedupe_examples(scored, limit)
-
 # Minimale ts_rank om pure ruis te weren. Bewust laag: ts_rank normaliseert
 # op documentlengte, waardoor zelfs een sterke één-stam-match (bv. 'marge')
 # op een korte vraag rond ~0.008 uitkomt. Irrelevante vragen zonder gedeelde

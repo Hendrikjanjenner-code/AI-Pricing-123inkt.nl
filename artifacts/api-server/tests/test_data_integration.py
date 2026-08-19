@@ -416,6 +416,63 @@ def test_bq_fetch_pg_rows_paginates_without_gaps_or_dupes(monkeypatch):
     finally:
         db.close()
 
+def test_bq_fetch_pg_rows_null_watermarks_multipage(monkeypatch):
+    """Rijen met een NULL-watermerk mogen niet buiten de paginering vallen
+    én mogen geen oneindige lus veroorzaken als een hele pagina uit
+    NULL-watermerkrijen bestaat (sleutel-normalisatie naar epoch)."""
+    import uuid
+    from sqlalchemy import text as sa_text
+    from bigquery import sync as bq_sync
+    monkeypatch.setattr(bq_sync, "BATCH_SIZE", 2)
+    db = SessionLocal()
+    tag = uuid.uuid4().hex[:8]
+    created_ids: list[int] = []
+    try:
+        # 5 shops met NULL created_at: > 2 volledige pagina's aan NULL-rijen.
+        for i in range(5):
+            row = db.execute(sa_text(
+                "INSERT INTO dim_shop (shop_code, name, created_at) "
+                "VALUES (:c, :n, NULL) RETURNING id"),
+                {"c": f"TEST-BQNULL-{tag}-{i}", "n": f"BQ NULL test {tag} {i}"},
+            ).fetchone()
+            created_ids.append(row[0])
+        db.commit()
+
+        expected = {r[0] for r in db.execute(
+            sa_text("SELECT id FROM dim_shop"))}
+        seen: list = []
+        last_key = None
+        pages = 0
+        while True:
+            rows = bq_sync._fetch_pg_rows(db, "dim_shop", since=None, last_key=last_key)
+            pages += 1
+            assert pages <= len(expected) + 2, "paginatie loopt vast in een lus"
+            if not rows:
+                break
+            seen.extend(r["id"] for r in rows)
+            last = rows[-1]
+            wm = last.get(bq_sync.WATERMARK_COLUMN["dim_shop"])
+            # Zelfde normalisatie als de sync-lus: NULL → epoch
+            from datetime import datetime as _dt
+            if wm is None:
+                wm = bq_sync._EPOCH
+            elif not isinstance(wm, _dt):
+                wm = _dt.combine(wm, _dt.min.time())
+            last_key = (wm, last["id"])
+            if len(rows) < bq_sync.BATCH_SIZE:
+                break
+        assert len(seen) == len(set(seen)), "paginatie leverde duplicaten op"
+        assert set(seen) == expected, "paginatie miste rijen (NULL-watermerk)"
+    finally:
+        try:
+            db.rollback()
+            if created_ids:
+                db.execute(sa_text("DELETE FROM dim_shop WHERE id = ANY(:ids)"),
+                           {"ids": created_ids})
+                db.commit()
+        finally:
+            db.close()
+
 
 def test_bq_null_watermark_rows_paginate_and_terminate(monkeypatch):
     """Meerdere pagina's vol NULL-watermerk-rijen: de keyset (EPOCH-normalisatie)

@@ -242,11 +242,19 @@ def test_transactions_outside_period_excluded(db, factory):
     assert r["treatment"]["spend_total"] == pytest.approx(100.0)
     assert r["treatment"]["orders_total"] == 1
 
+PERIOD_WARNING_TEXT = (
+    "Meetperiode geschat; voeg campagnedatums toe voor nauwkeurige analyse"
+)
 
-# ---------------------------------------------------------------------------
-# direction
-# ---------------------------------------------------------------------------
 
+def test_period_estimated_when_both_dates_missing(db, factory):
+    c = _build_two_group_campaign(
+        factory, treatment_spend=[100], control_spend=[100],
+        start=None, end=None,
+    )
+    r = li.compute_campaign_uplift(db, campaign_id=c.id)[0]
+    assert r["period_estimated"] is True
+    assert r["period_warning"] == PERIOD_WARNING_TEXT
 def test_direction_positive_when_treatment_spends_more(db, factory):
     c = _build_two_group_campaign(
         factory, treatment_spend=[200, 200], control_spend=[100, 100]
@@ -332,6 +340,24 @@ def test_republish_supersedes_previous_signal(db, factory):
     ).count()
     assert superseded >= 1
 
+@pytest.fixture(scope="module")
+def api_client():
+    os.environ.setdefault("DISABLE_SCRAPE_SCHEDULER", "true")
+    from fastapi.testclient import TestClient
+    import main
+    from database import engine
+    import seed
+    models.Base.metadata.create_all(bind=engine)
+    seed.seed_users_only()
+    client = TestClient(main.app)
+    resp = client.post("/api/auth/login",
+                       json={"username": "admin", "password": "admin123"})
+    if resp.status_code != 200:
+        pytest.skip("Admin login mislukt")
+    token = resp.json().get("token") or resp.json().get("access_token")
+    client.headers.update({"Authorization": f"Bearer {token}"})
+    return client
+
 
 def test_signal_inherits_campaign_shop_id(db, factory):
     """Signalen erven shop_id van de campagne i.p.v. hardcoded shop 1."""
@@ -382,3 +408,51 @@ def test_direction_change_supersedes_old_direction(db, factory):
     signals = _active_signals(db, c.id)
     assert len(signals) == 1
     assert signals[0].signal_type == "campaign_uplift_negative"
+
+def test_period_estimated_when_only_start_date_missing(db, factory):
+    c = _build_two_group_campaign(
+        factory, treatment_spend=[100], control_spend=[100],
+        start=None, end=PERIOD_END,
+    )
+    r = li.compute_campaign_uplift(db, campaign_id=c.id)[0]
+    assert r["period_estimated"] is True
+    assert r["period_warning"] == PERIOD_WARNING_TEXT
+
+def test_period_not_estimated_when_both_dates_present(db, factory):
+    c = _build_two_group_campaign(
+        factory, treatment_spend=[100], control_spend=[100],
+        start=PERIOD_START, end=PERIOD_END,
+    )
+    r = li.compute_campaign_uplift(db, campaign_id=c.id)[0]
+    assert r["period_estimated"] is False
+    assert r["period_warning"] is None
+
+def test_endpoint_exposes_period_fields_when_dates_missing(db, factory, api_client):
+    c = _build_two_group_campaign(
+        factory, treatment_spend=[100], control_spend=[100],
+        start=None, end=None,
+    )
+    db.commit()  # endpoint gebruikt een eigen sessie
+    body = api_client.get(f"/api/loyalty/campaigns/{c.id}/uplift").json()
+    assert body["period_estimated"] is True
+    assert body["period_warning"] == PERIOD_WARNING_TEXT
+    assert body["uplift"]["period_estimated"] is True
+
+def test_endpoint_exposes_period_fields_when_dates_present(db, factory, api_client):
+    c = _build_two_group_campaign(
+        factory, treatment_spend=[100], control_spend=[100],
+        start=PERIOD_START, end=PERIOD_END,
+    )
+    db.commit()
+    body = api_client.get(f"/api/loyalty/campaigns/{c.id}/uplift").json()
+    assert body["period_estimated"] is False
+    assert body["period_warning"] is None
+
+def test_period_estimated_when_only_end_date_missing(db, factory):
+    c = _build_two_group_campaign(
+        factory, treatment_spend=[100], control_spend=[100],
+        start=PERIOD_START, end=None,
+    )
+    r = li.compute_campaign_uplift(db, campaign_id=c.id)[0]
+    assert r["period_estimated"] is True
+    assert r["period_warning"] == PERIOD_WARNING_TEXT
