@@ -628,17 +628,31 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
                     )
                 else:
                     priceshape_connector._get_credentials(db=db)
-                    prices = priceshape_connector.fetch_competitor_prices(db=db)
+                    # Incrementele sync: geef de laatste geslaagde synctijd door
+                    # als updated_after, zodat PriceShape alleen gewijzigde
+                    # prijzen teruggeeft. Eerste sync (geen last_synced_at)
+                    # haalt nog steeds de volledige lijst op.
+                    cfg = _get_config(db, name)
+                    updated_after = (
+                        cfg.last_synced_at.isoformat()
+                        if cfg and cfg.last_synced_at else None
+                    )
+                    prices = priceshape_connector.fetch_competitor_prices(
+                        db=db, updated_after=updated_after,
+                    )
                     # Schrijf de opgehaalde rijen weg via exact dezelfde route als
                     # de handmatige upload en de feed-sync, zodat matching-,
                     # herkomst- en importinstellingenregels identiek zijn.
-                    # Modus "vervangen" werkt eerdere PriceShape-rijen bij met de
-                    # actuele prijzen; verwijderen/overschrijven blijft strikt
-                    # beperkt tot rijen die deze connector zelf schreef
-                    # (source-gescoped) — data van andere pipelines blijft staan.
+                    # Volledige sync: modus "vervangen" (upsert + source-gescoped
+                    # opschoning van niet-aangeleverde rijen). Incrementele sync:
+                    # modus "bijwerken" (alleen upsert) — ontbrekende rijen
+                    # betekenen dan "ongewijzigd", niet "verdwenen", dus mogen
+                    # ze nooit worden opgeschoond.
                     from routes.priceshape import persist_competitor_rows
                     res = persist_competitor_rows(
-                        db, prices, mode="vervangen", username="connector-sync",
+                        db, prices,
+                        mode="bijwerken" if updated_after else "vervangen",
+                        username="connector-sync",
                         filename="priceshape-rest-sync",
                     )
                     rejected = res.get("unmatched", 0) + res.get("invalid", 0)
@@ -662,8 +676,12 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
                         f"{res.get('invalid', 0)} rijen met ontbrekende prijs/concurrent overgeslagen."
                         if rejected else ""
                     )
+                    sync_kind = (
+                        f"PriceShape incrementele sync (wijzigingen sinds {updated_after}) voltooid"
+                        if updated_after else "PriceShape volledige sync voltooid"
+                    )
                     message = (
-                        f"PriceShape sync voltooid: {len(prices)} prijzen opgehaald, "
+                        f"{sync_kind}: {len(prices)} prijzen opgehaald, "
                         f"{res['created']} nieuw opgeslagen, {res['updated']} bijgewerkt, "
                         f"{res['skipped'] + rejected} overgeslagen."
                         + rejected_note + skipped_note

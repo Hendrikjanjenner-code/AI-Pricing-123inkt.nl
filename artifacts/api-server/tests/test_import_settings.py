@@ -437,7 +437,7 @@ def test_rest_sync_persists_rows_and_respects_import_settings(monkeypatch):
     monkeypatch.setattr(priceshape_connector, "_get_raw_config", lambda db=None: {"mode": "rest"})
     monkeypatch.setattr(priceshape_connector, "_get_mode", lambda raw: "rest")
     monkeypatch.setattr(priceshape_connector, "_get_credentials", lambda db=None: {})
-    monkeypatch.setattr(priceshape_connector, "fetch_competitor_prices", lambda db=None: [
+    monkeypatch.setattr(priceshape_connector, "fetch_competitor_prices", lambda db=None, **kw: [
         {"sku_id": "IMPSET-SKU-1", "competitor_name": "compa.nl", "competitor_price": 8.99},
         {"sku_id": "IMPSET-SKU-1", "competitor_name": "compb.nl", "competitor_price": 10.49},
     ])
@@ -484,7 +484,7 @@ def test_rest_sync_persists_rows_and_respects_import_settings(monkeypatch):
         assert float(by_source["handmatig"].price) == pytest.approx(99.99)
 
         # Tweede sync met nieuwe prijs: bestaande PriceShape-rij bijgewerkt.
-        monkeypatch.setattr(priceshape_connector, "fetch_competitor_prices", lambda db=None: [
+        monkeypatch.setattr(priceshape_connector, "fetch_competitor_prices", lambda db=None, **kw: [
             {"sku_id": "IMPSET-SKU-1", "competitor_name": "compa.nl", "competitor_price": 7.49},
         ])
         res = conn_routes._run_sync("priceshape", db, FakeUser())
@@ -497,7 +497,7 @@ def test_rest_sync_persists_rows_and_respects_import_settings(monkeypatch):
         assert float(row.price) == pytest.approx(7.49)
 
         # Onbekende SKU en ongeldige rij worden geteld, nooit stil gedropt.
-        monkeypatch.setattr(priceshape_connector, "fetch_competitor_prices", lambda db=None: [
+        monkeypatch.setattr(priceshape_connector, "fetch_competitor_prices", lambda db=None, **kw: [
             {"sku_id": "IMPSET-ONBEKEND", "competitor_name": "compa.nl", "competitor_price": 5.0},
             {"sku_id": "IMPSET-SKU-1", "competitor_name": "compa.nl"},  # geen prijs
             {"sku_id": "IMPSET-SKU-1", "competitor_name": "compneg.nl", "competitor_price": -1},
@@ -532,5 +532,83 @@ def test_rest_sync_persists_rows_and_respects_import_settings(monkeypatch):
         db.query(models.FactCompetitorPriceDaily).filter(
             models.FactCompetitorPriceDaily.sku_id.like("IMPSET-%")).delete(
             synchronize_session=False)
+        db.commit()
+        db.close()
+
+
+def test_rest_sync_incremental_uses_updated_after(monkeypatch):
+    """Een REST-sync met een eerdere geslaagde sync geeft updated_after door
+    (incrementeel) en ruimt géén bestaande PriceShape-rijen op; zonder eerdere
+    sync wordt alles opgehaald (updated_after=None) in vervangen-modus."""
+    from routes import connectors as conn_routes
+    from connectors import priceshape_connector
+    from datetime import date, datetime
+
+    monkeypatch.setattr(priceshape_connector, "_get_raw_config", lambda db=None: {"mode": "rest"})
+    monkeypatch.setattr(priceshape_connector, "_get_mode", lambda raw: "rest")
+    monkeypatch.setattr(priceshape_connector, "_get_credentials", lambda db=None: {})
+
+    seen: list = []
+
+    def fake_fetch(db=None, updated_after=None, **kw):
+        seen.append(updated_after)
+        return [{"sku_id": "IMPSET-SKU-2", "competitor_name": "compa.nl",
+                 "competitor_price": 8.99}]
+
+    monkeypatch.setattr(priceshape_connector, "fetch_competitor_prices", fake_fetch)
+
+    class FakeUser:
+        username = "test"
+
+    db = SessionLocal()
+    try:
+        if not db.query(models.DimProduct).filter(
+                models.DimProduct.sku_id == "IMPSET-SKU-2").first():
+            db.add(models.DimProduct(sku_id="IMPSET-SKU-2", product_name="Test", is_active=True))
+        db.query(models.ConnectorConfig).filter(
+            models.ConnectorConfig.connector_name == "priceshape").delete()
+        db.commit()
+
+        # Eerste sync: geen last_synced_at -> volledige sync, updated_after=None.
+        res = conn_routes._run_sync("priceshape", db, FakeUser())
+        assert res["status"] == "ok", res
+        assert seen == [None]
+        assert "volledige sync" in res["message"]
+
+        # Bestaande PriceShape-rij van een ANDERE concurrent op vandaag: bij een
+        # incrementele sync mag deze nooit worden opgeruimd (ontbreken in de
+        # batch betekent "ongewijzigd").
+        db.add(models.FactCompetitorPriceDaily(
+            date=date.today(), sku_id="IMPSET-SKU-2", competitor_name="compz.nl",
+            price=12.00, source="PriceShape"))
+        db.commit()
+
+        # Simuleer een eerdere geslaagde sync.
+        last = datetime(2026, 8, 18, 2, 0, 0)
+        cfg = db.query(models.ConnectorConfig).filter(
+            models.ConnectorConfig.connector_name == "priceshape").first()
+        if cfg is None:
+            cfg = models.ConnectorConfig(connector_name="priceshape")
+            db.add(cfg)
+        cfg.last_synced_at = last
+        db.commit()
+
+        res = conn_routes._run_sync("priceshape", db, FakeUser())
+        assert res["status"] == "ok", res
+        assert seen[-1] == last.isoformat()
+        assert "incrementele sync" in res["message"]
+        assert last.isoformat() in res["message"]
+        # Incrementeel: bestaande rij van compz.nl is NIET opgeruimd.
+        assert db.query(models.FactCompetitorPriceDaily).filter(
+            models.FactCompetitorPriceDaily.sku_id == "IMPSET-SKU-2",
+            models.FactCompetitorPriceDaily.competitor_name == "compz.nl").count() == 1
+        assert res["counts"]["verwijderd"] == 0
+    finally:
+        db.rollback()
+        db.query(models.FactCompetitorPriceDaily).filter(
+            models.FactCompetitorPriceDaily.sku_id == "IMPSET-SKU-2").delete(
+            synchronize_session=False)
+        db.query(models.ConnectorConfig).filter(
+            models.ConnectorConfig.connector_name == "priceshape").delete()
         db.commit()
         db.close()

@@ -183,6 +183,15 @@ def persist_competitor_rows(db: Session, rows: list[dict], mode: str, username: 
 
     Gedeeld door de handmatige upload-endpoint én de connector feed-synchronisatie,
     zodat beide exact dezelfde matching-, versiebeheer- en herkomstregels volgen.
+
+    Modi:
+    - "aanvullen":  alleen nieuwe rijen toevoegen, bestaande overslaan.
+    - "vervangen":  upsert + opschonen van eerder door deze connector geschreven
+                    rijen op de geraakte dagen die niet in de batch zitten.
+                    Alleen veilig bij een VOLLEDIGE batch.
+    - "bijwerken":  upsert zonder opschonen — voor incrementele batches
+                    (bijv. REST-sync met updated_after) waar ontbrekende rijen
+                    "ongewijzigd" betekenen, niet "verdwenen".
     Rijen die niet aan een bekende SKU matchen worden overgeslagen (nooit stil
     gedropt uit het rapport dat de aanroeper zelf opstelt). Commit gebeurt hier.
 
