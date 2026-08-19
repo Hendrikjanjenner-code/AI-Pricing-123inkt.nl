@@ -516,7 +516,21 @@ def get_data_quality(
     hier_count = db.query(models.DimCategoryHierarchy).filter(
         models.DimCategoryHierarchy.active == True).count()  # noqa: E712
 
+    # Laatste geplande (nachtelijke) scan — zichtbaar op de Data Quality-pagina.
+    last_scheduled = (
+        db.query(models.ImportJob)
+        .filter(models.ImportJob.upload_type == "data_quality_scan")
+        .order_by(models.ImportJob.created_at.desc())
+        .first()
+    )
+
     return {
+        "last_scan_at": datetime.utcnow().isoformat(),
+        "last_scheduled_scan_at": (
+            (last_scheduled.completed_at or last_scheduled.created_at).isoformat()
+            if last_scheduled else None
+        ),
+        "last_scheduled_scan_status": last_scheduled.status if last_scheduled else None,
         "overall_score": round(score * 100, 1),
         "total_skus": total_skus,
         "issues": issues,

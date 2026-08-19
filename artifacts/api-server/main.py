@@ -147,6 +147,17 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("Startup: PriceShape feed-sync scheduler disabled via DISABLE_FEED_SYNC.")
 
+        # 5b. Start de nachtelijke datakwaliteits-scan (§30) die de volledige
+        # detectielijst draait en eigenaren waarschuwt bij nieuwe of heropende
+        # issues. Uit te schakelen via DISABLE_DQ_SCAN.
+        dq_scan_task = None
+        if os.environ.get("DISABLE_DQ_SCAN", "false").lower() not in ("1", "true", "yes"):
+            from services.data_quality_scan_scheduler import start_dq_scan_scheduler
+            dq_scan_task = start_dq_scan_scheduler()
+            logger.info("Startup: datakwaliteits-scan scheduler started.")
+        else:
+            logger.info("Startup: datakwaliteits-scan scheduler disabled via DISABLE_DQ_SCAN.")
+
         # 6. AI-sleutel bereikbaarheidstest (goedkope probe, geen tokenverbruik).
         # Resultaat wordt opgeslagen in startup_state én in ai_gateway._probe_cache
         # zodat /api/copilot/status het direct kan teruggeven.
@@ -202,13 +213,14 @@ async def lifespan(app: FastAPI):
         health_monitor_task = None
         feed_sync_task = None
         ai_key_monitor_task = None
+        dq_scan_task = None
         # Re-raise so the process doesn't silently pretend to be healthy —
         # but the error is now captured in startup_state for diagnostics.
         raise
     try:
         yield
     finally:
-        for _bg_task in (health_monitor_task, feed_sync_task, ai_key_monitor_task):
+        for _bg_task in (health_monitor_task, feed_sync_task, ai_key_monitor_task, dq_scan_task):
             if _bg_task is not None:
                 _bg_task.cancel()
                 try:

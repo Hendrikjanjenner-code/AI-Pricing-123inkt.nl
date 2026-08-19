@@ -37,6 +37,9 @@ interface QualityReport {
   total_skus: number;
   issues: QualityIssue[];
   counts?: { errors: number; warnings: number; info: number; open: number; in_behandeling: number };
+  last_scan_at?: string | null;
+  last_scheduled_scan_at?: string | null;
+  last_scheduled_scan_status?: string | null;
 }
 
 const STATUS_OPTIES = [
@@ -230,6 +233,16 @@ export default function DataQuality() {
           <p className="text-muted-foreground mt-1">
             Alle datakwaliteits-detecties met severity, business impact, aanbevolen actie en eigenaar-workflow.
           </p>
+          {report?.last_scan_at && (
+            <p className="text-xs text-muted-foreground mt-1" data-testid="text-last-scan">
+              Laatste scan: {new Date(report.last_scan_at).toLocaleString("nl-NL")}
+              {" · "}
+              Laatste nachtelijke scan:{" "}
+              {report.last_scheduled_scan_at
+                ? `${new Date(report.last_scheduled_scan_at).toLocaleString("nl-NL")}${report.last_scheduled_scan_status === "fout" ? " (mislukt)" : ""}`
+                : "nog niet uitgevoerd"}
+            </p>
+          )}
         </div>
         <Button variant="outline" size="sm" onClick={laad} disabled={loading}>
           {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
