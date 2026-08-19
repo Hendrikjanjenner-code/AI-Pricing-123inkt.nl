@@ -305,20 +305,23 @@ def run_promotion_engine(db: Session, run_date: date | None = None,
             "shop_id": sid}
 
 
-def get_promotion_dashboard(db: Session, shop_id: int | None = None) -> Dict[str, Any]:
+def get_promotion_dashboard(db: Session, shop_id: int | None = None,
+                            sku_filter: set[str] | None = None) -> Dict[str, Any]:
+    # sku_filter (globale filtercontext): None = geen filter; een lege set matcht niets.
     sid = resolve_shop_id(db, shop_id)
     latest = db.query(func.max(models.FactPromotionEffect.run_date)).filter(
         models.FactPromotionEffect.shop_id == sid).scalar()
     if not latest:
         return {"run_date": None, "shop_id": sid, "totaal": 0, "effecten": [], "verdicts": {}}
 
-    effects = (
+    eq = (
         db.query(models.FactPromotionEffect)
         .filter(models.FactPromotionEffect.run_date == latest,
                 models.FactPromotionEffect.shop_id == sid)
-        .order_by(models.FactPromotionEffect.incremental_margin.desc())
-        .all()
     )
+    if sku_filter is not None:
+        eq = eq.filter(models.FactPromotionEffect.sku_id.in_(sku_filter))
+    effects = eq.order_by(models.FactPromotionEffect.incremental_margin.desc()).all()
     prods = {p.sku_id: p for p in db.query(models.DimProduct).filter(
         models.DimProduct.shop_id == sid).all()}
     verdicts: Dict[str, int] = {}

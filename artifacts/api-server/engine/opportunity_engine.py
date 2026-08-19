@@ -335,13 +335,18 @@ def run_opportunity_engine(db: Session, run_date: date | None = None,
 
 
 def get_opportunity_dashboard(db: Session, status: str = "open", limit: int = 200,
-                              shop_id: int | None = None) -> Dict[str, Any]:
+                              shop_id: int | None = None,
+                              sku_filter: set | None = None) -> Dict[str, Any]:
     sid = resolve_shop_id(db, shop_id)
     latest = db.query(func.max(models.Opportunity.run_date)).filter(
         models.Opportunity.shop_id == sid).scalar()
     q = db.query(models.Opportunity).filter(models.Opportunity.shop_id == sid)
     if status != "all":
         q = q.filter(models.Opportunity.status == status)
+    # Globale filtercontext (taak #217): kansen zijn SKU-gedragen (entity_id);
+    # None = geen filter, lege set = niets matcht.
+    if sku_filter is not None:
+        q = q.filter(models.Opportunity.entity_id.in_(list(sku_filter)))
     rows = q.order_by(models.Opportunity.priority_score.desc()).limit(limit).all()
 
     per_engine: Dict[str, int] = {}

@@ -179,8 +179,15 @@ def run_basket_engine(db: Session, run_date: date | None = None,
     return {"associations": created, "skus": len(skus), "run_date": str(run_date), "shop_id": sid}
 
 
-def get_basket_association_dashboard(db: Session, shop_id: int | None = None) -> Dict[str, Any]:
-    """Dashboard: associaties, FBT, cross-sell/upsell, fillers, marge per mandje."""
+def get_basket_association_dashboard(
+    db: Session, shop_id: int | None = None,
+    sku_filter: set[str] | None = None,
+) -> Dict[str, Any]:
+    """Dashboard: associaties, FBT, cross-sell/upsell, fillers, marge per mandje.
+
+    sku_filter (globale filtercontext): None = geen filter; anders nemen we een
+    paar alleen mee als het anker (antecedent_sku / sku_id_a) in de set zit. Een
+    lege set matcht dus niets."""
     sid = resolve_shop_id(db, shop_id)
     latest = db.query(func.max(models.BasketAssociation.run_date)).filter(
         models.BasketAssociation.shop_id == sid).scalar()
@@ -188,11 +195,15 @@ def get_basket_association_dashboard(db: Session, shop_id: int | None = None) ->
         return {"run_date": None, "shop_id": sid, "totaal_associaties": 0, "associaties": [],
                 "per_type": {}, "gemiddelde_mandmarge": 0}
 
-    assocs = (
+    q = (
         db.query(models.BasketAssociation)
         .filter(models.BasketAssociation.run_date == latest,
                 models.BasketAssociation.shop_id == sid)
-        .order_by(models.BasketAssociation.lift.desc())
+    )
+    if sku_filter is not None:
+        q = q.filter(models.BasketAssociation.antecedent_sku.in_(sku_filter))
+    assocs = (
+        q.order_by(models.BasketAssociation.lift.desc())
         .limit(500)
         .all()
     )

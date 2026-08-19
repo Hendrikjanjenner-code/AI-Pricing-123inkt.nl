@@ -1,7 +1,8 @@
 import { useState, useCallback } from "react";
 import { Link } from "wouter";
-import { useListRecommendations, useApproveRecommendation, useRejectRecommendation, useBulkApproveRecommendations } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useApproveRecommendation, useRejectRecommendation, useBulkApproveRecommendations } from "@workspace/api-client-react";
+import type { RecommendationListResponse } from "@workspace/api-client-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -12,6 +13,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Search, CheckCircle, XCircle, FileSearch } from "lucide-react";
 import SmartFilters, { SmartFilterValues, EMPTY_FILTERS } from "@/components/filters/SmartFilters";
+import { getAuthHeaders } from "@/lib/auth";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
+
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 const STRATEGIE_LABELS: Record<string, string> = {
   SUBSTITUTION_PORTFOLIO: "Substitutieportfolio",
@@ -40,11 +47,20 @@ export default function Prijsadviezen() {
     setGeselecteerd(new Set());
   }, []);
 
-  const { data, isLoading } = useListRecommendations({
-    page,
-    page_size: 50,
-    search: zoekterm || undefined,
-    approval_status: status !== "all" ? status : undefined,
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
+
+  const { data, isLoading } = useQuery<RecommendationListResponse>({
+    queryKey: ["/api/recommendations", page, zoekterm, status, filterQs],
+    queryFn: async () => {
+      const params = new URLSearchParams({ page: String(page), page_size: "50" });
+      if (zoekterm) params.set("search", zoekterm);
+      if (status !== "all") params.set("approval_status", status);
+      const qs = [params.toString(), filterQs].filter(Boolean).join("&");
+      const res = await fetch(`${BASE}/api/recommendations?${qs}`, { headers: getAuthHeaders() });
+      if (!res.ok) throw new Error("Kon prijsadviezen niet laden");
+      return res.json();
+    },
   });
 
   const queryClient = useQueryClient();
@@ -119,6 +135,8 @@ export default function Prijsadviezen() {
           </Button>
         </div>
       </div>
+
+      <GlobalFilterBar />
 
       <div className="flex items-center gap-4 bg-card p-3 border rounded-md">
         <div className="relative flex-1">

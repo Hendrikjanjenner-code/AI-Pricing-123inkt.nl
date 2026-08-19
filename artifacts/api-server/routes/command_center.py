@@ -22,6 +22,7 @@ from sqlalchemy import func
 from database import get_db
 from auth import get_current_user
 from semantic_layer import _shop_scope
+from routes.global_filters import resolve_sku_filter
 import models
 
 logger = logging.getLogger("uvicorn.error")
@@ -39,6 +40,8 @@ def _f(v) -> float:
 @router.get("/summary")
 def command_center_summary(
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ) -> Any:
@@ -54,44 +57,70 @@ def command_center_summary(
     Sales = models.FactSalesDaily
     P = models.DimProduct
 
-    # Subquery van SKU's binnen deze shop, voor tabellen zonder eigen shop_id.
-    shop_skus = db.query(P.sku_id).filter(P.shop_id == sid).scalar_subquery()
+    # Globale filtercontext: beperk het SKU-universum. None = geen filter;
+    # een lege set matcht niets. We snijden de shop_skus-subquery hierop bij.
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    shop_sku_q = db.query(P.sku_id).filter(P.shop_id == sid)
+    if _gf is not None:
+        shop_sku_q = shop_sku_q.filter(P.sku_id.in_(_gf))
+    shop_skus = shop_sku_q.scalar_subquery()
 
     def sig_count(**filters):
         q = db.query(Sig).filter(Sig.status == "active", Sig.shop_id == sid)
+        if _gf is not None:
+            q = q.filter(Sig.entity_id.in_(shop_skus))
         for k, v in filters.items():
             col = getattr(Sig, k)
             q = q.filter(col.in_(v) if isinstance(v, (list, tuple)) else col == v)
         return q.count()
 
     # ── TODAY ────────────────────────────────────────────────────────────
-    opportunities_open = db.query(Opp).filter(
-        Opp.status == "open", Opp.shop_id == sid).count()
+    opp_q = db.query(Opp).filter(Opp.status == "open", Opp.shop_id == sid)
+    if _gf is not None:
+        opp_q = opp_q.filter(Opp.entity_id.in_(shop_skus))
+    opportunities_open = opp_q.count()
     risks = sig_count(severity=["high", "critical"])
-    competitor_changes_today = db.query(models.FactCompetitorPriceDaily).filter(
+    comp_q = db.query(models.FactCompetitorPriceDaily).filter(
         models.FactCompetitorPriceDaily.shop_id == sid,
-        models.FactCompetitorPriceDaily.date >= today - timedelta(days=1)).count()
-    margin_issues = db.query(Sig).filter(
+        models.FactCompetitorPriceDaily.date >= today - timedelta(days=1))
+    if _gf is not None:
+        comp_q = comp_q.filter(models.FactCompetitorPriceDaily.sku_id.in_(shop_skus))
+    competitor_changes_today = comp_q.count()
+    margin_q = db.query(Sig).filter(
         Sig.status == "active", Sig.shop_id == sid,
-        Sig.signal_type.ilike("%margin%")).count()
+        Sig.signal_type.ilike("%margin%"))
+    if _gf is not None:
+        margin_q = margin_q.filter(Sig.entity_id.in_(shop_skus))
+    margin_issues = margin_q.count()
     supplier_warnings = db.query(models.FactProcurementForecastDaily).filter(
         models.FactProcurementForecastDaily.sku_id.in_(shop_skus),
         models.FactProcurementForecastDaily.date >= week_ago,
         models.FactProcurementForecastDaily.procurement_opportunity_score >= 70).count()
-    traffic_changes = db.query(Sig).filter(
-        Sig.status == "active", Sig.shop_id == sid, Sig.engine.ilike("%traffic%")).count()
+    traffic_q = db.query(Sig).filter(
+        Sig.status == "active", Sig.shop_id == sid, Sig.engine.ilike("%traffic%"))
+    if _gf is not None:
+        traffic_q = traffic_q.filter(Sig.entity_id.in_(shop_skus))
+    traffic_changes = traffic_q.count()
     alerts_open = db.query(models.FactMonitoringAlert).filter(
         models.FactMonitoringAlert.own_sku_id.in_(shop_skus),
         models.FactMonitoringAlert.resolved.is_(False)).count()
 
     # ── THIS WEEK ────────────────────────────────────────────────────────
-    best_opps = (db.query(Opp).filter(Opp.status == "open", Opp.shop_id == sid)
-                 .order_by(Opp.priority_score.desc()).limit(5).all())
-    pricing_actions = db.query(Rec).filter(
-        Rec.shop_id == sid, Rec.approval_status == "pending").count()
-    promo_opps = db.query(Opp).filter(
+    best_opp_q = db.query(Opp).filter(Opp.status == "open", Opp.shop_id == sid)
+    if _gf is not None:
+        best_opp_q = best_opp_q.filter(Opp.entity_id.in_(shop_skus))
+    best_opps = best_opp_q.order_by(Opp.priority_score.desc()).limit(5).all()
+    pricing_q = db.query(Rec).filter(
+        Rec.shop_id == sid, Rec.approval_status == "pending")
+    if _gf is not None:
+        pricing_q = pricing_q.filter(Rec.sku_id.in_(shop_skus))
+    pricing_actions = pricing_q.count()
+    promo_q = db.query(Opp).filter(
         Opp.status == "open", Opp.shop_id == sid,
-        Opp.opportunity_type.ilike("%promo%")).count()
+        Opp.opportunity_type.ilike("%promo%"))
+    if _gf is not None:
+        promo_q = promo_q.filter(Opp.entity_id.in_(shop_skus))
+    promo_opps = promo_q.count()
     huismerk_opps = db.query(models.FactPrivateLabelIntelligence).filter(
         models.FactPrivateLabelIntelligence.sku_id.in_(shop_skus),
         models.FactPrivateLabelIntelligence.run_date >= week_ago,
@@ -102,8 +131,11 @@ def command_center_summary(
 
     # ── FINANCIAL ────────────────────────────────────────────────────────
     def sales_window(start, end):
-        row = (db.query(func.sum(Sales.revenue), func.sum(Sales.margin))
-               .filter(Sales.shop_id == sid, Sales.date >= start, Sales.date < end).first())
+        q = (db.query(func.sum(Sales.revenue), func.sum(Sales.margin))
+             .filter(Sales.shop_id == sid, Sales.date >= start, Sales.date < end))
+        if _gf is not None:
+            q = q.filter(Sales.sku_id.in_(shop_skus))
+        row = q.first()
         return _f(row[0]), _f(row[1])
 
     rev_7d, margin_7d = sales_window(week_ago, today + timedelta(days=1))
@@ -111,37 +143,73 @@ def command_center_summary(
     margin_change_pct = round((margin_7d - margin_prev) / margin_prev * 100, 1) if margin_prev else None
     FC = models.FactForecastDaily
     latest_fc = db.query(func.max(FC.run_date)).filter(FC.shop_id == sid).scalar()
-    forecast_rev = _f(db.query(func.sum(FC.forecast_value)).filter(
+    fc_q = db.query(func.sum(FC.forecast_value)).filter(
         FC.shop_id == sid,
         FC.run_date == latest_fc,
         FC.forecast_type == "revenue",
-        FC.horizon_days == 30).scalar()) if latest_fc else 0.0
+        FC.horizon_days == 30)
+    if _gf is not None:
+        fc_q = fc_q.filter(FC.sku_id.in_(shop_skus))
+    forecast_rev = _f(fc_q.scalar()) if latest_fc else 0.0
 
     # ── AI ───────────────────────────────────────────────────────────────
-    total_recs = db.query(Rec).filter(Rec.shop_id == sid).count()
-    pending_approvals = pricing_actions \
-        + db.query(models.Decision).filter(
-            models.Decision.shop_id == sid,
-            models.Decision.status.in_(["proposed", "in_review"])).count()
-    avg_conf = _f(db.query(func.avg(Rec.confidence_score)).filter(Rec.shop_id == sid).scalar())
+    rec_q = db.query(Rec).filter(Rec.shop_id == sid)
+    conf_q = db.query(func.avg(Rec.confidence_score)).filter(Rec.shop_id == sid)
+    if _gf is not None:
+        rec_q = rec_q.filter(Rec.sku_id.in_(shop_skus))
+        conf_q = conf_q.filter(Rec.sku_id.in_(shop_skus))
+    total_recs = rec_q.count()
+    dec_q = db.query(models.Decision).filter(
+        models.Decision.shop_id == sid,
+        models.Decision.status.in_(["proposed", "in_review"]))
+    if _gf is not None:
+        # Globale filtercontext: SKU-beslissingen binnen de selectie;
+        # categorie-beslissingen alleen als de categorie producten in de
+        # selectie bevat (zelfde semantiek als /api/decisions).
+        dec_cats = {
+            c[0] for c in db.query(models.DimProduct.category)
+            .filter(models.DimProduct.sku_id.in_(shop_skus),
+                    models.DimProduct.category.isnot(None))
+            .distinct().all()
+        }
+        dec_q = dec_q.filter(
+            ((models.Decision.entity_type == "sku")
+             & (models.Decision.entity_id.in_(shop_skus)))
+            | ((models.Decision.entity_type == "category")
+               & (models.Decision.entity_id.in_(list(dec_cats)))))
+    pending_approvals = pricing_actions + dec_q.count()
+    avg_conf = _f(conf_q.scalar())
 
     # ── §50-blokken ──────────────────────────────────────────────────────
     # DimCompetitor is platform-breed (geen shop_id); tel concurrenten met
     # prijswaarnemingen binnen deze shop.
-    main_competitors = db.query(
+    mc_q = db.query(
         func.count(func.distinct(models.FactCompetitorPriceDaily.competitor_name))).filter(
-        models.FactCompetitorPriceDaily.shop_id == sid).scalar() or 0
-    threats = db.query(Sig).filter(
+        models.FactCompetitorPriceDaily.shop_id == sid)
+    if _gf is not None:
+        mc_q = mc_q.filter(models.FactCompetitorPriceDaily.sku_id.in_(shop_skus))
+    main_competitors = mc_q.scalar() or 0
+    threats_q = db.query(Sig).filter(
         Sig.status == "active", Sig.shop_id == sid, Sig.engine.ilike("%compet%"),
-        Sig.severity.in_(["high", "critical"])).count()
-    margin_opps_eur = _f(db.query(func.sum(Rec.expected_margin_uplift)).filter(
-        Rec.shop_id == sid, Rec.approval_status == "pending").scalar())
+        Sig.severity.in_(["high", "critical"]))
+    if _gf is not None:
+        threats_q = threats_q.filter(Sig.entity_id.in_(shop_skus))
+    threats = threats_q.count()
+    mo_q = db.query(func.sum(Rec.expected_margin_uplift)).filter(
+        Rec.shop_id == sid, Rec.approval_status == "pending")
+    if _gf is not None:
+        mo_q = mo_q.filter(Rec.sku_id.in_(shop_skus))
+    margin_opps_eur = _f(mo_q.scalar())
     switching = db.query(models.CustomerValueScore).filter(
         models.CustomerValueScore.shop_id == sid).count()
 
-    total_skus = db.query(P).filter(P.shop_id == sid).count()
-    skus_with_cost = db.query(P).filter(
-        P.shop_id == sid, P.cost_price.isnot(None)).count()
+    total_sku_q = db.query(P).filter(P.shop_id == sid)
+    cost_q = db.query(P).filter(P.shop_id == sid, P.cost_price.isnot(None))
+    if _gf is not None:
+        total_sku_q = total_sku_q.filter(P.sku_id.in_(_gf))
+        cost_q = cost_q.filter(P.sku_id.in_(_gf))
+    total_skus = total_sku_q.count()
+    skus_with_cost = cost_q.count()
     dq_score = round(skus_with_cost / total_skus, 2) if total_skus else 1.0
     # Platform-brede indicatoren (geen tenantdata): open DQ-issues & connectors.
     dq_open = db.query(models.DataQualityIssue).filter(models.DataQualityIssue.status != "resolved").count()
@@ -158,10 +226,13 @@ def command_center_summary(
         models.BusinessValueMeasurement.value_label.in_(["REALIZED", "MEASURED"])).scalar())
     roi_pct = round((measured_value - cost_30d) / cost_30d * 100, 1) if cost_30d else None
 
-    stock_risks = db.query(P).filter(
+    stock_q = db.query(P).filter(
         P.shop_id == sid,
         P.is_active.is_(True),
-        P.stock_quantity <= 0).count()
+        P.stock_quantity <= 0)
+    if _gf is not None:
+        stock_q = stock_q.filter(P.sku_id.in_(_gf))
+    stock_risks = stock_q.count()
 
     logger.info("command-center API completed: /summary user_id=%s shop_id=%s", current_user.id, sid)
     return {
@@ -234,6 +305,8 @@ def command_center_drilldown(
     days: int = Query(30, ge=1, le=365),
     limit: int = Query(50, ge=1, le=200),
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ) -> Any:
@@ -246,6 +319,8 @@ def command_center_drilldown(
     sid = _shop_scope(db, shop_id)
     since = date.today() - timedelta(days=days)
     P = models.DimProduct
+    # Globale filtercontext: doorsnede met category/brand-scope. Lege set = niets.
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
 
     if level == "category":
         group_col = P.category
@@ -260,6 +335,8 @@ def command_center_drilldown(
             q = q.filter(P.category == category)
         if brand:
             q = q.filter(P.brand == brand)
+        if _gf is not None:
+            q = q.filter(P.sku_id.in_(_gf))
         return q
 
     rows: list[dict] = []

@@ -16,6 +16,7 @@ from auth import get_current_user, require_role
 import models
 from sqlalchemy.exc import IntegrityError
 from semantic_layer import SEMANTIC_FUNCTIONS, get_active_signals, signal_to_dict, _shop_scope
+from routes.global_filters import resolve_sku_filter, signal_filter_conditions, descendant_node_ids, parse_csv_ints
 from metrics import METRIC_DEFINITIONS
 
 router = APIRouter(prefix="/api/signals", tags=["signals"])
@@ -58,6 +59,8 @@ def list_signals(
     entity_id: Optional[str] = Query(None),
     status: str = Query("active"),
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -68,6 +71,11 @@ def list_signals(
     q = db.query(models.IntelligenceSignal).filter(
         models.IntelligenceSignal.shop_id == sid
     )
+    # Globale filtercontext (taak #217)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    cond = signal_filter_conditions(db, _gf, hierarchy_node_ids, brands)
+    if cond is not None:
+        q = q.filter(cond)
     if status and status != "all":
         q = q.filter(models.IntelligenceSignal.status == status)
     if engine:
@@ -95,6 +103,80 @@ def list_signals(
             "severities": list(VALID_SEVERITIES),
             "entity_types": list(VALID_ENTITY_TYPES),
         },
+    }
+
+
+@router.get("/aggregate")
+def aggregate_signals(
+    level: int = Query(1, ge=1, le=10),
+    status: str = Query("active"),
+    engine: Optional[str] = Query(None),
+    shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    Aggregatie van signalen over de centrale producthiërarchie (taak #217):
+    telt signalen per node op het gevraagde niveau (SKU → subcategorie →
+    categorie), inclusief severity-verdeling. Signalen zonder hiërarchie-
+    koppeling worden apart gerapporteerd als 'niet_toegewezen'.
+    """
+    sid = _shop_scope(db, shop_id)
+    q = db.query(models.IntelligenceSignal).filter(
+        models.IntelligenceSignal.shop_id == sid
+    )
+    if status and status != "all":
+        q = q.filter(models.IntelligenceSignal.status == status)
+    if engine:
+        q = q.filter(models.IntelligenceSignal.engine == engine)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    cond = signal_filter_conditions(db, _gf, hierarchy_node_ids, brands)
+    if cond is not None:
+        q = q.filter(cond)
+    rows = q.all()
+
+    # Nodekaart: id → (path, level, naam) voor ancestor-resolutie op niveau
+    N = models.ProductHierarchyNode
+    node_map = {n.id: n for n in db.query(N).all()}
+
+    def ancestor_at_level(node_id: Optional[int]) -> Optional[int]:
+        n = node_map.get(node_id) if node_id else None
+        if n is None or not n.path:
+            return None
+        ids = [int(p) for p in n.path.strip("/").split("/") if p.isdigit()]
+        return ids[level - 1] if len(ids) >= level else None
+
+    buckets: dict = {}
+    unassigned = 0
+    for s in rows:
+        anc = ancestor_at_level(s.hierarchy_node_id)
+        if anc is None:
+            unassigned += 1
+            continue
+        b = buckets.setdefault(anc, {"totaal": 0, "per_severity": {}, "per_engine": {}})
+        b["totaal"] += 1
+        b["per_severity"][s.severity] = b["per_severity"].get(s.severity, 0) + 1
+        b["per_engine"][s.engine] = b["per_engine"].get(s.engine, 0) + 1
+
+    out = []
+    for nid, b in buckets.items():
+        n = node_map.get(nid)
+        out.append({
+            "node_id": nid,
+            "naam": n.name if n else None,
+            "pad": n.path_names if n else None,
+            "niveau": level,
+            **b,
+        })
+    out.sort(key=lambda x: -x["totaal"])
+    return {
+        "shop_id": sid,
+        "niveau": level,
+        "nodes": out,
+        "niet_toegewezen": unassigned,
+        "totaal": len(rows),
     }
 
 

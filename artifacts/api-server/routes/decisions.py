@@ -121,11 +121,29 @@ def list_decisions(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _: models.User = Depends(auth_utils.get_current_user),
 ):
     sid = _shop_scope(db, shop_id)
     q = db.query(models.Decision).filter(models.Decision.shop_id == sid)
+    # Globale filtercontext (taak #217): SKU-beslissingen binnen de selectie;
+    # categorie-beslissingen blijven zichtbaar als de categorie producten in
+    # de selectie bevat (lege set = niets matcht, None = geen filter).
+    from routes.global_filters import resolve_sku_filter
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is not None:
+        cats = {
+            r[0] for r in db.query(models.DimProduct.category)
+            .filter(models.DimProduct.sku_id.in_(list(_gf)),
+                    models.DimProduct.category.isnot(None))
+            .distinct().all()
+        } if _gf else set()
+        q = q.filter(
+            ((models.Decision.entity_type == "sku") & (models.Decision.entity_id.in_(list(_gf))))
+            | ((models.Decision.entity_type == "category") & (models.Decision.entity_id.in_(list(cats))))
+        )
     if status:
         q = q.filter(models.Decision.status == status)
     if entity_type:

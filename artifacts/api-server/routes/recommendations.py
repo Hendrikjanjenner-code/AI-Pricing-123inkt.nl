@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from database import get_db
 import models
 import auth as auth_utils
+from routes.global_filters import resolve_sku_filter
 
 router = APIRouter(prefix="/api/recommendations", tags=["recommendations"])
 
@@ -51,6 +52,8 @@ def list_recommendations(
     page_size: int = Query(50, ge=1, le=500),
     sort_by: Optional[str] = Query(None),
     sort_dir: Optional[str] = Query("desc"),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -78,6 +81,10 @@ def list_recommendations(
             p.sku_id for p in db.query(models.DimProduct).filter(models.DimProduct.category == category).all()
         ]
         q = q.filter(models.FactPricingRecommendationDaily.sku_id.in_(sku_ids))
+    # Globale filtercontext: doorsnede met het category-filter. Lege set = niets.
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is not None:
+        q = q.filter(models.FactPricingRecommendationDaily.sku_id.in_(_gf))
 
     total = q.count()
     pending_count = db.query(models.FactPricingRecommendationDaily).filter(

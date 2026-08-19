@@ -1,12 +1,13 @@
 """Procurement Forecasting routes — /api/procurement/*"""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import date
-from typing import Any
+from typing import Any, Optional
 
 from database import get_db
 from auth import get_current_user
+from routes.global_filters import resolve_sku_filter
 from models import FactProcurementForecastDaily
 
 router = APIRouter(prefix="/api/procurement", tags=["procurement"])
@@ -14,17 +15,24 @@ router = APIRouter(prefix="/api/procurement", tags=["procurement"])
 
 @router.get("")
 def get_procurement_overview(
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
 ) -> Any:
     """Procurement forecast overzicht: POS + FMR scores voor alle SKU's."""
     latest = db.query(func.max(FactProcurementForecastDaily.date)).scalar() or date.today()
-    recs = (
+    q = (
         db.query(FactProcurementForecastDaily)
         .filter(FactProcurementForecastDaily.date == latest)
-        .order_by(FactProcurementForecastDaily.procurement_opportunity_score.desc())
-        .all()
     )
+    # Globale filtercontext: None = geen filter; een lege set matcht niets.
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is not None:
+        q = q.filter(FactProcurementForecastDaily.sku_id.in_(_gf))
+    recs = q.order_by(
+        FactProcurementForecastDaily.procurement_opportunity_score.desc()
+    ).all()
 
     def avg(attr):
         vals = [float(getattr(r, attr) or 0) for r in recs]
@@ -120,18 +128,24 @@ def get_procurement_sku(
 
 @router.get("/risico")
 def get_procurement_risico(
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
 ) -> Any:
     """Top SKU's met hoogste toekomstig margerisico (FMR)."""
     latest = db.query(func.max(FactProcurementForecastDaily.date)).scalar() or date.today()
-    recs = (
+    q = (
         db.query(FactProcurementForecastDaily)
         .filter(FactProcurementForecastDaily.date == latest)
-        .order_by(FactProcurementForecastDaily.future_margin_risk_score.desc())
-        .limit(10)
-        .all()
     )
+    # Globale filtercontext: None = geen filter; een lege set matcht niets.
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is not None:
+        q = q.filter(FactProcurementForecastDaily.sku_id.in_(_gf))
+    recs = q.order_by(
+        FactProcurementForecastDaily.future_margin_risk_score.desc()
+    ).limit(10).all()
 
     return {
         "datum": str(latest),

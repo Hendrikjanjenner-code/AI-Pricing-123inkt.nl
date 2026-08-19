@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from auth import get_current_user, require_role
+from routes.global_filters import resolve_sku_filter
 import models
 from services.engine_jobs import start_engine_job
 from engine.basket_engine import (
@@ -20,11 +21,18 @@ router = APIRouter(prefix="/api/basket", tags=["basket-intelligence"])
 @router.get("/associations")
 def basket_associations(
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _: models.User = Depends(get_current_user),
 ) -> Any:
-    """Dashboard: associaties, per type, gemiddelde mandmarge."""
-    return get_basket_association_dashboard(db, shop_id=shop_id)
+    """Dashboard: associaties, per type, gemiddelde mandmarge.
+
+    Globale filtercontext: we nemen een associatie-paar alleen mee wanneer het
+    anker (antecedent_sku / sku_id_a) in de filterset zit — het ankerproduct
+    bepaalt de selectie. None = geen filter; een lege set matcht niets."""
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    return get_basket_association_dashboard(db, shop_id=shop_id, sku_filter=_gf)
 
 
 @router.get("/fbt/{sku_id}")

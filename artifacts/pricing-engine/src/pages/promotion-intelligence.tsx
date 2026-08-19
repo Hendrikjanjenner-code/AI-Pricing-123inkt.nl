@@ -6,6 +6,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Megaphone, Euro, FlaskConical, RefreshCw } from "lucide-react";
 import { getAuthHeaders } from "@/lib/auth";
 import { useEngineRun } from "@/lib/use-engine-run";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -51,10 +54,12 @@ const pct = (v: number | null) => (v == null ? "—" : `${v > 0 ? "+" : ""}${v.t
 
 export default function PromotionIntelligence() {
   const qc = useQueryClient();
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
   const { data, isLoading } = useQuery<Dashboard>({
-    queryKey: ["promotion-dashboard"],
+    queryKey: ["promotion-dashboard", filterQs],
     queryFn: async () => {
-      const res = await fetch(`${BASE}/api/promotion-intelligence/dashboard`, { headers: getAuthHeaders() });
+      const res = await fetch(`${BASE}/api/promotion-intelligence/dashboard${filterQs ? `?${filterQs}` : ""}`, { headers: getAuthHeaders() });
       if (!res.ok) throw new Error("Kon promotie-analyse niet laden");
       return res.json();
     },
@@ -80,6 +85,8 @@ export default function PromotionIntelligence() {
           {run.isRunning ? "Bezig met analyseren…" : "Analyseer promoties"}
         </Button>
       </div>
+
+      <GlobalFilterBar />
 
       {run.isRunning && (
         <p className="text-sm text-muted-foreground">

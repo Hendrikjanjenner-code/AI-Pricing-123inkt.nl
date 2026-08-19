@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from auth import get_current_user, require_role
+from routes.global_filters import resolve_sku_filter
 import models
 from services.engine_jobs import start_engine_job
 from engine.promotion_engine import run_promotion_engine, get_promotion_dashboard
@@ -15,27 +16,39 @@ router = APIRouter(prefix="/api/promotion-intelligence", tags=["promotion-intell
 @router.get("/dashboard")
 def promotion_dashboard(
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _: models.User = Depends(get_current_user),
 ) -> Any:
     """Historische promo-analyse: uplift, incrementaliteit, break-even, cannibalisatie/halo."""
-    return get_promotion_dashboard(db, shop_id=shop_id)
+    # Globale filtercontext: None = geen filter; een lege set matcht niets.
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    return get_promotion_dashboard(db, shop_id=shop_id, sku_filter=_gf)
 
 
 @router.get("/promotions")
 def list_promotions(
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _: models.User = Depends(get_current_user),
 ) -> Any:
     from engine.signal_publisher import resolve_shop_id
     sid = resolve_shop_id(db, shop_id)
     # Promotion heeft (nog) geen shop_id-kolom: eigenaarschap loopt via DimProduct.
-    promos = (
+    q = (
         db.query(models.Promotion)
         .join(models.DimProduct, models.DimProduct.sku_id == models.Promotion.sku_id)
         .filter(models.DimProduct.shop_id == sid)
-        .order_by(models.Promotion.start_date.desc())
+    )
+    # Globale filtercontext: filter promoties op hun SKU. Lege set matcht niets.
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is not None:
+        q = q.filter(models.Promotion.sku_id.in_(_gf))
+    promos = (
+        q.order_by(models.Promotion.start_date.desc())
         .limit(200)
         .all()
     )

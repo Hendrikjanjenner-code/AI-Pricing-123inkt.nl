@@ -12,6 +12,9 @@ import {
 } from "recharts";
 import { Zap, TrendingUp } from "lucide-react";
 import { getAuthToken } from "@/lib/auth";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const API = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -44,11 +47,14 @@ export default function BcgPricingPower() {
   const [loading, setLoading] = useState(true);
   const [zoek, setZoek] = useState("");
   const { toast } = useToast();
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
 
   useEffect(() => {
     (async () => {
+      setLoading(true);
       try {
-        const r = await fetch(`${API}/api/bcg/pricing-power`, {
+        const r = await fetch(`${API}/api/bcg/pricing-power${filterQs ? `?${filterQs}` : ""}`, {
           headers: { Authorization: `Bearer ${getAuthToken()}` },
         });
         if (!r.ok) throw new Error();
@@ -56,7 +62,7 @@ export default function BcgPricingPower() {
       } catch { toast({ title: "Laden mislukt", variant: "destructive" }); }
       setLoading(false);
     })();
-  }, []);
+  }, [filterQs]);
 
   if (loading) return (
     <div className="space-y-6">
@@ -102,6 +108,8 @@ export default function BcgPricingPower() {
           Welke SKU's hebben de meeste ruimte voor prijsverhoging zonder omzetverlies?
         </p>
       </div>
+
+      <GlobalFilterBar />
 
       {/* KPI's */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

@@ -1,5 +1,8 @@
 import { useState, useEffect } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const getToken = () => localStorage.getItem("auth_token") || "";
@@ -25,12 +28,16 @@ export default function ProcurementForecast() {
   const [zoek, setZoek] = useState("");
   const [sortBy, setSortBy] = useState("pos");
 
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
+
   useEffect(() => {
-    fetch(`${BASE}/api/procurement`, { headers: { Authorization: `Bearer ${getToken()}` } })
+    setLoading(true);
+    fetch(`${BASE}/api/procurement${filterQs ? `?${filterQs}` : ""}`, { headers: { Authorization: `Bearer ${getToken()}` } })
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false); })
       .catch(() => setLoading(false));
-  }, []);
+  }, [filterQs]);
 
   if (loading) return <div className="p-8 text-gray-500">Procurement data laden…</div>;
   if (!data) return <div className="p-8 text-red-500">Fout bij laden.</div>;
@@ -64,6 +71,8 @@ export default function ProcurementForecast() {
         <h1 className="text-2xl font-bold text-gray-900">Procurement Forecast</h1>
         <p className="text-gray-500 mt-1">Inkoopkansen (POS) en toekomstig margerisico (FMR) per SKU — 30 en 90 dagen horizon</p>
       </div>
+
+      <GlobalFilterBar />
 
       {/* KPI's */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">

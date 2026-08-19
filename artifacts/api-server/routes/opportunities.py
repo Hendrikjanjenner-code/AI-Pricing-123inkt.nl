@@ -18,10 +18,15 @@ VALID_STATUSES = ("open", "in_progress", "done", "dismissed")
 def opportunity_dashboard(
     status: str = Query("open"),
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _: models.User = Depends(get_current_user),
 ) -> Any:
-    return get_opportunity_dashboard(db, status=status, shop_id=shop_id)
+    # Globale filtercontext (taak #217): alleen kansen binnen de selectie.
+    from routes.global_filters import resolve_sku_filter
+    sku_filter = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    return get_opportunity_dashboard(db, status=status, shop_id=shop_id, sku_filter=sku_filter)
 
 
 @router.post("/run")

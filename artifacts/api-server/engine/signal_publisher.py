@@ -116,6 +116,32 @@ def auto_resolve_signals(
     return n
 
 
+def hierarchy_for_sku(db: Session, sku_id: str) -> tuple[Optional[int], Optional[int], Optional[int]]:
+    """(node_id, path_id, level) van de actieve primaire hierarchy-assignment
+    van een SKU, of (None, None, None) als de SKU (nog) niet is toegewezen."""
+    row = (
+        db.query(
+            models.ProductHierarchyNode.id,
+            models.ProductHierarchyNode.level,
+            models.ProductHierarchyPath.id,
+        )
+        .select_from(models.ProductHierarchyAssignment)
+        .join(models.ProductHierarchyNode,
+              models.ProductHierarchyNode.id == models.ProductHierarchyAssignment.node_id)
+        .outerjoin(models.ProductHierarchyPath,
+                   models.ProductHierarchyPath.leaf_node_id == models.ProductHierarchyNode.id)
+        .filter(
+            models.ProductHierarchyAssignment.sku_id == str(sku_id),
+            models.ProductHierarchyAssignment.status == "active",
+            models.ProductHierarchyAssignment.is_primary == True,  # noqa: E712
+        )
+        .first()
+    )
+    if not row:
+        return None, None, None
+    return row[0], row[2], row[1]
+
+
 def publish_signal(
     db: Session,
     *,
@@ -140,6 +166,9 @@ def publish_signal(
     valid_days: int = DEFAULT_VALIDITY_DAYS,
     model_version: Optional[str] = None,
     shop_id: Optional[int] = None,
+    hierarchy_node_id: Optional[int] = None,
+    hierarchy_path_id: Optional[int] = None,
+    hierarchy_level: Optional[int] = None,
 ) -> models.IntelligenceSignal:
     """
     Publiceer één IntelligenceSignal. Superseded automatisch een bestaand
@@ -158,6 +187,12 @@ def publish_signal(
 
     sid = shop_id if shop_id is not None else _default_shop_id(db)
     dedupe_key = f"{engine}:{signal_type}:{entity_type}:{entity_id}"
+
+    # Centrale hiërarchie (taak #217): SKU-signalen krijgen automatisch de
+    # node/pad/niveau van hun actieve hierarchy-assignment, tenzij de caller
+    # ze expliciet meegeeft (bv. voor categorie-signalen).
+    if hierarchy_node_id is None and entity_type == "sku":
+        hierarchy_node_id, hierarchy_path_id, hierarchy_level = hierarchy_for_sku(db, entity_id)
 
     db.query(models.IntelligenceSignal).filter(
         models.IntelligenceSignal.dedupe_key == dedupe_key,
@@ -187,6 +222,9 @@ def publish_signal(
         valid_until=valid_until if valid_until is not None else datetime.utcnow() + timedelta(days=valid_days),
         model_version=model_version,
         dedupe_key=dedupe_key,
+        hierarchy_node_id=hierarchy_node_id,
+        hierarchy_path_id=hierarchy_path_id,
+        hierarchy_level=hierarchy_level,
     )
     db.add(signal)
     return signal

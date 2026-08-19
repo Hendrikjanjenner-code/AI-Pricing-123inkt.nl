@@ -8,6 +8,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
 import { ArrowRightLeft, TrendingUp, ShieldCheck } from "lucide-react";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 function apiFetch(path: string) {
   const token = localStorage.getItem("auth_token");
@@ -27,10 +30,13 @@ export default function HuismerkImpact() {
   const [actie, setActie] = useState("all");
   const [huidigSku, setHuidigSku] = useState<string | null>(null);
 
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
+
   const { data: overzicht, isLoading: ladenOverzicht } = useQuery({
-    queryKey: ["huismerk-overzicht", minIsv, actie],
+    queryKey: ["huismerk-overzicht", minIsv, actie, filterQs],
     queryFn: () =>
-      apiFetch(`/api/huismerk-impact/overzicht?page_size=200&min_isv=${minIsv}${actie !== "all" ? `&actie=${actie}` : ""}`),
+      apiFetch(`/api/huismerk-impact/overzicht?page_size=200&min_isv=${minIsv}${actie !== "all" ? `&actie=${actie}` : ""}${filterQs ? `&${filterQs}` : ""}`),
   });
 
   const { data: detail, isLoading: ladenDetail } = useQuery({
@@ -50,6 +56,8 @@ export default function HuismerkImpact() {
         <h1 className="text-2xl font-bold tracking-tight">Huismerk Impact Monitor</h1>
         <p className="text-muted-foreground mt-1">A-merk vs. huismerk — ISV (Internal Substitution Value) en aanbevolen portefeuilleactie.</p>
       </div>
+
+      <GlobalFilterBar />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>

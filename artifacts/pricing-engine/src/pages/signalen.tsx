@@ -9,6 +9,9 @@ import {
   RefreshCw, TrendingUp, TrendingDown, Minus, Radio, ChevronLeft, ChevronRight, X,
 } from "lucide-react";
 import { getAuthToken } from "@/lib/auth";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -95,6 +98,9 @@ export default function Signalen() {
   const [open, setOpen] = useState<number | null>(null);
   const pageSize = 50;
 
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
+
   const laad = useCallback(async () => {
     setLaden(true);
     try {
@@ -102,7 +108,8 @@ export default function Signalen() {
       if (engine !== "all") params.set("engine", engine);
       if (severity !== "all") params.set("severity", severity);
       if (entityType !== "all") params.set("entity_type", entityType);
-      const data = await apiFetch(`/api/signals?${params}`);
+      const qs = [params.toString(), filterQs].filter(Boolean).join("&");
+      const data = await apiFetch(`/api/signals?${qs}`);
       setSignals(data.signals || []);
       setTotal(data.total || 0);
       setEngines(data.filter_options?.engines || []);
@@ -111,7 +118,7 @@ export default function Signalen() {
     } finally {
       setLaden(false);
     }
-  }, [page, engine, severity, entityType, toast]);
+  }, [page, engine, severity, entityType, filterQs, toast]);
 
   useEffect(() => { laad(); }, [laad]);
 
@@ -172,6 +179,8 @@ export default function Signalen() {
           {vernieuwen ? "Bezig..." : "Signalen vernieuwen"}
         </Button>
       </div>
+
+      <GlobalFilterBar />
 
       {/* Filters */}
       <Card>

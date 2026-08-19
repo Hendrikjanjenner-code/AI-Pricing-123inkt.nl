@@ -10,6 +10,9 @@ import {
   ResponsiveContainer, ReferenceLine, Cell,
 } from "recharts";
 import { getAuthToken } from "@/lib/auth";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const API = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -80,11 +83,14 @@ export default function BcgHybrid() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
   const { toast } = useToast();
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
 
   useEffect(() => {
     (async () => {
+      setLoading(true);
       try {
-        const r = await fetch(`${API}/api/bcg/hybrid-matrix`, {
+        const r = await fetch(`${API}/api/bcg/hybrid-matrix${filterQs ? `?${filterQs}` : ""}`, {
           headers: { Authorization: `Bearer ${getAuthToken()}` },
         });
         if (!r.ok) throw new Error();
@@ -92,7 +98,7 @@ export default function BcgHybrid() {
       } catch { toast({ title: "Laden mislukt", variant: "destructive" }); }
       setLoading(false);
     })();
-  }, []);
+  }, [filterQs]);
 
   if (loading) return (
     <div className="space-y-6">
@@ -112,6 +118,8 @@ export default function BcgHybrid() {
           Pricing Power (X-as) vs Concurrentiedruk (Y-as) — pricingstrategie op één oogopslag
         </p>
       </div>
+
+      <GlobalFilterBar />
 
       {/* Kwadrant samenvatting */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

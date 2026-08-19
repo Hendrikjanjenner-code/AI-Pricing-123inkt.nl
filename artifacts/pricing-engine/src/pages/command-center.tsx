@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "wouter";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem("auth_token") || ""}` });
@@ -34,7 +37,7 @@ function Sectie({ titel, children }: { titel: string; children: React.ReactNode 
   );
 }
 
-function DrillDown({ drill, onClose }: { drill: NonNullable<DrillState>; onClose: () => void }) {
+function DrillDown({ drill, onClose, filterQs }: { drill: NonNullable<DrillState>; onClose: () => void; filterQs: string }) {
   const [level, setLevel] = useState<"category" | "brand" | "sku">("category");
   const [category, setCategory] = useState<string | null>(null);
   const [brand, setBrand] = useState<string | null>(null);
@@ -47,11 +50,12 @@ function DrillDown({ drill, onClose }: { drill: NonNullable<DrillState>; onClose
     const p = new URLSearchParams({ kpi: drill.kpi, level });
     if (category) p.set("category", category);
     if (brand) p.set("brand", brand);
-    fetch(`${BASE}/api/command-center/drilldown?${p}`, { headers: authHeaders() })
+    const qs = [p.toString(), filterQs].filter(Boolean).join("&");
+    fetch(`${BASE}/api/command-center/drilldown?${qs}`, { headers: authHeaders() })
       .then(r => r.json())
       .then(d => { setRows(d.rows || []); setUnit(d.unit || ""); setLoading(false); })
       .catch(() => setLoading(false));
-  }, [drill.kpi, level, category, brand]);
+  }, [drill.kpi, level, category, brand, filterQs]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -122,12 +126,16 @@ export default function CommandCenter() {
   const [loading, setLoading] = useState(true);
   const [drill, setDrill] = useState<DrillState>(null);
 
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
+
   useEffect(() => {
-    fetch(`${BASE}/api/command-center/summary`, { headers: authHeaders() })
+    setLoading(true);
+    fetch(`${BASE}/api/command-center/summary${filterQs ? `?${filterQs}` : ""}`, { headers: authHeaders() })
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false); })
       .catch(() => setLoading(false));
-  }, []);
+  }, [filterQs]);
 
   if (loading) return <div className="p-8 text-gray-500">Command Center laden…</div>;
   if (!data) return <div className="p-8 text-red-500">Fout bij laden van het Command Center.</div>;
@@ -140,6 +148,8 @@ export default function CommandCenter() {
         <h1 className="text-2xl font-bold text-gray-900">Commercial Command Center</h1>
         <p className="text-gray-500 mt-1">Eén managementoverzicht — klik op een KPI om door te drillen naar categorie, merk en SKU (peildatum {data.peildatum})</p>
       </div>
+
+      <GlobalFilterBar />
 
       <Sectie titel="Today">
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -227,7 +237,7 @@ export default function CommandCenter() {
         </div>
       </Sectie>
 
-      {drill && <DrillDown drill={drill} onClose={() => setDrill(null)} />}
+      {drill && <DrillDown drill={drill} onClose={() => setDrill(null)} filterQs={filterQs} />}
     </div>
   );
 }

@@ -8,6 +8,9 @@ import { useToast } from "@/hooks/use-toast";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { Star, TrendingUp, Shield, HelpCircle, AlertTriangle, Zap, RefreshCw, Tag } from "lucide-react";
 import { getAuthToken } from "@/lib/auth";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const API = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -51,13 +54,15 @@ export default function BcgDashboard() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const { toast } = useToast();
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
 
-  useEffect(() => { laden(); }, []);
+  useEffect(() => { laden(); }, [filterQs]);
 
   async function laden() {
     setLoading(true);
     try {
-      const r = await fetch(`${API}/api/bcg/dashboard`, {
+      const r = await fetch(`${API}/api/bcg/dashboard${filterQs ? `?${filterQs}` : ""}`, {
         headers: { Authorization: `Bearer ${getAuthToken()}` },
       });
       if (!r.ok) throw new Error(await r.text());
@@ -112,6 +117,8 @@ export default function BcgDashboard() {
           </Button>
         </div>
       </div>
+
+      <GlobalFilterBar />
 
       {/* KPI kaarten: interne BCG */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

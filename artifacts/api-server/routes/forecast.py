@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from auth import get_current_user, require_role
+from routes.global_filters import resolve_sku_filter
 import models
 from services.engine_jobs import start_engine_job
 from engine.forecast_engine import run_forecast_engine, get_forecast_dashboard
@@ -16,12 +17,16 @@ router = APIRouter(prefix="/api/forecast", tags=["forecast-risk"])
 def forecast_dashboard(
     horizon: int = Query(30, description="Forecast-horizon in dagen (30 of 90)"),
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _: models.User = Depends(get_current_user),
 ) -> Any:
     if horizon not in (30, 90):
         horizon = 30
-    return get_forecast_dashboard(db, horizon=horizon, shop_id=shop_id)
+    # Globale filtercontext: None = geen filter; een lege set matcht niets.
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    return get_forecast_dashboard(db, horizon=horizon, shop_id=shop_id, sku_filter=_gf)
 
 
 @router.get("/sku/{sku_id}")

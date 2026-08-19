@@ -8,6 +8,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Target, TrendingDown, TrendingUp, ShieldCheck, ShieldAlert } from "lucide-react";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 function apiFetch(path: string) {
   const token = localStorage.getItem("auth_token");
@@ -50,9 +53,12 @@ export default function SkuConcurrentieAnalyse() {
   const [categorie, setCategorie] = useState("all");
   const [laag, setLaag] = useState("all");
 
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
+
   const { data: overzicht, isLoading: ladenOverzicht } = useQuery({
-    queryKey: ["concurrentie-overzicht", categorie],
-    queryFn: () => apiFetch(`/api/concurrentie/overzicht?page_size=200${categorie !== "all" ? `&categorie=${encodeURIComponent(categorie)}` : ""}`),
+    queryKey: ["concurrentie-overzicht", categorie, filterQs],
+    queryFn: () => apiFetch(`/api/concurrentie/overzicht?page_size=200${categorie !== "all" ? `&categorie=${encodeURIComponent(categorie)}` : ""}${filterQs ? `&${filterQs}` : ""}`),
   });
 
   const { data: skuDetail, isLoading: ladenDetail } = useQuery({
@@ -75,6 +81,8 @@ export default function SkuConcurrentieAnalyse() {
         <h1 className="text-2xl font-bold tracking-tight">SKU Concurrentie-analyse</h1>
         <p className="text-muted-foreground mt-1">CIS · CSRS · CSS per concurrent per SKU — wie volgen we en waarom?</p>
       </div>
+
+      <GlobalFilterBar />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="md:col-span-1 h-fit">

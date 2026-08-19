@@ -6,6 +6,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ShoppingCart, Link2, Euro, RefreshCw } from "lucide-react";
 import { getAuthHeaders } from "@/lib/auth";
 import { useEngineRun } from "@/lib/use-engine-run";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -51,10 +54,12 @@ const eur = (v: number) => new Intl.NumberFormat("nl-NL", { style: "currency", c
 
 export default function BasketIntelligenceDashboard() {
   const qc = useQueryClient();
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
   const { data, isLoading } = useQuery<Dashboard>({
-    queryKey: ["basket-associations"],
+    queryKey: ["basket-associations", filterQs],
     queryFn: async () => {
-      const res = await fetch(`${BASE}/api/basket/associations`, { headers: getAuthHeaders() });
+      const res = await fetch(`${BASE}/api/basket/associations${filterQs ? `?${filterQs}` : ""}`, { headers: getAuthHeaders() });
       if (!res.ok) throw new Error("Kon basket-associaties niet laden");
       return res.json();
     },
@@ -80,6 +85,8 @@ export default function BasketIntelligenceDashboard() {
           {run.isRunning ? "Bezig met herberekenen…" : "Herbereken"}
         </Button>
       </div>
+
+      <GlobalFilterBar />
 
       {run.isRunning && (
         <p className="text-sm text-muted-foreground">

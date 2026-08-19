@@ -2,11 +2,13 @@
 Routes voor prijselasticiteit per SKU.
 Pad: /api/elasticiteit/...
 """
+from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from database import get_db
 from auth import get_current_user
+from routes.global_filters import resolve_sku_filter
 from models import SkuElasticity, DimProduct, User
 
 router = APIRouter(prefix="/api/elasticiteit", tags=["elasticiteit"])
@@ -79,6 +81,8 @@ def get_elasticiteit_overzicht(
     vertrouwen: str = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -90,6 +94,10 @@ def get_elasticiteit_overzicht(
         q = q.filter(DimProduct.category == categorie)
     if vertrouwen:
         q = q.filter(SkuElasticity.confidence_class == vertrouwen)
+    # Globale filtercontext: doorsnede met categorie-filter. Lege set = niets.
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is not None:
+        q = q.filter(SkuElasticity.sku_id.in_(_gf))
 
     # Meest recente run per SKU
     laatste = q.order_by(desc(SkuElasticity.run_date)).all()

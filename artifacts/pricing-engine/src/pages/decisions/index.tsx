@@ -10,6 +10,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { Brain, RefreshCw, ChevronLeft, ChevronRight, AlertTriangle, Tag, Layers } from "lucide-react";
 import { getAuthToken } from "@/lib/auth";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -61,14 +64,18 @@ export default function Beslissingen() {
   const { toast } = useToast();
   const qc = useQueryClient();
 
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
+
   const params = new URLSearchParams({ page: String(page), page_size: "20" });
   if (status !== "all") params.set("status", status);
   if (entityType !== "all") params.set("entity_type", entityType);
   if (search) params.set("search", search);
+  const decisionsQs = [params.toString(), filterQs].filter(Boolean).join("&");
 
   const { data, isLoading } = useQuery({
-    queryKey: ["decisions", page, status, entityType, search],
-    queryFn: () => apiFetch(`/api/decisions?${params.toString()}`),
+    queryKey: ["decisions", page, status, entityType, search, filterQs],
+    queryFn: () => apiFetch(`/api/decisions?${decisionsQs}`),
   });
 
   const runEngine = useMutation({
@@ -102,6 +109,8 @@ export default function Beslissingen() {
             Genereer beslissingen
           </Button>
         </div>
+
+        <GlobalFilterBar />
 
         <div className="flex gap-3 flex-wrap items-center">
           <Input

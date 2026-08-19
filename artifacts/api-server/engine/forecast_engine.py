@@ -374,22 +374,26 @@ def _detect_sku_risks(db: Session, prod: models.DimProduct, fc30: dict, run_date
     return count
 
 
-def get_forecast_dashboard(db: Session, horizon: int = 30, shop_id: int | None = None) -> Dict[str, Any]:
+def get_forecast_dashboard(db: Session, horizon: int = 30, shop_id: int | None = None,
+                           sku_filter: set[str] | None = None) -> Dict[str, Any]:
+    # sku_filter (globale filtercontext): None = geen filter; een lege set matcht niets.
     sid = resolve_shop_id(db, shop_id)
     latest = db.query(func.max(models.FactForecastDaily.run_date)).filter(
         models.FactForecastDaily.shop_id == sid).scalar()
     if not latest:
         return {"run_date": None, "shop_id": sid, "horizon": horizon, "skus": [], "totalen": {}}
 
-    rows = (
+    fq = (
         db.query(models.FactForecastDaily)
         .filter(
             models.FactForecastDaily.run_date == latest,
             models.FactForecastDaily.shop_id == sid,
             models.FactForecastDaily.horizon_days == horizon,
         )
-        .all()
     )
+    if sku_filter is not None:
+        fq = fq.filter(models.FactForecastDaily.sku_id.in_(sku_filter))
+    rows = fq.all()
     per_sku: Dict[str, dict] = {}
     for r in rows:
         d = per_sku.setdefault(r.sku_id, {
@@ -402,14 +406,18 @@ def get_forecast_dashboard(db: Session, horizon: int = 30, shop_id: int | None =
         d[f"{r.forecast_type}_hoog"] = float(r.upper_bound or 0)
 
     skus = sorted(per_sku.values(), key=lambda x: x.get("revenue", 0), reverse=True)
-    risk_signals = (
+    rsq = (
         db.query(models.IntelligenceSignal)
         .filter(
             models.IntelligenceSignal.engine == "forecast_risk",
             models.IntelligenceSignal.status == "active",
             models.IntelligenceSignal.shop_id == sid,
         )
-        .order_by(models.IntelligenceSignal.observed_at.desc())
+    )
+    if sku_filter is not None:
+        rsq = rsq.filter(models.IntelligenceSignal.entity_id.in_(sku_filter))
+    risk_signals = (
+        rsq.order_by(models.IntelligenceSignal.observed_at.desc())
         .limit(100)
         .all()
     )

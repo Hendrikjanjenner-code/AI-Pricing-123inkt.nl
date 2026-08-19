@@ -12,6 +12,9 @@ import {
   ReferenceLine, Cell, ZAxis,
 } from "recharts";
 import { getAuthToken } from "@/lib/auth";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const API = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -48,13 +51,15 @@ export default function BcgSkuMatrix() {
   const [zoek, setZoek] = useState("");
   const [selectedSku, setSelectedSku] = useState<string | null>(null);
   const { toast } = useToast();
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
 
-  useEffect(() => { laden(matrixType); }, [matrixType]);
+  useEffect(() => { laden(matrixType); }, [matrixType, filterQs]);
 
   async function laden(type: string) {
     setLoading(true);
     try {
-      const r = await fetch(`${API}/api/bcg/sku-matrix?type=${type}`, {
+      const r = await fetch(`${API}/api/bcg/sku-matrix?type=${type}${filterQs ? `&${filterQs}` : ""}`, {
         headers: { Authorization: `Bearer ${getAuthToken()}` },
       });
       if (!r.ok) throw new Error();
@@ -96,6 +101,8 @@ export default function BcgSkuMatrix() {
           </SelectContent>
         </Select>
       </div>
+
+      <GlobalFilterBar />
 
       {/* Scatter plot */}
       <Card>

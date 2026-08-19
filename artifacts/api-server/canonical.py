@@ -75,6 +75,35 @@ def ensure_default_shop() -> None:
             db.rollback()
             logger.warning("Canonical: kon unieke signaal-index niet aanmaken: %s", exc)
 
+        # Hiërarchie-backfill (taak #217): vul hierarchy_node_id/path/level op
+        # bestaande SKU-signalen vanuit de actieve primaire assignment.
+        # Idempotent: alleen rijen waar hierarchy_node_id nog NULL is.
+        try:
+            db.execute(text(
+                "UPDATE intelligence_signals SET hierarchy_node_id = ("
+                "  SELECT a.node_id FROM product_hierarchy_assignments a"
+                "  WHERE a.sku_id = intelligence_signals.entity_id"
+                "    AND a.status = 'active' AND a.is_primary = TRUE"
+                "  ORDER BY a.id DESC LIMIT 1)"
+                " WHERE entity_type = 'sku' AND hierarchy_node_id IS NULL"
+            ))
+            db.execute(text(
+                "UPDATE intelligence_signals SET hierarchy_level = ("
+                "  SELECT n.level FROM product_hierarchy_nodes n"
+                "  WHERE n.id = intelligence_signals.hierarchy_node_id)"
+                " WHERE hierarchy_node_id IS NOT NULL AND hierarchy_level IS NULL"
+            ))
+            db.execute(text(
+                "UPDATE intelligence_signals SET hierarchy_path_id = ("
+                "  SELECT p.id FROM product_hierarchy_paths p"
+                "  WHERE p.leaf_node_id = intelligence_signals.hierarchy_node_id)"
+                " WHERE hierarchy_node_id IS NOT NULL AND hierarchy_path_id IS NULL"
+            ))
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.warning("Canonical: hiërarchie-backfill van signalen overgeslagen: %s", exc)
+
         backfilled_total = 0
         for table in _SHOP_SCOPED_TABLES:
             try:

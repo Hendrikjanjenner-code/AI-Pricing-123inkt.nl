@@ -10,13 +10,15 @@ Endpoints:
 
   GET  /api/conversie/signalen        — conversie alerts
 """
+from typing import Optional
 from datetime import date, timedelta
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from database import get_db
 import auth as auth_utils
 import models
 import metrics as metrics_lib
+from routes.global_filters import resolve_sku_filter
 from engine.traffic_engine import run_traffic_engine
 from engine.conversion_monitoring import (
     SIGNAL_LABELS_NL, SIGNAL_PRIORITY, SIGNAL_KLEUR, ADVIES_PER_SIGNAAL,
@@ -82,10 +84,16 @@ def _signal_dict(r: models.FactTrafficIntelligenceDaily) -> dict:
 
 @router.get("/api/traffic")
 def get_traffic_dashboard(
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(auth_utils.get_current_user),
 ):
     sku_rows = _latest_intel(db, "SKU")
+    # Globale filtercontext: beperk SKU-rijen tot de geselecteerde universe.
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is not None:
+        sku_rows = [r for r in sku_rows if r.entity_id in _gf]
 
     if not sku_rows:
         return {
@@ -103,10 +111,13 @@ def get_traffic_dashboard(
 
     today = date.today()
     cutoff30 = today - timedelta(days=30)
-    all_traffic = db.query(models.FactTrafficDaily).filter(
+    traffic_q = db.query(models.FactTrafficDaily).filter(
         models.FactTrafficDaily.date >= cutoff30,
         models.FactTrafficDaily.entity_type == "SKU",
-    ).all()
+    )
+    if _gf is not None:
+        traffic_q = traffic_q.filter(models.FactTrafficDaily.entity_id.in_(_gf))
+    all_traffic = traffic_q.all()
 
     totale_sessies = sum(r.sessions or 0 for r in all_traffic)
     totale_orders = sum(r.orders or 0 for r in all_traffic)
@@ -411,10 +422,16 @@ def import_traffic(_=Depends(auth_utils.get_current_user)):
 
 @conversie_router.get("/api/conversie/signalen")
 def get_conversie_signalen(
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(auth_utils.get_current_user),
 ):
     sku_rows = _latest_intel(db, "SKU")
+    # Globale filtercontext: beperk SKU-rijen tot de geselecteerde universe.
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is not None:
+        sku_rows = [r for r in sku_rows if r.entity_id in _gf]
     products = {p.sku_id: p for p in db.query(models.DimProduct).all()}
     pcis_map = {r.sku_id: r for r in db.query(models.SkuCompetitionScore).all()}
     inv_map = {r.sku_id: r.quantity_on_hand for r in db.query(models.FactInventoryDaily).filter_by(

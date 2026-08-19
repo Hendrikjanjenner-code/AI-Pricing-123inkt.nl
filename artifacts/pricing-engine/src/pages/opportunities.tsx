@@ -6,6 +6,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Lightbulb, Euro, RefreshCw, Check, X } from "lucide-react";
 import { getAuthHeaders } from "@/lib/auth";
 import { useEngineRun } from "@/lib/use-engine-run";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -55,10 +58,12 @@ const eur = (v: number) => new Intl.NumberFormat("nl-NL", { style: "currency", c
 
 export default function Opportunities() {
   const qc = useQueryClient();
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
   const { data, isLoading } = useQuery<Dashboard>({
-    queryKey: ["opportunities"],
+    queryKey: ["opportunities", filterQs],
     queryFn: async () => {
-      const res = await fetch(`${BASE}/api/opportunities?status=open`, { headers: getAuthHeaders() });
+      const res = await fetch(`${BASE}/api/opportunities?status=open${filterQs ? `&${filterQs}` : ""}`, { headers: getAuthHeaders() });
       if (!res.ok) throw new Error("Kon opportunities niet laden");
       return res.json();
     },
@@ -97,6 +102,8 @@ export default function Opportunities() {
           {run.isRunning ? "Bezig met vernieuwen…" : "Vernieuw kansen"}
         </Button>
       </div>
+
+      <GlobalFilterBar />
 
       {run.isRunning && (
         <p className="text-sm text-muted-foreground">

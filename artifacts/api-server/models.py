@@ -78,6 +78,13 @@ class IntelligenceSignal(Base):
     entity_id = Column(String(255), nullable=False, index=True)
     entity_name = Column(String(500))
 
+    # Centrale producthiërarchie (taak #217): voor SKU-signalen gevuld vanuit
+    # de actieve hierarchy-assignment; maakt filteren op de Global Filter
+    # Context en aggregatie SKU → subcategorie → categorie mogelijk.
+    hierarchy_node_id = Column(Integer, index=True)   # node waar de entiteit onder valt
+    hierarchy_path_id = Column(Integer)               # ProductHierarchyPath.id (leaf-pad)
+    hierarchy_level = Column(Integer)                 # niveau van de node (1 = top)
+
     metric = Column(String(100))                    # centrale metric-naam (metrics.py)
     current_value = Column(Float)
     previous_value = Column(Float)

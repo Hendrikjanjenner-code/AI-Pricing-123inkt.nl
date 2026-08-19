@@ -11,13 +11,15 @@ Endpoints:
   GET  /api/bcg/pricing-power   — pricing power ranglijst
   POST /api/bcg/run             — start BCG engine run
 """
+from typing import Optional
 from datetime import date
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from database import get_db
 import auth as auth_utils
 import models
 from engine.bcg_engine import run_bcg_engine
+from routes.global_filters import resolve_sku_filter
 
 router = APIRouter(prefix="/api/bcg", tags=["bcg"])
 
@@ -111,8 +113,17 @@ def _latest_cat_records(db: Session) -> list[models.FactBcgClassificationDaily]:
 # ─── GET /api/bcg/dashboard ───────────────────────────────────────────────────
 
 @router.get("/dashboard")
-def get_bcg_dashboard(db: Session = Depends(get_db), _=Depends(auth_utils.get_current_user)):
+def get_bcg_dashboard(
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _=Depends(auth_utils.get_current_user),
+):
     sku_rows = _latest_sku_records(db)
+    # Globale filtercontext: beperk SKU-rijen tot de geselecteerde universe.
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is not None:
+        sku_rows = [r for r in sku_rows if r.entity_id in _gf]
 
     if not sku_rows:
         return {
@@ -139,13 +150,25 @@ def get_bcg_dashboard(db: Session = Depends(get_db), _=Depends(auth_utils.get_cu
     # Top pricing power
     top_pps = sorted([r for r in sku_rows if r.pricing_power_score], key=lambda x: x.pricing_power_score, reverse=True)[:6]
 
-    # Top private label stars
-    pl_rows = db.query(models.FactPrivateLabelIntelligence).order_by(
+    # Top private label stars — filter mee op de globale filtercontext.
+    pl_q = db.query(models.FactPrivateLabelIntelligence).order_by(
         models.FactPrivateLabelIntelligence.private_label_value_score.desc()
-    ).limit(6).all()
+    )
+    if _gf is not None:
+        pl_q = pl_q.filter(models.FactPrivateLabelIntelligence.sku_id.in_(_gf))
+    pl_rows = pl_q.limit(6).all()
 
-    # Hoge concurrentiedruk categorieën
+    # Hoge concurrentiedruk categorieën — binnen de globale filtercontext:
+    # een categorie telt alleen mee als ze producten uit de selectie bevat.
     cat_rows = _latest_cat_records(db)
+    if _gf is not None:
+        _sel_cats = {
+            c[0] for c in db.query(models.DimProduct.category)
+            .filter(models.DimProduct.sku_id.in_(list(_gf)),
+                    models.DimProduct.category.isnot(None))
+            .distinct().all()
+        } if _gf else set()
+        cat_rows = [r for r in cat_rows if r.entity_id in _sel_cats]
     hoog_druk = sorted(
         [r for r in cat_rows if (r.css_external_score or 1.0) < 0.50],
         key=lambda x: x.css_external_score or 1.0
@@ -205,11 +228,18 @@ def get_bcg_dashboard(db: Session = Depends(get_db), _=Depends(auth_utils.get_cu
 @router.get("/sku-matrix")
 def get_sku_matrix(
     type: str = "internal",
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(auth_utils.get_current_user),
 ):
     rows = _latest_sku_records(db)
-    products = {p.sku_id: p for p in db.query(models.DimProduct).all()}
+    # Globale filtercontext: beperk SKU-rijen en productmap tot de selectie.
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is not None:
+        rows = [r for r in rows if r.entity_id in _gf]
+    products = {p.sku_id: p for p in db.query(models.DimProduct).all()
+                if _gf is None or p.sku_id in _gf}
 
     result = []
     for r in rows:
@@ -353,10 +383,24 @@ def get_sku_bcg_detail(
 
 @router.get("/categorie-matrix")
 def get_categorie_matrix(
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(auth_utils.get_current_user),
 ):
     rows = _latest_cat_records(db)
+    # Globale filtercontext (taak #217): een categorierij telt mee wanneer de
+    # categorie producten uit de geselecteerde SKU-set bevat. None = geen
+    # filter; een lege set matcht niets.
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is not None:
+        cats = {
+            c[0] for c in db.query(models.DimProduct.category)
+            .filter(models.DimProduct.sku_id.in_(list(_gf)),
+                    models.DimProduct.category.isnot(None))
+            .distinct().all()
+        } if _gf else set()
+        rows = [r for r in rows if r.entity_id in cats]
     result = []
     for r in rows:
         result.append({
@@ -383,11 +427,18 @@ def get_categorie_matrix(
 
 @router.get("/hybrid-matrix")
 def get_hybrid_matrix(
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(auth_utils.get_current_user),
 ):
     rows = _latest_sku_records(db)
-    products = {p.sku_id: p for p in db.query(models.DimProduct).all()}
+    # Globale filtercontext: beperk SKU-rijen en productmap tot de selectie.
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is not None:
+        rows = [r for r in rows if r.entity_id in _gf]
+    products = {p.sku_id: p for p in db.query(models.DimProduct).all()
+                if _gf is None or p.sku_id in _gf}
 
     result = []
     for r in rows:
@@ -432,13 +483,20 @@ def get_hybrid_matrix(
 
 @router.get("/huismerk")
 def get_huismerk_intelligence(
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(auth_utils.get_current_user),
 ):
-    pl_rows = db.query(models.FactPrivateLabelIntelligence).order_by(
+    # Globale filtercontext: beperk huismerk-SKU's tot de selectie.
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    pl_q = db.query(models.FactPrivateLabelIntelligence).order_by(
         models.FactPrivateLabelIntelligence.run_date.desc(),
         models.FactPrivateLabelIntelligence.private_label_value_score.desc(),
-    ).all()
+    )
+    if _gf is not None:
+        pl_q = pl_q.filter(models.FactPrivateLabelIntelligence.sku_id.in_(_gf))
+    pl_rows = pl_q.all()
 
     # Deduplicate op sku_id (neem meest recente)
     seen: set[str] = set()
@@ -486,11 +544,18 @@ def get_huismerk_intelligence(
 
 @router.get("/pricing-power")
 def get_pricing_power(
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(auth_utils.get_current_user),
 ):
     rows = _latest_sku_records(db)
-    products = {p.sku_id: p for p in db.query(models.DimProduct).all()}
+    # Globale filtercontext: beperk SKU-rijen en productmap tot de selectie.
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is not None:
+        rows = [r for r in rows if r.entity_id in _gf]
+    products = {p.sku_id: p for p in db.query(models.DimProduct).all()
+                if _gf is None or p.sku_id in _gf}
 
     sorted_rows = sorted(rows, key=lambda r: r.pricing_power_score or 0, reverse=True)
 

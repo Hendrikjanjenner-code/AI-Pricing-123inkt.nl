@@ -9,6 +9,9 @@ import { useToast } from "@/hooks/use-toast";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { Tag, TrendingUp, ArrowRightLeft, Star } from "lucide-react";
 import { getAuthToken } from "@/lib/auth";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const API = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -30,11 +33,14 @@ export default function BcgHuismerk() {
   const [loading, setLoading] = useState(true);
   const [zoek, setZoek] = useState("");
   const { toast } = useToast();
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
 
   useEffect(() => {
     (async () => {
+      setLoading(true);
       try {
-        const r = await fetch(`${API}/api/bcg/huismerk`, {
+        const r = await fetch(`${API}/api/bcg/huismerk${filterQs ? `?${filterQs}` : ""}`, {
           headers: { Authorization: `Bearer ${getAuthToken()}` },
         });
         if (!r.ok) throw new Error();
@@ -42,7 +48,7 @@ export default function BcgHuismerk() {
       } catch { toast({ title: "Laden mislukt", variant: "destructive" }); }
       setLoading(false);
     })();
-  }, []);
+  }, [filterQs]);
 
   if (loading) return (
     <div className="space-y-6">
@@ -72,6 +78,8 @@ export default function BcgHuismerk() {
           PLSV-scores, substitutiepotentie en traffic-to-margin strategieën voor 123inkt huismerken
         </p>
       </div>
+
+      <GlobalFilterBar />
 
       {/* KPI tellers */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

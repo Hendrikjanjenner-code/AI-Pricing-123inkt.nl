@@ -50,6 +50,66 @@ def hierarchy_sku_ids(db: Session, node_ids: list[int]) -> set[str]:
     return {r[0] for r in rows}
 
 
+def descendant_node_ids(db: Session, node_ids: list[int]) -> set[int]:
+    """Alle node-ids onder de selectie (inclusief de nodes zelf), via
+    prefix-LIKE op het gematerialiseerde pad."""
+    if not node_ids:
+        return set()
+    N = models.ProductHierarchyNode
+    nodes = db.query(N).filter(N.id.in_(node_ids)).all()
+    conds = [N.path.like(n.path + "%") for n in nodes if n.path]
+    if not conds:
+        return set()
+    return {r[0] for r in db.query(N.id).filter(or_(*conds)).all()}
+
+
+def signal_filter_conditions(
+    db: Session,
+    sku_filter: Optional[set[str]],
+    hierarchy_node_ids: Optional[str] = None,
+    brands: Optional[str] = None,
+):
+    """
+    SQLAlchemy-condities om IntelligenceSignal-rijen op de globale
+    filtercontext te beperken. Regels:
+    - SKU-signalen: entity_id moet in de gefilterde SKU-set zitten.
+    - Niet-SKU-signalen (categorie/subcategorie): alleen matchen op
+      hierarchy_node_id binnen de geselecteerde (sub)boom — en alléén als er
+      geen merk-filter actief is, want een merk-selectie is op categorie-
+      niveau niet evalueerbaar ("niet geëvalueerd" ≠ "binnen selectie").
+    Geeft None terug als er geen filter actief is.
+    """
+    if sku_filter is None:
+        return None
+    S = models.IntelligenceSignal
+    conds = [(S.entity_type == "sku") & (S.entity_id.in_(list(sku_filter)))]
+    if not parse_csv(brands):
+        node_set = descendant_node_ids(db, parse_csv_ints(hierarchy_node_ids))
+        if node_set:
+            conds.append((S.entity_type != "sku") & (S.hierarchy_node_id.in_(list(node_set))))
+    return or_(*conds)
+
+
+def filter_metadata(
+    db: Session,
+    hierarchy_node_ids: Optional[str] = None,
+    brands: Optional[str] = None,
+) -> dict:
+    """Leesbare metadata over de actieve filtercontext (voor exports)."""
+    node_ids = parse_csv_ints(hierarchy_node_ids)
+    names: list[str] = []
+    if node_ids:
+        N = models.ProductHierarchyNode
+        rows = db.query(N.id, N.path_names, N.name).filter(N.id.in_(node_ids)).all()
+        names = [(r[1] or r[2]) for r in rows]
+    brand_list = parse_csv(brands)
+    return {
+        "filters_actief": bool(node_ids or brand_list),
+        "hierarchie_selectie": names,
+        "merken": brand_list,
+    }
+
+
 def resolve_sku_filter(
     db: Session,
     hierarchy_node_ids: Optional[str] = None,

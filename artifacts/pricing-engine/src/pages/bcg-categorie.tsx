@@ -5,6 +5,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, Cell } from "recharts";
 import { getAuthToken } from "@/lib/auth";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const API = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -27,21 +30,25 @@ export default function BcgCategorie() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
   const { toast } = useToast();
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
 
   useEffect(() => {
+    setLoading(true);
     (async () => {
       try {
-        const r = await fetch(`${API}/api/bcg/categorie-matrix`, {
+        const r = await fetch(`${API}/api/bcg/categorie-matrix${filterQs ? `?${filterQs}` : ""}`, {
           headers: { Authorization: `Bearer ${getAuthToken()}` },
         });
         if (!r.ok) throw new Error();
         const d = await r.json();
         setData(d);
         if (d.items?.length) setSelected(d.items[0].categorie);
+        else setSelected(null);
       } catch { toast({ title: "Laden mislukt", variant: "destructive" }); }
       setLoading(false);
     })();
-  }, []);
+  }, [filterQs]);
 
   if (loading) return (
     <div className="space-y-6">
@@ -74,6 +81,8 @@ export default function BcgCategorie() {
         <h1 className="text-2xl font-bold">Categorie BCG Analyse</h1>
         <p className="text-muted-foreground text-sm mt-1">BCG-classificatie op categorieniveau — aggregatie van alle SKU's</p>
       </div>
+
+      <GlobalFilterBar />
 
       {/* Categorie kaarten */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

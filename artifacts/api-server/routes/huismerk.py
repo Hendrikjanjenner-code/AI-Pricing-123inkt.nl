@@ -2,11 +2,13 @@
 Routes voor interne concurrentie (huismerk vs A-merk) en ISV.
 Pad: /api/huismerk-impact/...
 """
+from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from database import get_db
 from auth import get_current_user
+from routes.global_filters import resolve_sku_filter
 from models import InternalCompetitionScore, DimProduct, User
 
 router = APIRouter(prefix="/api/huismerk-impact", tags=["huismerk"])
@@ -100,6 +102,8 @@ def get_huismerk_overzicht(
     actie: str = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -112,6 +116,11 @@ def get_huismerk_overzicht(
         q = q.filter(InternalCompetitionScore.recommended_internal_action == actie)
     if min_isv > 0:
         q = q.filter(InternalCompetitionScore.isv >= min_isv)
+    # Globale filtercontext: neem een paar mee als het A-merk (sku_id) in de set
+    # zit — het A-merk is het ankerproduct. None = geen filter; lege set = niets.
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is not None:
+        q = q.filter(InternalCompetitionScore.sku_id.in_(_gf))
 
     alle = q.all()
 

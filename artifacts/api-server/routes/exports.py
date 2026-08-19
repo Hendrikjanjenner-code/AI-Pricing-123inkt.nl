@@ -24,6 +24,23 @@ EXPORT_FIELDS = [
 ]
 
 
+def _apply_global_filter(db: Session, recs: list,
+                         hierarchy_node_ids: Optional[str],
+                         brands: Optional[str]) -> list:
+    """Beperk exportrijen tot de actieve globale filtercontext (taak #217).
+    None = geen filter actief; lege set = niets matcht."""
+    from routes.global_filters import resolve_sku_filter
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if _gf is None:
+        return recs
+    return [r for r in recs if r.sku_id in _gf]
+
+
+def _filter_meta(db: Session, hierarchy_node_ids: Optional[str], brands: Optional[str]) -> dict:
+    from routes.global_filters import filter_metadata
+    return filter_metadata(db, hierarchy_node_ids, brands)
+
+
 def _approved_query(db: Session, date_filter: Optional[str], only_unexported: bool = False):
     q = db.query(models.FactPricingRecommendationDaily).filter(
         models.FactPricingRecommendationDaily.approval_status == "approved",
@@ -116,6 +133,8 @@ def _export_log_out(e: models.ExportLog) -> dict:
 @router.get("/recommendations")
 def export_recommendations(
     date_filter: Optional[str] = Query(None, alias="date"),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
@@ -123,31 +142,51 @@ def export_recommendations(
     Returns JSON metadata about the export.
     The actual CSV/XLSX/XLS downloads and the DRS API-push are separate endpoints below.
     """
-    q = _approved_query(db, date_filter, only_unexported=True)
-    count = q.count()
+    recs = _apply_global_filter(
+        db, _approved_query(db, date_filter, only_unexported=True).all(),
+        hierarchy_node_ids, brands)
+    count = len(recs)
     export_date = date_filter or datetime.utcnow().date().isoformat()
     filename = f"prijsexport_{export_date}.csv"
 
+    extra = ""
+    if hierarchy_node_ids:
+        extra += f"&hierarchy_node_ids={hierarchy_node_ids}"
+    if brands:
+        extra += f"&brands={brands}"
     return {
         "exported_count": count,
         "date": export_date,
-        "download_url": f"/api/exports/recommendations/download?date={export_date}",
+        "download_url": f"/api/exports/recommendations/download?date={export_date}{extra}",
         "filename": filename,
+        "filter_context": _filter_meta(db, hierarchy_node_ids, brands),
     }
 
 
 @router.get("/recommendations/download")
 def download_recommendations_csv(
     date_filter: Optional[str] = Query(None, alias="date"),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
     """Stream the approved recommendations as a CSV file."""
-    recs = _approved_query(db, date_filter).all()
+    recs = _apply_global_filter(db, _approved_query(db, date_filter).all(),
+                                hierarchy_node_ids, brands)
     rows = _build_rows(db, recs)
 
     output = io.StringIO()
     writer = csv.writer(output)
+    meta = _filter_meta(db, hierarchy_node_ids, brands)
+    if meta["filters_actief"]:
+        # Metadata over de actieve filtercontext als commentaarregel vóór de
+        # header, zodat traceerbaar is met welke selectie is geëxporteerd.
+        writer.writerow([
+            "# filtercontext",
+            "; ".join(meta["hierarchie_selectie"]) or "-",
+            "; ".join(meta["merken"]) or "-",
+        ])
     writer.writerow(EXPORT_FIELDS)
     for row in rows:
         writer.writerow(row)
@@ -169,11 +208,14 @@ def download_recommendations_csv(
 @router.get("/recommendations/download/xlsx")
 def download_recommendations_xlsx(
     date_filter: Optional[str] = Query(None, alias="date"),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
     """Stream the approved recommendations as an XLSX file."""
-    recs = _approved_query(db, date_filter).all()
+    recs = _apply_global_filter(db, _approved_query(db, date_filter).all(),
+                                hierarchy_node_ids, brands)
     rows = _build_rows(db, recs)
 
     wb = Workbook()
@@ -182,6 +224,16 @@ def download_recommendations_xlsx(
     ws.append(EXPORT_FIELDS)
     for row in rows:
         ws.append(row)
+
+    # Metadata-tab met de actieve filtercontext (taak #217)
+    meta = _filter_meta(db, hierarchy_node_ids, brands)
+    if meta["filters_actief"]:
+        ms = wb.create_sheet("Filters")
+        ms.append(["Filtercontext van deze export"])
+        ms.append(["Hiërarchie-selectie", "; ".join(meta["hierarchie_selectie"]) or "-"])
+        ms.append(["Merken", "; ".join(meta["merken"]) or "-"])
+        ms.append(["Geëxporteerd op", datetime.utcnow().isoformat()])
+        ms.append(["Aantal rijen", len(rows)])
 
     buffer = io.BytesIO()
     wb.save(buffer)
@@ -203,11 +255,14 @@ def download_recommendations_xlsx(
 @router.get("/recommendations/download/xls")
 def download_recommendations_xls(
     date_filter: Optional[str] = Query(None, alias="date"),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
     """Stream the approved recommendations as a legacy XLS (BIFF8) file."""
-    recs = _approved_query(db, date_filter).all()
+    recs = _apply_global_filter(db, _approved_query(db, date_filter).all(),
+                                hierarchy_node_ids, brands)
     rows = _build_rows(db, recs)
 
     wb = xlwt.Workbook()
