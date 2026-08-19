@@ -122,7 +122,16 @@ export default function Signalen() {
       const totaal = Object.values(res.published_per_engine || {})
         .filter((v: any) => typeof v === "number" && v > 0)
         .reduce((a: number, b: any) => a + b, 0);
-      toast({ title: "Signalen vernieuwd", description: `${totaal} signalen gepubliceerd.` });
+      const gefaald: string[] = res.failed_engines || [];
+      if (gefaald.length > 0) {
+        toast({
+          title: "Vernieuwen gedeeltelijk mislukt",
+          description: `Gefaalde engines: ${gefaald.join(", ")}. ${totaal} signalen gepubliceerd door de overige engines.`,
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Signalen vernieuwd", description: `${totaal} signalen gepubliceerd.` });
+      }
       setPage(1);
       await laad();
     } catch (e: any) {

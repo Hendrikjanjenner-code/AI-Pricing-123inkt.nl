@@ -642,3 +642,88 @@ class TestEmitAllSignalsRollback:
         assert "fine" in call_log, "Emitters moeten draaien ook al crashte rankings"
         assert results.get("rankings") == -1
         assert results.get("pricing") == 1
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# POST /api/signals/refresh — de HTTP-respons weerspiegelt gefaalde engines
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestRefreshRouteFailedEngines:
+    """Integratietests (taak: signaalververs mag niet stilletjes 'voltooid'
+    melden terwijl engines gefaald zijn). Via de FastAPI TestClient met een
+    echte admin-login; emit_all_signals wordt via EMITTERS/rankings gemockt."""
+
+    _RCR_TARGET = "engine.competition_rankings.run_competitor_rankings"
+    _EXPIRE_TARGET = "engine.signal_emitters.expire_stale_signals"
+
+    @pytest.fixture(scope="class")
+    def client(self):
+        from fastapi.testclient import TestClient
+        from main import app
+        c = TestClient(app)
+        c.__enter__()
+        yield c
+        try:
+            c.__exit__(None, None, None)
+        except Exception:
+            pass
+
+    @pytest.fixture(scope="class")
+    def admin_headers(self, client):
+        resp = client.post("/api/auth/login",
+                           json={"username": "dev_admin", "password": "admin123"})
+        assert resp.status_code == 200, resp.text
+        return {"Authorization": f"Bearer {resp.json()['token']}"}
+
+    def _refresh(self, client, admin_headers, emitters, rankings=0, expired=0):
+        with patch("engine.signal_emitters.EMITTERS", emitters), \
+             patch(self._RCR_TARGET, return_value=rankings), \
+             patch(self._EXPIRE_TARGET, return_value=expired):
+            return client.post("/api/signals/refresh", headers=admin_headers)
+
+    def test_failed_engine_appears_in_response(self, client, admin_headers):
+        """Een crashende emitter (-1) moet in failed_engines van de respons staan."""
+        def boom(_db):
+            raise RuntimeError("Gesimuleerde emitter-crash")
+
+        resp = self._refresh(client, admin_headers,
+                             {"broken_engine": boom, "fine_engine": lambda _db: 4},
+                             expired=1)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert "failed_engines" in body, "Respons moet failed_engines bevatten"
+        assert "broken_engine" in body["failed_engines"]
+        assert "fine_engine" not in body["failed_engines"]
+        assert body["status"] != "voltooid", \
+            "Status mag niet 'voltooid' zijn als engines gefaald zijn"
+        assert body["status"] == "gedeeltelijk_mislukt"
+
+    def test_published_per_engine_and_expired_filled(self, client, admin_headers):
+        """expired en published_per_engine correct gevuld in de respons."""
+        resp = self._refresh(client, admin_headers,
+                             {"eng_a": lambda _db: 3, "eng_b": lambda _db: 7},
+                             rankings=2, expired=5)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        ppe = body["published_per_engine"]
+        assert ppe["eng_a"] == 3
+        assert ppe["eng_b"] == 7
+        assert ppe["rankings"] == 2
+        assert "expired" not in ppe, "expired hoort niet in published_per_engine"
+        assert body["expired"] == 5
+        assert body["failed_engines"] == []
+        assert body["status"] == "voltooid"
+
+    def test_http_200_despite_failed_engines(self, client, admin_headers):
+        """Route geeft HTTP 200 (geen crash), ook als álle engines falen."""
+        def boom(_db):
+            raise RuntimeError("crash")
+
+        with patch("engine.signal_emitters.EMITTERS", {"only_broken": boom}), \
+             patch(self._RCR_TARGET, side_effect=RuntimeError("rankings crash")), \
+             patch(self._EXPIRE_TARGET, return_value=0):
+            resp = client.post("/api/signals/refresh", headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert set(body["failed_engines"]) == {"only_broken", "rankings"}
+        assert body["status"] == "gedeeltelijk_mislukt"

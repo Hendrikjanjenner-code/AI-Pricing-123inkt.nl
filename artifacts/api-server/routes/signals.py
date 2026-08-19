@@ -227,11 +227,13 @@ def refresh_all_signals(
     """
     from engine.signal_emitters import emit_all_signals
     results = emit_all_signals(db)
+    failed = [k for k, v in results.items() if v == -1]
     return {
-        "status": "voltooid",
+        # Nooit stilletjes "voltooid" melden als er engines gefaald zijn.
+        "status": "gedeeltelijk_mislukt" if failed else "voltooid",
         "published_per_engine": {k: v for k, v in results.items() if k not in ("expired",)},
         "expired": results.get("expired", 0),
-        "failed_engines": [k for k, v in results.items() if v == -1],
+        "failed_engines": failed,
     }
 
 
