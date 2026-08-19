@@ -33,8 +33,17 @@ interface FieldDef {
   mode?: string;
 }
 
+interface FeedOutage {
+  unreached_hours: number | null;
+  unreached_text: string;
+  severity: "error" | "warning";
+  failed_at: string | null;
+  last_success_at: string | null;
+  error_message: string;
+}
 interface ConnectorSummary {
   name: string;
+  feed_outage?: FeedOutage | null;
   label: string;
   configured: boolean;
   source: "db" | "env" | "default" | null;
@@ -440,7 +449,19 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
   const isConfigured = connector.configured;
 
   return (
-    <Card className={isConnected ? "border-emerald-200" : isConfigured ? "border-amber-100" : ""}>
+    <Card
+      className={
+        connector.feed_outage?.severity === "error"
+          ? "border-red-300 bg-red-50/40"
+          : connector.feed_outage
+          ? "border-amber-300"
+          : isConnected
+          ? "border-emerald-200"
+          : isConfigured
+          ? "border-amber-100"
+          : ""
+      }
+    >
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -475,6 +496,28 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
       </CardHeader>
 
       <CardContent className="space-y-3">
+        {connector.feed_outage && (
+          <div
+            className={`flex items-start gap-2 rounded-md border p-3 text-xs ${
+              connector.feed_outage.severity === "error"
+                ? "border-red-200 bg-red-50 text-red-700"
+                : "border-amber-200 bg-amber-50 text-amber-700"
+            }`}
+          >
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div className="space-y-0.5">
+              <p className="font-semibold">
+                Feed niet bereikbaar — {connector.feed_outage.unreached_text.toLowerCase()}
+              </p>
+              <p>
+                Laatste mislukte sync: {formatDate(connector.feed_outage.failed_at)}
+                {connector.feed_outage.last_success_at &&
+                  ` · Laatste geslaagde sync: ${formatDate(connector.feed_outage.last_success_at)}`}
+              </p>
+              <p className="opacity-80">{connector.feed_outage.error_message}</p>
+            </div>
+          </div>
+        )}
         {isConfigured && (
           <div className="grid grid-cols-2 gap-3 text-xs text-muted-foreground">
             <div>

@@ -13,6 +13,11 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.schema import CreateColumn, CreateIndex
 
 
+# ── SQLite-portabiliteit voor Postgres-only kolommen ─────────────────────────
+# Sommige tests draaien tegen een geïsoleerde SQLite-database via
+# Base.metadata.create_all(). TSVECTOR en STORED generated columns met
+# to_tsvector() bestaan daar niet; markeer zulke kolommen/indexen met
+# info={"pg_only": True} zodat ze in SQLite-DDL worden overgeslagen.
 @compiles(CreateColumn, "sqlite")
 def _skip_pg_only_columns(element, compiler, **kw):
     """Sla Postgres-specifieke kolommen (tsvector + generated column) over in
@@ -2924,10 +2929,24 @@ class AiConversationSummary(Base):
     upto_message_id = Column(Integer)              # laatste bericht in de samenvatting
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+@compiles(TSVECTOR, "sqlite")
+def _tsvector_as_text_sqlite(type_, compiler, **kw):
+    return "TEXT"
+
 @compiles(CreateColumn, "sqlite")
 def _skip_postgres_only_columns(element, compiler, **kw):
     """Sla Postgres-specifieke kolommen (bijv. TSVECTOR generated columns)
     over in SQLite-DDL, zodat testdatabases op SQLite blijven werken."""
     if element.element.info.get("postgres_only"):
         return None
+    return compiler.visit_create_column(element, **kw)
+
+@compiles(CreateColumn, "sqlite")
+def _skip_computed_on_sqlite(element, compiler, **kw):
+    column = element.element
+    if column.computed is not None:
+        return "%s %s" % (
+            compiler.preparer.format_column(column),
+            compiler.dialect.type_compiler.process(column.type),
+        )
     return compiler.visit_create_column(element, **kw)

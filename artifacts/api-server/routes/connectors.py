@@ -239,7 +239,65 @@ def _mask_fields(fields_configured: list[str] | None) -> dict[str, str]:
         return {}
     return {k: "••••• geconfigureerd" for k in fields_configured}
 
+def _priceshape_feed_outage(db: Session) -> Optional[dict]:
+    """
+    Bepaal of de PriceShape-feed momenteel onbereikbaar is en hoe lang al.
 
+    Kijkt naar de laatste api_sync_priceshape ImportJob: is die mislukt met
+    een netwerkfout, dan wordt de duur berekend vanaf de laatste geslaagde
+    sync. Retourneert None wanneer er geen actuele storing is.
+    """
+    from sqlalchemy import func
+    from routes.data_quality import _format_age
+
+    last_job = (
+        db.query(models.ImportJob)
+        .filter(models.ImportJob.upload_type == "api_sync_priceshape")
+        .order_by(models.ImportJob.created_at.desc())
+        .first()
+    )
+    if not last_job or last_job.status not in ("fout", "failed"):
+        return None
+
+    err_lower = (last_job.error_message or "").lower()
+    _NETWORK_KEYWORDS = (
+        "niet bereikbaar", "unreachable", "connecterror",
+        "connection", "timeout", "network", "name or service",
+        "0 producten en 0 concurrentprijzen",  # empty-feed guard
+    )
+    if not any(kw in err_lower for kw in _NETWORK_KEYWORDS):
+        return None
+
+    now = datetime.utcnow()
+    failed_at = last_job.completed_at or last_job.created_at
+    last_ok = (
+        db.query(func.max(
+            func.coalesce(models.ImportJob.completed_at,
+                          models.ImportJob.created_at)))
+        .filter(models.ImportJob.upload_type == "api_sync_priceshape",
+                models.ImportJob.status == "geimporteerd")
+        .scalar()
+    )
+    if last_ok is not None:
+        unreached_hours = max(0.0, (now - last_ok).total_seconds() / 3600.0)
+        unreached_text = f"Feed al {_format_age(unreached_hours)} niet bereikt"
+    else:
+        unreached_hours = None
+        unreached_text = "Er is nog nooit een geslaagde sync geweest"
+
+    severity = (
+        "error"
+        if unreached_hours is None or unreached_hours > 24.0
+        else "warning"
+    )
+    return {
+        "unreached_hours": unreached_hours,
+        "unreached_text": unreached_text,
+        "severity": severity,
+        "failed_at": failed_at.isoformat() if failed_at else None,
+        "last_success_at": last_ok.isoformat() if last_ok is not None else None,
+        "error_message": last_job.error_message or "onbekende fout",
+    }
 def _connector_summary(db: Session, name: str) -> dict:
     cfg = _get_config(db, name)
     fields_def = CONNECTOR_FIELDS[name]
@@ -261,7 +319,13 @@ def _connector_summary(db: Session, name: str) -> dict:
             configured = True
             source = "default"
 
+    # PriceShape: bij een mislukte laatste feed-sync tonen we hoe lang de
+    # feed al niet meer bereikt is (op basis van de laatste geslaagde
+    # api_sync_priceshape ImportJob). >24u (of nooit geslaagd) = error.
+    feed_outage = _priceshape_feed_outage(db) if name == "priceshape" else None
+
     return {
+        "feed_outage": feed_outage,
         "default_feed_url": default_feed_url,
         "name": name,
         "label": CONNECTOR_LABELS[name],

@@ -42,3 +42,4 @@
 - [Keyset NULL watermark](keyset-null-watermark.md) — keyset pagination on (watermark, pk) silently skips rows with NULL watermark; backfill or coalesce.
 - [Run-registry status semantics](run-registry-latest-attempt.md) — laatste poging telt; oude succes-rij mag latere failure niet maskeren; run-historie-FK cascade.
 - [BQ keyset NULL-watermerken](bq-keyset-null-watermark.md) — keyset-paginatie op (watermerk, pk) verliest rijen met NULL-watermerk; COALESCE naar vroegst mogelijke timestamp in filter én ORDER BY.
+- [ImportJob-residu breekt volgordetests](importjob-residue.md) — connector-synctests laten geimporteerde api_sync_priceshape jobs achter; tests die "meest recente job = mijn faaljob" aannemen moeten created_at nu zetten en completed_at terugdateren.
