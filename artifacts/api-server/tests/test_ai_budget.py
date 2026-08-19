@@ -1073,7 +1073,7 @@ class TestMidnightRollover(unittest.TestCase):
                         tokens_reserved=ai_gateway._UPFRONT_TOKEN_RESERVATION * 10)
 
         # Vandaag moet gewoon lukken — geen 429
-        slot_date, _max_tokens = ai_gateway.check_and_reserve_budget(
+        slot_date, _max_tokens, _warning = ai_gateway.check_and_reserve_budget(
             self.username, "viewer"
         )
         self.assertEqual(slot_date, date.today(),

@@ -229,6 +229,7 @@ def _haal_goedgekeurde_adviezen(db: Session, datum=None) -> list[dict]:
     lines = []
     for rec, prod in q.all():
         lines.append({
+            "recommendation_id": rec.id,
             "sku_id": rec.sku_id,
             "old_price": float(rec.current_price) if rec.current_price else None,
             "new_price": float(rec.recommended_price) if rec.recommended_price else None,

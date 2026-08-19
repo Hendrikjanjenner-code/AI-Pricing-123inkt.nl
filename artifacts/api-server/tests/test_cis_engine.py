@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 from main import app
 from database import SessionLocal
 import models
-from engine.competitor_influence import run_cis_engine, calculate_cis, get_cis_class
+from engine.competitor_influence import run_cis_engine, calculate_cis, get_cis_class, profile_baseline_influence
 from engine.competition_rankings import run_competitor_rankings, W_INFLUENCE
 
 ADMIN_LOGIN = {"username": "dev_admin", "password": "admin123"}
@@ -406,23 +406,32 @@ def test_combined_score_differs_with_vs_without_cis(seed_data):
         without_cis = {r.competitor_name: (float(r.combined_score), float(r.influence_score))
                        for r in _overall_rankings(db, sid, today)}
 
+        checked = 0
         for name, (comb_with, infl_with) in with_cis.items():
             if infl_with <= 0 or name not in without_cis:
                 continue
             comb_without, infl_without = without_cis[name]
             # Zonder CIS-rijen valt Influence terug op de profiel-baseline
-            # (of 0 zonder profiel) — niet langer hard 0 (zie taak
-            # "Influence-score niet stilletjes terug naar 0").
+            # (of 0 zonder profiel) — nooit stilletjes op de oude waarde.
+            prof = db.query(models.CompetitorProfile).filter(
+                models.CompetitorProfile.shop_id == sid,
+                models.CompetitorProfile.competitor_name == name,
+            ).first()
+            expected_infl = profile_baseline_influence(prof) if prof else 0.0
+            assert abs(infl_without - expected_infl) < 0.001, (
+                f"Influence van {name} is {infl_without} zonder CIS-rijen; "
+                f"verwacht profiel-baseline {expected_infl}"
+            )
+            # De Influence-factor moet aantoonbaar meetellen: het verschil in
+            # combined_score is exact W_INFLUENCE * (influence-verschil).
             expected_delta = W_INFLUENCE * (infl_with - infl_without)
             assert abs((comb_with - comb_without) - expected_delta) < 0.001, (
                 f"combined_score-verschil {comb_with - comb_without:.4f} wijkt af van "
-                f"W_INFLUENCE*(Δinfluence) = {expected_delta:.4f} voor {name}"
+                f"W_INFLUENCE*Δinfluence = {expected_delta:.4f} voor {name} — "
+                f"de Influence-factor telt niet (correct) meer mee"
             )
-            if abs(infl_with - infl_without) > 1e-9:
-                assert comb_with != comb_without, (
-                    f"REGRESSIE: combined_score van {name} identiek met en zonder CIS-data "
-                    f"({comb_with}) — de Influence-factor telt niet meer mee"
-                )
+            checked += 1
+        assert checked > 0, "Geen enkele concurrent gecontroleerd; regressietest meet niets"
     finally:
         # Herstel CIS-data voor volgende tests in de module
         try:

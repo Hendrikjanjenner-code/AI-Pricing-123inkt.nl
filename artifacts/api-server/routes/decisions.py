@@ -361,6 +361,16 @@ def transition_decision(
         models.DecisionScenario.id == d.recommended_scenario_id
     ).first()
 
+    # Doorzetten naar prijsuitvoering (taak: signaal → scenario → goedkeuring
+    # → uitvoering). Geen autonome prijswijziging: er wordt alléén een
+    # goedgekeurde aanbeveling klaargezet die het bestaande, menselijk
+    # gestuurde execution-pad (dry-run/export/push) volgt.
+    execution_snapshot: dict = {}
+    if to_status == "approved":
+        execution_snapshot = _stage_price_execution(db, d, rec, current_user.username)
+    elif to_status == "executed":
+        execution_snapshot = _link_execution_job(db, d)
+
     db.add(models.DecisionEvent(
         decision_id=d.id,
         from_status=from_status,
@@ -373,15 +383,91 @@ def transition_decision(
             "expected_margin": rec.expected_margin if rec else None,
             "expected_revenue": rec.expected_revenue if rec else None,
             "confidence": rec.confidence if rec else None,
+            **execution_snapshot,
         },
     ))
     _audit(db, current_user.username, f"decision_{to_status}", "decision", str(d.id),
            f"{STATUS_NL.get(from_status, from_status)} → {STATUS_NL[to_status]}" + (f": {note}" if note else ""))
     db.commit()
     db.refresh(d)
-    return _decision_out(d, include_scenarios=True, db=db)
+    out = _decision_out(d, include_scenarios=True, db=db)
+    if execution_snapshot:
+        out["execution"] = execution_snapshot
+    return out
+
+# Scenario-typen die bij goedkeuring een uitvoerbare prijsregel opleveren
+PRICE_SCENARIO_TYPES = {"price_increase", "price_decrease"}
 
 
+def _stage_price_execution(
+    db: Session,
+    d: models.Decision,
+    scenario: Optional[models.DecisionScenario],
+    username: str,
+) -> dict:
+    """
+    Zet bij goedkeuring van een SKU-prijsscenario automatisch een goedgekeurde
+    aanbeveling klaar in FactPricingRecommendationDaily, zodat die meegaat in
+    het bestaande execution-framework (dry-run / export / push blijft een
+    menselijke actie). Idempotent per beslissing via source_decision_id.
+    """
+    if (
+        d.entity_type != "sku"
+        or scenario is None
+        or scenario.scenario_type not in PRICE_SCENARIO_TYPES
+    ):
+        return {}
+
+    params = scenario.parameters or {}
+    new_price = params.get("new_price")
+    if new_price is None:
+        return {"execution_staged": False, "execution_note": "Geen new_price in scenario-parameters; geen prijsregel klaargezet"}
+
+    product = db.query(models.DimProduct).filter(
+        models.DimProduct.sku_id == d.entity_id,
+        models.DimProduct.shop_id == d.shop_id,
+    ).first()
+    current_price = float(product.current_price) if product is not None and product.current_price is not None else None
+
+    reason_code = f"decision_{scenario.scenario_type}"
+
+    existing = db.query(models.FactPricingRecommendationDaily).filter(
+        models.FactPricingRecommendationDaily.source_decision_id == d.id,
+    ).first()
+    rec_row = existing or models.FactPricingRecommendationDaily(
+        source_decision_id=d.id,
+        sku_id=d.entity_id,
+        shop_id=d.shop_id,
+        date=d.run_date or datetime.utcnow().date(),
+    )
+    rec_row.date = datetime.utcnow().date()
+    rec_row.current_price = current_price
+    rec_row.recommended_price = new_price
+    if current_price:
+        rec_row.recommended_change_pct = round((float(new_price) - current_price) / current_price * 100, 2)
+    rec_row.expected_units = scenario.expected_units
+    rec_row.expected_revenue = scenario.expected_revenue
+    rec_row.expected_margin = scenario.expected_margin
+    rec_row.confidence_score = scenario.confidence
+    rec_row.reason_code = reason_code
+    rec_row.strategy_type = "decision_engine"
+    rec_row.model_version = d.ai_model_version
+    rec_row.approval_status = "approved"
+    rec_row.approved_by = username
+    rec_row.approved_at = datetime.utcnow()
+    if existing is None:
+        db.add(rec_row)
+    db.flush()
+
+    _audit(db, username, "decision_execution_staged", "pricing_recommendation", str(rec_row.id),
+           f"Beslissing #{d.id} goedgekeurd: prijsregel klaargezet voor uitvoering "
+           f"({d.entity_id}: €{current_price if current_price is not None else '?'} → €{float(new_price):.2f})")
+
+    return {
+        "execution_staged": True,
+        "recommendation_id": rec_row.id,
+        "new_price": float(new_price),
+    }
 def _get_or_404(decision_id: int, db: Session, shop_id: Optional[int] = None) -> models.Decision:
     """Shop-scoped lookup: een beslissing van een andere shop bestaat voor
     deze scope niet (404), zodat IDs niet cross-tenant te raden zijn."""
@@ -404,3 +490,44 @@ def _audit(db: Session, user: str, action: str, entity_type: str, entity_id: str
         details=details,
         timestamp=datetime.utcnow(),
     ))
+
+def _link_execution_job(db: Session, d: models.Decision) -> dict:
+    """
+    'Markeer als uitgevoerd' koppelt terug naar de execution-job: zoek de meest
+    recente uitvoering-regel die exact naar de klaargezette aanbeveling verwijst
+    (PriceExecutionLine.recommendation_id). Voor beslissingen met een gekoppelde
+    prijsregel is zo'n execution-job (niet dry-run) verplicht — een job voor
+    een andere aanbeveling van dezelfde SKU telt niet.
+    """
+    staged = db.query(models.FactPricingRecommendationDaily).filter(
+        models.FactPricingRecommendationDaily.source_decision_id == d.id,
+    ).first()
+    if staged is None:
+        return {}  # geen prijsbeslissing — executed blijft toegestaan zoals voorheen
+
+    from services.execution_engine import DRY_RUN
+    row = (
+        db.query(models.PriceExecutionLine, models.PriceExecutionJob)
+        .join(models.PriceExecutionJob, models.PriceExecutionJob.job_id == models.PriceExecutionLine.job_id)
+        .filter(
+            models.PriceExecutionLine.recommendation_id == staged.id,
+            models.PriceExecutionLine.status == "goedgekeurd",
+            models.PriceExecutionJob.execution_mode != DRY_RUN,
+        )
+        .order_by(desc(models.PriceExecutionJob.created_at))
+        .first()
+    )
+    if row is None:
+        raise HTTPException(
+            409,
+            "Kan niet als uitgevoerd markeren: er is nog geen execution-job "
+            "(export of push) voor deze prijsregel. Voer eerst de uitvoering uit "
+            "via Prijsuitvoering.",
+        )
+    line, job = row
+    return {
+        "execution_job_id": job.job_id,
+        "execution_line_id": line.line_id,
+        "execution_mode": job.execution_mode,
+        "recommendation_id": staged.id,
+    }

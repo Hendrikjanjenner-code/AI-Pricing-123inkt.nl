@@ -275,6 +275,10 @@ class FactPricingRecommendationDaily(Base):
     model_version = Column(String(50))
     override_price = Column(Numeric(10, 4))
     override_reason = Column(Text)
+    # Herkomst: gezet wanneer deze aanbeveling automatisch is aangemaakt bij
+    # goedkeuring van een Decision (beslisketen: signaal → scenario →
+    # goedkeuring → uitvoering). NULL voor reguliere engine-aanbevelingen.
+    source_decision_id = Column(Integer, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -700,6 +704,10 @@ class PriceExecutionLine(Base):
     status = Column(String(50), default="gepland")
     reason_code = Column(String(100))
     rollback_price = Column(Numeric(10, 4))
+    # Herkomst: de aanbeveling (fact_pricing_recommendation_daily.id) waaruit
+    # deze regel is opgebouwd — nodig om een beslissing bewijsbaar aan de
+    # juiste execution-job te koppelen.
+    recommendation_id = Column(Integer, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

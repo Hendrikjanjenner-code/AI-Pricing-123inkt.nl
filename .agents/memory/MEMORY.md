@@ -28,6 +28,7 @@
 - [Test-shop teardown FK](test-suite-conventions.md) — request middleware writes cost-usage rows per shop; any teardown that deletes a shop must delete those rows first or FK-fails only in full-suite runs.
 - [PIM source ownership](pim-source-ownership.md) — attribute values keep a source; cross-source writes must warn, never silently overwrite (DRS stays master).
 - [Feed-sync failure visibility](feed-sync-visibility.md) — failed syncs reuse ConnectorConfig.last_test_* (no schema change); feed response diagnostics + sanity checks live in the connector, reset per read cycle.
+- [Parallel task merges vs validation](parallel-task-validation.md) — completion validation runs the full suite on merged state; sibling-task regressions (dropped constants, changed API shapes) land on you — fix minimally, note in drift_reason.
 - [Stale lib d.ts vs artifact typecheck](typecheck-libs-stale.md) — TS2305 from @workspace pkgs means run root `pnpm run typecheck:libs` first; refs use built dist, not src.
 - [Few-shot FTS retrieval](fewshot-fts.md) — dutch FTS primary + Jaccard fallback; dutch stemmer quirk: 'marges' does NOT stem to 'marg'.
 - [DQ registry test isolation](dq-registry-test-isolation.md) — never call _sync_issue_registry/_detect_issues with a replaced/empty detection list in shared-DB tests; wrap the real detector and add a synthetic issue, or unrelated registry rows get auto-resolved.

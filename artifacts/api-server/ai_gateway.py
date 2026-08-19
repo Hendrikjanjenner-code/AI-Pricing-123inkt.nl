@@ -1595,6 +1595,13 @@ def _fewshot_rows_overlap(db: Session, question: str, limit: int) -> list[dict]:
     scored.sort(key=lambda t: t[0], reverse=True)
     return _dedupe_examples(scored, limit)
 
+# Minimale ts_rank om een FTS-match als relevant te beschouwen; filtert
+# toevalstreffers op één stopwoord-achtig lexeem uit de OR-query weg.
+# ts_rank met OR-semantiek geeft lage absolute waarden (één gedeeld lexeem
+# op een korte vraag ≈ 0.003–0.008), dus de drempel ligt daar net onder.
+FTS_MIN_RANK = 0.003
+
+
 def _fewshot_rows_fts(db: Session, question: str, limit: int) -> list[dict]:
     """Primaire retrieval: Postgres full-text search met Nederlandse stemmer.
 

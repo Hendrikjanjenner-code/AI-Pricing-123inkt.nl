@@ -139,8 +139,11 @@ def test_generation_scenarios_why_and_approval_flow(client, admin_headers, db):
         t = lambda body: client.post(f"/api/decisions/{did}/transition", json=body, headers=admin_headers)
         assert t({"to_status": "in_review"}).json()["status"] == "in_review"
         assert t({"to_status": "rejected"}).status_code == 400  # note verplicht
-        # approve met alternatief scenario
-        alt = next(s for s in det["scenarios"] if not s["is_recommended"])
+        # approve met alternatief (niet-prijs) scenario — prijsscenario's volgen
+        # sinds de executiekoppeling het execution-pad (zie aparte test)
+        alt = next(s for s in det["scenarios"]
+                   if not s["is_recommended"]
+                   and s["scenario_type"] not in ("price_increase", "price_decrease"))
         resp = t({"to_status": "approved", "scenario_id": alt["id"]}).json()
         assert resp["status"] == "approved"
         assert resp["recommended_scenario_id"] == alt["id"]
@@ -156,7 +159,93 @@ def test_generation_scenarios_why_and_approval_flow(client, admin_headers, db):
     finally:
         _cleanup(db, [sku])
 
+def test_approved_price_scenario_flows_into_execution(client, admin_headers, db):
+    """Goedkeuring van een prijsscenario zet een goedgekeurde prijsregel klaar;
+    'markeer als uitgevoerd' vereist en koppelt de execution-job."""
+    sku = f"TDEC-{uuid.uuid4().hex[:8]}"
+    job_id = None
+    try:
+        _seed_product(db, sku)
+        _seed_signal(db, sku)
+        db.commit()
 
+        r = client.post("/api/decisions/run", headers=admin_headers)
+        assert r.status_code == 200, r.text
+        items = client.get("/api/decisions", params={"entity_id": sku}, headers=admin_headers).json()["items"]
+        did = items[0]["id"]
+        det = client.get(f"/api/decisions/{did}", headers=admin_headers).json()
+
+        price_sc = next(s for s in det["scenarios"] if s["scenario_type"] == "price_increase")
+        assert price_sc["parameters"].get("new_price")
+
+        t = lambda body: client.post(f"/api/decisions/{did}/transition", json=body, headers=admin_headers)
+        assert t({"to_status": "in_review"}).status_code == 200
+        resp = t({"to_status": "approved", "scenario_id": price_sc["id"]})
+        assert resp.status_code == 200, resp.text
+        execution = resp.json().get("execution")
+        assert execution and execution["execution_staged"] is True
+        rec_id = execution["recommendation_id"]
+
+        # Aanbeveling staat klaar in het bestaande execution-pad
+        rec = db.get(models.FactPricingRecommendationDaily, rec_id)
+        assert rec.source_decision_id == did
+        assert rec.approval_status == "approved"
+        assert float(rec.recommended_price) == price_sc["parameters"]["new_price"]
+
+        # Zonder execution-job kan de beslissing niet 'uitgevoerd' worden
+        blocked = t({"to_status": "executed"})
+        assert blocked.status_code == 409, blocked.text
+
+        # Regressie: een export voor een ANDERE aanbeveling van dezelfde SKU
+        # (oudere datum) telt niet als uitvoering van deze beslissing
+        decoy_date = date.today() - timedelta(days=3)
+        decoy = models.FactPricingRecommendationDaily(
+            date=decoy_date, sku_id=sku, shop_id=1,
+            current_price=20.0, recommended_price=20.50,
+            confidence_score=0.9, reason_code="decoy",
+            approval_status="approved", approved_by="test",
+        )
+        db.add(decoy)
+        db.commit()
+        exp_decoy = client.post("/api/execution/export-csv",
+                                json={"datum": str(decoy_date)}, headers=admin_headers)
+        assert exp_decoy.status_code == 200, exp_decoy.text
+        still_blocked = t({"to_status": "executed"})
+        assert still_blocked.status_code == 409, still_blocked.text
+
+        # Menselijk gestuurde uitvoering: export maakt een job aan
+        exp = client.post("/api/execution/export-csv", json={}, headers=admin_headers)
+        assert exp.status_code == 200, exp.text
+        line = (
+            db.query(models.PriceExecutionLine)
+            .filter(models.PriceExecutionLine.recommendation_id == rec_id)
+            .order_by(models.PriceExecutionLine.line_id.desc())
+            .first()
+        )
+        assert line is not None and line.status == "goedgekeurd"
+        job_id = line.job_id
+
+        # Nu wél uitvoerbaar; event koppelt terug naar de job (audit compleet)
+        done = t({"to_status": "executed"})
+        assert done.status_code == 200, done.text
+        hist = client.get(f"/api/decisions/{did}/history", headers=admin_headers).json()
+        exec_event = next(e for e in hist["events"] if e["to_status"] == "executed")
+        assert exec_event["values_snapshot"]["execution_job_id"] == job_id
+        assert exec_event["values_snapshot"]["recommendation_id"] == rec_id
+    finally:
+        db.rollback()
+        sku_job_ids = [
+            l.job_id for l in db.query(models.PriceExecutionLine)
+            .filter(models.PriceExecutionLine.sku_id == sku).all()
+        ]
+        if sku_job_ids:
+            db.query(models.PriceExecutionLine).filter(models.PriceExecutionLine.job_id.in_(sku_job_ids)).delete(synchronize_session=False)
+            db.query(models.PriceExecutionJob).filter(models.PriceExecutionJob.job_id.in_(sku_job_ids)).delete(synchronize_session=False)
+        db.query(models.FactPricingRecommendationDaily).filter(
+            models.FactPricingRecommendationDaily.sku_id == sku
+        ).delete(synchronize_session=False)
+        db.commit()
+        _cleanup(db, [sku])
 def test_shop_isolation_idor(client, admin_headers, db):
     """Beslissingen van een andere shop zijn niet zichtbaar of muteerbaar."""
     sku = f"TDEC-{uuid.uuid4().hex[:8]}"

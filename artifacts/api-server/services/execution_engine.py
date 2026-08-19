@@ -183,6 +183,7 @@ def create_execution_job(
         db_line = PriceExecutionLine(
             job_id=job.job_id,
             sku_id=l["sku_id"],
+            recommendation_id=l.get("recommendation_id"),
             old_price=l.get("old_price"),
             new_price=l.get("new_price"),
             change_pct=change_pct,
