@@ -1090,6 +1090,107 @@ function SalesUploadCard() {
   );
 }
 
+function SupplierContentUploadCard() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [uploading, setUploading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+
+  const downloadTemplate = async () => {
+    setDownloading(true);
+    try {
+      const res = await fetch(`${BASE}/api/uploads/supplier-content/template`, {
+        headers: { Authorization: `Bearer ${TOKEN()}` },
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "supplier_content_sjabloon.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      toast({ title: "Sjabloon downloaden mislukt", description: err.message, variant: "destructive" });
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const handleBestand = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (e.target) e.target.value = "";
+    setImportResult(null);
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", f, f.name);
+      const res = await fetch(`${BASE}/api/uploads/supplier-content`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${TOKEN()}` },
+        body: formData,
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const result = await res.json();
+      setImportResult({ rows_processed: result.rows_processed ?? 0, rows_failed: result.rows_failed ?? 0, warnings: result.warnings ?? [] });
+      queryClient.invalidateQueries({ queryKey: ["/api/uploads"] });
+    } catch (err: any) {
+      toast({ title: "Import mislukt", description: err.message, variant: "destructive" });
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <Card className={importResult ? (importResult.rows_failed > 0 || importResult.warnings.length > 0 ? "border-amber-300" : "border-emerald-300") : ""}>
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Package className="h-5 w-5 text-primary" />
+              Leveranciers-content (PIM)
+            </CardTitle>
+            <CardDescription className="text-xs mt-1">
+              Attribuutwaarden per SKU (kolomnamen = attribuutcodes). Onbekende kolommen worden
+              gerapporteerd en niet geïmporteerd — gebruik het sjabloon voor de geldige codes.
+            </CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {importResult && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-3 text-sm">
+              <span className="text-emerald-600 flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />{importResult.rows_processed} verwerkt</span>
+              {importResult.rows_failed > 0 && <span className="text-red-500 flex items-center gap-1"><XCircle className="w-3 h-3" />{importResult.rows_failed} mislukt</span>}
+            </div>
+            {importResult.warnings.length > 0 && (
+              <div className="space-y-1">
+                {importResult.warnings.slice(0, 5).map((w, i) => (
+                  <div key={i} className="text-xs text-amber-700 flex items-start gap-1"><AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />{w}</div>
+                ))}
+                {importResult.warnings.length > 5 && <div className="text-xs text-muted-foreground">+{importResult.warnings.length - 5} meer waarschuwingen</div>}
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+      <CardFooter className="flex gap-2 flex-wrap">
+        <div className="relative flex-1">
+          <Input type="file" accept=".csv,.xlsx" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" onChange={handleBestand} disabled={uploading} />
+          <Button variant="outline" className="w-full text-sm" size="sm" disabled={uploading}>
+            {uploading ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Importeren…</> : <><Upload className="mr-2 h-4 w-4" />CSV of XLSX kiezen</>}
+          </Button>
+        </div>
+        <Button variant="ghost" size="sm" onClick={downloadTemplate} disabled={downloading} className="shrink-0">
+          {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}Sjabloon
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
 function TrafficUploadCard() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -1334,6 +1435,7 @@ export default function Gegevensintegratie() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <SalesUploadCard />
           <TrafficUploadCard />
+          <SupplierContentUploadCard />
         </div>
       </div>
 

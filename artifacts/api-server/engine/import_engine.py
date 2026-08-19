@@ -100,6 +100,12 @@ def decode_csv_bytes(content: bytes) -> str:
         return content.decode("latin-1")
 
 
+class RowList(list):
+    """Lijst van rij-dicts die ook de originele kolomkoppen bewaart, zodat
+    processors kolomvalidatie kunnen doen — óók bij een bestand zonder datarijen."""
+    headers: list[str] = []
+
+
 def xlsx_worksheet_to_rows(ws) -> list[dict]:
     """
     Convert a single openpyxl worksheet object into row dicts (lower-cased
@@ -108,7 +114,8 @@ def xlsx_worksheet_to_rows(ws) -> list[dict]:
     """
     rows_iter = ws.iter_rows(values_only=True)
     headers = [str(c).strip().lower() if c is not None else "" for c in next(rows_iter, [])]
-    rows: list[dict] = []
+    rows: RowList = RowList()
+    rows.headers = headers
     for row in rows_iter:
         if all(v is None or str(v).strip() == "" for v in row):
             continue
@@ -165,7 +172,7 @@ def xls_sheet_to_rows(wb, sheet) -> list[dict]:
     import xlrd
 
     if sheet.nrows == 0:
-        return []
+        return RowList()
 
     def _cell_to_str(cell) -> str:
         if cell.ctype == xlrd.XL_CELL_EMPTY or cell.value is None:
@@ -186,7 +193,8 @@ def xls_sheet_to_rows(wb, sheet) -> list[dict]:
         return str(cell.value).strip()
 
     headers = [_cell_to_str(sheet.cell(0, c)).lower() for c in range(sheet.ncols)]
-    rows: list[dict] = []
+    rows: RowList = RowList()
+    rows.headers = [h.strip() for h in headers]
     for r in range(1, sheet.nrows):
         values = [_cell_to_str(sheet.cell(r, c)) for c in range(sheet.ncols)]
         if all(v == "" for v in values):
@@ -228,7 +236,9 @@ def file_to_rows(content: bytes, filename: str, warnings: list | None = None) ->
     text = decode_csv_bytes(content)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     reader = csv.DictReader(io.StringIO(text))
-    return [{(k or "").strip().lower(): v for k, v in row.items()} for row in reader]
+    rows = RowList({(k or "").strip().lower(): v for k, v in row.items()} for row in reader)
+    rows.headers = [(h or "").strip().lower() for h in (reader.fieldnames or [])]
+    return rows
 
 
 # ── Waarde-parsers ───────────────────────────────────────────────────────────

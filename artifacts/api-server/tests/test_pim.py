@@ -194,7 +194,44 @@ def test_ai_approval_respects_source_ownership(client, admin_headers, seeded_sku
                      json={"action": "approve"})
     assert r.status_code == 409
 
+def test_supplier_import_unknown_columns_warn(client, admin_headers, seeded_sku):
+    # Onbekende kolommen ('kleur' i.p.v. 'color') mogen niet stil verdwijnen (§23)
+    csv = f"sku_id,kleur,materiaal,material\n{seeded_sku},ivoor,karton,karton\n"
+    r = client.post("/api/uploads/supplier-content",
+                    headers=admin_headers,
+                    files={"file": ("supplier.csv", io.BytesIO(csv.encode()), "text/csv")})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["rows_processed"] == 1
+    # Waarschuwing noemt beide onbekende kolommen en verwijst naar het sjabloon
+    w = [w for w in data["warnings"] if "Onbekende kolommen" in w]
+    assert len(w) == 1
+    assert "kleur" in w[0] and "materiaal" in w[0]
+    assert "sjabloon" in w[0].lower()
+    # ...en staat ook in het ImportJob-foutlog
+    rj = client.get(f"/api/uploads/{data['job_id']}", headers=admin_headers)
+    if rj.status_code == 200:
+        job = rj.json()
+        log_text = str(job.get("error_log") or "") + str(job.get("warnings_json") or "")
+        assert "Onbekende kolommen" in log_text
+    else:
+        db = SessionLocal()
+        try:
+            job = db.query(models.ImportJob).get(data["job_id"])
+            assert any("Onbekende kolommen" in (e.get("bericht") or "")
+                       for e in (job.error_log or []))
+        finally:
+            db.close()
 
+def test_supplier_import_unknown_header_without_rows_warns(client, admin_headers):
+    # Header-only bestand: waarschuwing moet er tóch komen (geen stille no-op)
+    csv = "sku_id,kleur\n"
+    r = client.post("/api/uploads/supplier-content",
+                    headers=admin_headers,
+                    files={"file": ("supplier.csv", io.BytesIO(csv.encode()), "text/csv")})
+    assert r.status_code == 200, r.text
+    w = [w for w in r.json()["warnings"] if "Onbekende kolommen" in w]
+    assert len(w) == 1 and "kleur" in w[0]
 def test_supplier_cannot_claim_empty_drs_field(client, admin_headers, seeded_sku):
     """Leeg DRS-owned veld: leverancier mag het niet vullen; DRS-sync wel."""
     # SKU2 heeft geen ean in DimProduct → 'ean' (DRS-owned) is leeg
@@ -499,3 +536,45 @@ def test_create_requires_admin_role(client):
     for path in ("/api/pim/attributes", "/api/pim/channels", "/api/pim/families"):
         resp = client.post(path, headers=headers, json={"code": "x", "name": "X"})
         assert resp.status_code == 403, f"{path}: {resp.status_code}"
+
+def test_supplier_import_unknown_header_only_xlsx_warns(client, admin_headers):
+    # Header-only XLSX: onbekende kolom moet ook zonder datarijen gemeld worden
+    import openpyxl
+    wb = openpyxl.Workbook()
+    wb.active.append(["sku_id", "kleur"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    r = client.post("/api/uploads/supplier-content",
+                    headers=admin_headers,
+                    files={"file": ("supplier.xlsx", buf,
+                                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert r.status_code == 200, r.text
+    w = [w for w in r.json()["warnings"] if "Onbekende kolommen" in w]
+    assert len(w) == 1 and "kleur" in w[0]
+
+
+def test_supplier_content_template_download(client, admin_headers):
+    r = client.get("/api/uploads/supplier-content/template", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    assert "text/csv" in r.headers["content-type"]
+    assert "attachment" in r.headers.get("content-disposition", "")
+    header = r.text.strip().splitlines()[0].split(",")
+    assert header[0] == "sku_id"
+    # geldige attribuutcodes uit pim_attribute_definition
+    assert "color" in header and "description" in header and "material" in header
+
+def test_supplier_import_unknown_header_blank_cells_and_bad_sku_warns(client, admin_headers):
+    # Onbekende kolom met lege cel + rij die op SKU-check strandt: nog steeds waarschuwen
+    csv = "sku_id,kleur,color\nBESTAAT-NIET-123,,wit\n"
+    r = client.post("/api/uploads/supplier-content",
+                    headers=admin_headers,
+                    files={"file": ("supplier.csv", io.BytesIO(csv.encode()), "text/csv")})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["rows_failed"] == 1  # onbekende SKU
+    w = [w for w in data["warnings"] if "Onbekende kolommen" in w]
+    assert len(w) == 1
+    onbekend_deel = w[0].split("Geldige")[0]
+    assert "kleur" in onbekend_deel
+    assert "color" not in onbekend_deel.replace("kleur", "")  # bekende kolom niet gemeld

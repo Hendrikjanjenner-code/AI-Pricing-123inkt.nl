@@ -1291,8 +1291,10 @@ def _dedupe_rows(rows: list[dict], warnings: list) -> tuple[list[dict], int]:
     rijen als duplicaat zijn overgeslagen. Zo laat één dubbele rij niet de hele
     upload op de primary key mislukken.
     """
+    from engine.import_engine import RowList
     seen: dict[tuple, int] = {}
-    unique: list[dict] = []
+    unique: list[dict] = RowList()
+    unique.headers = list(getattr(rows, "headers", None) or [])
     dups = 0
     for i, row in enumerate(rows, start=1):
         norm = {k.lower().strip(): (v or "").strip() for k, v in row.items() if isinstance(k, str)}
@@ -1331,6 +1333,15 @@ def _process_supplier_content(rows, db: Session):
             .filter(models.PimAttributeDefinition.active == True).all()}  # noqa: E712
 
     processed, failed, warnings = 0, 0, []
+    # Kolomvalidatie op basis van de headers zelf (§23) — onafhankelijk van
+    # rij-geldigheid of lege cellen, en ook bij een bestand zonder datarijen.
+    headers = list(getattr(rows, "headers", None) or [])
+    if not headers and rows:
+        headers = [k.lower().strip() for k in rows[0].keys() if isinstance(k, str)]
+    unknown_columns: set[str] = {
+        h for h in headers
+        if h and h not in ("sku_id", "own_sku_id") and h not in defs
+    }
     for i, row in enumerate(rows, start=1):
         try:
             if not _enforce_row_validation(row, i, warnings):
@@ -1356,7 +1367,9 @@ def _process_supplier_content(rows, db: Session):
                     continue
                 d = defs.get(col)
                 if d is None:
-                    continue  # onbekende kolommen negeren (geen attribuut)
+                    # Onbekende kolom (bv. via afwijkende rij-keys): ook rapporteren
+                    unknown_columns.add(col)
+                    continue
                 existing = db.query(models.PimAttributeValue).filter(
                     models.PimAttributeValue.sku_id == sku_id,
                     models.PimAttributeValue.attribute_id == d.id).first()
@@ -1381,10 +1394,37 @@ def _process_supplier_content(rows, db: Session):
         except Exception as e:
             warnings.append(f"Rij {i}: {str(e)}")
             failed += 1
+    if unknown_columns:
+        geldige = ", ".join(sorted(defs.keys()))
+        warnings.insert(0, (
+            f"Onbekende kolommen genegeerd (geen bekend attribuut): "
+            f"{', '.join(sorted(unknown_columns))}. Waarden in deze kolommen zijn NIET "
+            f"geïmporteerd. Geldige attribuutcodes: {geldige}. "
+            f"Download het CSV-sjabloon via /api/uploads/supplier-content/template."
+        ))
     db.commit()
     return processed, failed, warnings
 
-
+@router.get("/supplier-content/template")
+def supplier_content_template(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
+):
+    """CSV-sjabloon voor de leveranciers-contentimport: sku_id + alle geldige
+    (actieve) attribuutcodes uit pim_attribute_definition als kolomkoppen."""
+    from engine import pim_engine
+    pim_engine.ensure_defaults(db)
+    codes = [d.code for d in db.query(models.PimAttributeDefinition)
+             .filter(models.PimAttributeDefinition.active == True)  # noqa: E712
+             .order_by(models.PimAttributeDefinition.code).all()]
+    header = ",".join(["sku_id"] + codes)
+    csv_content = header + "\n"
+    from fastapi.responses import Response
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="supplier_content_sjabloon.csv"'},
+    )
 @router.post("/supplier-content")
 async def upload_supplier_content(
     file: UploadFile = File(...),
