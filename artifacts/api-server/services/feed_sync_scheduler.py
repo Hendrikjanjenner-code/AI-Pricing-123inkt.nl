@@ -121,6 +121,14 @@ def _run_sync_with_retries(max_retries: int,
     Probeer de sync tot `max_retries` keer met exponentiële backoff. Een mislukte
     sync laat de bestaande data altijd intact (zie feed_ingest), dus opnieuw
     proberen is veilig. Deze functie gooit nooit.
+
+    LET OP: retries bij een tijdelijke verbindingsfout (ConnectorError) worden
+    tegenwoordig door de sync ZELF gedaan (routes/connectors.py,
+    `_ingest_feed_with_retry`): status 'error' is dus al het eindresultaat ná
+    de interne retries. Hier niet nogmaals retryen — dat zou de pogingen
+    vermenigvuldigen (12 i.p.v. 4), per poging een extra fout-ImportJob
+    schrijven en de nachtsync ruim een uur laten hangen. De backoff-lus hier
+    vangt alleen ONVERWACHTE exceptions uit de cyclus zelf op.
     """
     import time
 
@@ -139,13 +147,23 @@ def _run_sync_with_retries(max_retries: int,
                     counts.get("producten_nieuw", 0) + counts.get("producten_bijgewerkt", 0),
                 )
                 return
-            # not_configured of error → loggen en (bij error) opnieuw proberen
             logger.warning(
                 "Feed-sync poging %d/%d gaf status '%s': %s",
                 attempt, max_retries, status, result.get("message", ""),
             )
             if status == "not_configured":
                 return  # opnieuw proberen heeft geen zin
+            if status == "error":
+                # De sync heeft transient fouten intern al geretried
+                # (_ingest_feed_with_retry) en pas de LAATSTE mislukking als
+                # ImportJob 'fout' gepersisteerd. Hier nogmaals proberen zou
+                # de pogingen stapelen en extra fout-jobs schrijven.
+                logger.error(
+                    "Feed-sync definitief mislukt (interne retries uitgeput). "
+                    "Laatst-goede data blijft actief; volgende poging bij het "
+                    "volgende interval."
+                )
+                return
         except Exception as exc:  # noqa: BLE001 — scheduler mag nooit crashen
             logger.exception("Feed-sync poging %d/%d gooide een fout: %s", attempt, max_retries, exc)
 

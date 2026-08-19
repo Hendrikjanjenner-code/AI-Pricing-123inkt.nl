@@ -197,6 +197,199 @@ def test_failed_sync_persists_importjob_and_connector_status(monkeypatch, db):
         db.commit()
 
 
+# ── Automatische retries bij tijdelijke ConnectorError (in de sync zelf) ────
+
+def _patch_sleep(monkeypatch):
+    """Vervang time.sleep en verzamel de gevraagde vertragingen."""
+    import time as _time
+    delays: list = []
+    monkeypatch.setattr(_time, "sleep", lambda s: delays.append(s))
+    return delays
+
+
+def test_ingest_retry_succeeds_after_transient_error(monkeypatch, db):
+    """Een tijdelijke verbindingsfout wordt transparant opgelost: succes na
+    2 mislukte pogingen, met exponentiële backoff tussen de pogingen."""
+    import feed_ingest
+    import routes.connectors as rc
+
+    delays = _patch_sleep(monkeypatch)
+    monkeypatch.setenv("FEED_INGEST_MAX_RETRIES", "3")
+    monkeypatch.setenv("FEED_INGEST_RETRY_BACKOFF", "300")
+
+    calls = {"n": 0}
+
+    def flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise ConnectorError("PriceShape feed niet bereikbaar: netwerkhik")
+        return {"ok": True}
+
+    monkeypatch.setattr(feed_ingest, "ingest_feed", flaky)
+    res = rc._ingest_feed_with_retry(db)
+    assert res == {"ok": True}
+    assert calls["n"] == 3
+    assert delays == [300, 600]  # exponentiële backoff
+
+
+def test_ingest_retry_gives_up_after_max_retries(monkeypatch, db):
+    """Faalt élke poging, dan loopt pas de laatste fout door (max 3 retries)."""
+    import feed_ingest
+    import routes.connectors as rc
+
+    delays = _patch_sleep(monkeypatch)
+    monkeypatch.setenv("FEED_INGEST_MAX_RETRIES", "3")
+    monkeypatch.setenv("FEED_INGEST_RETRY_BACKOFF", "300")
+
+    calls = {"n": 0}
+
+    def boom(*args, **kwargs):
+        calls["n"] += 1
+        raise ConnectorError("PriceShape feed niet bereikbaar: CDN-piek")
+
+    monkeypatch.setattr(feed_ingest, "ingest_feed", boom)
+    with pytest.raises(ConnectorError):
+        rc._ingest_feed_with_retry(db)
+    assert calls["n"] == 4  # 1 poging + 3 retries
+    assert len(delays) == 3  # geen slaap na de laatste mislukking
+
+
+def test_ingest_retry_skips_config_and_non_connector_errors(monkeypatch, db):
+    """Configuratiefouten en niet-ConnectorErrors worden niet geretried."""
+    import feed_ingest
+    import routes.connectors as rc
+
+    delays = _patch_sleep(monkeypatch)
+
+    calls = {"n": 0}
+
+    def not_configured(*args, **kwargs):
+        calls["n"] += 1
+        raise ConnectorError("PriceShape feed-URL niet geconfigureerd.")
+
+    monkeypatch.setattr(feed_ingest, "ingest_feed", not_configured)
+    with pytest.raises(ConnectorError):
+        rc._ingest_feed_with_retry(db)
+    assert calls["n"] == 1
+
+    calls["n"] = 0
+
+    def value_error(*args, **kwargs):
+        calls["n"] += 1
+        raise ValueError("0 producten")
+
+    monkeypatch.setattr(feed_ingest, "ingest_feed", value_error)
+    with pytest.raises(ValueError):
+        rc._ingest_feed_with_retry(db)
+    assert calls["n"] == 1
+    assert delays == []
+
+
+def test_run_sync_succeeds_after_retry_writes_ok_importjob(monkeypatch, db):
+    """Succes na een retry → sync status 'ok' en ImportJob 'geimporteerd'
+    (géén fout-job voor de tussentijdse mislukkingen)."""
+    import feed_ingest
+    import routes.connectors as rc
+
+    _patch_sleep(monkeypatch)
+    monkeypatch.setenv("FEED_INGEST_RETRY_BACKOFF", "0")
+
+    calls = {"n": 0}
+
+    def flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ConnectorError("PriceShape feed niet bereikbaar: netwerkhik")
+        return {"products_total": 2, "products_new": 1, "products_updated": 1,
+                "own_prices": 2, "competitor_rows": 5, "offer_rows": 0,
+                "skipped_by_settings": 0}
+
+    monkeypatch.setattr(feed_ingest, "ingest_feed", flaky)
+
+    prev = db.query(models.ConnectorConfig).filter(
+        models.ConnectorConfig.connector_name == "priceshape").first()
+    prev_state = (prev.last_test_status, prev.last_test_message,
+                  prev.last_tested_at) if prev else None
+
+    user = SimpleNamespace(username="test-feed-retry")
+    try:
+        result = rc._run_sync("priceshape", db, user)
+        assert result["status"] == "ok"
+        assert calls["n"] == 2
+
+        jobs = db.query(models.ImportJob).filter(
+            models.ImportJob.uploaded_by == "test-feed-retry",
+            models.ImportJob.upload_type == "api_sync_priceshape",
+        ).all()
+        assert len(jobs) == 1  # de tussentijdse mislukking persisteert niet
+        assert jobs[0].status == "geimporteerd"
+    finally:
+        db.query(models.ImportJob).filter(
+            models.ImportJob.uploaded_by == "test-feed-retry").delete()
+        cfg = db.query(models.ConnectorConfig).filter(
+            models.ConnectorConfig.connector_name == "priceshape").first()
+        if cfg is not None:
+            if prev_state is None and not cfg.encrypted_credentials:
+                db.delete(cfg)
+            elif prev_state is not None:
+                cfg.last_test_status, cfg.last_test_message, cfg.last_tested_at = prev_state
+        db.commit()
+
+
+def test_scheduler_does_not_stack_retries_on_top_of_ingest_retries(monkeypatch, db):
+    """Geplande sync (scheduler-pad): een blijvende ConnectorError leidt tot
+    precies 1 + 3 ingest-pogingen in TOTAAL (geen buitenste retry-vermenig-
+    vuldiging) en precies ÉÉN fout-ImportJob voor de laatste mislukking."""
+    import feed_ingest
+    from services import feed_sync_scheduler as fss
+
+    delays = _patch_sleep(monkeypatch)
+    monkeypatch.setenv("FEED_INGEST_MAX_RETRIES", "3")
+    monkeypatch.setenv("FEED_INGEST_RETRY_BACKOFF", "300")
+
+    calls = {"n": 0}
+
+    def boom(*args, **kwargs):
+        calls["n"] += 1
+        raise ConnectorError("PriceShape feed niet bereikbaar: blijvende storing")
+
+    monkeypatch.setattr(feed_ingest, "ingest_feed", boom)
+    # Laat de scheduler-cyclus de ImportJob onder een herkenbare gebruiker schrijven.
+    monkeypatch.setattr(fss, "_SYSTEM_USER", SimpleNamespace(username="test-sched-retry"))
+
+    prev = db.query(models.ConnectorConfig).filter(
+        models.ConnectorConfig.connector_name == "priceshape").first()
+    prev_state = (prev.last_test_status, prev.last_test_message,
+                  prev.last_tested_at) if prev else None
+
+    try:
+        fss._run_sync_with_retries(max_retries=3, backoff_base=60)
+
+        # Totaal 4 ingest-pogingen (1 + 3 interne retries), geen 12.
+        assert calls["n"] == 4
+        # Alleen de interne backoffs (300, 600, 600) — geen buitenste 60s-backoffs.
+        assert delays == [300, 600, 600]
+
+        # Precies één fout-ImportJob: alleen de laatste mislukking persisteert.
+        jobs = db.query(models.ImportJob).filter(
+            models.ImportJob.uploaded_by == "test-sched-retry",
+            models.ImportJob.upload_type == "api_sync_priceshape",
+        ).all()
+        assert len(jobs) == 1
+        assert jobs[0].status == "fout"
+    finally:
+        db.query(models.ImportJob).filter(
+            models.ImportJob.uploaded_by == "test-sched-retry").delete()
+        cfg = db.query(models.ConnectorConfig).filter(
+            models.ConnectorConfig.connector_name == "priceshape").first()
+        if cfg is not None:
+            if prev_state is None and not cfg.encrypted_credentials:
+                db.delete(cfg)
+            elif prev_state is not None:
+                cfg.last_test_status, cfg.last_test_message, cfg.last_tested_at = prev_state
+        db.commit()
+
+
 # ── Retry-spreiding ─────────────────────────────────────────────────────────
 
 def test_retry_backoff_is_spread_over_minutes():

@@ -574,7 +574,23 @@ def _run_live_check(name: str, db: Session) -> dict:
         return microsoft_ads_connector.check_connection(db=db)
     return {"status": "error", "message": "Onbekende connector."}
 
+# Retry-instellingen voor de feed-ingest zelf: een tijdelijke verbindingsfout
+# (netwerkhik, CDN-piek) mag de nachtelijke sync niet laten mislukken tot de
+# volgende nacht. Standaard 3 retries met exponentiële backoff (5 min basis).
+_INGEST_DEFAULT_MAX_RETRIES = 3
+_INGEST_DEFAULT_RETRY_BACKOFF = 300  # seconden (5 minuten)
 
+
+def _ingest_env_int(name: str, default: int) -> int:
+    import os
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        val = int(raw)
+        return val if val >= 0 else default
+    except ValueError:
+        return default
 def _run_sync(name: str, db: Session, current_user) -> dict:
     """Trigger de bijbehorende sync-logica en persisteer een ImportJob.
 
@@ -607,8 +623,9 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
                 from connectors import priceshape_connector
                 raw = priceshape_connector._get_raw_config(db=db)
                 if priceshape_connector._get_mode(raw) == "feed":
-                    import feed_ingest
-                    res = feed_ingest.ingest_feed(db, source="priceshape")
+                    # Retries bij tijdelijke verbindingsfout: pas de laatste
+                    # mislukking persisteert hieronder als ImportJob 'fout'.
+                    res = _ingest_feed_with_retry(db, source="priceshape")
                     counts["producten_nieuw"] = res["products_new"]
                     counts["producten_bijgewerkt"] = res["products_updated"]
                     counts["eigen_prijzen"] = res["own_prices"]
@@ -1079,3 +1096,58 @@ def _test_microsoft_ads(creds: dict) -> dict:
         return {"status": "error", "message": f"Microsoft Ads API antwoordde met HTTP {code}."}
     except Exception as exc:
         return {"status": "unreachable", "message": str(exc)[:200]}
+
+def _ingest_feed_with_retry(db: Session, source: str = "priceshape") -> dict:
+    """Voer `feed_ingest.ingest_feed` uit met automatische retries bij een
+    tijdelijke ConnectorError (feed onbereikbaar, HTTP-fout, lege export).
+
+    - Maximaal FEED_INGEST_MAX_RETRIES (standaard 3) retries met exponentiële
+      backoff (FEED_INGEST_RETRY_BACKOFF als basis, standaard 5 minuten).
+    - Elke poging wordt gelogd; pas als ook de laatste poging faalt, loopt de
+      fout door naar de aanroeper (die hem als ImportJob 'fout' persisteert) —
+      een succes na een retry levert dus gewoon een geslaagde sync op.
+    - Configuratiefouten ("niet geconfigureerd") en niet-ConnectorErrors worden
+      NIET geretried: opnieuw proberen kan die niet oplossen.
+    """
+    import time
+    import feed_ingest
+    from connectors.priceshape_connector import ConnectorError
+    from services.feed_sync_scheduler import _backoff_seconds
+
+    max_retries = _ingest_env_int("FEED_INGEST_MAX_RETRIES", _INGEST_DEFAULT_MAX_RETRIES)
+    backoff_base = _ingest_env_int("FEED_INGEST_RETRY_BACKOFF", _INGEST_DEFAULT_RETRY_BACKOFF)
+    attempts = max_retries + 1
+
+    for attempt in range(1, attempts + 1):
+        try:
+            res = feed_ingest.ingest_feed(db, source=source)
+            if attempt > 1:
+                _log.info(
+                    "PriceShape feed-sync alsnog geslaagd bij poging %d/%d.",
+                    attempt, attempts,
+                )
+            return res
+        except ConnectorError as exc:
+            if "niet geconfigureerd" in str(exc).lower():
+                raise  # configuratiefout — retry heeft geen zin
+            # De sessie kan na een mislukte ingest in een afgebroken transactie
+            # zitten; rollback zodat de volgende poging schoon start.
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            if attempt >= attempts:
+                _log.error(
+                    "PriceShape feed-sync definitief mislukt na %d pogingen: %s",
+                    attempts, exc,
+                )
+                raise
+            delay = _backoff_seconds(attempt, backoff_base)
+            _log.warning(
+                "PriceShape feed-sync poging %d/%d mislukt (%s) — "
+                "nieuwe poging over %ds.",
+                attempt, attempts, exc, delay,
+            )
+            time.sleep(delay)
+
+    raise RuntimeError("unreachable")  # pragma: no cover
