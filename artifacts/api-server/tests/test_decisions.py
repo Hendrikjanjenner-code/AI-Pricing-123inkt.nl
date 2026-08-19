@@ -20,7 +20,6 @@ from main import app
 from database import SessionLocal
 import models
 from engine.signal_publisher import publish_signal
-from unittest.mock import patch
 import engine.decision_engine as decision_engine
 from engine.decision_engine import run_decision_engine
 
@@ -43,6 +42,56 @@ def admin_headers(client):
     resp = client.post("/api/auth/login", json=ADMIN_LOGIN)
     assert resp.status_code == 200, resp.text
     return {"Authorization": f"Bearer {resp.json()['token']}"}
+
+
+@pytest.fixture(scope="module")
+def shop_id():
+    """
+    Dedicated testshop: de dev-DB is gedeeld (3k+ producten met echte actieve
+    signalen na een feed-sync). De Decision Engine rankt signalen op severity
+    met een cap (MAX_DECISIONS_PER_RUN), dus in shop 1 wordt een vers geseede
+    SKU verdrongen en ontstaat er geen decision. Alle tests die de engine
+    draaien doen dat daarom in hun eigen shop-scope.
+    """
+    s = SessionLocal()
+    shop = models.DimShop(
+        shop_code=f"tdec-{uuid.uuid4().hex[:8]}",
+        name="Decisions testshop", is_default=False, active=True,
+    )
+    s.add(shop)
+    s.commit()
+    sid = shop.id
+    try:
+        yield sid
+    finally:
+        try:
+            # Volgorde: eerst afhankelijke rijen (o.a. cost-usage via request-
+            # middleware), dan de shop zelf.
+            s.query(models.CostUsageRecord).filter(
+                models.CostUsageRecord.shop_id == sid).delete(synchronize_session=False)
+            s.query(models.IntelligenceSignal).filter(
+                models.IntelligenceSignal.shop_id == sid).delete(synchronize_session=False)
+            dids = [d.id for d in s.query(models.Decision).filter(
+                models.Decision.shop_id == sid).all()]
+            if dids:
+                s.query(models.DecisionScenario).filter(
+                    models.DecisionScenario.decision_id.in_(dids)).delete(synchronize_session=False)
+                s.query(models.DecisionEvent).filter(
+                    models.DecisionEvent.decision_id.in_(dids)).delete(synchronize_session=False)
+                s.query(models.Decision).filter(
+                    models.Decision.id.in_(dids)).delete(synchronize_session=False)
+            s.query(models.FactPricingRecommendationDaily).filter(
+                models.FactPricingRecommendationDaily.shop_id == sid).delete(synchronize_session=False)
+            s.query(models.FactSalesDaily).filter(
+                models.FactSalesDaily.shop_id == sid).delete(synchronize_session=False)
+            s.query(models.DimProduct).filter(
+                models.DimProduct.shop_id == sid).delete(synchronize_session=False)
+            s.query(models.DimShop).filter(models.DimShop.id == sid).delete()
+            s.commit()
+        except Exception:
+            s.rollback()
+        finally:
+            s.close()
 
 
 def _seed_product(db, sku, shop_id=1, days=30):
@@ -107,22 +156,22 @@ def db():
     s.close()
 
 
-def test_generation_scenarios_why_and_approval_flow(client, admin_headers, db):
+def test_generation_scenarios_why_and_approval_flow(client, admin_headers, db, shop_id):
     sku = f"TDEC-{uuid.uuid4().hex[:8]}"
     try:
-        _seed_product(db, sku)
-        _seed_signal(db, sku)
+        _seed_product(db, sku, shop_id=shop_id)
+        _seed_signal(db, sku, shop_id=shop_id)
         db.commit()
 
-        r = client.post("/api/decisions/run", headers=admin_headers)
+        r = client.post("/api/decisions/run", params={"shop_id": shop_id}, headers=admin_headers)
         assert r.status_code == 200, r.text
         assert r.json()["decisions_created"] >= 1
 
-        items = client.get("/api/decisions", params={"entity_id": sku}, headers=admin_headers).json()["items"]
+        items = client.get("/api/decisions", params={"entity_id": sku, "shop_id": shop_id}, headers=admin_headers).json()["items"]
         assert len(items) == 1
         did = items[0]["id"]
 
-        det = client.get(f"/api/decisions/{did}", headers=admin_headers).json()
+        det = client.get(f"/api/decisions/{did}", params={"shop_id": shop_id}, headers=admin_headers).json()
         assert det["status"] == "proposed"
         types = {s["scenario_type"] for s in det["scenarios"]}
         assert {"price_increase", "price_decrease", "price_hold", "promotion",
@@ -136,7 +185,8 @@ def test_generation_scenarios_why_and_approval_flow(client, admin_headers, db):
         assert any("data unavailable" in g for g in det["data_gaps"])
 
         # §28-flow: proposed → in_review → approved → executed; reject vereist note
-        t = lambda body: client.post(f"/api/decisions/{did}/transition", json=body, headers=admin_headers)
+        t = lambda body: client.post(f"/api/decisions/{did}/transition",
+                                     json={**body, "shop_id": shop_id}, headers=admin_headers)
         assert t({"to_status": "in_review"}).json()["status"] == "in_review"
         assert t({"to_status": "rejected"}).status_code == 400  # note verplicht
         # approve met alternatief (niet-prijs) scenario — prijsscenario's volgen
@@ -150,7 +200,7 @@ def test_generation_scenarios_why_and_approval_flow(client, admin_headers, db):
         assert t({"to_status": "proposed"}).status_code == 409  # illegale overgang
         assert t({"to_status": "executed"}).json()["status"] == "executed"
 
-        hist = client.get(f"/api/decisions/{did}/history", headers=admin_headers).json()
+        hist = client.get(f"/api/decisions/{did}/history", params={"shop_id": shop_id}, headers=admin_headers).json()
         seq = [(e["from_status"], e["to_status"], e["actor_type"]) for e in hist["events"]]
         assert seq[0] == (None, "proposed", "ai")
         assert (Approved := ("in_review", "approved", "human")) in seq
@@ -159,26 +209,27 @@ def test_generation_scenarios_why_and_approval_flow(client, admin_headers, db):
     finally:
         _cleanup(db, [sku])
 
-def test_approved_price_scenario_flows_into_execution(client, admin_headers, db):
+def test_approved_price_scenario_flows_into_execution(client, admin_headers, db, shop_id):
     """Goedkeuring van een prijsscenario zet een goedgekeurde prijsregel klaar;
     'markeer als uitgevoerd' vereist en koppelt de execution-job."""
     sku = f"TDEC-{uuid.uuid4().hex[:8]}"
     job_id = None
     try:
-        _seed_product(db, sku)
-        _seed_signal(db, sku)
+        _seed_product(db, sku, shop_id=shop_id)
+        _seed_signal(db, sku, shop_id=shop_id)
         db.commit()
 
-        r = client.post("/api/decisions/run", headers=admin_headers)
+        r = client.post("/api/decisions/run", params={"shop_id": shop_id}, headers=admin_headers)
         assert r.status_code == 200, r.text
-        items = client.get("/api/decisions", params={"entity_id": sku}, headers=admin_headers).json()["items"]
+        items = client.get("/api/decisions", params={"entity_id": sku, "shop_id": shop_id}, headers=admin_headers).json()["items"]
         did = items[0]["id"]
-        det = client.get(f"/api/decisions/{did}", headers=admin_headers).json()
+        det = client.get(f"/api/decisions/{did}", params={"shop_id": shop_id}, headers=admin_headers).json()
 
         price_sc = next(s for s in det["scenarios"] if s["scenario_type"] == "price_increase")
         assert price_sc["parameters"].get("new_price")
 
-        t = lambda body: client.post(f"/api/decisions/{did}/transition", json=body, headers=admin_headers)
+        t = lambda body: client.post(f"/api/decisions/{did}/transition",
+                                     json={**body, "shop_id": shop_id}, headers=admin_headers)
         assert t({"to_status": "in_review"}).status_code == 200
         resp = t({"to_status": "approved", "scenario_id": price_sc["id"]})
         assert resp.status_code == 200, resp.text
@@ -200,7 +251,7 @@ def test_approved_price_scenario_flows_into_execution(client, admin_headers, db)
         # (oudere datum) telt niet als uitvoering van deze beslissing
         decoy_date = date.today() - timedelta(days=3)
         decoy = models.FactPricingRecommendationDaily(
-            date=decoy_date, sku_id=sku, shop_id=1,
+            date=decoy_date, sku_id=sku, shop_id=shop_id,
             current_price=20.0, recommended_price=20.50,
             confidence_score=0.9, reason_code="decoy",
             approval_status="approved", approved_by="test",
@@ -228,7 +279,7 @@ def test_approved_price_scenario_flows_into_execution(client, admin_headers, db)
         # Nu wél uitvoerbaar; event koppelt terug naar de job (audit compleet)
         done = t({"to_status": "executed"})
         assert done.status_code == 200, done.text
-        hist = client.get(f"/api/decisions/{did}/history", headers=admin_headers).json()
+        hist = client.get(f"/api/decisions/{did}/history", params={"shop_id": shop_id}, headers=admin_headers).json()
         exec_event = next(e for e in hist["events"] if e["to_status"] == "executed")
         assert exec_event["values_snapshot"]["execution_job_id"] == job_id
         assert exec_event["values_snapshot"]["recommendation_id"] == rec_id
@@ -280,7 +331,7 @@ def test_shop_isolation_idor(client, admin_headers, db):
         _cleanup(db, [sku], extra_shop_id=other.id)
 
 
-def test_category_decisions_derived_from_sku_signals(client, admin_headers, db):
+def test_category_decisions_derived_from_sku_signals(client, admin_headers, db, shop_id):
     """Categoriebeslissingen worden afgeleid uit SKU-signalen via DimProduct.category."""
     cat = f"TestCat-{uuid.uuid4().hex[:6]}"
     sku1 = f"TDEC-C1-{uuid.uuid4().hex[:6]}"
@@ -296,29 +347,28 @@ def test_category_decisions_derived_from_sku_signals(client, admin_headers, db):
                 sku_id=sku, product_name=f"Catproduct {sku}", category=cat,
                 subcategory="TestSub", is_private_label=(sku == sku1),
                 current_price=15.0, cost_price=8.0, min_price=10.0, max_price=20.0,
-                stock_quantity=50, lifecycle_status="active", shop_id=1,
+                stock_quantity=50, lifecycle_status="active", shop_id=shop_id,
             ))
             for i in range(30):
                 db.add(models.FactSalesDaily(
-                    sku_id=sku, date=date.today() - timedelta(days=i), shop_id=1,
+                    sku_id=sku, date=date.today() - timedelta(days=i), shop_id=shop_id,
                     units_sold=3, revenue=45.0, margin=21.0, margin_pct=46.7,
                 ))
-            _seed_signal(db, sku)
+            _seed_signal(db, sku, shop_id=shop_id)
         db.commit()
 
-        # Onbeperkt budget: met echte feed-data outranken bestaande categorieën
-        # de testcategorie anders binnen het standaard budget.
-        with patch.object(decision_engine, "MAX_DECISIONS_PER_RUN", 10**6):
-            r = client.post("/api/decisions/run", headers=admin_headers)
+        # Eigen shop-scope: echte feed-data (shop 1) kan de testdata niet meer
+        # verdringen binnen het standaard budget (MAX_DECISIONS_PER_RUN).
+        r = client.post("/api/decisions/run", params={"shop_id": shop_id}, headers=admin_headers)
         assert r.status_code == 200, r.text
         result = r.json()
         assert result["decisions_created"] >= 3  # ≥2 SKU's + ≥1 categorie
 
         # Categoriebeslissing is aangemaakt met entity_type="category"
-        # Filter op entity_id: met echte feed-data in de DB kunnen er veel
-        # categoriebeslissingen zijn en valt onze categorie anders buiten pagina 1.
         items = client.get(
-            "/api/decisions", params={"entity_type": "category", "entity_id": cat}, headers=admin_headers
+            "/api/decisions",
+            params={"entity_type": "category", "entity_id": cat, "shop_id": shop_id},
+            headers=admin_headers,
         ).json()["items"]
         cat_items = [d for d in items if d["entity_id"] == cat]
         assert len(cat_items) == 1, f"Verwacht 1 categoriebeslissing voor '{cat}', kreeg: {[d['entity_id'] for d in items]}"
@@ -328,7 +378,7 @@ def test_category_decisions_derived_from_sku_signals(client, admin_headers, db):
         assert d["entity_name"] == cat
 
         # Detail: minstens promotie- en no_action-scenario
-        det = client.get(f"/api/decisions/{d['id']}", headers=admin_headers).json()
+        det = client.get(f"/api/decisions/{d['id']}", params={"shop_id": shop_id}, headers=admin_headers).json()
         types = {s["scenario_type"] for s in det["scenarios"]}
         assert "promotion" in types
         assert "no_action" in types
@@ -359,14 +409,14 @@ def test_category_decisions_derived_from_sku_signals(client, admin_headers, db):
 
         # SKU-beslissingen krijgen géén category_context
         sku_items = client.get(
-            "/api/decisions", params={"entity_type": "sku", "entity_id": sku1}, headers=admin_headers
+            "/api/decisions", params={"entity_type": "sku", "entity_id": sku1, "shop_id": shop_id}, headers=admin_headers
         ).json()["items"]
         if sku_items:
-            sku_det = client.get(f"/api/decisions/{sku_items[0]['id']}", headers=admin_headers).json()
+            sku_det = client.get(f"/api/decisions/{sku_items[0]['id']}", params={"shop_id": shop_id}, headers=admin_headers).json()
             assert "category_context" not in sku_det
 
         # entity_type_counts in de lijstrespons
-        resp = client.get("/api/decisions", headers=admin_headers).json()
+        resp = client.get("/api/decisions", params={"shop_id": shop_id}, headers=admin_headers).json()
         assert resp["entity_type_counts"].get("category", 0) >= 1
         assert resp["entity_type_counts"].get("sku", 0) >= 1
 
@@ -380,7 +430,7 @@ def test_category_decisions_derived_from_sku_signals(client, admin_headers, db):
         _cleanup(db, [sku1, sku2])
 
 
-def test_category_decision_without_sales_has_data_gaps(client, admin_headers, db):
+def test_category_decision_without_sales_has_data_gaps(client, admin_headers, db, shop_id):
     """Categorie zonder verkoophistorie levert een beslissing op met data_gaps, geen crash."""
     cat = f"TestCat-NS-{uuid.uuid4().hex[:6]}"
     sku = f"TDEC-NS-{uuid.uuid4().hex[:6]}"
@@ -388,18 +438,20 @@ def test_category_decision_without_sales_has_data_gaps(client, admin_headers, db
         db.add(models.DimProduct(
             sku_id=sku, product_name=f"Nosales {sku}", category=cat,
             current_price=10.0, cost_price=5.0, min_price=7.0, max_price=14.0,
-            stock_quantity=20, lifecycle_status="active", shop_id=1,
+            stock_quantity=20, lifecycle_status="active", shop_id=shop_id,
         ))
         # Geen FactSalesDaily — simuleer ontbrekende verkoopdata
-        _seed_signal(db, sku)
+        _seed_signal(db, sku, shop_id=shop_id)
         db.commit()
 
-        with patch.object(decision_engine, "MAX_DECISIONS_PER_RUN", 10**6):
-            r = client.post("/api/decisions/run", headers=admin_headers)
+        # Eigen shop-scope i.p.v. cap-patch: geen verdringing door feed-data
+        r = client.post("/api/decisions/run", params={"shop_id": shop_id}, headers=admin_headers)
         assert r.status_code == 200, r.text
 
         items = client.get(
-            "/api/decisions", params={"entity_type": "category", "entity_id": cat}, headers=admin_headers
+            "/api/decisions",
+            params={"entity_type": "category", "entity_id": cat, "shop_id": shop_id},
+            headers=admin_headers,
         ).json()["items"]
         cat_items = [d for d in items if d["entity_id"] == cat]
         assert len(cat_items) == 1, "Categoriebeslissing moet aangemaakt worden ook zonder verkoop"
@@ -409,7 +461,7 @@ def test_category_decision_without_sales_has_data_gaps(client, admin_headers, db
         assert any("data unavailable" in g for g in d["data_gaps"])
 
         # Beslissing heeft aanbevolen scenario (geen crash)
-        det = client.get(f"/api/decisions/{d['id']}", headers=admin_headers).json()
+        det = client.get(f"/api/decisions/{d['id']}", params={"shop_id": shop_id}, headers=admin_headers).json()
         assert det["recommended_scenario_id"] is not None
     finally:
         cat_dids = [d.id for d in db.query(models.Decision).filter(models.Decision.entity_id == cat).all()]
@@ -420,7 +472,7 @@ def test_category_decision_without_sales_has_data_gaps(client, admin_headers, db
         _cleanup(db, [sku])
 
 
-def test_entity_type_filter_isolates_sku_and_category(client, admin_headers, db):
+def test_entity_type_filter_isolates_sku_and_category(client, admin_headers, db, shop_id):
     """entity_type queryparameter filtert strikt op SKU of categorie."""
     cat = f"TestCat-F-{uuid.uuid4().hex[:6]}"
     sku = f"TDEC-F-{uuid.uuid4().hex[:6]}"
@@ -428,20 +480,20 @@ def test_entity_type_filter_isolates_sku_and_category(client, admin_headers, db)
         db.add(models.DimProduct(
             sku_id=sku, product_name=f"Filtertest {sku}", category=cat,
             current_price=12.0, cost_price=6.0, min_price=9.0, max_price=16.0,
-            stock_quantity=30, lifecycle_status="active", shop_id=1,
+            stock_quantity=30, lifecycle_status="active", shop_id=shop_id,
         ))
         for i in range(15):
             db.add(models.FactSalesDaily(
-                sku_id=sku, date=date.today() - timedelta(days=i), shop_id=1,
+                sku_id=sku, date=date.today() - timedelta(days=i), shop_id=shop_id,
                 units_sold=2, revenue=24.0, margin=12.0, margin_pct=50.0,
             ))
-        _seed_signal(db, sku)
+        _seed_signal(db, sku, shop_id=shop_id)
         db.commit()
 
-        client.post("/api/decisions/run", headers=admin_headers)
+        client.post("/api/decisions/run", params={"shop_id": shop_id}, headers=admin_headers)
 
-        sku_items = client.get("/api/decisions", params={"entity_type": "sku", "entity_id": sku}, headers=admin_headers).json()["items"]
-        cat_items = client.get("/api/decisions", params={"entity_type": "category"}, headers=admin_headers).json()["items"]
+        sku_items = client.get("/api/decisions", params={"entity_type": "sku", "entity_id": sku, "shop_id": shop_id}, headers=admin_headers).json()["items"]
+        cat_items = client.get("/api/decisions", params={"entity_type": "category", "shop_id": shop_id}, headers=admin_headers).json()["items"]
 
         assert all(d["entity_type"] == "sku" for d in sku_items)
         assert all(d["entity_type"] == "category" for d in cat_items)
@@ -501,14 +553,14 @@ def test_category_cap_defers_explicitly_with_stable_order(client, db):
         assert decided == sorted(cats)[:decision_engine.MAX_DECISIONS_PER_RUN]
     finally:
         _cleanup(db, skus, extra_shop_id=other.id)
-def test_single_entity_failure_does_not_erase_prior_work(client, db, monkeypatch):
+def test_single_entity_failure_does_not_erase_prior_work(client, db, monkeypatch, shop_id):
     """Savepoint per entiteit: een crash bij één SKU wist eerdere beslissingen niet."""
     ok_sku = f"TDEC-{uuid.uuid4().hex[:8]}"
     bad_sku = f"TDEC-BAD-{uuid.uuid4().hex[:6]}"
     try:
         for s in (ok_sku, bad_sku):
-            _seed_product(db, s)
-            _seed_signal(db, s)
+            _seed_product(db, s, shop_id=shop_id)
+            _seed_signal(db, s, shop_id=shop_id)
         db.commit()
 
         import engine.decision_engine as de
@@ -520,7 +572,7 @@ def test_single_entity_failure_does_not_erase_prior_work(client, db, monkeypatch
             return real(dbs, today, sid, entity_id, sigs, product)
 
         monkeypatch.setattr(de, "_build_decision", flaky)
-        result = run_decision_engine(db)
+        result = run_decision_engine(db, shop_id=shop_id)
         # De goede SKU is aangemaakt en gecommit; de kapotte alleen overgeslagen
         assert result["entities_skipped"] >= 1
         ok = db.query(models.Decision).filter(models.Decision.entity_id == ok_sku).all()

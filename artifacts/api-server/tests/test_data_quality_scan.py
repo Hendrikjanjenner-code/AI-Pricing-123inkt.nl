@@ -184,9 +184,10 @@ def test_scan_publishes_signal_and_records_run(db):
     finally:
         _cleanup(code)
     # Integriteit: de test zelf mag bestaande registry-rijen niet wijzigen.
-    # De echte detector mag verouderde rijen legitiem auto-resolven; daarom
-    # controleren we alleen rijen die de echte detectie nog steeds oplevert
-    # (die moeten open + ongewijzigd blijven) en dat eigenaren nooit wijzigen.
+    # De echte detector mag verouderde rijen legitiem auto-resolven én eerder
+    # opgeloste rijen legitiem heropenen als de detectie ze opnieuw oplevert;
+    # daarom eisen we voor nog-gedetecteerde rijen alleen dat ze na de run
+    # open staan en dat eigenaren nooit wijzigen.
     s = SessionLocal()
     try:
         after = {r.issue_code: (r.status, r.owner)
@@ -195,7 +196,9 @@ def test_scan_publishes_signal_and_records_run(db):
         s.close()
     for k, v in snapshot_before.items():
         if k in real_codes:
-            assert after.get(k) == v, f"testrun wijzigde actief registry-item {k}"
+            assert after.get(k) is not None, f"testrun verwijderde registry-item {k}"
+            assert after[k][0] == "open", f"nog-gedetecteerd item {k} moet open staan"
+            assert after[k][1] == v[1], f"testrun wijzigde eigenaar van {k}"
         elif k in after:
             assert after[k][1] == v[1], f"testrun wijzigde eigenaar van {k}"
 

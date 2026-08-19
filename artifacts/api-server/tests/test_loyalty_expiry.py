@@ -287,6 +287,104 @@ def test_expiring_soon_members_window(db, policy):
     # de engine begrenst de schatting op het waarschuwingsvenster.
     assert rows[m_late.id]["expires_on"] is None
 
+def test_expiring_soon_overdue_plus_window_gets_past_expiry(db, policy):
+    """Een lid met zowel levende overdue-punten als punten binnen het
+    waarschuwingsvenster krijgt een geschatte vervaldatum in het verleden:
+    de overdue punten vervallen bij de eerstvolgende expiry-run en bepalen
+    FIFO de prioritering (days_until_expiry <= 0)."""
+    s, created = db
+    today = date.today()
+
+    m = _make_member(s, created)
+    # Overdue: al over de vervalgrens, nog niet formeel verlopen.
+    li.apply_ledger_entry(s, m, today - timedelta(days=EXPIRY_DAYS + 40), "earn", 400)
+    # Binnen het waarschuwingsvenster.
+    li.apply_ledger_entry(
+        s, m, today - timedelta(days=EXPIRY_DAYS - WARN_DAYS + 10), "earn", 300)
+    s.commit()
+
+    rows = {r["member_id"]: r for r in li.expiring_soon_members(s)}
+    assert m.id in rows
+    row = rows[m.id]
+    assert row["points_expiring"] == 700
+    assert row["expires_on"] is not None
+    assert row["days_until_expiry"] <= 0
+
+    # FIFO: zodra de overdue punten volledig zijn ingewisseld, telt weer de
+    # window-earn en ligt de geschatte vervaldatum in de toekomst.
+    li.apply_ledger_entry(s, m, today - timedelta(days=5), "redeem", -400)
+    s.commit()
+    rows = {r["member_id"]: r for r in li.expiring_soon_members(s)}
+    assert m.id in rows
+    assert rows[m.id]["points_expiring"] == 300
+    assert rows[m.id]["days_until_expiry"] is not None
+    assert 0 <= rows[m.id]["days_until_expiry"] <= WARN_DAYS
+
+
+def test_liability_summary_unscoped_uses_each_shops_policy(db, policy):
+    """Ongescoped liability (dashboard zonder shop_id) moet per shop het eigen
+    verloopbeleid toepassen: een shop met kortere looptijd telt volgens dat
+    kortere beleid mee, een shop met uitgeschakeld beleid telt niet mee —
+    nooit shop 1-beleid op andere shops."""
+    s, created = db
+    today = date.today()
+
+    shop_b = models.DimShop(shop_code=f"lty-b-{uuid.uuid4().hex[:6]}", name="Loyalty B")
+    shop_c = models.DimShop(shop_code=f"lty-c-{uuid.uuid4().hex[:6]}", name="Loyalty C")
+    s.add_all([shop_b, shop_c])
+    s.commit()
+    pol_b = models.LoyaltyExpiryPolicy(
+        shop_id=shop_b.id, enabled=True, expiry_months=6, warn_days_before=WARN_DAYS)
+    pol_c = models.LoyaltyExpiryPolicy(
+        shop_id=shop_c.id, enabled=False, expiry_months=EXPIRY_MONTHS,
+        warn_days_before=WARN_DAYS)
+    s.add_all([pol_b, pol_c])
+    s.commit()
+    try:
+        before = li.liability_summary(s)
+
+        def _member(shop):
+            m = models.LoyaltyMember(
+                shop_id=shop.id,
+                pseudonymous_customer_id=f"TEST-EXPIRY-{uuid.uuid4().hex[:8]}",
+                tier_code="bronze", status="active", is_demo_data=False,
+            )
+            s.add(m)
+            s.commit()
+            created.append(m.id)
+            return m
+
+        # Shop B (6 mnd): earn 200 dagen geleden → overdue onder B's beleid,
+        # maar ruim binnen de 12 maanden van shop 1 — telt alleen mee als B's
+        # eigen beleid wordt toegepast.
+        m_b = _member(shop_b)
+        li.apply_ledger_entry(s, m_b, today - timedelta(days=200), "earn", 500)
+        # Shop C (uitgeschakeld): overdue punten mogen nergens meetellen.
+        m_c = _member(shop_c)
+        li.apply_ledger_entry(s, m_c, today - timedelta(days=400), "earn", 700)
+        s.commit()
+
+        after = li.liability_summary(s)
+        assert after["points_expiring_90d"] - before["points_expiring_90d"] == 500
+        assert after["points_expiring_30d"] - before["points_expiring_30d"] == 500
+        delta = [a["points"] - b["points"]
+                 for a, b in zip(after["expiry_forecast"], before["expiry_forecast"])]
+        # Overdue punten van shop B vallen in de eerste maand; shop C telt niet mee.
+        assert delta[0] == 500
+        assert sum(delta) == 500
+    finally:
+        s.rollback()
+        s.query(models.LoyaltyExpiryPolicy).filter(
+            models.LoyaltyExpiryPolicy.shop_id.in_([shop_b.id, shop_c.id])
+        ).delete(synchronize_session=False)
+        _cleanup_member_ids(list(created))
+        del created[:]
+        s.query(models.DimShop).filter(
+            models.DimShop.id.in_([shop_b.id, shop_c.id])
+        ).delete(synchronize_session=False)
+        s.commit()
+
+
 def test_expiring_soon_respects_fifo_redeems(db, policy):
     """Redeems consumeren FIFO eerst de window-punten als er niets ouders is:
     het waarschuwingsbedrag daalt mee."""

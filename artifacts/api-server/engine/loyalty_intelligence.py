@@ -428,15 +428,28 @@ def liability_summary(db: Session, shop_id: int | None = None) -> dict:
     expiring_vouchers = expiring_vouchers_q.scalar() or 0
     points_liability = round(outstanding * POINT_VALUE_EUR, 2)
 
-    # Punten die binnenkort verlopen op basis van het verloopbeleid van de shop
+    # Punten die binnenkort verlopen op basis van het verloopbeleid van de shop.
+    # Ongescoped (dashboard zonder shop_id): aggregeer per shop volgens het
+    # eigen (enabled) beleid van die shop — nooit shop 1-beleid op andere shops.
     policy = _get_expiry_policy(db, shop_id if shop_id is not None else 1)
     points_expiring_30d = 0
     points_expiring_90d = 0
     expiry_forecast: list[dict] = []
-    if policy.enabled:
-        points_expiring_30d = _compute_expiring_points(db, policy, warn_days=30, shop_id=shop_id)
-        points_expiring_90d = _compute_expiring_points(db, policy, warn_days=90, shop_id=shop_id)
-        expiry_forecast = _expiry_forecast_monthly(db, policy, months=6, shop_id=shop_id)
+    scope_ids = [shop_id] if shop_id is not None else _loyalty_shop_ids(db)
+    for sid in scope_ids:
+        shop_policy = policy if sid == (shop_id if shop_id is not None else 1) \
+            else _get_expiry_policy(db, sid)
+        if not shop_policy.enabled:
+            continue
+        points_expiring_30d += _compute_expiring_points(db, shop_policy, warn_days=30, shop_id=sid)
+        points_expiring_90d += _compute_expiring_points(db, shop_policy, warn_days=90, shop_id=sid)
+        shop_forecast = _expiry_forecast_monthly(db, shop_policy, months=6, shop_id=sid)
+        if not expiry_forecast:
+            expiry_forecast = shop_forecast
+        else:
+            for agg, extra in zip(expiry_forecast, shop_forecast):
+                agg["points"] += extra["points"]
+                agg["eur"] = round(agg["eur"] + extra["eur"], 2)
 
     return {
         "shop_id": shop_id,
@@ -757,14 +770,25 @@ def expiring_soon_members(db: Session, shop_id: int | None = None) -> list[dict]
             warn_window_end=cutoff_full,
         )
         if pts > 0:
-            # Schat de vervaldatum: vroegste earn-datum van punten binnen het
-            # waarschuwingsvenster. Punten die al over de grens zijn hebben
-            # geen zinvolle toekomstige vervaldatum → expires_on blijft None.
-            earliest = db.query(func.min(models.LoyaltyTransaction.txn_date)).filter(
+            # Schat de vervaldatum FIFO-consistent: zolang er nog levende
+            # punten van vóór de vervalgrens zijn (overdue), is de vroegste
+            # earn-datum überhaupt bepalend → geschatte vervaldatum in het
+            # verleden en days_until_expiry <= 0, zodat overdue leden bovenaan
+            # sorteren — consistent met de liability-cijfers. Pas als de
+            # overdue punten volledig geconsumeerd zijn telt de vroegste earn
+            # binnen het waarschuwingsvenster.
+            overdue_live = _fifo_expirable_points(
+                db, wallet.member_id, wallet, expiry_cutoff=cutoff_full,
+            )
+            date_filters = [
                 models.LoyaltyTransaction.member_id == member.id,
                 models.LoyaltyTransaction.txn_type.in_(list(_CREDIT_TYPES)),
-                models.LoyaltyTransaction.txn_date >= cutoff_full,
                 models.LoyaltyTransaction.txn_date < cutoff_soon,
+            ]
+            if overdue_live <= 0:
+                date_filters.append(models.LoyaltyTransaction.txn_date >= cutoff_full)
+            earliest = db.query(func.min(models.LoyaltyTransaction.txn_date)).filter(
+                *date_filters
             ).scalar()
             if earliest is None:
                 # Alleen al-overdue punten: schat de (verstreken) vervaldatum
