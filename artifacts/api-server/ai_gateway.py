@@ -571,6 +571,19 @@ FUNCTION_PERMISSIONS: dict[str, Optional[str]] = {
     "get_opportunities": "ai.view",
     "simulate_price_change": "pricing.view",
     "simulate_competitor_scenario": "competition.view",
+    # ── Concurrentprofiel (taak #249) — fail-closed op competition.view ──
+    "get_competitor_business_profile": "competition.view",
+    "get_competitor_company_size": "competition.view",
+    "get_competitor_geographic_presence": "competition.view",
+    "get_competitor_fulfilment_profile": "competition.view",
+    "get_competitor_financial_health": "competition.view",
+    "get_competitor_procurement_power": "competition.view",
+    "get_competitor_market_roles": "competition.view",
+    "get_competitor_corporate_structure": "competition.view",
+    "get_competitor_evolution": "competition.view",
+    "compare_competitor_profiles": "competition.view",
+    "get_competitor_future_threats": "competition.view",
+    "get_competitor_profile_quality": "competition.view",
 }
 
 
@@ -720,6 +733,104 @@ _TOOL_PARAMETERS: dict[str, dict] = {
             },
         },
         "required": ["sku_id", "change_pct"],
+    },
+    # ── Concurrentprofiel (taak #249) ──────────────────────────────────
+    "get_competitor_business_profile": {
+        "type": "object",
+        "properties": {
+            "competitor_name": {"type": "string",
+                                "description": "Naam van de concurrent"},
+        },
+        "required": ["competitor_name"],
+    },
+    "get_competitor_company_size": {
+        "type": "object",
+        "properties": {
+            "competitor_name": {"type": "string", "description": "Optioneel: één concurrent"},
+            "size_class": {"type": "string",
+                           "description": "Optioneel filter, bv. 'groot'"},
+            "geographic_scale": {"type": "string",
+                                 "description": "Optioneel filter, bv. 'internationaal'"},
+            "limit": {"type": "integer"},
+        },
+    },
+    "get_competitor_geographic_presence": {
+        "type": "object",
+        "properties": {
+            "competitor_name": {"type": "string"},
+            "country_code": {"type": "string",
+                             "description": "Optioneel ISO-landcode, bv. 'DE'"},
+            "limit": {"type": "integer"},
+        },
+    },
+    "get_competitor_fulfilment_profile": {
+        "type": "object",
+        "properties": {
+            "competitor_name": {"type": "string"},
+            "dropship_only": {"type": "boolean",
+                              "description": "Alleen dropshipspelers tonen"},
+            "limit": {"type": "integer"},
+        },
+    },
+    "get_competitor_financial_health": {
+        "type": "object",
+        "properties": {
+            "competitor_name": {"type": "string"},
+            "limit": {"type": "integer"},
+        },
+    },
+    "get_competitor_procurement_power": {
+        "type": "object",
+        "properties": {"limit": {"type": "integer"}},
+    },
+    "get_competitor_market_roles": {
+        "type": "object",
+        "properties": {
+            "competitor_name": {"type": "string"},
+            "role": {"type": "string",
+                     "description": "Optioneel rolfilter, bv. 'prijsvechter'"},
+            "limit": {"type": "integer"},
+        },
+    },
+    "get_competitor_corporate_structure": {
+        "type": "object",
+        "properties": {
+            "competitor_name": {"type": "string"},
+            "limit": {"type": "integer"},
+        },
+    },
+    "get_competitor_evolution": {
+        "type": "object",
+        "properties": {
+            "competitor_name": {"type": "string"},
+            "days": {"type": "integer", "description": "Periode in dagen (default 365)"},
+            "limit": {"type": "integer"},
+        },
+        "required": ["competitor_name"],
+    },
+    "compare_competitor_profiles": {
+        "type": "object",
+        "properties": {
+            "competitor_names": {
+                "type": "array", "items": {"type": "string"},
+                "description": "2–5 concurrentnamen om te vergelijken",
+            },
+        },
+        "required": ["competitor_names"],
+    },
+    "get_competitor_future_threats": {
+        "type": "object",
+        "properties": {"limit": {"type": "integer"}},
+    },
+    "get_competitor_profile_quality": {
+        "type": "object",
+        "properties": {
+            "competitor_name": {"type": "string"},
+            "needs_recheck_only": {
+                "type": "boolean",
+                "description": "Alleen profielen die opnieuw gecontroleerd moeten worden"},
+            "limit": {"type": "integer"},
+        },
     },
 }
 

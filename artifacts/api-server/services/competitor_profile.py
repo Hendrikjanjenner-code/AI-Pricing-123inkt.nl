@@ -288,6 +288,202 @@ def section_completeness(profile, fields: list[str],
     }
 
 
+# ── Profielkwaliteit-vlaggen (Competition Data Quality, taak #249) ──────────
+# Eén gedeelde berekening voor de DQ-scan én de Copilot-datakwaliteitsfunctie,
+# zodat "profiel moet opnieuw gecontroleerd worden" overal dezelfde definitie
+# heeft. Confidence-drempel voor low-confidence profielvelden:
+LOW_PROFILE_CONFIDENCE = 0.5
+
+# Issue-codes (code-keyed registry in de DQ-scan)
+CP_FLAG_CODES = (
+    "CP_UNKNOWN_COMPANY_SIZE", "CP_MISSING_FOUNDED_YEAR",
+    "CP_STALE_EMPLOYEE_ESTIMATE", "CP_STALE_REVENUE_ESTIMATE",
+    "CP_UNKNOWN_FULFILMENT_MODEL", "CP_UNKNOWN_DROPSHIP_MODEL",
+    "CP_UNKNOWN_ACTIVE_COUNTRIES", "CP_MISSING_OWNERSHIP",
+    "CP_STALE_FINANCIALS", "CP_CONFLICTING_FINANCIALS",
+    "CP_MISSING_PROFILE_SOURCE", "CP_LOW_CONFIDENCE_PROFILE",
+    "CP_INCONSISTENT_PARENT_RELATIONS",
+)
+
+
+def _meta_status(meta: dict, field: str) -> Optional[str]:
+    return ((meta or {}).get(field) or {}).get("status")
+
+
+def _meta_verified(meta: dict, field: str) -> Optional[datetime]:
+    lva = ((meta or {}).get(field) or {}).get("last_verified_at")
+    if isinstance(lva, str):
+        try:
+            return datetime.fromisoformat(lva)
+        except ValueError:
+            return None
+    return None
+
+
+def profile_quality_flags(db: Session, shop_id: int,
+                          competitor_name: Optional[str] = None) -> dict[str, dict]:
+    """
+    Kwaliteitsvlaggen per concurrent binnen één shop.
+
+    Returns {competitor_name: {"flags": [issue_codes], "stale_fields": [...],
+    "low_confidence_fields": [...], "missing_source_fields": [...],
+    "open_recheck_requests": int, "needs_recheck": bool}}.
+
+    Definities volgen de freshness-configuratie (get_freshness_rules) en de
+    expliciete unknown-conventie: een veld dat bewust op status "unknown"
+    staat is behandeld, maar het gegeven blijft onbekend en vlagt dus wél.
+    """
+    rules = get_freshness_rules(db, shop_id)
+
+    def _q(model):
+        q = db.query(model).filter(model.shop_id == shop_id)
+        if competitor_name:
+            q = q.filter(model.competitor_name == competitor_name)
+        return q.all()
+
+    names: set[str] = set()
+    if competitor_name:
+        names.add(competitor_name)
+    else:
+        for model in (models.CompetitorProfile, models.CompetitorBusinessProfile):
+            for (n,) in (db.query(model.competitor_name)
+                         .filter(model.shop_id == shop_id).distinct()):
+                names.add(n)
+
+    business = {b.competitor_name: b for b in _q(models.CompetitorBusinessProfile)}
+    fulfilment = {f.competitor_name: f for f in _q(models.CompetitorFulfilmentProfile)}
+    geo: dict[str, list] = {}
+    for g in _q(models.CompetitorGeographicPresence):
+        if g.valid_to is None:
+            geo.setdefault(g.competitor_name, []).append(g)
+    relations: dict[str, list] = {}
+    for r in _q(models.CompetitorCorporateRelation):
+        if r.valid_to is None:
+            relations.setdefault(r.competitor_name, []).append(r)
+    financials: dict[str, list] = {}
+    for f in _q(models.CompetitorFinancialObservation):
+        financials.setdefault(f.competitor_name, []).append(f)
+    recheck: dict[str, int] = {}
+    for v in _q(models.CompetitorFieldValidation):
+        if v.is_current and v.action == "heronderzoek":
+            recheck[v.competitor_name] = recheck.get(v.competitor_name, 0) + 1
+
+    out: dict[str, dict] = {}
+    for name in sorted(names):
+        flags: list[str] = []
+        stale_fields: list[str] = []
+        low_conf: list[str] = []
+        no_source: list[str] = []
+        b = business.get(name)
+        bmeta = (b.field_meta or {}) if b is not None else {}
+
+        # Company size / oprichtingsjaar / ownership
+        if b is None or (b.size_class is None):
+            flags.append("CP_UNKNOWN_COMPANY_SIZE")
+        if b is None or (b.founded_year is None):
+            flags.append("CP_MISSING_FOUNDED_YEAR")
+        if (b is None or b.ownership_type is None) and not relations.get(name):
+            flags.append("CP_MISSING_OWNERSHIP")
+
+        # Verouderde employee-/revenue-estimates (freshness-regels)
+        if b is not None:
+            for field, code in (("employee_range_min", "CP_STALE_EMPLOYEE_ESTIMATE"),
+                                ("employee_range_max", "CP_STALE_EMPLOYEE_ESTIMATE"),
+                                ("revenue_range_min", "CP_STALE_REVENUE_ESTIMATE"),
+                                ("revenue_range_max", "CP_STALE_REVENUE_ESTIMATE")):
+                if getattr(b, field) is None:
+                    continue
+                ftype = FIELD_TYPE_MAP.get(field, "default")
+                if is_stale(_meta_verified(bmeta, field), ftype, rules):
+                    if code not in flags:
+                        flags.append(code)
+                    stale_fields.append(f"business.{field}")
+
+        # Fulfilment / dropship
+        f = fulfilment.get(name)
+        fmeta = (f.field_meta or {}) if f is not None else {}
+        if f is None or f.inventory_model is None:
+            flags.append("CP_UNKNOWN_FULFILMENT_MODEL")
+        if f is None or (f.dropship_share_pct is None
+                         and (f.inventory_model or "") != "eigen_voorraad"):
+            flags.append("CP_UNKNOWN_DROPSHIP_MODEL")
+
+        # Actieve landen
+        if not geo.get(name):
+            flags.append("CP_UNKNOWN_ACTIVE_COUNTRIES")
+
+        # Financiële data: te oud of conflicterend
+        fin = financials.get(name, [])
+        known_fin = [r for r in fin if not r.is_unknown]
+        if known_fin and all(
+                is_stale(r.last_verified_at, "revenue", rules) for r in known_fin):
+            flags.append("CP_STALE_FINANCIALS")
+            stale_fields.append("financials")
+        by_key: dict[tuple, list] = {}
+        for r in known_fin:
+            by_key.setdefault((r.metric, r.fiscal_year), []).append(r)
+        for key, rows in by_key.items():
+            if len(rows) < 2:
+                continue
+            # Conflicterend: ranges van hetzelfde metric/boekjaar overlappen niet
+            lo = max((float(r.value_min) for r in rows if r.value_min is not None),
+                     default=None)
+            hi = min((float(r.value_max) for r in rows if r.value_max is not None),
+                     default=None)
+            if lo is not None and hi is not None and lo > hi:
+                if "CP_CONFLICTING_FINANCIALS" not in flags:
+                    flags.append("CP_CONFLICTING_FINANCIALS")
+
+        # Ontbrekende bron & lage confidence (singleton-velden + rij-secties)
+        for section, meta in (("business", bmeta), ("fulfilment", fmeta)):
+            for field, m in (meta or {}).items():
+                m = m or {}
+                if m.get("status") == "unknown":
+                    continue
+                if not m.get("source") and not m.get("evidence_id"):
+                    no_source.append(f"{section}.{field}")
+                conf = m.get("confidence")
+                if conf is not None and conf < LOW_PROFILE_CONFIDENCE:
+                    low_conf.append(f"{section}.{field}")
+        for section, rows in (("financials", known_fin),
+                              ("geography", geo.get(name, [])),
+                              ("corporate_relations", relations.get(name, []))):
+            for r in rows:
+                if r.evidence_id is None and not getattr(r, "source_note", None):
+                    no_source.append(f"{section}#{r.id}")
+                if r.confidence is not None and r.confidence < LOW_PROFILE_CONFIDENCE:
+                    low_conf.append(f"{section}#{r.id}")
+        if no_source:
+            flags.append("CP_MISSING_PROFILE_SOURCE")
+        if low_conf:
+            flags.append("CP_LOW_CONFIDENCE_PROFILE")
+
+        # Inconsistente parent-relaties
+        rels = relations.get(name, [])
+        parents = [r for r in rels if r.relation_type == "parent"]
+        ultimates = {r.related_entity for r in rels
+                     if r.relation_type == "ultimate_parent"}
+        self_rel = any(r.related_entity == name for r in rels)
+        if (len({p.related_entity for p in parents}) > 1
+                or len(ultimates) > 1 or self_rel):
+            flags.append("CP_INCONSISTENT_PARENT_RELATIONS")
+
+        open_recheck = recheck.get(name, 0)
+        needs_recheck = bool(
+            open_recheck or stale_fields
+            or {"CP_CONFLICTING_FINANCIALS", "CP_INCONSISTENT_PARENT_RELATIONS",
+                "CP_LOW_CONFIDENCE_PROFILE"} & set(flags))
+        out[name] = {
+            "flags": flags,
+            "stale_fields": stale_fields,
+            "low_confidence_fields": low_conf,
+            "missing_source_fields": no_source,
+            "open_recheck_requests": open_recheck,
+            "needs_recheck": needs_recheck,
+        }
+    return out
+
+
 def rows_completeness(rows: list, field_type: str, rules: dict[str, int]) -> dict:
     """Completeness/freshness voor rij-gebaseerde secties (financials, rollen,
     landen, relaties): aanwezig = er zijn rijen; unknown-rijen expliciet."""

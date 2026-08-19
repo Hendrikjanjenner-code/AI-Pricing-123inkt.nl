@@ -522,6 +522,116 @@ def _detect_issues(db: Session, total_skus: int) -> list[dict]:  # noqa: C901
             "Deze SKU's verliezen op jaarbasis geld; margereparatie heeft prioriteit.",
             "Analyseer prijs- en kostenopbouw; overweeg prijsverhoging of sanering."))
 
+    # ── Competition Data Quality: concurrentprofielen (taak #249) ─────────
+    issues.extend(_detect_competitor_profile_issues(db))
+
+    return issues
+
+
+# Metadata per CP-issuecode: (severity, titel, omschrijving, impact, actie).
+# Owner-toewijzing verloopt — net als bij alle andere codes — via de
+# issue-workflow in het bestaande data-quality-overzicht.
+_CP_ISSUE_META: dict[str, tuple[str, str, str, str, str]] = {
+    "CP_UNKNOWN_COMPANY_SIZE": (
+        "warning", "Onbekende bedrijfsomvang concurrent",
+        "Concurrentprofielen zonder size class",
+        "Zonder omvangsindicatie zijn dreiging en inkoopkracht niet in te schatten.",
+        "Vul de size class aan of markeer het veld expliciet als unknown met bron."),
+    "CP_MISSING_FOUNDED_YEAR": (
+        "info", "Ontbrekend oprichtingsjaar concurrent",
+        "Concurrentprofielen zonder oprichtingsjaar",
+        "Beperkte impact; oprichtingsjaar ondersteunt volwassenheidsinschatting.",
+        "Vul het oprichtingsjaar aan (KvK/jaarverslag)."),
+    "CP_STALE_EMPLOYEE_ESTIMATE": (
+        "warning", "Verouderde employee-estimates",
+        "Employee-ranges ouder dan de freshness-regel voor employees",
+        "Verouderde personeelsdata vertekent de company-size-classificatie.",
+        "Herverifieer de employee-range en werk last_verified_at bij."),
+    "CP_STALE_REVENUE_ESTIMATE": (
+        "warning", "Verouderde revenue-estimates",
+        "Revenue-ranges ouder dan de freshness-regel voor revenue",
+        "Verouderde omzetdata vertekent financiële gezondheid en omvang.",
+        "Herverifieer de revenue-range en werk last_verified_at bij."),
+    "CP_UNKNOWN_FULFILMENT_MODEL": (
+        "warning", "Onbekend fulfilmentmodel concurrent",
+        "Concurrentprofielen zonder voorraad-/fulfilmentmodel",
+        "Zonder fulfilmentmodel is de operationele dreiging niet te duiden.",
+        "Bepaal het voorraadmodel of markeer het expliciet als unknown."),
+    "CP_UNKNOWN_DROPSHIP_MODEL": (
+        "warning", "Onbekend dropshipmodel concurrent",
+        "Concurrentprofielen zonder dropship-aandeel",
+        "Dropship-vragen aan de Copilot kunnen deze spelers niet meenemen.",
+        "Vul het dropship-aandeel aan of markeer het expliciet als unknown."),
+    "CP_UNKNOWN_ACTIVE_COUNTRIES": (
+        "warning", "Onbekende actieve landen concurrent",
+        "Concurrentprofielen zonder actieve geografische aanwezigheid",
+        "Geografische schaal en internationale dreiging zijn niet te bepalen.",
+        "Registreer de actieve landen (webshop/operationeel) met bron."),
+    "CP_MISSING_OWNERSHIP": (
+        "warning", "Ontbrekende ownership-informatie",
+        "Concurrentprofielen zonder eigendomstype én zonder corporate relaties",
+        "Groepsverbanden en financiële slagkracht blijven onzichtbaar.",
+        "Vul ownership-type of corporate relaties aan (KvK/jaarverslag)."),
+    "CP_STALE_FINANCIALS": (
+        "warning", "Verouderde financiële data concurrent",
+        "Alle bekende financiële observaties zijn ouder dan de freshness-regel",
+        "Financiële gezondheidsscores leunen op verouderde cijfers.",
+        "Herverifieer de meest recente jaarcijfers."),
+    "CP_CONFLICTING_FINANCIALS": (
+        "error", "Conflicterende financiële data concurrent",
+        "Meerdere niet-overlappende waardes voor hetzelfde metric/boekjaar",
+        "Tegenstrijdige cijfers maken de financiële score onbetrouwbaar.",
+        "Beoordeel de bronnen en markeer de foute observatie."),
+    "CP_MISSING_PROFILE_SOURCE": (
+        "warning", "Profielvelden zonder bron",
+        "Profielvelden of -rijen zonder bronvermelding of evidence",
+        "Zonder bron kan de Copilot betrouwbaarheid niet onderbouwen.",
+        "Voeg bron of evidence toe aan de betreffende velden."),
+    "CP_LOW_CONFIDENCE_PROFILE": (
+        "warning", "Lage confidence in concurrentprofiel",
+        "Profielvelden met confidence onder de drempel",
+        "Laag vertrouwen betekent dat antwoorden als hypothese moeten worden gebracht.",
+        "Herverifieer de velden met lage confidence of bevestig ze handmatig."),
+    "CP_INCONSISTENT_PARENT_RELATIONS": (
+        "error", "Inconsistente parent-relaties",
+        "Meerdere actieve parents/ultimate parents of zelfverwijzing",
+        "Groepsanalyses ('zelfde groep') geven tegenstrijdige antwoorden.",
+        "Corrigeer de corporate relaties: één actieve parent per concurrent."),
+}
+
+
+def _detect_competitor_profile_issues(db: Session) -> list[dict]:
+    """Profielkwaliteit-detecties over alle shops met concurrentprofielen.
+
+    Gebruikt exact dezelfde vlag-definities als de Copilot-functie
+    get_competitor_profile_quality (services.competitor_profile.
+    profile_quality_flags), zodat scan en Copilot nooit uiteenlopen.
+    Fail-safe: een fout hier mag de rest van de scan nooit breken.
+    """
+    from services.competitor_profile import profile_quality_flags
+    issues: list[dict] = []
+    try:
+        shop_ids = {sid for (sid,) in db.query(
+            models.CompetitorProfile.shop_id).distinct()}
+        shop_ids |= {sid for (sid,) in db.query(
+            models.CompetitorBusinessProfile.shop_id).distinct()}
+        counts: dict[str, int] = {}
+        for sid in sorted(shop_ids):
+            for info in profile_quality_flags(db, sid).values():
+                for code in info["flags"]:
+                    counts[code] = counts.get(code, 0) + 1
+        for code, meta in _CP_ISSUE_META.items():
+            n = counts.get(code, 0)
+            if not n:
+                continue
+            severity, title, message, impact, action = meta
+            issues.append(_issue(
+                code, severity, title, message, n,
+                "Competition", "Concurrentprofielen", impact, action))
+    except Exception:  # pragma: no cover — fail-safe, nooit de scan breken
+        import logging
+        logging.getLogger(__name__).exception(
+            "Concurrentprofiel-detecties mislukt; overgeslagen in deze scan.")
     return issues
 
 

@@ -934,6 +934,17 @@ def signal_to_dict(s: models.IntelligenceSignal) -> dict:
     }
 
 
+# Concurrentprofiel-functies (taak #249): implementaties in
+# semantic_layer_competitor.py; registratie in hetzelfde gesloten register.
+from semantic_layer_competitor import (  # noqa: E402
+    get_competitor_business_profile, get_competitor_company_size,
+    get_competitor_geographic_presence, get_competitor_fulfilment_profile,
+    get_competitor_financial_health, get_competitor_procurement_power,
+    get_competitor_market_roles, get_competitor_corporate_structure,
+    get_competitor_evolution, compare_competitor_profiles,
+    get_competitor_future_threats, get_competitor_profile_quality,
+)
+
 # Register van goedgekeurde functies. De AI Gateway (latere taak) gebruikt dit
 # register als de volledige, gesloten lijst van toegestane data-toegangen.
 SEMANTIC_FUNCTIONS: dict[str, SemanticFunction] = {
@@ -995,5 +1006,68 @@ SEMANTIC_FUNCTIONS: dict[str, SemanticFunction] = {
             "Multi-concurrent what-if: prijswijziging met volgkans per concurrent "
             "(op basis van strategie), effect op prijsindex, afzet en marge.",
             ANALYST_UP, simulate_competitor_scenario),
+        # ── Concurrentprofiel (taak #249) ──────────────────────────────
+        SemanticFunction(
+            "get_competitor_business_profile",
+            "Volledig bedrijfsprofiel van één concurrent (juridische naam, KvK, "
+            "oprichtingsjaar, size class, ranges, ownership, HQ) met per veld "
+            "informatielaag, confidence en bron.",
+            ALL_ROLES, get_competitor_business_profile),
+        SemanticFunction(
+            "get_competitor_company_size",
+            "Bedrijfsomvang per concurrent (size class, employee-/revenue-range, "
+            "geografische schaal), filterbaar — bv. grote internationale spelers.",
+            ALL_ROLES, get_competitor_company_size),
+        SemanticFunction(
+            "get_competitor_geographic_presence",
+            "Actieve landen per concurrent (webshop/operationeel), filterbaar op "
+            "land, met informatielaag en confidence.",
+            ALL_ROLES, get_competitor_geographic_presence),
+        SemanticFunction(
+            "get_competitor_fulfilment_profile",
+            "Fulfilmentprofiel per concurrent (voorraadmodel, dropship-aandeel, "
+            "levertijd); met dropship_only alleen dropshipspelers.",
+            ALL_ROLES, get_competitor_fulfilment_profile),
+        SemanticFunction(
+            "get_competitor_financial_health",
+            "Financiële gezondheid per concurrent: score/status + onderliggende "
+            "observaties per boekjaar, incl. relevantie voor ons.",
+            ANALYST_UP, get_competitor_financial_health),
+        SemanticFunction(
+            "get_competitor_procurement_power",
+            "Procurement Power-ranking van concurrenten uit de laatste "
+            "scoringsrun; NULL-scores zijn expliciet unknown.",
+            ANALYST_UP, get_competitor_procurement_power),
+        SemanticFunction(
+            "get_competitor_market_roles",
+            "Actieve marktrollen (Competition DNA) per concurrent, filterbaar "
+            "op rol, met validatiestatus.",
+            ALL_ROLES, get_competitor_market_roles),
+        SemanticFunction(
+            "get_competitor_corporate_structure",
+            "Corporate relaties per concurrent en groepsvorming: welke "
+            "concurrenten delen dezelfde (ultimate) parent.",
+            ALL_ROLES, get_competitor_corporate_structure),
+        SemanticFunction(
+            "get_competitor_evolution",
+            "Evolution-timeline van één concurrent: profielwijzigingen met "
+            "datum, bron en oud/nieuw.",
+            ALL_ROLES, get_competitor_evolution),
+        SemanticFunction(
+            "compare_competitor_profiles",
+            "Vergelijk 2–5 concurrenten zij-aan-zij op omvang, fulfilment, "
+            "financiën, procurement power, threat, rollen en relevantie.",
+            ALL_ROLES, compare_competitor_profiles),
+        SemanticFunction(
+            "get_competitor_future_threats",
+            "Future-threat-ranking (afgeleid signaal) van concurrenten met "
+            "onderliggende factoren.",
+            ANALYST_UP, get_competitor_future_threats),
+        SemanticFunction(
+            "get_competitor_profile_quality",
+            "Betrouwbaarheid van concurrentprofielen: kwaliteitsvlaggen, "
+            "freshness, lage confidence, ontbrekende bronnen en welke "
+            "profielen opnieuw gecontroleerd moeten worden.",
+            ALL_ROLES, get_competitor_profile_quality),
     ]
 }
