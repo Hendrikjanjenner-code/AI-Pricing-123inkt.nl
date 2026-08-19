@@ -575,6 +575,112 @@ def patch_family(
     }
 
 
+@router.delete("/attributes/{attribute_id}")
+def delete_attribute(
+    attribute_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role(*ADMIN_ROLES)),
+):
+    """Verwijder een attribuutdefinitie; geweigerd zolang er gekoppelde data is."""
+    d = db.query(models.PimAttributeDefinition).filter(
+        models.PimAttributeDefinition.id == attribute_id).first()
+    if d is None:
+        raise HTTPException(status_code=404, detail="Attribuutdefinitie niet gevonden.")
+
+    blockers: list[str] = []
+    value_count = db.query(models.PimAttributeValue).filter(
+        models.PimAttributeValue.attribute_id == d.id).count()
+    if value_count:
+        blockers.append(f"{value_count} attribuutwaarde(n)")
+    suggestion_count = db.query(models.PimAiSuggestion).filter(
+        models.PimAiSuggestion.attribute_id == d.id).count()
+    if suggestion_count:
+        blockers.append(f"{suggestion_count} AI-suggestie(s)")
+    channels_using = [c.code for c in db.query(models.PimChannel).all()
+                      if d.code in (c.required_attribute_codes or [])]
+    if channels_using:
+        blockers.append(f"vereist in channel(s): {', '.join(channels_using)}")
+    if blockers:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Attribuut '{d.code}' kan niet verwijderd worden: "
+                   f"{'; '.join(blockers)}. Zet het attribuut op inactief of "
+                   f"verwijder eerst de gekoppelde data.")
+
+    db.add(models.AuditLog(
+        entity_type="pim_attribute_definition", entity_id=str(d.id),
+        action="attribute_deleted", performed_by=current_user.username,
+        details=f"code={d.code}"))
+    db.delete(d)
+    db.commit()
+    return {"deleted": attribute_id}
+
+
+@router.delete("/channels/{channel_id}")
+def delete_channel(
+    channel_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role(*ADMIN_ROLES)),
+):
+    """Verwijder een channel; geweigerd zolang er completeness-scores voor bestaan."""
+    c = db.query(models.PimChannel).filter(models.PimChannel.id == channel_id).first()
+    if c is None:
+        raise HTTPException(status_code=404, detail="Channel niet gevonden.")
+
+    score_count = db.query(models.PimCompletenessScore).filter(
+        models.PimCompletenessScore.channel_code == c.code).count()
+    if score_count:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Channel '{c.code}' kan niet verwijderd worden: er bestaan "
+                   f"{score_count} completeness-score(s) voor dit channel. "
+                   f"Zet het channel op inactief, of verwijder de scores eerst.")
+
+    db.add(models.AuditLog(
+        entity_type="pim_channel", entity_id=str(c.id),
+        action="channel_deleted", performed_by=current_user.username,
+        details=f"code={c.code}"))
+    db.delete(c)
+    db.commit()
+    return {"deleted": channel_id}
+
+
+@router.delete("/families/{family_id}")
+def delete_family(
+    family_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role(*ADMIN_ROLES)),
+):
+    """Verwijder een productfamilie; geweigerd zolang er producten of attributen aan hangen."""
+    f = db.query(models.PimFamily).filter(models.PimFamily.id == family_id).first()
+    if f is None:
+        raise HTTPException(status_code=404, detail="Familie niet gevonden.")
+
+    blockers: list[str] = []
+    product_count = db.query(models.PimProductContent).filter(
+        models.PimProductContent.family_id == f.id).count()
+    if product_count:
+        blockers.append(f"{product_count} gekoppeld(e) product(en)")
+    attr_count = db.query(models.PimAttributeDefinition).filter(
+        models.PimAttributeDefinition.family_id == f.id).count()
+    if attr_count:
+        blockers.append(f"{attr_count} gekoppelde attribuutdefinitie(s)")
+    if blockers:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Familie '{f.code}' kan niet verwijderd worden: "
+                   f"{'; '.join(blockers)}. Zet de familie op inactief of "
+                   f"koppel de data eerst los.")
+
+    db.add(models.AuditLog(
+        entity_type="pim_family", entity_id=str(f.id),
+        action="family_deleted", performed_by=current_user.username,
+        details=f"code={f.code}"))
+    db.delete(f)
+    db.commit()
+    return {"deleted": family_id}
+
+
 # ─── Productrelaties ─────────────────────────────────────────────────────────
 
 VALID_RELATION_TYPES = {"variant_van", "accessoire", "vervangt", "alternatief"}

@@ -10,7 +10,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   CheckCircle2, ChevronDown, ChevronUp, Loader2, RefreshCw, XCircle,
-  Settings, BarChart3, Save, X as XIcon, Plus,
+  Settings, BarChart3, Save, X as XIcon, Plus, Trash2,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { getAuthHeaders } from "@/lib/auth";
@@ -109,6 +109,14 @@ async function postApi(path: string, body: object): Promise<Response> {
     method: "POST",
     headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000),
+  });
+}
+
+async function deleteApi(path: string): Promise<Response> {
+  return fetch(`${BASE}${path}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
     signal: AbortSignal.timeout(30_000),
   });
 }
@@ -463,6 +471,26 @@ function AttributenBeheer({ attrs, onChange }: { attrs: AttrDef[]; onChange: () 
     }
   }
 
+  const [verwijderen, setVerwijderen] = useState<number | null>(null);
+
+  async function verwijder(a: AttrDef) {
+    if (!window.confirm(`Attribuut '${a.code}' definitief verwijderen? Dit kan niet ongedaan worden gemaakt.`)) return;
+    setVerwijderen(a.id);
+    setFout(null);
+    try {
+      const res = await deleteApi(`/api/pim/attributes/${a.id}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail ?? `HTTP ${res.status}`);
+      }
+      onChange();
+    } catch (e: any) {
+      setFout(e?.message ?? "Verwijderen mislukt");
+    } finally {
+      setVerwijderen(null);
+    }
+  }
+
   const SOURCES = ["DRS", "Leverancier", "Handmatig", "AI"];
 
   return (
@@ -555,9 +583,21 @@ function AttributenBeheer({ attrs, onChange }: { attrs: AttrDef[]; onChange: () 
                       </Button>
                     </div>
                   ) : (
-                    <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => startEdit(a)}>
-                      Bewerk
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => startEdit(a)}>
+                        Bewerk
+                      </Button>
+                      <Button
+                        size="sm" variant="ghost"
+                        className="h-7 px-2 text-red-500 hover:text-red-600"
+                        onClick={() => verwijder(a)}
+                        disabled={verwijderen === a.id}
+                        title="Verwijder attribuut"
+                        data-testid={`button-delete-attribute-${a.id}`}
+                      >
+                        {verwijderen === a.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                      </Button>
+                    </div>
                   )}
                 </TableCell>
               </TableRow>
@@ -616,6 +656,26 @@ function ChannelsBeheer({
       setFout(e?.message ?? "Opslaan mislukt");
     } finally {
       setSaving(false);
+    }
+  }
+
+  const [verwijderen, setVerwijderen] = useState<number | null>(null);
+
+  async function verwijder(c: Channel) {
+    if (!window.confirm(`Channel '${c.code}' definitief verwijderen? Dit kan niet ongedaan worden gemaakt.`)) return;
+    setVerwijderen(c.id);
+    setFout(null);
+    try {
+      const res = await deleteApi(`/api/pim/channels/${c.id}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail ?? `HTTP ${res.status}`);
+      }
+      onChange();
+    } catch (e: any) {
+      setFout(e?.message ?? "Verwijderen mislukt");
+    } finally {
+      setVerwijderen(null);
     }
   }
 
@@ -700,9 +760,21 @@ function ChannelsBeheer({
                       </Button>
                     </div>
                   ) : (
-                    <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => startEdit(c)}>
-                      Bewerk
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => startEdit(c)}>
+                        Bewerk
+                      </Button>
+                      <Button
+                        size="sm" variant="ghost"
+                        className="h-7 px-2 text-red-500 hover:text-red-600"
+                        onClick={() => verwijder(c)}
+                        disabled={verwijderen === c.id}
+                        title="Verwijder channel"
+                        data-testid={`button-delete-channel-${c.id}`}
+                      >
+                        {verwijderen === c.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                      </Button>
+                    </div>
                   )}
                 </TableCell>
               </TableRow>
@@ -757,6 +829,26 @@ function FamiliesBeheer({ families, onChange }: { families: Family[]; onChange: 
       setFout(e?.message ?? "Opslaan mislukt");
     } finally {
       setSaving(false);
+    }
+  }
+
+  const [verwijderen, setVerwijderen] = useState<number | null>(null);
+
+  async function verwijder(f: Family) {
+    if (!window.confirm(`Familie '${f.code}' definitief verwijderen? Dit kan niet ongedaan worden gemaakt.`)) return;
+    setVerwijderen(f.id);
+    setFout(null);
+    try {
+      const res = await deleteApi(`/api/pim/families/${f.id}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail ?? `HTTP ${res.status}`);
+      }
+      onChange();
+    } catch (e: any) {
+      setFout(e?.message ?? "Verwijderen mislukt");
+    } finally {
+      setVerwijderen(null);
     }
   }
 
@@ -829,9 +921,21 @@ function FamiliesBeheer({ families, onChange }: { families: Family[]; onChange: 
                       </Button>
                     </div>
                   ) : (
-                    <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => startEdit(f)}>
-                      Bewerk
-                    </Button>
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => startEdit(f)}>
+                        Bewerk
+                      </Button>
+                      <Button
+                        size="sm" variant="ghost"
+                        className="h-7 px-2 text-red-500 hover:text-red-600"
+                        onClick={() => verwijder(f)}
+                        disabled={verwijderen === f.id}
+                        title="Verwijder familie"
+                        data-testid={`button-delete-family-${f.id}`}
+                      >
+                        {verwijderen === f.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                      </Button>
+                    </div>
                   )}
                 </TableCell>
               </TableRow>

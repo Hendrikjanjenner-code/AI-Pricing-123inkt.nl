@@ -84,8 +84,27 @@ DEFAULT_FAMILIES = [
 ]
 
 
+_defaults_seeded = False  # proces-lokale sneltoets; de echte marker staat in audit_log
+
+
 def ensure_defaults(db: Session) -> None:
-    """Seed default attributen, channels en families als de tabellen leeg zijn."""
+    """
+    Seed default attributen, channels en families — maar hooguit één keer.
+
+    Een marker in audit_log voorkomt dat een beheerder die bewust het laatste
+    attribuut/channel/familie verwijdert, bij de eerstvolgende lijst-refresh
+    de defaults weer terug ziet komen.
+    """
+    global _defaults_seeded
+    if _defaults_seeded:
+        return
+    marker = (db.query(models.AuditLog)
+              .filter(models.AuditLog.entity_type == "pim_defaults",
+                      models.AuditLog.action == "defaults_seeded")
+              .first())
+    if marker is not None:
+        _defaults_seeded = True
+        return
     if db.query(models.PimAttributeDefinition).count() == 0:
         for code, name, dtype, unit, owner, req, weight, dim_field in DEFAULT_ATTRIBUTES:
             db.add(models.PimAttributeDefinition(
@@ -100,7 +119,11 @@ def ensure_defaults(db: Session) -> None:
     if db.query(models.PimFamily).count() == 0:
         for code, name, patterns in DEFAULT_FAMILIES:
             db.add(models.PimFamily(code=code, name=name, category_patterns=patterns))
+    db.add(models.AuditLog(
+        entity_type="pim_defaults", entity_id="v1", action="defaults_seeded",
+        performed_by="system", details="Initiële PIM-defaults geseed (eenmalig)"))
     db.commit()
+    _defaults_seeded = True
 
 
 def _attr_defs(db: Session) -> list[models.PimAttributeDefinition]:

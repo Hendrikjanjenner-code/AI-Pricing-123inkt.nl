@@ -32,4 +32,5 @@
 - [Stale lib d.ts vs artifact typecheck](typecheck-libs-stale.md) — TS2305 from @workspace pkgs means run root `pnpm run typecheck:libs` first; refs use built dist, not src.
 - [Few-shot FTS retrieval](fewshot-fts.md) — dutch FTS primary + Jaccard fallback; dutch stemmer quirk: 'marges' does NOT stem to 'marg'.
 - [DQ registry test isolation](dq-registry-test-isolation.md) — never call _sync_issue_registry/_detect_issues with a replaced/empty detection list in shared-DB tests; wrap the real detector and add a synthetic issue, or unrelated registry rows get auto-resolved.
+- [PIM defaults seed-once](pim-defaults-seeding.md) — "seed if empty" on list reads resurrects deleted reference data; use a persistent seeded-once marker.
 - [Reasoning-model tools 400](model-tools-reasoning-effort.md) — gpt-5.6-terra weigert tools + reasoning_effort op chat completions; gateway retryt met none; smoke-test tool-vragen na modelwissel.
