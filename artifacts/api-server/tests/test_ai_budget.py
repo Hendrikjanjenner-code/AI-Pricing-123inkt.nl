@@ -832,6 +832,13 @@ class TestBudgetConfigValidation(unittest.TestCase):
     def setUpClass(cls):
         from fastapi.testclient import TestClient
         import main
+        # TestClient buiten een context manager voert de startup-events niet
+        # uit; zorg zelf dat de tabellen en demo-gebruikers bestaan.
+        from database import engine
+        import models as _models
+        import seed
+        _models.Base.metadata.create_all(bind=engine)
+        seed.seed_users_only()
         cls.client = TestClient(main.app)
 
         resp = cls.client.post("/api/auth/login",
