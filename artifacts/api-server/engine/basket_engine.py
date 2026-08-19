@@ -15,7 +15,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import models
-from engine.signal_publisher import publish_signal, resolve_shop_id
+from engine.signal_publisher import publish_signal, resolve_shop_id, auto_resolve_signals
 from engine.model_governance import ensure_active_model, record_run_metrics, get_active_config
 
 # Default modelconfiguratie — vastgelegd per registry-versie (governance §54).
@@ -163,6 +163,16 @@ def run_basket_engine(db: Session, run_date: date | None = None,
             suggested_action="Bied deze producten als bundel of cross-sell aan",
             model_version=model.version,
         )
+
+    # Auto-resolve: associatiesignalen die niet meer in de top-selectie van
+    # deze run zitten worden op resolved gezet. Bij een lege bron (geen
+    # affiniteitsdata) komen we hier niet — de early return hierboven bewaakt
+    # dat "geen data" nooit tot resolutie leidt.
+    auto_resolve_signals(
+        db, engine="basket",
+        still_active={("strong_product_association", a) for a in signaled_antecedents},
+        signal_types=["strong_product_association"], entity_type="sku",
+        shop_id=sid)
 
     record_run_metrics(db, "basket", {"associations": created, "skus": len(skus), "shop_id": sid})
     db.commit()

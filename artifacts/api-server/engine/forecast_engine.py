@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 import models
 import logging
 
-from engine.signal_publisher import publish_signal, resolve_shop_id
+from engine.signal_publisher import publish_signal, resolve_shop_id, auto_resolve_signals
 from engine.model_governance import ensure_active_model, record_run_metrics, get_active_config
 from engine.run_profiling import RunProfiler, check_slow_run
 
@@ -38,6 +38,12 @@ FORECAST_DEFAULT_CONFIG = {
     # shop-gescopeerde runs (tests) zijn uitgezonderd. <= 0 schakelt uit.
     "slow_run_threshold_seconds": 60.0,
 }
+
+# Risicosignaaltypen die deze engine publiceert; auto-resolve blijft hiertoe
+# beperkt zodat bv. engine_slow_run-signalen niet worden aangeraakt.
+FORECAST_RISK_SIGNAL_TYPES = [
+    "stock_risk", "demand_risk", "margin_risk", "competitor_risk", "supplier_risk",
+]
 
 
 def _forecast_sku(rows: list, horizon: int, min_history_days: int = 14) -> Optional[dict]:
@@ -137,6 +143,8 @@ def run_forecast_engine(db: Session, run_date: date | None = None,
 
     forecast_count = 0
     risk_count = 0
+    still_active_risks: set[tuple[str, str]] = set()
+    evaluated_by_type: dict[str, set[str]] = {}
     _t_forecasts = time.monotonic()
     for sku_id, rows in by_sku.items():
         prod = products.get(sku_id)
@@ -185,7 +193,21 @@ def run_forecast_engine(db: Session, run_date: date | None = None,
         # ── Risicodetectie per SKU (op 30-dagen forecast) ────────────────────
         fc30 = _forecast_sku(rows, 30, min_hist)
         if fc30:
-            risk_count += _detect_sku_risks(db, prod, fc30, run_date, model.version, sid, cfg)
+            risk_count += _detect_sku_risks(db, prod, fc30, run_date, model.version, sid, cfg,
+                                            still_active_risks, evaluated_by_type)
+
+    # Auto-resolve: risicosignalen waarvan de conditie in deze run niet meer
+    # geldt worden op resolved gezet — per signaaltype, en alléén voor SKU's
+    # waarvan dát type daadwerkelijk geëvalueerd kon worden (voldoende
+    # historie, actief product en — voor competitor/supplier — aanwezige
+    # brondata). Geen of onvoldoende data is géén bewijs dat het risico
+    # verholpen is.
+    for risk_type, skus_evaluated in evaluated_by_type.items():
+        if skus_evaluated:
+            auto_resolve_signals(
+                db, engine="forecast_risk", still_active=still_active_risks,
+                signal_types=[risk_type], entity_type="sku",
+                shop_id=sid, entity_ids=skus_evaluated)
 
     prof.timings["forecasts"] = round(time.monotonic() - _t_forecasts, 3)
     logger.info("Forecast engine stap 'forecasts' duurde %.3fs",
@@ -217,11 +239,21 @@ def run_forecast_engine(db: Session, run_date: date | None = None,
 
 
 def _detect_sku_risks(db: Session, prod: models.DimProduct, fc30: dict, run_date: date,
-                      model_version: str, sid: int, cfg: dict) -> int:
+                      model_version: str, sid: int, cfg: dict,
+                      still_active: set[tuple[str, str]] | None = None,
+                      evaluated: dict[str, set[str]] | None = None) -> int:
+    if still_active is None:
+        still_active = set()
+    if evaluated is None:
+        evaluated = {}
     count = 0
     sku = prod.sku_id
     name = prod.product_name
     sources = ["fact_sales_daily", "dim_product", "fact_forecast_daily"]
+
+    # Forecast-gebaseerde risico's zijn evalueerbaar zodra fc30 bestaat.
+    for _t in ("stock_risk", "demand_risk", "margin_risk"):
+        evaluated.setdefault(_t, set()).add(sku)
 
     # Stock-risico: verwachte vraag > voorraad
     stock = float(prod.stock_quantity or 0)
@@ -241,6 +273,7 @@ def _detect_sku_risks(db: Session, prod: models.DimProduct, fc30: dict, run_date
                       "days_of_stock": round(days_left, 1)},
             sources=sources, suggested_action="Bestel bij of verhoog de prijs om vraag te dempen",
             model_version=model_version)
+        still_active.add(("stock_risk", sku))
         count += 1
 
     # Demand-risico: sterk dalende trend
@@ -256,6 +289,7 @@ def _detect_sku_risks(db: Session, prod: models.DimProduct, fc30: dict, run_date
                       "avg_daily_units": round(fc30["avg_daily_units"], 2)},
             sources=sources, suggested_action="Onderzoek prijs/concurrentie of plan afbouw",
             model_version=model_version)
+        still_active.add(("demand_risk", sku))
         count += 1
 
     # Marge-risico: verwachte marge per eenheid nihil of negatief
@@ -270,15 +304,21 @@ def _detect_sku_risks(db: Session, prod: models.DimProduct, fc30: dict, run_date
             evidence={"margin_per_unit": round(fc30["margin_per_unit"], 2)},
             sources=sources, suggested_action="Verhoog prijs of heronderhandel inkoopprijs",
             model_version=model_version)
+        still_active.add(("margin_risk", sku))
         count += 1
 
     # Competitor-risico: prijsindex fors boven de markt
     score = (
         db.query(models.SkuCompetitionScore)
-        .filter(models.SkuCompetitionScore.sku_id == sku)
+        .filter(models.SkuCompetitionScore.sku_id == sku,
+                models.SkuCompetitionScore.shop_id == sid)
         .order_by(models.SkuCompetitionScore.run_date.desc())
         .first()
     )
+    # Zonder (shop-eigen) competitiescore is het concurrentierisico niet
+    # geëvalueerd; bestaande signalen mogen dan niet resolven.
+    if score and score.price_index is not None:
+        evaluated.setdefault("competitor_risk", set()).add(sku)
     if score and score.price_index and float(score.price_index) > float(cfg["price_index_risk_threshold"]):
         publish_signal(
             db, shop_id=sid, engine="forecast_risk", signal_type="competitor_risk",
@@ -295,6 +335,7 @@ def _detect_sku_risks(db: Session, prod: models.DimProduct, fc30: dict, run_date
             sources=sources + ["sku_competition_score"],
             suggested_action="Beoordeel prijsaanpassing via de pricing engine",
             model_version=model_version)
+        still_active.add(("competitor_risk", sku))
         count += 1
 
     # Supplier-risico: lange levertijd bij lage voorraaddekking
@@ -304,6 +345,10 @@ def _detect_sku_risks(db: Session, prod: models.DimProduct, fc30: dict, run_date
         .order_by(models.FactSupplierData.created_at.desc())
         .first()
     )
+    # Zonder leveranciersrecord (met levertijd) is het leveranciersrisico
+    # niet geëvalueerd; bestaande signalen mogen dan niet resolven.
+    if supplier and supplier.lead_time_days:
+        evaluated.setdefault("supplier_risk", set()).add(sku)
     if supplier and supplier.lead_time_days and fc30["avg_daily_units"] > 0:
         days_left = stock / max(0.01, fc30["avg_daily_units"])
         if supplier.lead_time_days > days_left:
@@ -323,6 +368,7 @@ def _detect_sku_risks(db: Session, prod: models.DimProduct, fc30: dict, run_date
                 sources=sources + ["fact_supplier_data"],
                 suggested_action="Plaats nu een order bij de leverancier",
                 model_version=model_version)
+            still_active.add(("supplier_risk", sku))
             count += 1
 
     return count

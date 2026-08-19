@@ -14,7 +14,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import models
-from engine.signal_publisher import publish_signal, resolve_shop_id
+from engine.signal_publisher import publish_signal, resolve_shop_id, auto_resolve_signals
 from engine.model_governance import ensure_active_model, record_run_metrics, get_active_config
 
 # Default modelconfiguratie — vastgelegd per registry-versie (governance §54).
@@ -233,14 +233,20 @@ def run_promotion_engine(db: Session, run_date: date | None = None,
 
     analyzed = 0
     effects: list[models.FactPromotionEffect] = []
+    analyzed_skus: set[str] = set()
+    unanalyzable_skus: set[str] = set()
     for promo in promos:
         eff = analyze_promotion(db, promo, run_date, model.version, sid, cfg)
         if eff:
             analyzed += 1
             effects.append(eff)
+            analyzed_skus.add(promo.sku_id)
+        else:
+            unanalyzable_skus.add(promo.sku_id)
 
     prods = {p.sku_id: p for p in db.query(models.DimProduct).filter(
         models.DimProduct.shop_id == sid).all()}
+    still_active: set[tuple[str, str]] = set()
     for eff in effects:
         if eff.verdict == "VERLIESGEVEND":
             sev, direction, action = "high", "negative", "Herhaal deze promotie niet in de huidige vorm"
@@ -251,6 +257,7 @@ def run_promotion_engine(db: Session, run_date: date | None = None,
         else:
             continue
         prod = prods.get(eff.sku_id)
+        still_active.add((stype, eff.sku_id))
         publish_signal(
             db,
             shop_id=sid,
@@ -278,6 +285,18 @@ def run_promotion_engine(db: Session, run_date: date | None = None,
             suggested_action=action,
             model_version=model.version,
         )
+
+    # Auto-resolve: promotiesignalen waarvan het oordeel in deze run niet meer
+    # verliesgevend/effectief is worden op resolved gezet — maar alléén voor
+    # SKU's waarvan álle promoties analyseerbaar waren. Een SKU met (ook maar
+    # één) niet-analyseerbare promotie (onvoldoende verkoopdata) is niet
+    # geëvalueerd; dat is géén bewijs dat de conditie verholpen is.
+    evaluated_skus = analyzed_skus - unanalyzable_skus
+    if evaluated_skus:
+        auto_resolve_signals(
+            db, engine="promotion", still_active=still_active,
+            signal_types=["promotion_loss_making", "promotion_effective"],
+            entity_type="sku", shop_id=sid, entity_ids=evaluated_skus)
 
     record_run_metrics(db, "promotion", {"promotions": len(promos), "analyzed": analyzed,
                                          "shop_id": sid})

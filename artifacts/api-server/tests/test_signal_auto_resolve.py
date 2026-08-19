@@ -724,3 +724,818 @@ class TestEconomicAutoResolve:
             s.query(models.IntelligenceSignal).filter_by(signal_type=code).delete()
             s.commit()
             s.close()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Engines die rechtstreeks publiceren: forecast, promotie, basket, loyaliteit
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _make_shop(s, prefix):
+    shop = models.DimShop(shop_code=f"{prefix}{_unique()[:6]}",
+                          name=f"AR {prefix} shop", active=True)
+    s.add(shop)
+    s.flush()
+    return shop.id
+
+
+class TestForecastAutoResolve:
+    def test_stock_risk_resolves_when_stock_replenished(self):
+        from engine.forecast_engine import run_forecast_engine
+        uid = _unique()
+        sku_id = f"SKU-ARFC-{uid}"
+        today = date_type.today()
+
+        s = SessionLocal()
+        shop_id_test = None
+        try:
+            shop_id_test = _make_shop(s, "ARFC")
+            s.add(models.DimProduct(sku_id=sku_id, product_name=f"Forecast {uid}",
+                                    shop_id=shop_id_test, stock_quantity=10,
+                                    current_price=10.0, cost_price=5.0))
+            for i in range(20):
+                s.add(models.FactSalesDaily(
+                    date=today - timedelta(days=i + 1), sku_id=sku_id,
+                    shop_id=shop_id_test, units_sold=5,
+                    revenue=50.0, cost=25.0, margin=25.0))
+            s.commit()
+
+            run_forecast_engine(s, shop_id=shop_id_test)
+            sig = _signal_for(s, sku_id, "stock_risk")
+            assert sig is not None and sig.status == "active"
+
+            # Verhelpen: voorraad ruimschoots aangevuld
+            s.query(models.DimProduct).filter_by(sku_id=sku_id).update(
+                {"stock_quantity": 100000})
+            s.commit()
+
+            run_forecast_engine(s, shop_id=shop_id_test)
+            assert _signal_for(s, sku_id, "stock_risk").status == "resolved"
+
+            # Idempotent: nog een run publiceert niet opnieuw
+            run_forecast_engine(s, shop_id=shop_id_test)
+            cnt = s.query(models.IntelligenceSignal).filter(
+                models.IntelligenceSignal.entity_id == sku_id,
+                models.IntelligenceSignal.signal_type == "stock_risk").count()
+            assert cnt == 1
+        finally:
+            s.rollback()
+            s.query(models.FactForecastDaily).filter_by(sku_id=sku_id).delete()
+            s.query(models.FactSalesDaily).filter_by(sku_id=sku_id).delete()
+            s.query(models.DimProduct).filter_by(sku_id=sku_id).delete()
+            s.query(models.IntelligenceSignal).filter_by(entity_id=sku_id).delete()
+            if shop_id_test:
+                s.query(models.IntelligenceSignal).filter_by(
+                    shop_id=shop_id_test).delete()
+                s.query(models.DimShop).filter_by(id=shop_id_test).delete()
+            s.commit()
+            s.close()
+
+    def test_unevaluable_sku_not_resolved_in_mixed_run(self):
+        """Regressie: een SKU met te weinig historie (conditie niet
+        evalueerbaar) mag niet worden geresolved, ook al konden andere SKU's
+        in dezelfde run wél worden geëvalueerd."""
+        from engine.forecast_engine import run_forecast_engine
+        uid = _unique()
+        sku_ok = f"SKU-ARFCMX-{uid}"     # voldoende historie, geen risico
+        sku_thin = f"SKU-ARFCTH-{uid}"   # te weinig historie
+        today = date_type.today()
+
+        s = SessionLocal()
+        shop_id_test = None
+        try:
+            shop_id_test = _make_shop(s, "ARFM")
+            s.add(models.DimProduct(sku_id=sku_ok, product_name=f"OK {uid}",
+                                    shop_id=shop_id_test, stock_quantity=100000,
+                                    current_price=10.0, cost_price=5.0))
+            s.add(models.DimProduct(sku_id=sku_thin, product_name=f"Dun {uid}",
+                                    shop_id=shop_id_test, stock_quantity=10,
+                                    current_price=10.0, cost_price=5.0))
+            for i in range(20):
+                s.add(models.FactSalesDaily(
+                    date=today - timedelta(days=i + 1), sku_id=sku_ok,
+                    shop_id=shop_id_test, units_sold=5,
+                    revenue=50.0, cost=25.0, margin=25.0))
+            # Te weinig historie voor sku_thin (< min_history_days)
+            for i in range(3):
+                s.add(models.FactSalesDaily(
+                    date=today - timedelta(days=i + 1), sku_id=sku_thin,
+                    shop_id=shop_id_test, units_sold=5,
+                    revenue=50.0, cost=25.0, margin=25.0))
+            sig = publish_signal(
+                s, engine="forecast_risk", signal_type="stock_risk",
+                entity_type="sku", entity_id=sku_thin,
+                explanation="Voorraadrisico.", evidence={"v": 1}, sources=["t"],
+                shop_id=shop_id_test)
+            s.commit()
+            sig_id = sig.id
+
+            run_forecast_engine(s, shop_id=shop_id_test)
+            refreshed = s.query(models.IntelligenceSignal).get(sig_id)
+            assert refreshed.status == "active", (
+                "Een niet-evalueerbare SKU mag in een gemengde run niet "
+                "worden geresolved")
+        finally:
+            s.rollback()
+            for sk in (sku_ok, sku_thin):
+                s.query(models.FactForecastDaily).filter_by(sku_id=sk).delete()
+                s.query(models.FactSalesDaily).filter_by(sku_id=sk).delete()
+                s.query(models.DimProduct).filter_by(sku_id=sk).delete()
+                s.query(models.IntelligenceSignal).filter_by(entity_id=sk).delete()
+            if shop_id_test:
+                s.query(models.IntelligenceSignal).filter_by(
+                    shop_id=shop_id_test).delete()
+                s.query(models.DimShop).filter_by(id=shop_id_test).delete()
+            s.commit()
+            s.close()
+
+    def test_missing_source_data_keeps_competitor_and_supplier_signals(self):
+        """Regressie: competitor_risk en supplier_risk mogen niet resolven
+        wanneer de bijbehorende brondata (competitiescore resp.
+        leveranciersrecord) ontbreekt — ook al is de verkoophistorie
+        evalueerbaar. Een cross-shop competitiescore telt niet als eigen
+        evaluatie."""
+        from engine.forecast_engine import run_forecast_engine
+        uid = _unique()
+        sku = f"SKU-ARFSRC-{uid}"
+        today = date_type.today()
+
+        s = SessionLocal()
+        shop_id_test = None
+        other_shop_id = None
+        try:
+            shop_id_test = _make_shop(s, "ARFS")
+            other_shop_id = _make_shop(s, "ARFO")
+            s.add(models.DimProduct(sku_id=sku, product_name=f"Src {uid}",
+                                    shop_id=shop_id_test, stock_quantity=100000,
+                                    current_price=10.0, cost_price=5.0))
+            for i in range(20):
+                s.add(models.FactSalesDaily(
+                    date=today - timedelta(days=i + 1), sku_id=sku,
+                    shop_id=shop_id_test, units_sold=5,
+                    revenue=50.0, cost=25.0, margin=25.0))
+            # Alleen een ANDERE shop heeft een competitiescore voor deze SKU
+            s.add(models.SkuCompetitionScore(
+                shop_id=other_shop_id, sku_id=sku, run_date=today,
+                price_index=0.9))
+            sig_comp = publish_signal(
+                s, engine="forecast_risk", signal_type="competitor_risk",
+                entity_type="sku", entity_id=sku,
+                explanation="Concurrentierisico.", evidence={"v": 1},
+                sources=["t"], shop_id=shop_id_test)
+            sig_sup = publish_signal(
+                s, engine="forecast_risk", signal_type="supplier_risk",
+                entity_type="sku", entity_id=sku,
+                explanation="Leveranciersrisico.", evidence={"v": 1},
+                sources=["t"], shop_id=shop_id_test)
+            s.commit()
+            comp_id, sup_id = sig_comp.id, sig_sup.id
+
+            run_forecast_engine(s, shop_id=shop_id_test)
+            assert s.query(models.IntelligenceSignal).get(comp_id).status == "active", (
+                "competitor_risk mag niet resolven zonder eigen (shop-"
+                "gescopeerde) competitiescore")
+            assert s.query(models.IntelligenceSignal).get(sup_id).status == "active", (
+                "supplier_risk mag niet resolven zonder leveranciersrecord")
+        finally:
+            s.rollback()
+            s.query(models.FactForecastDaily).filter_by(sku_id=sku).delete()
+            s.query(models.FactSalesDaily).filter_by(sku_id=sku).delete()
+            s.query(models.SkuCompetitionScore).filter_by(sku_id=sku).delete()
+            s.query(models.DimProduct).filter_by(sku_id=sku).delete()
+            s.query(models.IntelligenceSignal).filter_by(entity_id=sku).delete()
+            for shp in (shop_id_test, other_shop_id):
+                if shp:
+                    s.query(models.IntelligenceSignal).filter_by(
+                        shop_id=shp).delete()
+                    s.query(models.DimShop).filter_by(id=shp).delete()
+            s.commit()
+            s.close()
+
+    def test_no_sales_data_does_not_resolve(self):
+        """Een run zonder enige verkoophistorie mag risicosignalen niet resolven."""
+        from engine.forecast_engine import run_forecast_engine
+        uid = _unique()
+        sku_id = f"SKU-ARFCND-{uid}"
+
+        s = SessionLocal()
+        shop_id_test = None
+        try:
+            shop_id_test = _make_shop(s, "ARFN")
+            sig = publish_signal(
+                s, engine="forecast_risk", signal_type="stock_risk",
+                entity_type="sku", entity_id=sku_id,
+                explanation="Voorraadrisico.", evidence={"v": 1}, sources=["t"],
+                shop_id=shop_id_test)
+            s.commit()
+            sig_id = sig.id
+
+            run_forecast_engine(s, shop_id=shop_id_test)  # geen sales in deze shop
+            refreshed = s.query(models.IntelligenceSignal).get(sig_id)
+            assert refreshed.status == "active", (
+                "Geen verkoopdata is geen bewijs dat het risico verholpen is")
+        finally:
+            s.rollback()
+            if shop_id_test:
+                s.query(models.IntelligenceSignal).filter_by(
+                    shop_id=shop_id_test).delete()
+                s.query(models.DimShop).filter_by(id=shop_id_test).delete()
+            s.commit()
+            s.close()
+
+
+class TestPromotionAutoResolve:
+    def test_loss_making_resolves_when_verdict_improves(self):
+        from engine.promotion_engine import run_promotion_engine
+        uid = _unique()
+        sku_id = f"SKU-ARPM-{uid}"
+        today = date_type.today()
+        p_start = today - timedelta(days=10)
+        p_end = today - timedelta(days=4)
+
+        s = SessionLocal()
+        shop_id_test = None
+        promo_id = None
+        try:
+            shop_id_test = _make_shop(s, "ARPM")
+            s.add(models.DimProduct(sku_id=sku_id, product_name=f"Promo {uid}",
+                                    shop_id=shop_id_test, category=f"cat-{uid}",
+                                    current_price=10.0, cost_price=5.0,
+                                    stock_quantity=1000))
+            promo = models.Promotion(sku_id=sku_id, promotion_type="percentage_off",
+                                     discount_value=50.0, start_date=p_start,
+                                     end_date=p_end)
+            s.add(promo)
+            # Baseline: gezonde verkoop met marge
+            b_end = p_start - timedelta(days=1)
+            for i in range(7):
+                s.add(models.FactSalesDaily(
+                    date=b_end - timedelta(days=i), sku_id=sku_id,
+                    shop_id=shop_id_test, units_sold=10,
+                    revenue=100.0, cost=50.0, margin=50.0))
+            # Tijdens promo: zelfde afzet, marge weggegeven → verliesgevend
+            d = p_start
+            while d <= p_end:
+                s.add(models.FactSalesDaily(
+                    date=d, sku_id=sku_id, shop_id=shop_id_test,
+                    units_sold=10, revenue=50.0, cost=50.0, margin=0.0))
+                d += timedelta(days=1)
+            s.commit()
+            promo_id = promo.id
+
+            run_promotion_engine(s, shop_id=shop_id_test)
+            sig = _signal_for(s, sku_id, "promotion_loss_making")
+            assert sig is not None and sig.status == "active"
+
+            # Verhelpen: promo-marge blijkt na datacorrectie toch positief
+            s.query(models.FactSalesDaily).filter(
+                models.FactSalesDaily.sku_id == sku_id,
+                models.FactSalesDaily.date >= p_start,
+            ).update({"margin": 60.0}, synchronize_session=False)
+            s.commit()
+
+            run_promotion_engine(s, shop_id=shop_id_test)
+            assert _signal_for(s, sku_id, "promotion_loss_making").status == "resolved"
+        finally:
+            s.rollback()
+            if promo_id:
+                s.query(models.FactPromotionEffect).filter_by(
+                    promotion_id=promo_id).delete()
+                s.query(models.Promotion).filter_by(id=promo_id).delete()
+            s.query(models.FactSalesDaily).filter_by(sku_id=sku_id).delete()
+            s.query(models.DimProduct).filter_by(sku_id=sku_id).delete()
+            s.query(models.IntelligenceSignal).filter_by(entity_id=sku_id).delete()
+            if shop_id_test:
+                s.query(models.IntelligenceSignal).filter_by(
+                    shop_id=shop_id_test).delete()
+                s.query(models.DimShop).filter_by(id=shop_id_test).delete()
+            s.commit()
+            s.close()
+
+    def test_unanalyzable_promo_sku_not_resolved_in_mixed_run(self):
+        """Regressie: een SKU waarvan de promotie niet analyseerbaar is (geen
+        verkoopdata) mag niet worden geresolved, ook al kon een andere
+        promotie in dezelfde run wél worden geanalyseerd."""
+        from engine.promotion_engine import run_promotion_engine
+        uid = _unique()
+        sku_ok = f"SKU-ARPMMX-{uid}"
+        sku_nd = f"SKU-ARPMND2-{uid}"
+        today = date_type.today()
+        p_start = today - timedelta(days=10)
+        p_end = today - timedelta(days=4)
+
+        s = SessionLocal()
+        shop_id_test = None
+        promo_ids = []
+        try:
+            shop_id_test = _make_shop(s, "ARPX")
+            for sk in (sku_ok, sku_nd):
+                s.add(models.DimProduct(sku_id=sk, product_name=f"P {sk}",
+                                        shop_id=shop_id_test,
+                                        category=f"cat-{sk}",
+                                        current_price=10.0, cost_price=5.0))
+                promo = models.Promotion(sku_id=sk,
+                                         promotion_type="percentage_off",
+                                         discount_value=50.0,
+                                         start_date=p_start, end_date=p_end)
+                s.add(promo)
+                s.flush()
+                promo_ids.append(promo.id)
+            # Alleen sku_ok krijgt analyseerbare verkoopdata
+            b_end = p_start - timedelta(days=1)
+            for i in range(7):
+                s.add(models.FactSalesDaily(
+                    date=b_end - timedelta(days=i), sku_id=sku_ok,
+                    shop_id=shop_id_test, units_sold=10,
+                    revenue=100.0, cost=50.0, margin=50.0))
+            d = p_start
+            while d <= p_end:
+                s.add(models.FactSalesDaily(
+                    date=d, sku_id=sku_ok, shop_id=shop_id_test,
+                    units_sold=10, revenue=50.0, cost=50.0, margin=0.0))
+                d += timedelta(days=1)
+            sig = publish_signal(
+                s, engine="promotion", signal_type="promotion_loss_making",
+                entity_type="sku", entity_id=sku_nd,
+                explanation="Verliesgevende promotie.", evidence={"v": 1},
+                sources=["t"], shop_id=shop_id_test)
+            s.commit()
+            sig_id = sig.id
+
+            run_promotion_engine(s, shop_id=shop_id_test)
+            refreshed = s.query(models.IntelligenceSignal).get(sig_id)
+            assert refreshed.status == "active", (
+                "Een SKU met niet-analyseerbare promotie mag in een gemengde "
+                "run niet worden geresolved")
+            # De analyseerbare SKU levert wél een vers signaal op
+            assert _signal_for(s, sku_ok, "promotion_loss_making").status == "active"
+        finally:
+            s.rollback()
+            for pid in promo_ids:
+                s.query(models.FactPromotionEffect).filter_by(
+                    promotion_id=pid).delete()
+                s.query(models.Promotion).filter_by(id=pid).delete()
+            for sk in (sku_ok, sku_nd):
+                s.query(models.FactSalesDaily).filter_by(sku_id=sk).delete()
+                s.query(models.DimProduct).filter_by(sku_id=sk).delete()
+                s.query(models.IntelligenceSignal).filter_by(entity_id=sk).delete()
+            if shop_id_test:
+                s.query(models.IntelligenceSignal).filter_by(
+                    shop_id=shop_id_test).delete()
+                s.query(models.DimShop).filter_by(id=shop_id_test).delete()
+            s.commit()
+            s.close()
+
+    def test_no_analyzable_promotions_does_not_resolve(self):
+        """Promoties zonder analyseerbare verkoopdata mogen niets resolven."""
+        from engine.promotion_engine import run_promotion_engine
+        uid = _unique()
+        sku_id = f"SKU-ARPMND-{uid}"
+        today = date_type.today()
+
+        s = SessionLocal()
+        shop_id_test = None
+        promo_id = None
+        try:
+            shop_id_test = _make_shop(s, "ARPN")
+            s.add(models.DimProduct(sku_id=sku_id, product_name=f"Promo {uid}",
+                                    shop_id=shop_id_test, current_price=10.0,
+                                    cost_price=5.0))
+            promo = models.Promotion(sku_id=sku_id, promotion_type="percentage_off",
+                                     discount_value=10.0,
+                                     start_date=today - timedelta(days=10),
+                                     end_date=today - timedelta(days=4))
+            s.add(promo)
+            sig = publish_signal(
+                s, engine="promotion", signal_type="promotion_loss_making",
+                entity_type="sku", entity_id=sku_id,
+                explanation="Verliesgevende promotie.", evidence={"v": 1},
+                sources=["t"], shop_id=shop_id_test)
+            s.commit()
+            promo_id = promo.id
+            sig_id = sig.id
+
+            # Geen verkoopdata → analyzed == 0 → geen resolve
+            run_promotion_engine(s, shop_id=shop_id_test)
+            refreshed = s.query(models.IntelligenceSignal).get(sig_id)
+            assert refreshed.status == "active", (
+                "Zonder analyseerbare data mag een promotiesignaal niet resolven")
+        finally:
+            s.rollback()
+            if promo_id:
+                s.query(models.FactPromotionEffect).filter_by(
+                    promotion_id=promo_id).delete()
+                s.query(models.Promotion).filter_by(id=promo_id).delete()
+            s.query(models.DimProduct).filter_by(sku_id=sku_id).delete()
+            s.query(models.IntelligenceSignal).filter_by(entity_id=sku_id).delete()
+            if shop_id_test:
+                s.query(models.IntelligenceSignal).filter_by(
+                    shop_id=shop_id_test).delete()
+                s.query(models.DimShop).filter_by(id=shop_id_test).delete()
+            s.commit()
+            s.close()
+
+
+class TestBasketAutoResolve:
+    def test_resolves_when_association_drops_out(self):
+        from engine.basket_engine import run_basket_engine
+        uid = _unique()
+        sku_a = f"SKU-ARBA-{uid}"
+        sku_b = f"SKU-ARBB-{uid}"
+        sku_c = f"SKU-ARBC-{uid}"
+
+        s = SessionLocal()
+        shop_id_test = None
+        try:
+            shop_id_test = _make_shop(s, "ARBK")
+            for sk, nm in [(sku_a, "A"), (sku_b, "B"), (sku_c, "C")]:
+                s.add(models.DimProduct(sku_id=sk, product_name=f"Basket {nm} {uid}",
+                                        shop_id=shop_id_test, current_price=20.0,
+                                        cost_price=10.0))
+            s.add(models.FactBasketAffinity(
+                shop_id=shop_id_test, sku_id_a=sku_a, sku_id_b=sku_b,
+                affinity_score=0.95, co_purchase_count=40))
+            s.commit()
+
+            run_basket_engine(s, shop_id=shop_id_test)
+            sig = _signal_for(s, sku_a, "strong_product_association")
+            assert sig is not None and sig.status == "active"
+
+            # Verhelpen: de associatie a→b verdwijnt; andere data blijft
+            s.query(models.FactBasketAffinity).filter_by(
+                sku_id_a=sku_a, shop_id=shop_id_test).delete()
+            s.add(models.FactBasketAffinity(
+                shop_id=shop_id_test, sku_id_a=sku_c, sku_id_b=sku_b,
+                affinity_score=0.9, co_purchase_count=30))
+            s.commit()
+
+            run_basket_engine(s, shop_id=shop_id_test)
+            assert _signal_for(s, sku_a, "strong_product_association").status == "resolved"
+
+            # Geen data betekent geen resolve: bron leeg → c-signaal blijft actief
+            sig_c = _signal_for(s, sku_c, "strong_product_association")
+            assert sig_c is not None and sig_c.status == "active"
+            s.query(models.FactBasketAffinity).filter_by(
+                shop_id=shop_id_test).delete()
+            s.commit()
+            run_basket_engine(s, shop_id=shop_id_test)  # early return: no_data
+            assert _signal_for(s, sku_c, "strong_product_association").status == "active", (
+                "Een lege basket-bron mag associatiesignalen niet resolven")
+        finally:
+            s.rollback()
+            for sk in (sku_a, sku_b, sku_c):
+                s.query(models.FactBasketAffinity).filter_by(sku_id_a=sk).delete()
+                s.query(models.BasketAssociation).filter_by(antecedent_sku=sk).delete()
+                s.query(models.DimProduct).filter_by(sku_id=sk).delete()
+                s.query(models.IntelligenceSignal).filter_by(entity_id=sk).delete()
+            if shop_id_test:
+                s.query(models.IntelligenceSignal).filter_by(
+                    shop_id=shop_id_test).delete()
+                s.query(models.DimShop).filter_by(id=shop_id_test).delete()
+            s.commit()
+            s.close()
+
+
+class TestLoyaltyAutoResolve:
+    def _member(self, s, shop_id_test, uid):
+        m = models.LoyaltyMember(
+            shop_id=shop_id_test,
+            pseudonymous_customer_id=f"CUST-ARLO-{uid}",
+            joined_at=date_type.today() - timedelta(days=100),
+            tier_code="bronze", status="active")
+        s.add(m)
+        s.flush()
+        return m
+
+    def test_nba_and_fraud_resolve_when_fixed(self):
+        from engine.loyalty_intelligence import publish_signals
+        uid = _unique()
+        run_date = date_type.today() - timedelta(days=500)  # geïsoleerde run
+
+        s = SessionLocal()
+        shop_id_test = None
+        member_id = None
+        try:
+            shop_id_test = _make_shop(s, "ARLO")
+            m = self._member(s, shop_id_test, uid)
+            member_id = m.id
+            cust = m.pseudonymous_customer_id
+            score = models.CustomerValueScore(
+                shop_id=shop_id_test, member_id=member_id, run_date=run_date,
+                clv_estimate=999999.0, churn_risk=0.8, retention_probability=0.2,
+                value_segment="at_risk", confidence=0.7,
+                next_best_action="winback_voucher", nba_reason="Churnrisico hoog.",
+                nba_expected_value=50.0, nba_alternative="prijsverlaging",
+                nba_alternative_cost=80.0)
+            s.add(score)
+            fraud = models.LoyaltyFraudSignal(
+                shop_id=shop_id_test, member_id=member_id, run_date=run_date,
+                fraud_type="abnormal_earn_rate", severity="high", score=0.9,
+                explanation="Abnormaal spaargedrag.", evidence={"v": 1},
+                status="open")
+            s.add(fraud)
+            s.commit()
+
+            publish_signals(s, run_date)
+            s.commit()
+            assert _signal_for(s, cust, f"nba_winback_voucher").status == "active"
+            assert _signal_for(s, cust, "fraud_abnormal_earn_rate").status == "active"
+
+            # Verhelpen: geen actie meer nodig, fraudemelding beoordeeld
+            score.next_best_action = "no_action"
+            fraud.status = "reviewed"
+            s.commit()
+
+            publish_signals(s, run_date)
+            s.commit()
+            assert _signal_for(s, cust, "nba_winback_voucher").status == "resolved"
+            assert _signal_for(s, cust, "fraud_abnormal_earn_rate").status == "resolved"
+        finally:
+            s.rollback()
+            if member_id:
+                s.query(models.CustomerValueScore).filter_by(member_id=member_id).delete()
+                s.query(models.LoyaltyFraudSignal).filter_by(member_id=member_id).delete()
+                s.query(models.LoyaltyMember).filter_by(id=member_id).delete()
+            if shop_id_test:
+                s.query(models.IntelligenceSignal).filter_by(
+                    shop_id=shop_id_test).delete()
+                s.query(models.LoyaltyExpiryPolicy).filter_by(
+                    shop_id=shop_id_test).delete()
+                s.query(models.DimShop).filter_by(id=shop_id_test).delete()
+            s.commit()
+            s.close()
+
+    def test_liability_signal_resolves_when_no_outstanding_points(self):
+        """Regressie: een actief loyalty_liability_level-shopsignaal resolvet
+        zodra de shop geen uitstaande punten meer heeft."""
+        from engine.loyalty_intelligence import publish_signals
+        uid = _unique()
+        run_date = date_type.today() - timedelta(days=505)
+
+        s = SessionLocal()
+        shop_id_test = None
+        member_id = None
+        try:
+            shop_id_test = _make_shop(s, "ARLL")
+            # Lid zonder punten: shop is loyalty-actief maar zonder liability
+            m = self._member(s, shop_id_test, uid)
+            member_id = m.id
+            sig = publish_signal(
+                s, engine="loyalty", signal_type="loyalty_liability_level",
+                entity_type="shop", entity_id=str(shop_id_test),
+                explanation="Openstaande verplichting.", evidence={"v": 1},
+                sources=["t"], shop_id=shop_id_test)
+            s.commit()
+            sig_id = sig.id
+
+            publish_signals(s, run_date)
+            s.commit()
+            refreshed = s.query(models.IntelligenceSignal).get(sig_id)
+            assert refreshed.status == "resolved", (
+                "Zonder uitstaande punten moet het liability-signaal "
+                "auto-resolven")
+        finally:
+            s.rollback()
+            s.query(models.LoyaltyWallet).filter_by(
+                member_id=member_id).delete() if member_id else None
+            if member_id:
+                s.query(models.LoyaltyMember).filter_by(id=member_id).delete()
+            if shop_id_test:
+                s.query(models.IntelligenceSignal).filter_by(
+                    shop_id=shop_id_test).delete()
+                s.query(models.LoyaltyExpiryPolicy).filter_by(
+                    shop_id=shop_id_test).delete()
+                s.query(models.DimShop).filter_by(id=shop_id_test).delete()
+            s.commit()
+            s.close()
+
+    def test_reviewed_fraud_on_unscored_member_resolves(self):
+        """Regressie: een gereviewde fraudemelding van een lid zónder
+        klantwaardescore moet tóch auto-resolven — de fraudeconditie is
+        immers beoordeeld en verholpen, los van de scoring."""
+        from engine.loyalty_intelligence import publish_signals
+        uid = _unique()
+        run_date = date_type.today() - timedelta(days=504)
+
+        s = SessionLocal()
+        shop_id_test = None
+        member_id = None
+        fraud_id = None
+        try:
+            shop_id_test = _make_shop(s, "ARLF")
+            m = self._member(s, shop_id_test, uid)
+            member_id = m.id
+            fraud = models.LoyaltyFraudSignal(
+                shop_id=shop_id_test, member_id=m.id, run_date=run_date,
+                fraud_type="velocity", severity="high", score=0.9,
+                explanation="Verdacht inwisselpatroon.", status="open",
+                evidence={"v": 1})
+            s.add(fraud)
+            s.flush()
+            fraud_id = fraud.id
+            sig = publish_signal(
+                s, engine="loyalty", signal_type="fraud_velocity",
+                entity_type="customer",
+                entity_id=m.pseudonymous_customer_id,
+                explanation="Fraudeverdenking.", evidence={"v": 1},
+                sources=["t"], shop_id=shop_id_test)
+            s.commit()
+            sig_id = sig.id
+
+            # Melding wordt gereviewd/gesloten — geen open fraude meer
+            fraud.status = "reviewed"
+            s.commit()
+
+            publish_signals(s, run_date)
+            s.commit()
+            refreshed = s.query(models.IntelligenceSignal).get(sig_id)
+            assert refreshed.status == "resolved", (
+                "Een gereviewde fraudemelding moet ook zonder "
+                "klantwaardescore auto-resolven")
+        finally:
+            s.rollback()
+            if fraud_id:
+                s.query(models.LoyaltyFraudSignal).filter_by(id=fraud_id).delete()
+            if member_id:
+                s.query(models.LoyaltyMember).filter_by(id=member_id).delete()
+            if shop_id_test:
+                s.query(models.IntelligenceSignal).filter_by(
+                    shop_id=shop_id_test).delete()
+                s.query(models.LoyaltyExpiryPolicy).filter_by(
+                    shop_id=shop_id_test).delete()
+                s.query(models.DimShop).filter_by(id=shop_id_test).delete()
+            s.commit()
+            s.close()
+
+    def test_unscored_member_not_resolved_in_mixed_run(self):
+        """Regressie: een lid zonder score in deze run (niet geëvalueerd) mag
+        niet worden geresolved, ook al zijn andere leden in dezelfde shop
+        wél gescoord."""
+        from engine.loyalty_intelligence import publish_signals
+        uid = _unique()
+        run_date = date_type.today() - timedelta(days=503)
+
+        s = SessionLocal()
+        shop_id_test = None
+        member_ids = []
+        try:
+            shop_id_test = _make_shop(s, "ARLM")
+            m_scored = self._member(s, shop_id_test, f"{uid}-a")
+            member_ids.append(m_scored.id)
+            s.add(models.CustomerValueScore(
+                shop_id=shop_id_test, member_id=m_scored.id, run_date=run_date,
+                clv_estimate=100.0, value_segment="mid_value", confidence=0.6,
+                next_best_action="no_action"))
+            m_unscored = models.LoyaltyMember(
+                shop_id=shop_id_test,
+                pseudonymous_customer_id=f"CUST-ARLM-{uid}-b",
+                joined_at=date_type.today() - timedelta(days=100),
+                tier_code="bronze", status="active")
+            s.add(m_unscored)
+            s.flush()
+            member_ids.append(m_unscored.id)
+            sig = publish_signal(
+                s, engine="loyalty", signal_type="nba_winback_voucher",
+                entity_type="customer",
+                entity_id=m_unscored.pseudonymous_customer_id,
+                explanation="NBA.", evidence={"v": 1}, sources=["t"],
+                shop_id=shop_id_test)
+            s.commit()
+            sig_id = sig.id
+
+            publish_signals(s, run_date)
+            s.commit()
+            refreshed = s.query(models.IntelligenceSignal).get(sig_id)
+            assert refreshed.status == "active", (
+                "Een niet-gescoord lid mag in een gemengde run niet worden "
+                "geresolved")
+        finally:
+            s.rollback()
+            if member_ids:
+                s.query(models.CustomerValueScore).filter(
+                    models.CustomerValueScore.member_id.in_(member_ids)).delete(
+                    synchronize_session=False)
+                s.query(models.LoyaltyMember).filter(
+                    models.LoyaltyMember.id.in_(member_ids)).delete(
+                    synchronize_session=False)
+            if shop_id_test:
+                s.query(models.IntelligenceSignal).filter_by(
+                    shop_id=shop_id_test).delete()
+                s.query(models.LoyaltyExpiryPolicy).filter_by(
+                    shop_id=shop_id_test).delete()
+                s.query(models.DimShop).filter_by(id=shop_id_test).delete()
+            s.commit()
+            s.close()
+
+    def test_member_outside_publication_top_not_resolved(self):
+        """Regressie: een lid met een bestaand NBA-signaal dat door ranking
+        buiten de top-50-publicatielimiet valt maar nog steeds een geldige
+        actie heeft (next_best_action != no_action) mag NIET worden
+        geresolved."""
+        from engine.loyalty_intelligence import publish_signals
+        uid = _unique()
+        run_date = date_type.today() - timedelta(days=502)  # geïsoleerde run
+
+        s = SessionLocal()
+        shop_id_test = None
+        member_ids = []
+        cust_low = None
+        try:
+            shop_id_test = _make_shop(s, "ARLT")
+            # Laag-CLV-lid met bestaand actief NBA-signaal en nog geldige actie
+            m_low = self._member(s, shop_id_test, uid)
+            member_ids.append(m_low.id)
+            cust_low = m_low.pseudonymous_customer_id
+            s.add(models.CustomerValueScore(
+                shop_id=shop_id_test, member_id=m_low.id, run_date=run_date,
+                clv_estimate=1.0, value_segment="low_value", confidence=0.6,
+                next_best_action="winback_voucher", nba_reason="Actie geldig.",
+                nba_expected_value=5.0, nba_alternative="prijsverlaging",
+                nba_alternative_cost=8.0))
+            sig = publish_signal(
+                s, engine="loyalty", signal_type="nba_winback_voucher",
+                entity_type="customer", entity_id=cust_low,
+                explanation="Bestaand NBA-signaal.", evidence={"v": 1},
+                sources=["t"], shop_id=shop_id_test)
+            # 50 leden met hogere CLV duwen het lid uit de publicatie-top
+            for i in range(50):
+                m = models.LoyaltyMember(
+                    shop_id=shop_id_test,
+                    pseudonymous_customer_id=f"CUST-ARLT-{uid}-{i}",
+                    joined_at=date_type.today() - timedelta(days=100),
+                    tier_code="bronze", status="active")
+                s.add(m)
+                s.flush()
+                member_ids.append(m.id)
+                s.add(models.CustomerValueScore(
+                    shop_id=shop_id_test, member_id=m.id, run_date=run_date,
+                    clv_estimate=100000.0 + i, value_segment="high_value",
+                    confidence=0.8, next_best_action="loyalty_bonus",
+                    nba_reason="Hoog CLV.", nba_expected_value=50.0,
+                    nba_alternative="prijsverlaging", nba_alternative_cost=80.0))
+            s.commit()
+            sig_id = sig.id
+
+            publish_signals(s, run_date)
+            s.commit()
+            refreshed = s.query(models.IntelligenceSignal).get(sig_id)
+            assert refreshed.status == "active", (
+                "Een lid dat buiten de top-50-publicatie valt maar nog een "
+                "geldige NBA heeft mag niet worden geresolved")
+        finally:
+            s.rollback()
+            if member_ids:
+                s.query(models.CustomerValueScore).filter(
+                    models.CustomerValueScore.member_id.in_(member_ids)).delete(
+                    synchronize_session=False)
+                s.query(models.LoyaltyMember).filter(
+                    models.LoyaltyMember.id.in_(member_ids)).delete(
+                    synchronize_session=False)
+            if shop_id_test:
+                s.query(models.IntelligenceSignal).filter_by(
+                    shop_id=shop_id_test).delete()
+                s.query(models.LoyaltyExpiryPolicy).filter_by(
+                    shop_id=shop_id_test).delete()
+                s.query(models.DimShop).filter_by(id=shop_id_test).delete()
+            s.commit()
+            s.close()
+
+    def test_no_scores_for_run_does_not_resolve(self):
+        """Een run zonder klantwaardescores voor deze shop mag NBA/fraude-
+        signalen niet resolven (scoring niet gedraaid ≠ conditie verholpen)."""
+        from engine.loyalty_intelligence import publish_signals
+        uid = _unique()
+        run_date = date_type.today() - timedelta(days=501)
+
+        s = SessionLocal()
+        shop_id_test = None
+        member_id = None
+        try:
+            shop_id_test = _make_shop(s, "ARLN")
+            m = self._member(s, shop_id_test, uid)
+            member_id = m.id
+            cust = m.pseudonymous_customer_id
+            sig = publish_signal(
+                s, engine="loyalty", signal_type="nba_winback_voucher",
+                entity_type="customer", entity_id=cust,
+                explanation="NBA.", evidence={"v": 1}, sources=["t"],
+                shop_id=shop_id_test)
+            s.commit()
+            sig_id = sig.id
+
+            publish_signals(s, run_date)  # geen scores voor deze run_date/shop
+            s.commit()
+            refreshed = s.query(models.IntelligenceSignal).get(sig_id)
+            assert refreshed.status == "active", (
+                "Zonder scores voor deze shop mag niets worden geresolved")
+        finally:
+            s.rollback()
+            if member_id:
+                s.query(models.LoyaltyMember).filter_by(id=member_id).delete()
+            if shop_id_test:
+                s.query(models.IntelligenceSignal).filter_by(
+                    shop_id=shop_id_test).delete()
+                s.query(models.LoyaltyExpiryPolicy).filter_by(
+                    shop_id=shop_id_test).delete()
+                s.query(models.DimShop).filter_by(id=shop_id_test).delete()
+            s.commit()
+            s.close()

@@ -814,10 +814,14 @@ def expiring_soon_members(db: Session, shop_id: int | None = None) -> list[dict]
                 models.LoyaltyTransaction.txn_date < cutoff_soon,
             ).scalar()
             if earliest_window is None:
-                # Alleen al-overdue punten: geen zinvolle toekomstige
-                # vervaldatum — de schatting blijft begrensd op het
-                # waarschuwingsvenster (expires_on = None).
-                earliest = None
+                # Alleen al-overdue punten: schat de (verstreken) vervaldatum
+                # op de vroegste credit vóór de vervalgrens → geschatte
+                # vervaldatum in het verleden, days_until_expiry <= 0.
+                earliest = db.query(func.min(models.LoyaltyTransaction.txn_date)).filter(
+                    models.LoyaltyTransaction.member_id == member.id,
+                    models.LoyaltyTransaction.txn_type.in_(list(_CREDIT_TYPES)),
+                    models.LoyaltyTransaction.txn_date < cutoff_full,
+                ).scalar()
             elif overdue_live > 0:
                 # Overdue + window: de vroegste credit überhaupt bepaalt
                 # FIFO de (verstreken) vervaldatum → days_until_expiry <= 0.
@@ -845,10 +849,10 @@ def expiring_soon_members(db: Session, shop_id: int | None = None) -> list[dict]
             })
     result.sort(key=lambda r: r["days_until_expiry"] if r["days_until_expiry"] is not None else 9999)
     return result
-
 # ---------------------------------------------------------------------------
 # Fraude
 # ---------------------------------------------------------------------------
+
 
 def detect_fraud(db: Session, run_date: date | None = None) -> int:
     """
@@ -982,6 +986,23 @@ def publish_signals(db: Session, run_date: date | None = None) -> int:
     ).order_by(models.CustomerValueScore.clv_estimate.desc()).limit(50).all()
     members = {m.id: m for m in db.query(models.LoyaltyMember).all()}
 
+    # Nog geldende (signal_type, entity_id)-paren per shop voor auto-resolve
+    # van klant-gebonden signalen (NBA + fraude). De NBA-conditie wordt over
+    # ÁLLE kwalificerende scores bepaald — niet alleen de top-50 die hieronder
+    # gepubliceerd wordt — zodat een lid dat uit de publicatie-top valt maar
+    # nog steeds een geldige actie heeft, niet onterecht wordt geresolved.
+    still_active: dict[int, set[tuple[str, str]]] = {}
+    all_qualifying = db.query(models.CustomerValueScore).filter(
+        models.CustomerValueScore.run_date == run_date,
+        models.CustomerValueScore.next_best_action != "no_action",
+    ).all()
+    for s in all_qualifying:
+        m = members.get(s.member_id)
+        if not m:
+            continue
+        still_active.setdefault(int(m.shop_id or 1), set()).add(
+            (f"nba_{s.next_best_action}", m.pseudonymous_customer_id))
+
     for s in scores:
         m = members.get(s.member_id)
         if not m:
@@ -1026,6 +1047,8 @@ def publish_signals(db: Session, run_date: date | None = None) -> int:
         m = members.get(f.member_id)
         if not m:
             continue
+        still_active.setdefault(int(m.shop_id or 1), set()).add(
+            (f"fraud_{f.fraud_type}", m.pseudonymous_customer_id))
         _publish_signal(
             db,
             shop_id=int(m.shop_id or 1),
@@ -1045,10 +1068,68 @@ def publish_signals(db: Session, run_date: date | None = None) -> int:
         )
         published += 1
 
-    # Liability op shop-niveau: één signaal per shop met loyalty-leden
+    # Auto-resolve NBA/fraude: klant-signalen waarvan de conditie in deze run
+    # niet meer geldt worden op resolved gezet, per shop van de leden. Geen
+    # data (geen enkele klantwaardescore voor deze run_date, bv. omdat de
+    # scoring niet draaide) is géén bewijs dat iets verholpen is → overslaan.
+    from engine.signal_publisher import auto_resolve_signals
+
+    def _active_customer_types(sid: int, prefix: str) -> list[str]:
+        rows = db.query(models.IntelligenceSignal.signal_type).filter(
+            models.IntelligenceSignal.engine == "loyalty",
+            models.IntelligenceSignal.entity_type == "customer",
+            models.IntelligenceSignal.status == "active",
+            models.IntelligenceSignal.shop_id == sid,
+            models.IntelligenceSignal.signal_type.like(f"{prefix}%"),
+        ).distinct().all()
+        return [r[0] for r in rows]
+
+    # NBA: alleen leden die in deze run daadwerkelijk gescoord zijn, zijn
+    # geëvalueerd; NBA-signalen van niet-gescoorde leden blijven ongemoeid.
+    scored_customers_by_shop: dict[int, set[str]] = {}
+    for row in (db.query(models.LoyaltyMember.shop_id,
+                         models.LoyaltyMember.pseudonymous_customer_id)
+                .join(models.CustomerValueScore,
+                      models.CustomerValueScore.member_id == models.LoyaltyMember.id)
+                .filter(models.CustomerValueScore.run_date == run_date)
+                .distinct().all()):
+        scored_customers_by_shop.setdefault(int(row[0] or 1), set()).add(row[1])
+    for sid, scored_customers in scored_customers_by_shop.items():
+        nba_types = _active_customer_types(sid, "nba_")
+        if nba_types:
+            auto_resolve_signals(
+                db, engine="loyalty", entity_type="customer",
+                still_active=still_active.get(sid, set()), shop_id=sid,
+                signal_types=nba_types, entity_ids=scored_customers)
+
+    # Fraude: geëvalueerd zijn leden met een fraudemelding (ongeacht status)
+    # voor deze run_date — een gereviewde/gesloten melding betekent dat de
+    # fraudeconditie beoordeeld en verholpen is, ook zonder klantwaardescore.
+    fraud_eval_by_shop: dict[int, set[str]] = {}
+    for row in (db.query(models.LoyaltyMember.shop_id,
+                         models.LoyaltyMember.pseudonymous_customer_id)
+                .join(models.LoyaltyFraudSignal,
+                      models.LoyaltyFraudSignal.member_id == models.LoyaltyMember.id)
+                .filter(models.LoyaltyFraudSignal.run_date == run_date)
+                .distinct().all()):
+        fraud_eval_by_shop.setdefault(int(row[0] or 1), set()).add(row[1])
+    for sid, fraud_customers in fraud_eval_by_shop.items():
+        fraud_types = _active_customer_types(sid, "fraud_")
+        if fraud_types:
+            auto_resolve_signals(
+                db, engine="loyalty", entity_type="customer",
+                still_active=still_active.get(sid, set()), shop_id=sid,
+                signal_types=fraud_types, entity_ids=fraud_customers)
+
+    # Liability op shop-niveau: één signaal per shop met loyalty-leden. Elke
+    # shop waarvoor liability_summary is berekend, is geëvalueerd: zonder
+    # uitstaande punten is de liability-conditie verholpen en resolvet het
+    # bestaande signaal.
     for sid in _loyalty_shop_ids(db):
         liab = liability_summary(db, shop_id=sid)
+        liability_still_active: set[tuple[str, str]] = set()
         if liab["outstanding_points"] > 0:
+            liability_still_active.add(("loyalty_liability_level", str(sid)))
             _publish_signal(
                 db,
                 shop_id=sid,
@@ -1071,6 +1152,11 @@ def publish_signals(db: Session, run_date: date | None = None) -> int:
                 suggested_action="monitor_liability",
             )
             published += 1
+        auto_resolve_signals(
+            db, engine="loyalty", entity_type="shop",
+            signal_types=["loyalty_liability_level"],
+            still_active=liability_still_active, shop_id=sid,
+            entity_ids={str(sid)})
 
     return published
 

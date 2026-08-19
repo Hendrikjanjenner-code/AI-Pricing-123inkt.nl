@@ -67,6 +67,7 @@ def auto_resolve_signals(
     signal_types: Optional[list[str]] = None,
     entity_type: Optional[str] = None,
     shop_id: Optional[int] = None,
+    entity_ids: Optional[set[str]] = None,
 ) -> int:
     """Zet actieve signalen op 'resolved' zodra de onderliggende conditie
     niet meer geldt (zelfde patroon als warn_suspicious_matches).
@@ -82,6 +83,11 @@ def auto_resolve_signals(
     signalen van andere winkels nooit worden aangeraakt op basis van
     brondata van een andere winkel.
 
+    entity_ids: optionele beperking tot entiteiten waarvan de conditie in
+    deze run daadwerkelijk geëvalueerd kón worden. Signalen van entiteiten
+    buiten deze verzameling blijven ongemoeid — "niet geëvalueerd" is niet
+    hetzelfde als "conditie verholpen".
+
     Idempotent: alleen status='active' wordt aangeraakt; al-resolved,
     superseded of expired signalen blijven ongemoeid. Er wordt niets
     opnieuw gepubliceerd. Commit gebeurt door de caller.
@@ -96,6 +102,10 @@ def auto_resolve_signals(
         q = q.filter(models.IntelligenceSignal.signal_type.in_(signal_types))
     if entity_type:
         q = q.filter(models.IntelligenceSignal.entity_type == entity_type)
+    if entity_ids is not None:
+        if not entity_ids:
+            return 0
+        q = q.filter(models.IntelligenceSignal.entity_id.in_(list(entity_ids)))
     n = 0
     for sig in q.all():
         if (sig.signal_type, sig.entity_id) not in still_active:
