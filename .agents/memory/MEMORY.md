@@ -34,3 +34,4 @@
 - [DQ registry test isolation](dq-registry-test-isolation.md) — never call _sync_issue_registry/_detect_issues with a replaced/empty detection list in shared-DB tests; wrap the real detector and add a synthetic issue, or unrelated registry rows get auto-resolved.
 - [PIM defaults seed-once](pim-defaults-seeding.md) — "seed if empty" on list reads resurrects deleted reference data; use a persistent seeded-once marker.
 - [Reasoning-model tools 400](model-tools-reasoning-effort.md) — gpt-5.6-terra weigert tools + reasoning_effort op chat completions; gateway retryt met none; smoke-test tool-vragen na modelwissel.
+- [Few-shot FTS retrieval](fewshot-fts.md) — fail-safe fallback maskeert FTS-fouten (zelfs NameError); rank-drempel ≤0.005 voor één-woord-matches.

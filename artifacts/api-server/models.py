@@ -311,6 +311,24 @@ class ModelRun(Base):
     run_metadata = Column(JSON)
 
 
+class EngineRun(Base):
+    """Run-log van de nachtelijke engines (scheduled_engines.py).
+
+    Eén rij per engine per shop per run, zodat het dashboard kan tonen of de
+    run van afgelopen nacht geslaagd is.
+    """
+    __tablename__ = "engine_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    engine_name = Column(String(50), nullable=False, index=True)  # basket, promotion, forecast, opportunity
+    shop_id = Column(Integer, index=True)
+    started_at = Column(DateTime, default=datetime.utcnow, index=True)
+    completed_at = Column(DateTime)
+    status = Column(String(20), nullable=False, default="running")  # running, success, failed
+    error_message = Column(Text)
+    result_summary = Column(JSON)
+
+
 class ImportJob(Base):
     __tablename__ = "import_jobs"
 

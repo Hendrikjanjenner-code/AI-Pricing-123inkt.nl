@@ -159,6 +159,136 @@ function DatabronnenStrip() {
   );
 }
 
+type EngineStatus = "success" | "failed" | "stale" | "missing";
+
+interface EngineShopStatus {
+  shop_id: number;
+  shop_code: string;
+  status: EngineStatus | "running";
+  last_run_at: string | null;
+  error_message: string | null;
+}
+
+interface EngineRunInfo {
+  engine: string;
+  label: string;
+  status: EngineStatus;
+  last_run_at: string | null;
+  error_message: string | null;
+  shops: EngineShopStatus[];
+}
+
+interface EngineRunStatusResponse {
+  overall: "ok" | "warning";
+  engines: EngineRunInfo[];
+}
+
+const ENGINE_STATUS_LABEL: Record<EngineStatus, string> = {
+  success: "Geslaagd",
+  failed: "Mislukt",
+  stale: "Verouderd",
+  missing: "Nog niet gedraaid",
+};
+
+const ENGINE_STATUS_DOT: Record<EngineStatus, string> = {
+  success: "bg-emerald-500",
+  failed: "bg-red-500",
+  stale: "bg-amber-500",
+  missing: "bg-gray-400",
+};
+
+function formatRunTijd(iso: string | null): string {
+  if (!iso) return "—";
+  // Backend levert UTC-tijden zonder timezone-suffix.
+  const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : `${iso}Z`);
+  return d.toLocaleString("nl-NL", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+function NachtelijkeEnginesStrip() {
+  const [data, setData] = useState<EngineRunStatusResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+  const hasDataRef = useRef(false);
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      if (document.hidden) return;
+      try {
+        const resp = await fetch(`${BASE}/api/engine-runs/status`, { headers: getAuthHeaders() });
+        if (!resp.ok) throw new Error("fetch failed");
+        const json: EngineRunStatusResponse = await resp.json();
+        if (!active) return;
+        hasDataRef.current = true;
+        setData(json);
+        setError(false);
+      } catch {
+        // Behoud de laatst bekende status bij een tijdelijke fetch-fout.
+        if (active && !hasDataRef.current) setError(true);
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    load();
+    const intervalId = setInterval(load, 60000);
+    return () => {
+      active = false;
+      clearInterval(intervalId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (loading) return <Skeleton className="h-[68px] w-full" />;
+  if (error || !data) return null;
+
+  const problemen = data.engines.filter((e) => e.status !== "success");
+  const anyProblem = problemen.length > 0;
+
+  return (
+    <Card className={anyProblem ? "border-amber-300" : ""} data-testid="nachtelijke-engines-strip">
+      <CardContent className="py-3 space-y-2">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <span className="text-sm font-medium text-muted-foreground">Nachtelijke engines</span>
+          {data.engines.map((e) => (
+            <div
+              key={e.engine}
+              className="flex items-center gap-1.5"
+              title={
+                e.status === "failed" && e.error_message
+                  ? `${e.label}: ${ENGINE_STATUS_LABEL[e.status]} — ${e.error_message}`
+                  : `${e.label}: ${ENGINE_STATUS_LABEL[e.status]}${e.last_run_at ? ` (laatste run ${formatRunTijd(e.last_run_at)})` : ""}`
+              }
+            >
+              <span className={`w-2.5 h-2.5 rounded-full ${ENGINE_STATUS_DOT[e.status]}`} />
+              <span className="text-sm font-medium">{e.label}</span>
+              <span className={`text-xs ${e.status === "success" ? "text-emerald-600" : "text-muted-foreground"}`}>
+                {e.status === "success" ? formatRunTijd(e.last_run_at) : ENGINE_STATUS_LABEL[e.status]}
+              </span>
+            </div>
+          ))}
+        </div>
+        {anyProblem && (
+          <div className="flex items-start gap-2 text-sm text-amber-700">
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+            <span>
+              {problemen.map((e) => {
+                const probleemShops = e.shops.filter((s) => s.status !== "success");
+                const winkels = probleemShops.length > 0
+                  ? ` (winkel: ${probleemShops.map((s) => `${s.shop_code} — ${ENGINE_STATUS_LABEL[s.status as EngineStatus] ?? s.status}`).join(", ")})`
+                  : "";
+                if (e.status === "failed") return `${e.label} is afgelopen nacht mislukt${e.error_message ? `: ${e.error_message}` : ""}${winkels}`;
+                if (e.status === "stale") return `${e.label} heeft afgelopen nacht niet gedraaid${winkels}`;
+                return `${e.label} heeft nog niet voor alle winkels gedraaid${winkels}`;
+              }).join(". ")}
+              . Forecasts en kansen kunnen verouderd zijn.
+            </span>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 const STRATEGIE_LABELS: Record<string, string> = {
   SUBSTITUTION_PORTFOLIO: "Substitutieportfolio",
   COMPETITOR_INDEX: "Concurrentie-index",
@@ -194,6 +324,8 @@ export default function Dashboard() {
       <h1 className="text-3xl font-bold tracking-tight">Dagelijks overzicht</h1>
 
       <DatabronnenStrip />
+
+      <NachtelijkeEnginesStrip />
 
       {loadingSummary ? (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

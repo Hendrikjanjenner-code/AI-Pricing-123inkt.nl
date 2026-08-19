@@ -53,6 +53,128 @@ def get_model_health(
     }
 
 
+NIGHTLY_ENGINES = [
+    ("basket", "Basket-engine"),
+    ("promotion", "Promotion-engine"),
+    ("forecast", "Forecast/Risk-engine"),
+    ("opportunity", "Opportunity-engine"),
+]
+
+# Een nachtelijke run hoort elke nacht te draaien; ouder dan 26 uur = verouderd.
+STALE_AFTER_HOURS = 26
+
+
+@router.get("/engine-runs/status")
+def get_engine_run_status(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """Status van de nachtelijke engine-runs (scheduled_engines.py) per engine.
+
+    Per engine: laatste run-tijdstip en status. Een engine krijgt status
+    'failed' als minstens één shop in de laatste run mislukt is, 'stale' als
+    de laatste run ouder is dan 26 uur, en 'missing' als er nog nooit een run
+    is gelogd.
+    """
+    now = datetime.utcnow()
+    stale_cutoff = STALE_AFTER_HOURS * 3600
+    engines_out = []
+    any_warning = False
+
+    # Uitgangspunt zijn de actieve shops: een shop zonder run telt als 'missing'.
+    active_shops = db.query(models.DimShop).filter(models.DimShop.active == True).all()  # noqa: E712
+
+    for engine_name, label in NIGHTLY_ENGINES:
+        # Per shop de meest recente run van deze engine.
+        latest_per_shop = (
+            db.query(
+                models.EngineRun.shop_id,
+                func.max(models.EngineRun.started_at).label("max_started"),
+            )
+            .filter(models.EngineRun.engine_name == engine_name)
+            .group_by(models.EngineRun.shop_id)
+            .subquery()
+        )
+        runs = (
+            db.query(models.EngineRun)
+            .join(
+                latest_per_shop,
+                (models.EngineRun.shop_id == latest_per_shop.c.shop_id)
+                & (models.EngineRun.started_at == latest_per_shop.c.max_started),
+            )
+            .filter(models.EngineRun.engine_name == engine_name)
+            .all()
+        )
+        runs_by_shop = {r.shop_id: r for r in runs}
+
+        # Per actieve shop een status; shops zonder run zijn 'missing',
+        # succesvolle runs ouder dan de drempel zijn 'stale'.
+        shops = []
+        for shop in active_shops:
+            r = runs_by_shop.get(shop.id)
+            if r is None:
+                shop_status = "missing"
+                shops.append({
+                    "shop_id": shop.id,
+                    "shop_code": shop.shop_code,
+                    "status": shop_status,
+                    "last_run_at": None,
+                    "error_message": None,
+                })
+                continue
+            if r.status == "failed":
+                shop_status = "failed"
+            elif r.started_at and (now - r.started_at).total_seconds() > stale_cutoff:
+                shop_status = "stale"
+            else:
+                shop_status = r.status  # success (of nog running)
+            shops.append({
+                "shop_id": shop.id,
+                "shop_code": shop.shop_code,
+                "status": shop_status,
+                "last_run_at": r.started_at.isoformat() if r.started_at else None,
+                "error_message": r.error_message,
+            })
+
+        # Engine-status: slechtste status over alle actieve shops.
+        # failed > missing > stale > success.
+        shop_statuses = {s["status"] for s in shops}
+        if "failed" in shop_statuses:
+            status = "failed"
+        elif "missing" in shop_statuses:
+            status = "missing"
+        elif "stale" in shop_statuses:
+            status = "stale"
+        elif shops:
+            status = "success"
+        else:
+            status = "missing"  # geen actieve shops geconfigureerd
+
+        run_times = [r.started_at for r in runs if r.started_at]
+        last_run_at = max(run_times) if run_times else None
+        error_message = next(
+            (s["error_message"] for s in shops if s["status"] == "failed" and s["error_message"]),
+            None,
+        )
+
+        if status != "success":
+            any_warning = True
+        engines_out.append({
+            "engine": engine_name,
+            "label": label,
+            "status": status,
+            "last_run_at": last_run_at.isoformat() if last_run_at else None,
+            "error_message": error_message,
+            "shops": shops,
+        })
+
+    return {
+        "overall": "warning" if any_warning else "ok",
+        "checked_at": now.isoformat(),
+        "engines": engines_out,
+    }
+
+
 @router.get("/model-runs")
 def list_model_runs(
     db: Session = Depends(get_db),

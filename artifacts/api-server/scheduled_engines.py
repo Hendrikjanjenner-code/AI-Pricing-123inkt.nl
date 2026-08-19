@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import logging
 import sys
-from datetime import date
+from datetime import date, datetime
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,14 +45,20 @@ logger = logging.getLogger("scheduled_engines")
 
 def _run_engine(name: str, fn, db, shop_id: int) -> bool:
     """Voer één engine uit en retourneer True bij succes, False bij fout."""
+    started_at = datetime.utcnow()
     try:
         result = fn(db, run_date=date.today(), shop_id=shop_id)
         db.commit()
         logger.info("[%s] shop=%d klaar: %s", name, shop_id, result)
+        summary = result if isinstance(result, (dict, list)) else {"result": str(result)}
+        _log_run(db, name=name, shop_id=shop_id, started_at=started_at,
+                 status="success", result_summary=summary)
         return True
-    except Exception:
+    except Exception as exc:
         db.rollback()
         logger.exception("[%s] shop=%d mislukt — overige engines gaan door.", name, shop_id)
+        _log_run(db, name=name, shop_id=shop_id, started_at=started_at,
+                 status="failed", error_message=str(exc))
         return False
 
 
@@ -135,3 +141,25 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+def _log_run(db, *, name: str, shop_id: int, started_at, status: str,
+             error_message: str | None = None, result_summary=None) -> None:
+    """Schrijf een EngineRun-rij weg zodat het dashboard de run-status kan tonen.
+
+    Logging mag de run zelf nooit laten falen; fouten worden alleen gelogd.
+    """
+    import models
+    try:
+        db.add(models.EngineRun(
+            engine_name=name,
+            shop_id=shop_id,
+            started_at=started_at,
+            completed_at=datetime.utcnow(),
+            status=status,
+            error_message=error_message,
+            result_summary=result_summary,
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("[%s] shop=%d run-log kon niet worden weggeschreven.", name, shop_id)
