@@ -1182,6 +1182,57 @@ def get_competitor_rankings(
     }
 
 
+@router.get("/rankings/history")
+def get_competitor_ranking_history(
+    scope: str = Query("overall"),
+    shop_id: Optional[int] = Query(None),
+    competitor: Optional[str] = Query(None),
+    limit_runs: int = Query(12, ge=1, le=60),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """
+    Rank-verloop per concurrent over eerdere runs (§11): per run_date de rank
+    en combined score, zodat structurele stijgers/dalers zichtbaar zijn.
+    Beperkt tot de laatste `limit_runs` runs binnen scope + shop.
+    """
+    sid = _scope(db, shop_id)
+    run_dates = [
+        r[0] for r in
+        db.query(models.CompetitorRanking.run_date)
+        .filter(models.CompetitorRanking.scope == scope,
+                models.CompetitorRanking.shop_id == sid)
+        .distinct()
+        .order_by(models.CompetitorRanking.run_date.desc())
+        .limit(limit_runs)
+        .all()
+    ]
+    if not run_dates:
+        return {"scope": scope, "run_dates": [], "history": {}}
+    q = (
+        db.query(models.CompetitorRanking)
+        .filter(models.CompetitorRanking.scope == scope,
+                models.CompetitorRanking.shop_id == sid,
+                models.CompetitorRanking.run_date.in_(run_dates))
+    )
+    if competitor:
+        q = q.filter(models.CompetitorRanking.competitor_name == competitor)
+    rows = q.order_by(models.CompetitorRanking.run_date.asc(),
+                      models.CompetitorRanking.rank.asc()).all()
+    history: dict = {}
+    for r in rows:
+        history.setdefault(r.competitor_name, []).append({
+            "run_date": str(r.run_date),
+            "rank": r.rank,
+            "combined_score": round(float(r.combined_score or 0), 4),
+        })
+    return {
+        "scope": scope,
+        "run_dates": [str(d) for d in sorted(run_dates)],
+        "history": history,
+    }
+
+
 def _ranking_scopes(db: Session, shop_id: Optional[int] = None) -> list[str]:
     q = db.query(models.CompetitorRanking.scope).distinct()
     if shop_id is not None:

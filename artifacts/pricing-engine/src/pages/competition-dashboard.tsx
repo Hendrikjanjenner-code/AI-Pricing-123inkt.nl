@@ -32,6 +32,28 @@ const STRATEGIE_COLORS: Record<string, string> = {
   PRICE_LEADER:        "bg-yellow-100 text-yellow-700",
 };
 
+function RankSparkline({ points }: { points: { run_date: string; rank: number }[] }) {
+  if (!points || points.length < 2) return null;
+  const w = 72, h = 20, pad = 2;
+  const ranks = points.map(p => p.rank ?? 0);
+  const min = Math.min(...ranks), max = Math.max(...ranks);
+  const span = Math.max(1, max - min);
+  // Lagere rank = beter = hoger in de grafiek
+  const xy = points.map((p, i) => {
+    const x = pad + (i * (w - 2 * pad)) / (points.length - 1);
+    const y = pad + (((p.rank ?? 0) - min) / span) * (h - 2 * pad);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const improving = ranks[ranks.length - 1] < ranks[0];
+  const worsening = ranks[ranks.length - 1] > ranks[0];
+  const color = improving ? "#059669" : worsening ? "#ef4444" : "#94a3b8";
+  return (
+    <svg width={w} height={h} className="shrink-0" aria-label="rank-verloop">
+      <polyline points={xy.join(" ")} fill="none" stroke={color} strokeWidth="1.5" />
+    </svg>
+  );
+}
+
 function ScoreBar({ label, value }: { label: string; value: number }) {
   return (
     <div className="flex items-center gap-2 text-xs">
@@ -73,6 +95,17 @@ export default function CompetitionDashboard() {
     },
   });
   const rankings = rankData?.rankings || [];
+  const [openHistory, setOpenHistory] = useState<string | null>(null);
+  const { data: histData } = useQuery({
+    queryKey: ["competition-rankings-history", rankScope, shopId],
+    queryFn: () => {
+      const p = new URLSearchParams({ scope: rankScope });
+      if (shopId !== undefined) p.set("shop_id", String(shopId));
+      return apiFetch(`/api/competition/rankings/history?${p}`);
+    },
+    enabled: rankings.length > 0,
+  });
+  const rankHistory: Record<string, { run_date: string; rank: number }[]> = histData?.history || {};
   const rankScopes: string[] = rankData?.scopes?.length ? rankData.scopes : ["overall"];
 
   const categories = dashData?.categories || [];
@@ -184,8 +217,11 @@ export default function CompetitionDashboard() {
                 <div className="divide-y max-h-[420px] overflow-y-auto">
                   {rankings.map((r: any) => {
                     const basis = r.evidence?.influence_basis;
+                    const hist = rankHistory[r.competitor_name] || [];
+                    const isOpen = openHistory === r.competitor_name;
                     return (
-                      <div key={`${r.rank}-${r.competitor_name}`} className="grid grid-cols-12 items-center px-4 py-2.5 text-sm">
+                      <div key={`${r.rank}-${r.competitor_name}`}>
+                      <div className="grid grid-cols-12 items-center px-4 py-2.5 text-sm">
                         <div className="col-span-1 flex items-center gap-1 tabular-nums font-medium">
                           {r.rank}
                           {r.trend === "up" && <TrendingUp className="h-3.5 w-3.5 text-emerald-600" />}
@@ -197,6 +233,17 @@ export default function CompetitionDashboard() {
                           <Link href={`/competition/competitors/${encodeURIComponent(r.competitor_name)}`}>
                             <span className="font-medium truncate hover:underline cursor-pointer">{r.competitor_name}</span>
                           </Link>
+                          {hist.length >= 2 && (
+                            <button
+                              type="button"
+                              onClick={() => setOpenHistory(isOpen ? null : r.competitor_name)}
+                              className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted"
+                              title="Toon rank-verloop over eerdere runs"
+                              data-testid={`button-rank-history-${r.competitor_name}`}
+                            >
+                              <RankSparkline points={hist} />
+                            </button>
+                          )}
                         </div>
                         <div className="col-span-2 text-right tabular-nums text-xs">
                           {((r.competition_relevance_score || 0) * 100).toFixed(0)}
@@ -246,6 +293,28 @@ export default function CompetitionDashboard() {
                         <div className="col-span-1 text-right tabular-nums font-semibold">
                           {((r.combined_score || 0) * 100).toFixed(0)}
                         </div>
+                      </div>
+                      {isOpen && hist.length >= 2 && (
+                        <div className="px-4 pb-3 bg-muted/30" data-testid={`panel-rank-history-${r.competitor_name}`}>
+                          <div className="text-xs text-muted-foreground pt-2 pb-1.5">
+                            Rank-verloop over de laatste {hist.length} runs (lager = beter)
+                          </div>
+                          <div className="flex flex-wrap gap-x-4 gap-y-1">
+                            {hist.map((hp, i) => {
+                              const prev = i > 0 ? hist[i - 1].rank : null;
+                              const delta = prev !== null ? prev - hp.rank : 0;
+                              return (
+                                <div key={hp.run_date} className="flex items-center gap-1 text-xs tabular-nums">
+                                  <span className="text-muted-foreground">{hp.run_date}</span>
+                                  <span className="font-medium">#{hp.rank}</span>
+                                  {prev !== null && delta > 0 && <TrendingUp className="h-3 w-3 text-emerald-600" />}
+                                  {prev !== null && delta < 0 && <TrendingDown className="h-3 w-3 text-red-500" />}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                       </div>
                     );
                   })}
