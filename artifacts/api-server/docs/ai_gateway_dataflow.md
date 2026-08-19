@@ -25,7 +25,9 @@ Antwoord: conclusion · period · sources · data_freshness · records ·
   Configuratie via `AI_INTEGRATIONS_OPENAI_BASE_URL` + `AI_INTEGRATIONS_OPENAI_API_KEY`
   (automatisch door Replit gezet; geen eigen API-key nodig). Expliciete
   fallback: `OPENAI_API_KEY` rechtstreeks naar OpenAI.
-- **Model:** instelbaar via `AI_COPILOT_MODEL` (default `gpt-5.1`).
+- **Model:** instelbaar via `AI_COPILOT_MODEL` (default `gpt-5.1`;
+  momenteel ingesteld op `gpt-5.6-terra` — sneller en scherper, preferred
+  algemeen model).
 - **Datastroom naar de provider:** systeem-prompt, de gebruikersvraag,
   gespreksgeschiedenis (max. 12 berichten) en PII-gescrubde, geaggregeerde
   tool-resultaten. Er gaat **nooit** ruwe klantdata, vrije SQL of een

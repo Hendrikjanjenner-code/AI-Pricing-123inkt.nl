@@ -358,6 +358,27 @@ def provider_overview() -> dict:
     }
 
 
+def _chat_completion_with_tools(client, **kwargs):
+    """Chat-completion met function tools, compatibel met reasoning-modellen.
+
+    Nieuwere modellen (o.a. gpt-5.6-terra) weigeren function tools op
+    /v1/chat/completions zolang reasoning_effort actief is (400: "Function
+    tools with reasoning_effort are not supported ... set reasoning_effort
+    to 'none'"). Oudere modellen kennen reasoning_effort='none' juist niet.
+    Daarom: eerst de standaard-aanroep; alleen bij díe specifieke 400 opnieuw
+    proberen met reasoning_effort='none'. Geen stille terugval op een ander
+    model — alleen deze parameter wordt aangepast."""
+    try:
+        return client.chat.completions.create(**kwargs)
+    except Exception as exc:
+        msg = str(exc)
+        if getattr(exc, "status_code", None) == 400 and "reasoning_effort" in msg:
+            logger.info("Model %s vereist reasoning_effort='none' bij tools; "
+                        "opnieuw geprobeerd.", kwargs.get("model"))
+            return client.chat.completions.create(reasoning_effort="none", **kwargs)
+        raise
+
+
 def _make_client():
     cfg = _provider_config()
     if not cfg:
@@ -829,7 +850,8 @@ def run_copilot(
                         status = "budget_exceeded"
                         break
 
-                resp = client.chat.completions.create(
+                resp = _chat_completion_with_tools(
+                    client,
                     model=AI_MODEL,
                     max_completion_tokens=_MAX_COMPLETION_PER_CALL,
                     messages=messages,

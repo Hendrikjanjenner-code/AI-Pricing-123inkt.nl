@@ -29,3 +29,4 @@
 - [PIM source ownership](pim-source-ownership.md) — attribute values keep a source; cross-source writes must warn, never silently overwrite (DRS stays master).
 - [Feed-sync failure visibility](feed-sync-visibility.md) — failed syncs reuse ConnectorConfig.last_test_* (no schema change); feed response diagnostics + sanity checks live in the connector, reset per read cycle.
 - [Stale lib d.ts vs artifact typecheck](typecheck-libs-stale.md) — TS2305 from @workspace pkgs means run root `pnpm run typecheck:libs` first; refs use built dist, not src.
+- [Reasoning-model tools 400](model-tools-reasoning-effort.md) — gpt-5.6-terra weigert tools + reasoning_effort op chat completions; gateway retryt met none; smoke-test tool-vragen na modelwissel.
