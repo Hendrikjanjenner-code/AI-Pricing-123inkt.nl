@@ -14,6 +14,12 @@ Volgorde (afhankelijkheidsvolgorde):
   2. Promotion-engine   → promotie-effecten
   3. Forecast/Risk-engine → dagelijkse forecasts en risicoklassen
   4. Opportunity-engine  → kansen (aggregeert signalen van bovenstaande)
+  5. CIS-engine          → Competitor Influence Scores per (SKU, concurrent)
+  6. Competitor rankings → rankings op basis van (o.a.) verse CIS-scores
+
+De CIS-engine draait bewust VÓÓR de rankings: de Influence-score in de
+rankings is het gemiddelde van de CIS-scores, dus verouderde CIS-rijen
+zouden anders een verouderde ranking opleveren.
 
 Foutafhandeling
 ---------------
@@ -87,6 +93,28 @@ def main() -> int:
                 ok = _run_engine(engine_name, engine_fn, db, shop.id)
                 if not ok:
                     failures += 1
+
+        # ── CIS + rankings (globaal, niet per shop) ──────────────────────
+        # Eerst CIS herberekenen zodat de Influence-score in de rankings op
+        # verse scores is gebaseerd; daarna pas de rankings zelf.
+        from engine.competitor_influence import run_cis_engine
+        from engine.competition_rankings import run_competitor_rankings
+
+        try:
+            cis_written = run_cis_engine(db)
+            logger.info("[cis] klaar: %d CIS-rijen geschreven.", cis_written)
+        except Exception:
+            db.rollback()
+            failures += 1
+            logger.exception("[cis] mislukt — rankings draaien op bestaande CIS-rijen.")
+
+        try:
+            rankings_written = run_competitor_rankings(db)
+            logger.info("[rankings] klaar: %d ranking-rijen geschreven.", rankings_written)
+        except Exception:
+            db.rollback()
+            failures += 1
+            logger.exception("[rankings] mislukt.")
 
         if failures:
             logger.error(
