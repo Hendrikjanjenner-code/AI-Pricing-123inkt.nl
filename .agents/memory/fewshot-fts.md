@@ -1,16 +1,12 @@
 ---
 name: Few-shot FTS retrieval
-description: Copilot few-shot retrieval uses Postgres dutch FTS with word-overlap fallback; stemmer/rank quirks and silent-fallback trap.
+description: Copilot few-shot retrieval uses Postgres dutch FTS with word-overlap fallback; stemmer quirks, rank thresholds, and the silent-fallback trap.
 ---
-Few-shot retrieval (ai_gateway) is primarily Postgres full-text: OR-tsquery over query words against the STORED generated column question_tsv (GIN-indexed), ranked by ts_rank; any exception rolls back and falls back to Jaccard word-overlap.
+Few-shot retrieval (ai_gateway) is primarily Postgres full-text: OR-tsquery over query words against the dutch tsvector, ranked by ts_rank; ANY exception falls back silently to Jaccard word-overlap. A NameError (e.g. a constant lost in a bad merge) therefore disables FTS unnoticed — after FTS changes, run the reformulation retrieval test explicitly.
 
-**Why:** synonym/reformulated questions must still match, and FTS may be unavailable (fail-safe requirement). But because the caller catches every exception, a NameError or missing column silently disables FTS — a validation failure was once masked this way.
+**Why:** reformulated/synonym questions must still match, and FTS may be unavailable (fail-safe requirement), but the fallback masks real FTS bugs.
 
 **How to apply:**
-- The auto-migrator skips Computed columns; generated columns need manual DDL in migrate.py's _MANUAL_INDEXES.
-- ts_rank normalizes on length: one matching stem on a short question scores ~0.008, so keep the min-rank cutoff very low (≈0.003, ≤0.005); the @@ filter already excludes zero-overlap questions.
-- The dutch snowball stemmer is quirky — 'marge'→'marg' but 'marges'→'marges' (no match). Verify stems via `SELECT to_tsvector('dutch', ...)` when writing retrieval tests.
-- After FTS changes, run the retrieval test explicitly; the fallback will hide breakage otherwise.
-- question_tsv is Postgres-only: column and GIN index carry info={"pg_only": True}; compiles-hooks in models.py skip them in SQLite DDL.
-- Keep exactly ONE authoritative FTS_MIN_RANK definition, right next to its use; a duplicate or dropped definition after a merge silently disables FTS via the fallback.
-- FTS tests failing with [] usually mean the primary path is throwing, not that ranking changed; one shared stem in a longer question ranks ~0.0076, irrelevant questions 0.0.
+- ts_rank normalizes on length: one matching stem in a longer OR-query ranks ~0.0076, a strong short match ~0.008. Keep the min-rank cutoff very low (≤0.005; currently 0.003) — the `@@` filter already excludes zero-overlap questions.
+- The tsvector is a STORED generated column (question_tsv) with a GIN index; the auto-migrator skips Computed columns, so it needs manual DDL in migrate.py. SQLite (isolated tests) can't compile TSVECTOR/to_tsvector — models.py renders the column as plain TEXT there via a CreateColumn compile hook.
+- The dutch snowball stemmer is quirky — 'marge'→'marg' but 'marges'→'marges' (no match!). Verify stems via `SELECT to_tsvector('dutch', ...)` when writing retrieval tests.

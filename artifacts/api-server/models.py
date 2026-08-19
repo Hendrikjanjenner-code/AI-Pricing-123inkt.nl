@@ -2603,6 +2603,13 @@ class AiFeedback(Base):
     )
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+@compiles(CreateColumn, "sqlite")
+def _sqlite_skip_tsv_computed(element, compiler, **kw):
+    col = element.element
+    if col.name == "question_tsv" and col.table is not None and col.table.name == "ai_feedback":
+        return f"{compiler.preparer.format_column(col)} TEXT"
+    return compiler.visit_create_column(element, **kw)
 class PlatformModule(Base):
     """
     Module-registry (§46/§49): per platformmodule de verwachte functionaliteit,

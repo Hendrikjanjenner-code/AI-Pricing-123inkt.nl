@@ -476,6 +476,27 @@ export default function LoyaltyDashboard() {
             {(liability?.vouchers_expiring_30d ?? 0) > 0 && (
               <div className="text-xs text-amber-700">{liability.vouchers_expiring_30d} vouchers verlopen binnen 30 dagen</div>
             )}
+            {(liability?.expiry_forecast || []).length > 0 && (
+              <div className="border-t pt-2 mt-2">
+                <div className="text-xs font-medium mb-1">Verloopcurve — komende 6 maanden</div>
+                {(() => {
+                  const forecast = liability.expiry_forecast as any[];
+                  const max = Math.max(1, ...forecast.map((f) => f.points));
+                  return forecast.map((f) => (
+                    <div key={f.month} className="flex items-center gap-2 text-xs py-0.5" data-testid={`expiry-month-${f.month}`}>
+                      <span className="w-24 capitalize text-muted-foreground">{f.label}</span>
+                      <div className="flex-1 h-2 bg-muted rounded overflow-hidden">
+                        <div className="h-full bg-amber-500 rounded" style={{ width: `${Math.round((f.points / max) * 100)}%` }} />
+                      </div>
+                      <span className="w-28 text-right tabular-nums">{f.points.toLocaleString("nl-NL")} pt · €{f.eur.toFixed(2)}</span>
+                    </div>
+                  ));
+                })()}
+                {(liability.expiry_forecast as any[]).every((f: any) => f.points === 0) && (
+                  <div className="text-xs text-muted-foreground">Geen punten die de komende 6 maanden vervallen.</div>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
 

@@ -259,3 +259,151 @@ def test_upload_batch_survives_duplicate_row():
         s.query(models.LoyaltyMember).filter_by(id=mid).delete()
         s.commit()
         s.close()
+
+
+def test_expiry_forecast_monthly_buckets(db, member):
+    """Punten die over ~45 dagen de vervalgrens passeren, verschijnen in de
+    juiste maand-bucket van de verloopcurve (delta t.o.v. baseline)."""
+    from datetime import timedelta
+
+    policy = li._get_expiry_policy(db)
+    assert policy.enabled
+    horizon = policy.expiry_months * 30
+
+    before = li._expiry_forecast_monthly(db, policy, months=6)
+
+    # Verdiend zó dat het verloop over ~45 dagen valt
+    earn_date = date.today() - timedelta(days=horizon - 45)
+    li.apply_ledger_entry(db, member, earn_date, "earn", 777,
+                          external_ref=f"forecast-test-{member.id}")
+
+    after = li._expiry_forecast_monthly(db, policy, months=6)
+
+    assert len(after) == 6
+    assert all(f["points"] >= 0 for f in after)
+    deltas = [a["points"] - b["points"] for a, b in zip(after, before)]
+    assert sum(deltas) == 777
+    # De 777 punten vallen in één van de eerste drie maanden (rond dag 45)
+    assert sum(deltas[:3]) == 777
+    # EUR-waarde consistent met puntwaarde
+    for f in after:
+        assert f["eur"] == round(f["points"] * li.POINT_VALUE_EUR, 2)
+
+
+def test_expiry_forecast_boundary_matches_expiry_run(db, member):
+    """Een credit gedateerd exact month_end - horizon valt in de bucket van de
+    VOLGENDE maand, consistent met apply_expiry_run (txn_date < run_date - horizon)."""
+    from datetime import timedelta
+
+    policy = li._get_expiry_policy(db)
+    horizon = policy.expiry_months * 30
+    today = date.today()
+    month_end = li._month_end(today)
+
+    before = li._expiry_forecast_monthly(db, policy, months=6)
+    li.apply_ledger_entry(db, member, month_end - timedelta(days=horizon),
+                          "earn", 555,
+                          external_ref=f"forecast-boundary-{member.id}")
+    after = li._expiry_forecast_monthly(db, policy, months=6)
+    deltas = [a["points"] - b["points"] for a, b in zip(after, before)]
+
+    # Niet in de huidige maand: een expiry-run op month_end laat deze punten staan
+    assert deltas[0] == 0
+    assert deltas[1] == 555
+
+    # Consistentie met de echte expiry-run (dry_run): op month_end nog niets,
+    # op de eerste dag van de volgende maand wél.
+    wallet = li.ensure_wallet(db, member.id)
+    assert li._fifo_expirable_points(db, member.id, wallet,
+                                     month_end - timedelta(days=horizon)) == 0
+    next_day = month_end + timedelta(days=1)
+    assert li._fifo_expirable_points(db, member.id, wallet,
+                                     next_day - timedelta(days=horizon)) == 555
+
+
+def test_expiry_forecast_query_count_bounded(db, member):
+    """De verloopcurve mag een vast, klein aantal queries gebruiken,
+    onafhankelijk van het aantal wallets (set-based, geen per-wallet loop)."""
+    from datetime import timedelta
+    from sqlalchemy import event
+
+    policy = li._get_expiry_policy(db)
+    horizon = policy.expiry_months * 30
+    li.apply_ledger_entry(db, member, date.today() - timedelta(days=horizon - 40),
+                          "earn", 100, external_ref=f"forecast-qc-{member.id}")
+
+    counter = {"n": 0}
+
+    def _count(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT"):
+            counter["n"] += 1
+
+    engine = db.get_bind()
+    event.listen(engine, "before_cursor_execute", _count)
+    try:
+        li._expiry_forecast_monthly(db, policy, months=6)
+    finally:
+        event.remove(engine, "before_cursor_execute", _count)
+
+    # 1 wallet-query + 1 gegroepeerde credit-query (+ evt. beleidsquery-marge)
+    assert counter["n"] <= 5, (
+        f"Verloopcurve gebruikte {counter['n']} SELECT-queries; verwacht een "
+        "vast klein aantal onafhankelijk van het aantal wallets"
+    )
+
+
+def test_expiry_forecast_six_ordered_buckets_and_overdue(db, member):
+    """De curve heeft exact zes oplopende maand-buckets; punten die de
+    vervalgrens al gepasseerd zijn (overdue) vallen in de eerste bucket."""
+    from datetime import timedelta
+
+    policy = li._get_expiry_policy(db)
+    horizon = policy.expiry_months * 30
+
+    before = li._expiry_forecast_monthly(db, policy, months=6)
+    assert len(before) == 6
+    months = [f["month"] for f in before]
+    assert months == sorted(months) and len(set(months)) == 6
+    for f in before:
+        assert set(f) >= {"month", "label", "points", "eur"}
+
+    # Overdue: al 10 dagen over de grens — vervalt bij de eerstvolgende run,
+    # dus telt in de eerste maand-bucket.
+    li.apply_ledger_entry(db, member, date.today() - timedelta(days=horizon + 10),
+                          "earn", 321, external_ref=f"forecast-overdue-{member.id}")
+    after = li._expiry_forecast_monthly(db, policy, months=6)
+    deltas = [a["points"] - b["points"] for a, b in zip(after, before)]
+    assert deltas[0] == 321 and sum(deltas[1:]) == 0
+
+
+def test_expiry_forecast_fifo_redeems_reduce_buckets(db, member):
+    """Redeems consumeren FIFO de oudste punten: een redeem verlaagt de
+    verloopcurve, want de oudste (eerst vervallende) punten zijn al op."""
+    from datetime import timedelta
+
+    policy = li._get_expiry_policy(db)
+    horizon = policy.expiry_months * 30
+
+    before = li._expiry_forecast_monthly(db, policy, months=6)
+    li.apply_ledger_entry(db, member, date.today() - timedelta(days=horizon - 40),
+                          "earn", 500, external_ref=f"forecast-fifo-earn-{member.id}")
+    li.apply_ledger_entry(db, member, date.today(), "redeem", -200,
+                          external_ref=f"forecast-fifo-redeem-{member.id}")
+    after = li._expiry_forecast_monthly(db, policy, months=6)
+    deltas = [a["points"] - b["points"] for a, b in zip(after, before)]
+    # Van de 500 blijft na de FIFO-redeem van 200 nog 300 te vervallen over.
+    assert sum(deltas) == 300
+
+
+def test_expiry_forecast_disabled_policy_empty(db):
+    """Bij een uitgeschakeld verloopbeleid bevat liability_summary een lege
+    verloopcurve (geen speculatieve buckets)."""
+    policy = li._get_expiry_policy(db)
+    was_enabled = policy.enabled
+    try:
+        policy.enabled = False
+        db.flush()
+        summary = li.liability_summary(db)
+        assert summary["expiry_forecast"] == []
+    finally:
+        db.rollback()

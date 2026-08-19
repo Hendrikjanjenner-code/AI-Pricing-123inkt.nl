@@ -432,9 +432,11 @@ def liability_summary(db: Session, shop_id: int | None = None) -> dict:
     policy = _get_expiry_policy(db, shop_id if shop_id is not None else 1)
     points_expiring_30d = 0
     points_expiring_90d = 0
+    expiry_forecast: list[dict] = []
     if policy.enabled:
         points_expiring_30d = _compute_expiring_points(db, policy, warn_days=30, shop_id=shop_id)
         points_expiring_90d = _compute_expiring_points(db, policy, warn_days=90, shop_id=shop_id)
+        expiry_forecast = _expiry_forecast_monthly(db, policy, months=6, shop_id=shop_id)
 
     return {
         "shop_id": shop_id,
@@ -447,6 +449,7 @@ def liability_summary(db: Session, shop_id: int | None = None) -> dict:
         "vouchers_expiring_30d": int(expiring_vouchers),
         "points_expiring_30d": int(points_expiring_30d),
         "points_expiring_90d": int(points_expiring_90d),
+        "expiry_forecast": expiry_forecast,
         "expiry_policy": {
             "enabled": policy.enabled,
             "expiry_months": policy.expiry_months,
@@ -579,7 +582,17 @@ def _compute_expiring_points(
         total += pts
     return total
 
+_NL_MONTHS = [
+    "januari", "februari", "maart", "april", "mei", "juni",
+    "juli", "augustus", "september", "oktober", "november", "december",
+]
 
+
+def _month_end(d: date) -> date:
+    """Laatste dag van de maand waarin `d` valt."""
+    if d.month == 12:
+        return date(d.year, 12, 31)
+    return date(d.year, d.month + 1, 1) - timedelta(days=1)
 def apply_expiry_run(
     db: Session,
     run_date: date | None = None,
@@ -744,13 +757,13 @@ def expiring_soon_members(db: Session, shop_id: int | None = None) -> list[dict]
             warn_window_end=cutoff_full,
         )
         if pts > 0:
-            # Schat de vervaldatum: vroegste earn-datum van punten die binnenkort
-            # verlopen. Géén ondergrens op cutoff_full: punten die de vervalgrens
-            # al gepasseerd zijn (maar nog niet formeel verlopen) tellen mee en
-            # krijgen een vervaldatum in het verleden (days_until_expiry <= 0).
+            # Schat de vervaldatum: vroegste earn-datum van punten binnen het
+            # waarschuwingsvenster. Punten die al over de grens zijn hebben
+            # geen zinvolle toekomstige vervaldatum → expires_on blijft None.
             earliest = db.query(func.min(models.LoyaltyTransaction.txn_date)).filter(
                 models.LoyaltyTransaction.member_id == member.id,
                 models.LoyaltyTransaction.txn_type.in_(list(_CREDIT_TYPES)),
+                models.LoyaltyTransaction.txn_date >= cutoff_full,
                 models.LoyaltyTransaction.txn_date < cutoff_soon,
             ).scalar()
             expires_on = (
@@ -1296,6 +1309,101 @@ def publish_campaign_uplift_signals(db: Session, run_date: date | None = None) -
         db.flush()
         published += 1
     return published
+
+def _expiry_forecast_monthly(
+    db: Session, policy: models.LoyaltyExpiryPolicy, months: int = 6,
+    shop_id: int | None = None,
+) -> list[dict]:
+    """
+    Maand-voor-maand verloopcurve voor de komende `months` kalendermaanden.
+
+    Voor elke maandgrens berekenen we cumulatief hoeveel punten (FIFO) tegen
+    het einde van die maand de vervalgrens zijn gepasseerd; het verschil
+    tussen opeenvolgende grenzen is het verloop in die maand. Al verlopen
+    (overdue) punten vallen in de eerste maand — die vervallen bij de
+    eerstvolgende expiry-run.
+
+    Set-based: één wallet-query + één gegroepeerde credit-query met
+    conditionele sommen per maandgrens, daarna de FIFO-formule in geheugen
+    per lid (identiek aan het normale pad van _fifo_expirable_points).
+    """
+    from sqlalchemy import case
+
+    today = date.today()
+    horizon = timedelta(days=policy.expiry_months * 30)
+
+    # Maandgrenzen: einde van deze maand + de volgende (months-1) maanden
+    boundaries: list[date] = []
+    cursor = today
+    for _ in range(months):
+        end = _month_end(cursor)
+        boundaries.append(end)
+        cursor = end + timedelta(days=1)
+    # Zelfde grenssemantiek als apply_expiry_run: txn_date < run_date - horizon
+    cutoffs = [b - horizon for b in boundaries]
+
+    def _bucket(boundary: date, pts: int) -> dict:
+        return {
+            "month": boundary.strftime("%Y-%m"),
+            "label": f"{_NL_MONTHS[boundary.month - 1]} {boundary.year}",
+            "points": int(pts),
+            "eur": round(pts * POINT_VALUE_EUR, 2),
+        }
+
+    wallet_q = db.query(models.LoyaltyWallet).filter(
+        models.LoyaltyWallet.balance_points > 0
+    )
+    if shop_id is not None:
+        wallet_q = wallet_q.join(
+            models.LoyaltyMember,
+            models.LoyaltyMember.id == models.LoyaltyWallet.member_id,
+        ).filter(models.LoyaltyMember.shop_id == shop_id)
+    wallets = wallet_q.all()
+    if not wallets:
+        return [_bucket(b, 0) for b in boundaries]
+
+    member_ids = [w.member_id for w in wallets]
+    sums = [
+        func.coalesce(func.sum(case(
+            (models.LoyaltyTransaction.txn_date < c,
+             models.LoyaltyTransaction.points_delta),
+            else_=0,
+        )), 0).label(f"c{i}")
+        for i, c in enumerate(cutoffs)
+    ]
+    rows = (db.query(models.LoyaltyTransaction.member_id, *sums)
+            .filter(models.LoyaltyTransaction.member_id.in_(member_ids),
+                    models.LoyaltyTransaction.txn_type.in_(list(_CREDIT_TYPES)))
+            .group_by(models.LoyaltyTransaction.member_id)
+            .all())
+    earned_by_member = {r[0]: [int(r[i + 1] or 0) for i in range(months)]
+                        for r in rows}
+
+    cumulative = [0] * months
+    for w in wallets:
+        earned = earned_by_member.get(w.member_id)
+        if not earned:
+            continue
+        balance = int(w.balance_points or 0)
+        redeemed = int(w.lifetime_redeemed or 0)
+        expired = int(w.lifetime_expired or 0)
+        for i in range(months):
+            earned_old = earned[i]
+            if earned_old <= 0:
+                continue
+            # FIFO (zelfde formule als _fifo_expirable_points, normaal pad)
+            redeems_hitting_old = min(redeemed, earned_old)
+            still_live_old = max(0, earned_old - redeems_hitting_old - expired)
+            cumulative[i] += min(balance, still_live_old)
+
+    forecast = []
+    prev = 0
+    for boundary, cum in zip(boundaries, cumulative):
+        pts = max(0, cum - prev)
+        prev = max(prev, cum)
+        forecast.append(_bucket(boundary, pts))
+    return forecast
+
 
 def _loyalty_shop_ids(db: Session) -> list[int]:
     """Alle shop_ids waarvoor loyalty-leden bestaan."""
