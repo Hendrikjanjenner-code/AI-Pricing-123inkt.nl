@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { CheckCircle2, XCircle, Search, Link as LinkIcon, Check, X, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useShopId, withShop } from "@/hooks/use-shop-id";
@@ -31,6 +32,18 @@ const MATCH_TYPE_LABELS: Record<string, string> = {
   Categorie_Alternatief:"Categorie Alt.",
   Geen_Match:           "Geen Match",
 };
+
+const SUSPECT_THRESHOLD_PCT = 40;
+
+function isSuspect(m: any): boolean {
+  return m.status === "PENDING"
+    && m.price_diff_pct != null
+    && Math.abs(m.price_diff_pct) > SUSPECT_THRESHOLD_PCT;
+}
+
+function formatPrice(v: number | null | undefined): string {
+  return v != null ? `€ ${Number(v).toFixed(2)}` : "onbekend";
+}
 
 const STATUS_COLORS: Record<string, string> = {
   PENDING:  "bg-slate-100 text-slate-600",
@@ -290,15 +303,54 @@ export default function CompetitionAiMatching() {
               <div className="p-12 text-center text-muted-foreground">Geen matches gevonden. Voer een matching-run uit via de API of draai de backfill.</div>
             ) : (
               <div className="divide-y max-h-[600px] overflow-y-auto">
-                {items.map((m: any) => (
-                  <div key={m.id} className="grid grid-cols-12 items-start px-4 py-3 text-sm hover:bg-muted/30 transition-colors">
+                {items.map((m: any) => {
+                  const suspect = isSuspect(m);
+                  return (
+                  <div
+                    key={m.id}
+                    className={`grid grid-cols-12 items-start px-4 py-3 text-sm transition-colors ${
+                      suspect
+                        ? "border-l-4 border-l-amber-400 bg-amber-50/50 hover:bg-amber-50"
+                        : "hover:bg-muted/30"
+                    }`}
+                    data-testid={suspect ? `row-suspect-match-${m.id}` : undefined}
+                  >
                     <div className="col-span-3">
-                      <div className="font-medium truncate pr-2">{m.product_name}</div>
+                      <div className="flex items-center gap-1.5 pr-2">
+                        <span className="font-medium truncate">{m.product_name}</span>
+                        {suspect && (
+                          <TooltipProvider delayDuration={150}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span
+                                  className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 flex-shrink-0 cursor-default"
+                                  data-testid={`badge-suspect-${m.id}`}
+                                >
+                                  <AlertTriangle className="h-3 w-3" /> Verdacht
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="max-w-xs">
+                                <p className="font-medium">
+                                  Prijsverschil {m.price_diff_pct > 0 ? "+" : ""}{m.price_diff_pct.toFixed(1)}% boven de drempel van ±{SUSPECT_THRESHOLD_PCT}%
+                                </p>
+                                <p className="mt-1">
+                                  Eigen prijs {formatPrice(m.own_price)} vs concurrentprijs {formatPrice(m.competitor_price)}. Nog niet beoordeeld — controleer of dit dezelfde producten zijn.
+                                </p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        )}
+                      </div>
                       <div className="text-xs text-muted-foreground">
                         {m.own_sku_id}
                         {m.ean ? ` · EAN ${m.ean}` : ""}
                         {m.oem_code ? ` · OEM ${m.oem_code}` : ""}
                       </div>
+                      {suspect && (
+                        <div className="text-xs text-amber-700 mt-0.5" data-testid={`text-suspect-reason-${m.id}`}>
+                          Prijsverschil &gt; {SUSPECT_THRESHOLD_PCT}% en nog niet beoordeeld
+                        </div>
+                      )}
                     </div>
                     <div className="col-span-2">
                       <div className="text-sm truncate">{m.competitor_name}</div>
@@ -342,7 +394,8 @@ export default function CompetitionAiMatching() {
                       )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

@@ -1258,7 +1258,9 @@ def test_slow_full_run_publishes_engine_slow_run_signal(monkeypatch):
         db.commit()
         db.close()
 
-ED_PFX = f"ED{uuid.uuid4().hex[:6]}"
+
+ED_PFX = f"EDTEST{uuid.uuid4().hex[:6]}"
+
 
 
 @pytest.fixture(scope="module")
