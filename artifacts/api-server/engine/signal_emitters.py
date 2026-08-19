@@ -20,7 +20,12 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import models
-from engine.signal_publisher import publish_signal, expire_stale_signals
+from engine.signal_publisher import (
+    publish_signal,
+    expire_stale_signals,
+    auto_resolve_signals,
+    _default_shop_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,20 +37,45 @@ def _f(v) -> float | None:
     return float(v) if v is not None else None
 
 
+def _own_sku_filter(db: Session, sid: int, sku_col):
+    """SQL-filter: sluit SKU's uit die aantoonbaar bij een ANDERE winkel horen.
+
+    Voor brontabellen zonder shop_id-kolom. Onbekende SKU's (geen
+    DimProduct-rij) blijven meedoen — geen data is geen bewijs van een
+    andere winkel. Wordt óók gebruikt bij het bepalen van de laatste
+    run-datum, zodat een nieuwere run van een andere winkel nooit een lege
+    bronset (en dus onterechte auto-resolves) voor deze winkel oplevert."""
+    own_sq = db.query(models.DimProduct.sku_id).filter(
+        models.DimProduct.shop_id == sid)
+    foreign_sq = db.query(models.DimProduct.sku_id).filter(
+        models.DimProduct.shop_id != sid,
+        ~models.DimProduct.sku_id.in_(own_sq))
+    return ~sku_col.in_(foreign_sq)
+
+
 # ── Competition ──────────────────────────────────────────────────────────────
 
 def emit_competition_signals(db: Session) -> int:
     """Concurrentiedruk- en prijskanssignalen uit SkuCompetitionScore +
     ranking-verschuivingen uit CompetitorRanking."""
     n = 0
-    scores = db.query(models.SkuCompetitionScore).all()
-    products = {p.sku_id: p for p in db.query(models.DimProduct).all()}
+    sid = _default_shop_id(db)
+    # Alleen de laatste run van déze winkel: oude scores mogen een inmiddels
+    # neutrale SKU niet in still_active houden.
+    latest_score = db.query(func.max(models.SkuCompetitionScore.run_date)).filter(
+        func.coalesce(models.SkuCompetitionScore.shop_id, sid) == sid).scalar()
+    scores = db.query(models.SkuCompetitionScore).filter(
+        func.coalesce(models.SkuCompetitionScore.shop_id, sid) == sid,
+        models.SkuCompetitionScore.run_date == latest_score,
+    ).all() if latest_score else []
+    products = {p.sku_id: p for p in db.query(models.DimProduct).filter(
+        models.DimProduct.shop_id == sid).all()}
 
     # Hoge concurrentiedruk: duurder dan de markt én sterke concurrentieklasse
-    pressure = sorted(
-        [s for s in scores if (s.price_index or 0) > 1.05
-         and s.competition_class in ("Critical", "Strong")],
-        key=lambda s: float(s.price_index or 1), reverse=True)[:MAX_PER_TYPE]
+    pressure_all = [s for s in scores if (s.price_index or 0) > 1.05
+                    and s.competition_class in ("Critical", "Strong")]
+    pressure = sorted(pressure_all,
+                      key=lambda s: float(s.price_index or 1), reverse=True)[:MAX_PER_TYPE]
     for s in pressure:
         p = products.get(s.sku_id)
         pi = float(s.price_index)
@@ -77,9 +107,9 @@ def emit_competition_signals(db: Session) -> int:
         n += 1
 
     # Prijsverhogingskans: goedkoper dan de markt bij lage druk
-    opportunity = sorted(
-        [s for s in scores if (s.price_index or 1) < 0.95 and s.price_index],
-        key=lambda s: float(s.price_index), reverse=False)[:MAX_PER_TYPE]
+    opportunity_all = [s for s in scores if (s.price_index or 1) < 0.95 and s.price_index]
+    opportunity = sorted(opportunity_all,
+                         key=lambda s: float(s.price_index), reverse=False)[:MAX_PER_TYPE]
     for s in opportunity:
         p = products.get(s.sku_id)
         pi = float(s.price_index)
@@ -108,14 +138,35 @@ def emit_competition_signals(db: Session) -> int:
         )
         n += 1
 
+    # Auto-resolve: actieve druk-/kanssignalen waarvan de conditie niet meer
+    # geldt. Alleen als er scoredata is (geen data ≠ conditie verholpen).
+    if scores:
+        auto_resolve_signals(
+            db, engine="competition", shop_id=sid,
+            signal_types=["competitive_pressure_increased", "price_increase_opportunity"],
+            entity_type="sku",
+            still_active={("competitive_pressure_increased", s.sku_id) for s in pressure_all}
+            | {("price_increase_opportunity", s.sku_id) for s in opportunity_all},
+        )
+
     # Rankingverschuivingen (§11): concurrent stijgt in de overall ranking
-    latest = db.query(func.max(models.CompetitorRanking.run_date)).scalar()
+    latest = db.query(func.max(models.CompetitorRanking.run_date)).filter(
+        func.coalesce(models.CompetitorRanking.shop_id, sid) == sid).scalar()
     if latest:
-        movers = db.query(models.CompetitorRanking).filter(
+        movers_all = db.query(models.CompetitorRanking).filter(
+            func.coalesce(models.CompetitorRanking.shop_id, sid) == sid,
             models.CompetitorRanking.run_date == latest,
             models.CompetitorRanking.scope == "overall",
             models.CompetitorRanking.rank_trend == "up",
-        ).order_by(models.CompetitorRanking.rank).limit(MAX_PER_TYPE).all()
+        ).order_by(models.CompetitorRanking.rank).all()
+        auto_resolve_signals(
+            db, engine="competition", shop_id=sid,
+            signal_types=["competitor_rank_increased"],
+            entity_type="competitor",
+            still_active={("competitor_rank_increased", r.competitor_name)
+                          for r in movers_all},
+        )
+        movers = movers_all[:MAX_PER_TYPE]
         for r in movers:
             publish_signal(
                 db, engine="competition", signal_type="competitor_rank_increased",
@@ -144,22 +195,40 @@ def emit_competition_signals(db: Session) -> int:
 
 def emit_pricing_signals(db: Session) -> int:
     """Signalen uit de laatste pricing-engine-run (aanbevelingen van vandaag)."""
-    latest = db.query(func.max(models.FactPricingRecommendationDaily.date)).scalar()
+    sid = _default_shop_id(db)
+    latest = db.query(func.max(models.FactPricingRecommendationDaily.date)).filter(
+        func.coalesce(models.FactPricingRecommendationDaily.shop_id, sid) == sid,
+    ).scalar()
     if not latest:
         return 0
     recs = db.query(models.FactPricingRecommendationDaily).filter(
+        func.coalesce(models.FactPricingRecommendationDaily.shop_id, sid) == sid,
         models.FactPricingRecommendationDaily.date == latest,
         models.FactPricingRecommendationDaily.approval_status == "pending",
     ).all()
-    products = {p.sku_id: p for p in db.query(models.DimProduct).all()}
+    products = {p.sku_id: p for p in db.query(models.DimProduct).filter(
+        models.DimProduct.shop_id == sid).all()}
     n = 0
+
+    increases_all = [r for r in recs if (r.recommended_change_pct or 0) >= 2.0]
+    decreases_all = [r for r in recs if (r.recommended_change_pct or 0) <= -2.0]
+
+    # Auto-resolve: aanbeveling niet meer pending (goedgekeurd/afgewezen) of
+    # niet meer significant → signaal is opgelost.
+    auto_resolve_signals(
+        db, engine="pricing", shop_id=sid,
+        signal_types=["price_increase_recommended", "price_decrease_recommended"],
+        entity_type="sku",
+        still_active={("price_increase_recommended", r.sku_id) for r in increases_all}
+        | {("price_decrease_recommended", r.sku_id) for r in decreases_all},
+    )
 
     for direction_label, sig_type, sev, dirn, subset in (
         ("verhoging", "price_increase_recommended", "medium", "positive",
-         sorted([r for r in recs if (r.recommended_change_pct or 0) >= 2.0],
+         sorted(increases_all,
                 key=lambda r: float(r.expected_margin_uplift or 0), reverse=True)[:MAX_PER_TYPE]),
         ("verlaging", "price_decrease_recommended", "medium", "negative",
-         sorted([r for r in recs if (r.recommended_change_pct or 0) <= -2.0],
+         sorted(decreases_all,
                 key=lambda r: float(r.recommended_change_pct or 0))[:MAX_PER_TYPE]),
     ):
         for r in subset:
@@ -196,17 +265,32 @@ def emit_pricing_signals(db: Session) -> int:
 # ── BCG ──────────────────────────────────────────────────────────────────────
 
 def emit_bcg_signals(db: Session) -> int:
+    sid = _default_shop_id(db)
+    own = _own_sku_filter(db, sid, models.FactBcgClassificationDaily.entity_id)
     latest = db.query(func.max(models.FactBcgClassificationDaily.date)).filter(
-        models.FactBcgClassificationDaily.entity_type == "SKU").scalar()
+        models.FactBcgClassificationDaily.entity_type == "SKU", own).scalar()
     if not latest:
         return 0
     rows = db.query(models.FactBcgClassificationDaily).filter(
         models.FactBcgClassificationDaily.entity_type == "SKU",
         models.FactBcgClassificationDaily.date == latest,
+        own,
     ).all()
     n = 0
 
-    stars = sorted([r for r in rows if r.hybrid_bcg_class == "PRICING_POWER_STAR"],
+    stars_all = [r for r in rows if r.hybrid_bcg_class == "PRICING_POWER_STAR"]
+    dogs_all = [r for r in rows if r.hybrid_bcg_class == "LOW_PRIORITY_DOG"]
+
+    # Auto-resolve: SKU niet meer in de betreffende BCG-klasse → opgelost
+    auto_resolve_signals(
+        db, engine="bcg", shop_id=sid,
+        signal_types=["pricing_power_high", "sku_low_priority_dog"],
+        entity_type="sku",
+        still_active={("pricing_power_high", r.entity_id) for r in stars_all}
+        | {("sku_low_priority_dog", r.entity_id) for r in dogs_all},
+    )
+
+    stars = sorted(stars_all,
                    key=lambda r: float(r.pricing_power_score or 0), reverse=True)[:MAX_PER_TYPE]
     for r in stars:
         pps = float(r.pricing_power_score or 0)
@@ -233,8 +317,7 @@ def emit_bcg_signals(db: Session) -> int:
         )
         n += 1
 
-    dogs = sorted([r for r in rows if r.hybrid_bcg_class == "LOW_PRIORITY_DOG"],
-                  key=lambda r: float(r.gps_score or 0))[:MAX_PER_TYPE]
+    dogs = sorted(dogs_all, key=lambda r: float(r.gps_score or 0))[:MAX_PER_TYPE]
     for r in dogs:
         publish_signal(
             db, engine="bcg", signal_type="sku_low_priority_dog",
@@ -263,8 +346,10 @@ def emit_bcg_signals(db: Session) -> int:
 
 def emit_traffic_signals(db: Session) -> int:
     from engine.conversion_monitoring import SIGNAL_LABELS_NL, SIGNAL_PRIORITY
+    sid = _default_shop_id(db)
+    own = _own_sku_filter(db, sid, models.FactTrafficIntelligenceDaily.entity_id)
     latest = db.query(func.max(models.FactTrafficIntelligenceDaily.date)).filter(
-        models.FactTrafficIntelligenceDaily.entity_type == "SKU").scalar()
+        models.FactTrafficIntelligenceDaily.entity_type == "SKU", own).scalar()
     if not latest:
         return 0
     rows = db.query(models.FactTrafficIntelligenceDaily).filter(
@@ -272,9 +357,18 @@ def emit_traffic_signals(db: Session) -> int:
         models.FactTrafficIntelligenceDaily.date == latest,
         models.FactTrafficIntelligenceDaily.reason_code.isnot(None),
         models.FactTrafficIntelligenceDaily.reason_code != "NO_SIGNAL",
+        own,
     ).all()
     rows.sort(key=lambda r: (float(r.conversion_risk_score or 0)
                              + float(r.traffic_opportunity_score or 0)), reverse=True)
+
+    # Auto-resolve: SKU heeft op de laatste run geen (of een andere)
+    # reason_code meer → het oude traffic-signaal is opgelost.
+    auto_resolve_signals(
+        db, engine="traffic", shop_id=sid, entity_type="sku",
+        still_active={((r.reason_code or "").lower(), r.entity_id) for r in rows},
+    )
+
     sev_map = {"hoog": "high", "gemiddeld": "medium", "laag": "low"}
     n = 0
     for r in rows[:MAX_PER_TYPE * 2]:
@@ -315,14 +409,28 @@ def emit_traffic_signals(db: Session) -> int:
 # ── Procurement / Supplier ───────────────────────────────────────────────────
 
 def emit_procurement_signals(db: Session) -> int:
-    latest = db.query(func.max(models.FactProcurementForecastDaily.date)).scalar()
+    sid = _default_shop_id(db)
+    own = _own_sku_filter(db, sid, models.FactProcurementForecastDaily.sku_id)
+    latest = db.query(func.max(models.FactProcurementForecastDaily.date)).filter(
+        own).scalar()
     if not latest:
         return 0
     rows = db.query(models.FactProcurementForecastDaily).filter(
         models.FactProcurementForecastDaily.date == latest,
         models.FactProcurementForecastDaily.signal_code.in_(
             ("BUY_NOW", "URGENT_BUY", "MARGIN_RISK")),
+        own,
     ).all()
+
+    # Auto-resolve: SKU heeft op de laatste forecast geen (of een ander)
+    # inkoopsignaal meer → oude procurement-signalen zijn opgelost.
+    auto_resolve_signals(
+        db, engine="procurement", shop_id=sid,
+        signal_types=["buy_now", "urgent_buy", "margin_risk"],
+        entity_type="sku",
+        still_active={((r.signal_code or "").lower(), r.sku_id) for r in rows},
+    )
+
     n = 0
     for r in sorted(rows, key=lambda x: float(x.future_margin_risk_score or 0)
                     + float(x.procurement_opportunity_score or 0), reverse=True)[:MAX_PER_TYPE * 2]:
@@ -362,13 +470,28 @@ def emit_procurement_signals(db: Session) -> int:
 # ── Switching / Huismerk ─────────────────────────────────────────────────────
 
 def emit_switching_signals(db: Session) -> int:
-    latest = db.query(func.max(models.InternalCompetitionScore.run_date)).scalar()
+    sid = _default_shop_id(db)
+    own = _own_sku_filter(db, sid, models.InternalCompetitionScore.sku_id)
+    latest = db.query(func.max(models.InternalCompetitionScore.run_date)).filter(
+        own).scalar()
     if not latest:
         return 0
-    rows = db.query(models.InternalCompetitionScore).filter(
-        models.InternalCompetitionScore.run_date == latest,
-    ).order_by(models.InternalCompetitionScore.isv.desc()).limit(MAX_PER_TYPE).all()
-    products = {p.sku_id: p for p in db.query(models.DimProduct).all()}
+    rows_all = db.query(models.InternalCompetitionScore).filter(
+        models.InternalCompetitionScore.run_date == latest, own,
+    ).order_by(models.InternalCompetitionScore.isv.desc()).all()
+
+    # Auto-resolve: kannibalisatierisico onder de drempel gezakt → opgelost
+    auto_resolve_signals(
+        db, engine="switching", shop_id=sid,
+        signal_types=["cannibalisation_risk"],
+        entity_type="sku",
+        still_active={("cannibalisation_risk", r.sku_id) for r in rows_all
+                      if float(r.internal_switch_probability or 0) >= 0.25},
+    )
+
+    rows = rows_all[:MAX_PER_TYPE]
+    products = {p.sku_id: p for p in db.query(models.DimProduct).filter(
+        models.DimProduct.shop_id == sid).all()}
     n = 0
     for r in rows:
         prob = float(r.internal_switch_probability or 0)
@@ -408,13 +531,36 @@ def emit_switching_signals(db: Session) -> int:
 # ── Cost / Economic / Break-even ─────────────────────────────────────────────
 
 def emit_cost_signals(db: Session) -> int:
-    latest = db.query(func.max(models.FactCostDaily.date)).scalar()
     n = 0
+    sid = _default_shop_id(db)
+    own = _own_sku_filter(db, sid, models.FactCostDaily.sku_id)
+    latest = db.query(func.max(models.FactCostDaily.date)).filter(own).scalar()
     if latest:
-        rows = db.query(models.FactCostDaily).filter(
+        rows_all = db.query(models.FactCostDaily).filter(
             models.FactCostDaily.date == latest,
             models.FactCostDaily.net_margin_pct.isnot(None),
-        ).order_by(models.FactCostDaily.net_margin_pct).limit(MAX_PER_TYPE).all()
+            own,
+        ).order_by(models.FactCostDaily.net_margin_pct).all()
+
+        # Auto-resolve: marge hersteld boven de drempels → kostsignaal
+        # opgelost. Alleen als de laatste run marges bevat (geen data ≠
+        # conditie verholpen).
+        if rows_all:
+            still: set[tuple[str, str]] = set()
+            for r in rows_all:
+                nm = float(r.net_margin_pct or 0)
+                if nm <= 0:
+                    still.add(("below_break_even", r.sku_id))
+                elif nm < 5:
+                    still.add(("margin_under_pressure", r.sku_id))
+            auto_resolve_signals(
+                db, engine="cost", shop_id=sid,
+                signal_types=["below_break_even", "margin_under_pressure"],
+                entity_type="sku",
+                still_active=still,
+            )
+
+        rows = rows_all[:MAX_PER_TYPE]
         for r in rows:
             nm = float(r.net_margin_pct or 0)
             if nm >= 5:
@@ -452,6 +598,19 @@ def emit_cost_signals(db: Session) -> int:
     econ = db.query(models.FactEconomicSignalDaily).filter(
         models.FactEconomicSignalDaily.valid_until >= today,
     ).all()
+
+    # Auto-resolve: broncode niet meer geldig (valid_until verstreken of rij
+    # verwijderd) → economisch signaal opgelost. Alleen als de brontabel
+    # überhaupt data bevat: een lege/onbeschikbare bron (bijv. mislukte
+    # ingest) is geen bewijs dat de conditie verholpen is.
+    econ_source_exists = db.query(
+        models.FactEconomicSignalDaily.id).first() is not None
+    if econ_source_exists:
+        auto_resolve_signals(
+            db, engine="economic", shop_id=sid, entity_type="shop",
+            still_active={((e.signal_code or "economic_signal").lower(), "1") for e in econ},
+        )
+
     for e in econ[:MAX_PER_TYPE]:
         sev = "high" if float(e.severity_score or 0) >= 0.6 else "medium"
         publish_signal(

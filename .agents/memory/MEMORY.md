@@ -42,9 +42,6 @@
 - [BQ keyset NULL-watermerken](bq-keyset-null-watermark.md) — keyset-paginatie op (watermerk, pk) verliest rijen met NULL-watermerk; COALESCE naar vroegst mogelijke timestamp in filter én ORDER BY.
 - [ImportJob-residu breekt volgordetests](importjob-residue.md) — connector-synctests laten geimporteerde api_sync_priceshape jobs achter; tests die "meest recente job = mijn faaljob" aannemen moeten created_at nu zetten en completed_at terugdateren.
 - [Rebase drops adjacent blocks](rebase-dropped-blocks.md) — task-merge rebases can silently drop module-level constant blocks; grep for definitions after every rebase.
-- [Test-shop teardown FK](test-suite-conventions.md) — request middleware writes cost-usage rows per shop; any teardown that deletes a shop must delete those rows first or FK-fails only in full-suite runs.
-- [Few-shot FTS retrieval](fewshot-fts.md) — dutch FTS + Jaccard-fallback; fail-safe fallback maskeert FTS-fouten (zelfs NameError); stemmer/rank-drempel quirks in topicfile.
 - [Loyalty expiry semantics](loyalty-expiry-semantics.md) — overdue points count as "expiring soon"; policy is per shop but apply_expiry_run keeps legacy expiry_cutoff/expiry_months fields.
-- [Few-shot FTS retrieval](fewshot-fts.md) — dutch FTS primary + Jaccard fallback; dutch stemmer quirk: 'marges' does NOT stem to 'marg'.
-- [Few-shot FTS retrieval](fewshot-fts.md) — fail-safe fallback maskeert FTS-fouten (zelfs NameError); rank-drempel ≤0.005 voor één-woord-matches.
 - [Schedulers uit in tests](test-scheduler-isolation.md) — TestClient start de lifespan; conftest zet alle DISABLE_*-vlaggen of full-suite runs krijgen StaleDataError/verdwenen rijen.
+- [Signal auto-resolve scoping](signal-auto-resolve.md) — auto_resolve_signals is shop-gescoped (default shop); emitters moeten brondata óók shop-filteren of cross-shop rijen uitsluiten, anders resolve je andermans signalen.

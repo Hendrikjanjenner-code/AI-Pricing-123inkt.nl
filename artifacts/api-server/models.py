@@ -94,7 +94,7 @@ class IntelligenceSignal(Base):
     valid_until = Column(DateTime)
     model_version = Column(String(50))
 
-    status = Column(String(20), default="active")   # active / expired / superseded / dismissed
+    status = Column(String(20), default="active")   # active / expired / superseded / dismissed / resolved
     dedupe_key = Column(String(255), index=True)    # engine:signal_type:entity — voorkomt duplicaten
     created_at = Column(DateTime, default=datetime.utcnow)
 

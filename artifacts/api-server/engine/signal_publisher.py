@@ -59,6 +59,53 @@ def expire_stale_signals(db: Session) -> int:
     return n
 
 
+def auto_resolve_signals(
+    db: Session,
+    *,
+    engine: str,
+    still_active: set[tuple[str, str]],
+    signal_types: Optional[list[str]] = None,
+    entity_type: Optional[str] = None,
+    shop_id: Optional[int] = None,
+) -> int:
+    """Zet actieve signalen op 'resolved' zodra de onderliggende conditie
+    niet meer geldt (zelfde patroon als warn_suspicious_matches).
+
+    still_active: verzameling (signal_type, entity_id)-paren die volgens de
+    meest recente engine-run nog steeds aan de signaalconditie voldoen.
+    Actieve signalen van deze engine (optioneel beperkt tot signal_types en
+    entity_type) die NIET in die verzameling zitten worden op resolved gezet.
+
+    Shop-scoping: de signaal-levenscyclus is shop-gescoped (net als dedupe in
+    publish_signal). Zonder expliciete shop_id wordt de resolutie beperkt tot
+    de default shop — dezelfde scope waarin de emitters publiceren — zodat
+    signalen van andere winkels nooit worden aangeraakt op basis van
+    brondata van een andere winkel.
+
+    Idempotent: alleen status='active' wordt aangeraakt; al-resolved,
+    superseded of expired signalen blijven ongemoeid. Er wordt niets
+    opnieuw gepubliceerd. Commit gebeurt door de caller.
+    """
+    sid = shop_id if shop_id is not None else _default_shop_id(db)
+    q = db.query(models.IntelligenceSignal).filter(
+        models.IntelligenceSignal.engine == engine,
+        models.IntelligenceSignal.status == "active",
+        models.IntelligenceSignal.shop_id == sid,
+    )
+    if signal_types:
+        q = q.filter(models.IntelligenceSignal.signal_type.in_(signal_types))
+    if entity_type:
+        q = q.filter(models.IntelligenceSignal.entity_type == entity_type)
+    n = 0
+    for sig in q.all():
+        if (sig.signal_type, sig.entity_id) not in still_active:
+            sig.status = "resolved"
+            n += 1
+    if n:
+        logger.info("Auto-resolved %d %s-signalen (conditie verholpen)", n, engine)
+    return n
+
+
 def publish_signal(
     db: Session,
     *,

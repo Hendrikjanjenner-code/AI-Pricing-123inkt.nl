@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/signals", tags=["signals"])
 VALID_SEVERITIES = ("info", "low", "medium", "high", "critical")
 VALID_DIRECTIONS = ("positive", "negative", "neutral")
 VALID_ENTITY_TYPES = ("sku", "category", "brand", "competitor", "shop", "supplier")
-VALID_STATUSES = ("active", "expired", "superseded", "dismissed")
+VALID_STATUSES = ("active", "expired", "superseded", "dismissed", "resolved")
 
 
 class SignalCreate(BaseModel):
