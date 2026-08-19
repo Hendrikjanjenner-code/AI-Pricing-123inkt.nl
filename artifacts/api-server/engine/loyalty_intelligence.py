@@ -975,6 +975,7 @@ def ensure_default_tiers(db: Session) -> None:
 def compute_campaign_uplift(
     db: Session,
     campaign_id: int | None = None,
+    shop_id: int | None = None,
 ) -> list[dict]:
     """
     Berekent uplift per campagne (treatment vs. control):
@@ -989,6 +990,8 @@ def compute_campaign_uplift(
     q = db.query(models.LoyaltyCampaign)
     if campaign_id is not None:
         q = q.filter(models.LoyaltyCampaign.id == campaign_id)
+    if shop_id is not None:
+        q = q.filter(models.LoyaltyCampaign.shop_id == shop_id)
     campaigns = q.all()
 
     results = []
@@ -1105,6 +1108,7 @@ def compute_campaign_uplift(
 
         results.append({
             "campaign_id": c.id,
+            "shop_id": c.shop_id or 1,
             "campaign_name": c.name,
             "campaign_type": c.campaign_type,
             "start_date": start.isoformat(),
@@ -1166,7 +1170,7 @@ def publish_campaign_uplift_signals(db: Session, run_date: date | None = None) -
         spend_uplift = u["uplift"]["spend_per_member_pct"]
         dedupe_key = f"loyalty:{signal_type}:campaign:{campaign_entity_id}"
         db.add(models.IntelligenceSignal(
-            shop_id=1,
+            shop_id=u.get("shop_id") or 1,
             engine="loyalty",
             signal_type=signal_type,
             severity="medium" if u["direction"] in ("positive", "negative") else "info",

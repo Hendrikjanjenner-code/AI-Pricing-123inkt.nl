@@ -26,7 +26,7 @@ from engine import loyalty_intelligence as li
 
 @pytest.fixture(scope="module", autouse=True)
 def ensure_shop():
-    """Zorg dat dim_shop id=1 bestaat (lege dev-DB na alleen users-seed)."""
+    """Zorg dat dim_shop id=1 en id=2 bestaan (lege dev-DB na alleen users-seed)."""
     from sqlalchemy import text as sa_text
     s = SessionLocal()
     try:
@@ -36,11 +36,12 @@ def ensure_shop():
             "AND column_default IS NULL AND column_name NOT IN ('id')"
         )).fetchall()]
         extra_cols = "".join(f", {c}" for c in cols)
-        extra_vals = "".join(f", 'test-{c}'" for c in cols)
-        s.execute(sa_text(
-            f"INSERT INTO dim_shop (id{extra_cols}) VALUES (1{extra_vals}) "
-            "ON CONFLICT (id) DO NOTHING"
-        ))
+        for sid in (1, 2):
+            extra_vals = "".join(f", 'test-{c}-{sid}'" for c in cols)
+            s.execute(sa_text(
+                f"INSERT INTO dim_shop (id{extra_cols}) VALUES ({sid}{extra_vals}) "
+                "ON CONFLICT (id) DO NOTHING"
+            ))
         s.commit()
     finally:
         s.close()
@@ -66,9 +67,9 @@ class CampaignFactory:
         self.member_ids: list[int] = []
         self.campaign_ids: list[int] = []
 
-    def member(self) -> models.LoyaltyMember:
+    def member(self, *, shop_id=1) -> models.LoyaltyMember:
         m = models.LoyaltyMember(
-            shop_id=1,
+            shop_id=shop_id,
             pseudonymous_customer_id=f"TEST-UPLIFT-{uuid.uuid4().hex[:10]}",
             tier_code="bronze", status="active", is_demo_data=False,
         )
@@ -77,9 +78,9 @@ class CampaignFactory:
         self.member_ids.append(m.id)
         return m
 
-    def campaign(self, *, start=None, end=None, name=None) -> models.LoyaltyCampaign:
+    def campaign(self, *, start=None, end=None, name=None, shop_id=1) -> models.LoyaltyCampaign:
         c = models.LoyaltyCampaign(
-            shop_id=1,
+            shop_id=shop_id,
             name=name or f"TEST-UPLIFT-CAMPAGNE-{uuid.uuid4().hex[:8]}",
             campaign_type="bonus_points",
             start_date=start, end_date=end, status="active",
@@ -330,6 +331,39 @@ def test_republish_supersedes_previous_signal(db, factory):
         models.IntelligenceSignal.status == "superseded",
     ).count()
     assert superseded >= 1
+
+
+def test_signal_inherits_campaign_shop_id(db, factory):
+    """Signalen erven shop_id van de campagne i.p.v. hardcoded shop 1."""
+    c = factory.campaign(start=PERIOD_START, end=PERIOD_END, shop_id=2)
+    for spend, group in ((200, "treatment"), (200, "treatment"),
+                         (100, "control"), (100, "control")):
+        m = factory.member(shop_id=2)
+        factory.assign(c, m, group)
+        factory.earn(m, IN_PERIOD, spend)
+    li.publish_campaign_uplift_signals(db)
+    db.flush()
+    signals = _active_signals(db, c.id)
+    assert len(signals) == 1
+    assert signals[0].shop_id == 2
+
+
+def test_compute_uplift_scoped_to_shop(db, factory):
+    """compute_campaign_uplift(shop_id=...) beperkt zich tot campagnes van die shop."""
+    c1 = _build_two_group_campaign(
+        factory, treatment_spend=[200, 200], control_spend=[100, 100]
+    )
+    c2 = factory.campaign(start=PERIOD_START, end=PERIOD_END, shop_id=2)
+    for spend, group in ((150, "treatment"), (100, "control")):
+        m = factory.member(shop_id=2)
+        factory.assign(c2, m, group)
+        factory.earn(m, IN_PERIOD, spend)
+
+    results = li.compute_campaign_uplift(db, shop_id=2)
+    ids = {r["campaign_id"] for r in results}
+    assert c2.id in ids
+    assert c1.id not in ids
+    assert all(r["shop_id"] == 2 for r in results if r["campaign_id"] == c2.id)
 
 
 def test_direction_change_supersedes_old_direction(db, factory):
