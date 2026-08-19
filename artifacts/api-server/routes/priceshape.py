@@ -177,7 +177,8 @@ def _log_audit(db: Session, entity_type: str, entity_id: str, action: str,
 
 
 def persist_competitor_rows(db: Session, rows: list[dict], mode: str, username: str,
-                            filename: str = "") -> dict:
+                            filename: str = "",
+                            replace_scope_dates: set | None = None) -> dict:
     """
     Upsert PriceShape-concurrentieprijzen in fact_competitor_price_daily.
 
@@ -192,6 +193,13 @@ def persist_competitor_rows(db: Session, rows: list[dict], mode: str, username: 
     - "bijwerken":  upsert zonder opschonen — voor incrementele batches
                     (bijv. REST-sync met updated_after) waar ontbrekende rijen
                     "ongewijzigd" betekenen, niet "verdwenen".
+
+    ``replace_scope_dates``: extra dagen die in "vervangen"-modus altijd worden
+    opgeschoond, óók als de batch voor die dag geen (geldige) rijen bevat. Een
+    volledige REST-sync geeft hier de syncdag mee: een concurrent die volledig
+    uit PriceShape is verdwenen levert dan geen rij meer, maar zijn eerder
+    geschreven rijen van vandaag moeten wél worden opgeruimd — zelfs bij een
+    geldig-maar-leeg volledig antwoord.
     Rijen die niet aan een bekende SKU matchen worden overgeslagen (nooit stil
     gedropt uit het rapport dat de aanroeper zelf opstelt). Commit gebeurt hier.
 
@@ -281,7 +289,11 @@ def persist_competitor_rows(db: Session, rows: list[dict], mode: str, username: 
 
     db.flush()
 
-    if mode == "vervangen" and touched_dates:
+    # Opschoonbereik: de dagen uit de batch zelf, plus expliciet meegegeven
+    # dagen (volledige sync) — die laatste ook als de batch leeg is, anders
+    # blijven verdwenen concurrenten voor eeuwig staan.
+    cleanup_dates = set(touched_dates) | set(replace_scope_dates or ())
+    if mode == "vervangen" and cleanup_dates:
         # Only ever delete rows previously written by THIS connector
         # (source == SOURCE_NAME). Competitor prices captured by other
         # pipelines (manual uploads, scrapers, paper-copy, etc.) on the
@@ -289,7 +301,7 @@ def persist_competitor_rows(db: Session, rows: list[dict], mode: str, username: 
         existing_in_scope = (
             db.query(models.FactCompetitorPriceDaily)
             .filter(
-                models.FactCompetitorPriceDaily.date.in_(touched_dates),
+                models.FactCompetitorPriceDaily.date.in_(cleanup_dates),
                 models.FactCompetitorPriceDaily.source == SOURCE_NAME,
             )
             .all()

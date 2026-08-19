@@ -423,11 +423,11 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
     }
   };
 
-  const handleSync = async () => {
+  const handleSync = async (full = false) => {
     setSyncing(true);
     setSyncResult(null);
     try {
-      const resp = await fetch(`${BASE}/api/connectors/${connector.name}/sync`, {
+      const resp = await fetch(`${BASE}/api/connectors/${connector.name}/sync${full ? "?full=true" : ""}`, {
         method: "POST",
         headers: getAuthHeaders(),
         // Ruime eigen time-out (5 min) i.p.v. de globale 15s: een volledige
@@ -583,9 +583,21 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
 
         <div className="flex flex-wrap gap-2">
           {isConfigured && (
-            <Button size="sm" variant="default" onClick={handleSync} disabled={syncing}>
+            <Button size="sm" variant="default" onClick={() => handleSync()} disabled={syncing}>
               {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
               <span className="ml-1.5">Nu synchroniseren</span>
+            </Button>
+          )}
+          {isConfigured && connector.name === "priceshape" && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handleSync(true)}
+              disabled={syncing}
+              title="Haal alles opnieuw op en ruim concurrentprijzen op die niet meer in PriceShape staan (vervangen-modus)."
+            >
+              {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+              <span className="ml-1.5">Volledige sync</span>
             </Button>
           )}
           <Button

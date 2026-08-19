@@ -612,3 +612,132 @@ def test_rest_sync_incremental_uses_updated_after(monkeypatch):
             models.ConnectorConfig.connector_name == "priceshape").delete()
         db.commit()
         db.close()
+
+
+def test_rest_sync_periodic_full_cleanup(monkeypatch):
+    """Concurrenten die uit PriceShape verdwijnen worden periodiek opgeruimd:
+    is de laatste volledige REST-sync ouder dan het interval, dan draait de
+    sync zonder updated_after in vervangen-modus; anders incrementeel. Met
+    force_full kan een volledige sync altijd handmatig worden afgedwongen.
+    De importgeschiedenis onderscheidt beide via de bestandsnaam."""
+    from routes import connectors as conn_routes
+    from connectors import priceshape_connector
+    from datetime import datetime, timedelta
+
+    monkeypatch.setattr(priceshape_connector, "_get_raw_config", lambda db=None: {"mode": "rest"})
+    monkeypatch.setattr(priceshape_connector, "_get_mode", lambda raw: "rest")
+    monkeypatch.setattr(priceshape_connector, "_get_credentials", lambda db=None: {})
+
+    seen: list = []
+
+    def fake_fetch(db=None, updated_after=None, **kw):
+        seen.append(updated_after)
+        return [{"sku_id": "IMPSET-SKU-3", "competitor_name": "compa.nl",
+                 "competitor_price": 8.99}]
+
+    monkeypatch.setattr(priceshape_connector, "fetch_competitor_prices", fake_fetch)
+
+    class FakeUser:
+        username = "test"
+
+    db = SessionLocal()
+    try:
+        if not db.query(models.DimProduct).filter(
+                models.DimProduct.sku_id == "IMPSET-SKU-3").first():
+            db.add(models.DimProduct(sku_id="IMPSET-SKU-3", product_name="Test", is_active=True))
+        # Schone uitgangssituatie: geen eerdere sync-jobs of connector-config.
+        db.query(models.ImportJob).filter(
+            models.ImportJob.upload_type == "api_sync_priceshape").delete(
+            synchronize_session=False)
+        db.query(models.ConnectorConfig).filter(
+            models.ConnectorConfig.connector_name == "priceshape").delete()
+        db.commit()
+
+        # Verouderde PriceShape-rij van vandaag voor een concurrent die niet
+        # meer in het volledige antwoord zit → moet worden opgeruimd. Een rij
+        # van een andere pipeline op dezelfde dag moet blijven staan.
+        from datetime import date as _date
+        db.add(models.FactCompetitorPriceDaily(
+            date=_date.today(), sku_id="IMPSET-SKU-3",
+            competitor_name="verdwenen.nl", price=5.55, source="PriceShape"))
+        db.add(models.FactCompetitorPriceDaily(
+            date=_date.today(), sku_id="IMPSET-SKU-3",
+            competitor_name="verdwenen.nl", price=6.66, source="handmatig"))
+        db.commit()
+
+        # Simuleer een eerdere geslaagde (incrementele) sync-situatie:
+        # last_synced_at gezet, laatste volledige run ouder dan het interval.
+        last = datetime(2026, 8, 18, 2, 0, 0)
+        db.add(models.ConnectorConfig(connector_name="priceshape", last_synced_at=last))
+        from engine.import_engine import new_batch_id
+        db.add(models.ImportJob(
+            batch_id=new_batch_id(), upload_type="api_sync_priceshape",
+            filename=conn_routes.REST_SYNC_FULL_FILENAME, source="API-Sync",
+            status="geimporteerd", rows_processed=1,
+            uploaded_by="test",
+            created_at=datetime.utcnow() - timedelta(days=8),
+            completed_at=datetime.utcnow() - timedelta(days=8)))
+        db.commit()
+
+        # 1) Volledige run verschuldigd (laatste > 7 dagen geleden).
+        res = conn_routes._run_sync("priceshape", db, FakeUser())
+        assert res["status"] == "ok", res
+        assert seen[-1] is None
+        assert "volledige sync" in res["message"]
+        assert "periodieke opschoning" in res["message"]
+        job = db.query(models.ImportJob).filter(
+            models.ImportJob.upload_type == "api_sync_priceshape").order_by(
+            models.ImportJob.id.desc()).first()
+        assert job.filename == conn_routes.REST_SYNC_FULL_FILENAME
+        # Verdwenen concurrent is opgeruimd; rij van andere pipeline overleeft.
+        assert res["counts"]["verwijderd"] >= 1
+        db.expire_all()
+        rest = db.query(models.FactCompetitorPriceDaily).filter(
+            models.FactCompetitorPriceDaily.sku_id == "IMPSET-SKU-3",
+            models.FactCompetitorPriceDaily.competitor_name == "verdwenen.nl").all()
+        assert [r.source for r in rest] == ["handmatig"], (
+            "volledige sync moet PriceShape-rijen van verdwenen concurrenten "
+            "opruimen en rijen van andere pipelines met rust laten")
+
+        # 2) Direct daarna: volledige run is vers -> incrementeel.
+        res = conn_routes._run_sync("priceshape", db, FakeUser())
+        assert res["status"] == "ok", res
+        assert seen[-1] == last.isoformat()
+        assert "incrementele sync" in res["message"]
+        job = db.query(models.ImportJob).filter(
+            models.ImportJob.upload_type == "api_sync_priceshape").order_by(
+            models.ImportJob.id.desc()).first()
+        assert job.filename == conn_routes.REST_SYNC_INCR_FILENAME
+
+        # 3) Handmatig afgedwongen volledige sync via force_full.
+        res = conn_routes._run_sync("priceshape", db, FakeUser(), force_full=True)
+        assert res["status"] == "ok", res
+        assert seen[-1] is None
+        assert "handmatig aangevraagd" in res["message"]
+        job = db.query(models.ImportJob).filter(
+            models.ImportJob.upload_type == "api_sync_priceshape").order_by(
+            models.ImportJob.id.desc()).first()
+        assert job.filename == conn_routes.REST_SYNC_FULL_FILENAME
+
+        # 4) Geldig-maar-leeg volledig antwoord: ook dan wordt de syncdag
+        # opgeschoond (PriceShape-rijen weg, andere pipelines onaangetast).
+        monkeypatch.setattr(priceshape_connector, "fetch_competitor_prices",
+                            lambda db=None, **kw: [])
+        res = conn_routes._run_sync("priceshape", db, FakeUser(), force_full=True)
+        assert res["status"] == "ok", res
+        db.expire_all()
+        leftover = db.query(models.FactCompetitorPriceDaily).filter(
+            models.FactCompetitorPriceDaily.sku_id == "IMPSET-SKU-3").all()
+        assert all(r.source != "PriceShape" for r in leftover), (
+            "een geldig leeg volledig antwoord moet PriceShape-rijen van de "
+            "syncdag opruimen")
+        assert any(r.source == "handmatig" for r in leftover)
+    finally:
+        db.rollback()
+        db.query(models.FactCompetitorPriceDaily).filter(
+            models.FactCompetitorPriceDaily.sku_id == "IMPSET-SKU-3").delete(
+            synchronize_session=False)
+        db.query(models.ConnectorConfig).filter(
+            models.ConnectorConfig.connector_name == "priceshape").delete()
+        db.commit()
+        db.close()

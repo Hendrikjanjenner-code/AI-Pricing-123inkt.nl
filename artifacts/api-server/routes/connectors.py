@@ -18,7 +18,7 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta, date as _date
 from typing import Optional, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -545,6 +545,7 @@ def disconnect_connector(
 @router.post("/{name}/sync")
 def sync_connector(
     name: str,
+    full: bool = Query(False, description="Forceer een volledige sync (vervangen-modus) i.p.v. incrementeel."),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager", "analyst")),
 ):
@@ -565,7 +566,7 @@ def sync_connector(
 
     sync_db = BackgroundSessionLocal()
     try:
-        result = _run_sync(name, sync_db, current_user)
+        result = _run_sync(name, sync_db, current_user, force_full=full)
 
         # Bijwerken van last_synced_at zodat de UI de laatste sync toont — óók
         # wanneer de connector alleen via omgevingsvariabelen is geconfigureerd.
@@ -638,13 +639,25 @@ def _run_live_check(name: str, db: Session) -> dict:
         return microsoft_ads_connector.check_connection(db=db)
     return {"status": "error", "message": "Onbekende connector."}
 
-# Retry-instellingen voor de feed-ingest zelf: een tijdelijke verbindingsfout
-# (netwerkhik, CDN-piek) mag de nachtelijke sync niet laten mislukken tot de
-# volgende nacht. Standaard 3 retries met exponentiële backoff (5 min basis).
-_INGEST_DEFAULT_MAX_RETRIES = 3
-_INGEST_DEFAULT_RETRY_BACKOFF = 300  # seconden (5 minuten)
+# Bestandsnamen in de importgeschiedenis: maken zichtbaar of een REST-sync
+# volledig ("vervangen": ook opschonen van verdwenen concurrentprijzen) of
+# incrementeel ("bijwerken": alleen upsert) was. De laatste geslaagde
+# volledige run bepaalt bovendien wanneer de volgende periodieke volledige
+# sync verschuldigd is.
+REST_SYNC_FULL_FILENAME = "priceshape-rest-sync-volledig"
+REST_SYNC_INCR_FILENAME = "priceshape-rest-sync-incrementeel"
+DEFAULT_FULL_SYNC_DAYS = 7
 
 
+def _full_sync_interval_days() -> int:
+    """Aantal dagen tussen periodieke volledige REST-syncs (PRICESHAPE_FULL_SYNC_DAYS)."""
+    import os
+    raw = os.environ.get("PRICESHAPE_FULL_SYNC_DAYS", "").strip()
+    try:
+        val = int(raw)
+        return val if val > 0 else DEFAULT_FULL_SYNC_DAYS
+    except ValueError:
+        return DEFAULT_FULL_SYNC_DAYS
 def _ingest_env_int(name: str, default: int) -> int:
     import os
     raw = (os.environ.get(name) or "").strip()
@@ -655,7 +668,7 @@ def _ingest_env_int(name: str, default: int) -> int:
         return val if val >= 0 else default
     except ValueError:
         return default
-def _run_sync(name: str, db: Session, current_user) -> dict:
+def _run_sync(name: str, db: Session, current_user, force_full: bool = False) -> dict:
     """Trigger de bijbehorende sync-logica en persisteer een ImportJob.
 
     Beschermd met een advisory lock: draait er al een sync voor deze connector
@@ -673,6 +686,9 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
     # subtellers rapporteert, zet het deze expliciet i.p.v. sum(counts).
     processed_rows: int | None = None
     errors: list[str] = []
+    # Bestandsnaam voor de ImportJob in de importgeschiedenis; het REST-pad
+    # overschrijft deze om volledige vs. incrementele runs te onderscheiden.
+    job_filename = f"handmatige-sync-{name}"
 
     with _sync_lock(name) as got_lock:
         if not got_lock:
@@ -718,6 +734,30 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
                         cfg.last_synced_at.isoformat()
                         if cfg and cfg.last_synced_at else None
                     )
+                    # Periodieke volledige sync: incrementele runs schonen nooit
+                    # op (ontbrekend = ongewijzigd), dus concurrenten die uit
+                    # PriceShape verdwijnen blijven anders eeuwig staan. Elke
+                    # PRICESHAPE_FULL_SYNC_DAYS dagen (standaard 7) — of op
+                    # verzoek (?full=true) — draait de sync daarom zonder
+                    # updated_after in vervangen-modus.
+                    full_reason = None
+                    if force_full:
+                        full_reason = "handmatig aangevraagd"
+                    elif updated_after is None:
+                        full_reason = "eerste sync"
+                    else:
+                        last_full = _last_full_rest_sync_at(db)
+                        interval_days = _full_sync_interval_days()
+                        if (last_full is None
+                                or datetime.now(timezone.utc) - last_full
+                                >= timedelta(days=interval_days)):
+                            full_reason = f"periodieke opschoning, elke {interval_days} dagen"
+                    if full_reason:
+                        updated_after = None
+                    job_filename = (
+                        REST_SYNC_FULL_FILENAME if full_reason
+                        else REST_SYNC_INCR_FILENAME
+                    )
                     prices = priceshape_connector.fetch_competitor_prices(
                         db=db, updated_after=updated_after,
                     )
@@ -734,7 +774,12 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
                         db, prices,
                         mode="bijwerken" if updated_after else "vervangen",
                         username="connector-sync",
-                        filename="priceshape-rest-sync",
+                        filename=job_filename,
+                        # Volledige sync: schoon de syncdag altijd op, óók als
+                        # het (geldige) antwoord leeg is of een concurrent geen
+                        # enkele rij meer levert — anders blijven verdwenen
+                        # concurrentprijzen voor eeuwig staan.
+                        replace_scope_dates=(None if updated_after else {date.today()}),
                     )
                     rejected = res.get("unmatched", 0) + res.get("invalid", 0)
                     counts["opgehaald"] = len(prices)
@@ -759,7 +804,8 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
                     )
                     sync_kind = (
                         f"PriceShape incrementele sync (wijzigingen sinds {updated_after}) voltooid"
-                        if updated_after else "PriceShape volledige sync voltooid"
+                        if updated_after
+                        else f"PriceShape volledige sync ({full_reason}) voltooid"
                     )
                     message = (
                         f"{sync_kind}: {len(prices)} prijzen opgehaald, "
@@ -835,7 +881,7 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
                 db_local.add(models.ImportJob(
                     batch_id=_new_batch_id(),
                     upload_type=f"api_sync_{name}",
-                    filename=f"handmatige-sync-{name}",
+                    filename=job_filename,
                     source="API-Sync",
                     status=job_status,
                     rows_processed=(processed_rows if processed_rows is not None
@@ -1215,3 +1261,22 @@ def _ingest_feed_with_retry(db: Session, source: str = "priceshape") -> dict:
             time.sleep(delay)
 
     raise RuntimeError("unreachable")  # pragma: no cover
+
+def _last_full_rest_sync_at(db: Session):
+    """Tijdstip van de laatste geslaagde volledige REST-sync, of None."""
+    job = (
+        db.query(models.ImportJob)
+        .filter(
+            models.ImportJob.upload_type == "api_sync_priceshape",
+            models.ImportJob.filename == REST_SYNC_FULL_FILENAME,
+            models.ImportJob.status == "geimporteerd",
+        )
+        .order_by(models.ImportJob.created_at.desc())
+        .first()
+    )
+    if not job or not job.created_at:
+        return None
+    # ImportJob.created_at is naive-UTC (DateTime zonder tz); maak hem aware
+    # zodat de vergelijking met datetime.now(timezone.utc) niet crasht.
+    ts = job.created_at
+    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)

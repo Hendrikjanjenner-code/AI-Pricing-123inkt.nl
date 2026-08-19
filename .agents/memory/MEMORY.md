@@ -25,7 +25,6 @@
 - [Engine shop-scoping](engine-shop-scoping.md) — engines, results, dashboards, signals and by-id endpoints must all be shop-scoped; foreign-shop ids return 404.
 - [AI Gateway provider config](ai-gateway-provider.md) — Copilot LLM via AI_INTEGRATIONS_OPENAI_* (fallback OPENAI_API_KEY); unprovisioned = fail-safe mode, provision from main session.
 - [API curl paths in dev](api-curl-paths.md) — curl uvicorn's own port directly (`localhost:8080/api/...`); the port-80 preview proxy doubles the /api prefix and 404s.
-- [Test-shop teardown FK](test-suite-conventions.md) — request middleware writes cost-usage rows per shop; any teardown that deletes a shop must delete those rows first or FK-fails only in full-suite runs.
 - [PIM source ownership](pim-source-ownership.md) — attribute values keep a source; cross-source writes must warn, never silently overwrite (DRS stays master).
 - [Feed-sync failure visibility](feed-sync-visibility.md) — failed syncs reuse ConnectorConfig.last_test_* (no schema change); feed response diagnostics + sanity checks live in the connector, reset per read cycle.
 - [Parallel task merges vs validation](parallel-task-validation.md) — completion validation runs the full suite on merged state; sibling-task regressions (dropped constants, changed API shapes) land on you — fix minimally, note in drift_reason.
@@ -38,8 +37,8 @@
 - [API query-param codegen](api-param-codegen.md) — new query params need route + openapi.yaml + orval regen; client-side filtering over paged results gives wrong totals.
 - [Merge kan constanten stil droppen](merge-dropped-constants.md) — na een taak-rebase eerst greppen of gebruikte constanten nog gedefinieerd zijn; fail-safe fallbacks verzwelgen de NameError.
 - [Postgres-only kolommen vs SQLite-tests](pg-only-columns-sqlite.md) — markeer tsvector/GIN e.d. met info={"pg_only"}; de CreateColumn/CreateIndex-compilers in models.py slaan ze over in SQLite-DDL.
-- [Few-shot FTS retrieval](fewshot-fts.md) — dutch FTS + Jaccard-fallback; fail-safe fallback maskeert FTS-fouten (zelfs NameError); stemmer/rank-drempel quirks in topicfile.
 - [Keyset NULL watermark](keyset-null-watermark.md) — keyset pagination on (watermark, pk) silently skips rows with NULL watermark; backfill or coalesce.
 - [Run-registry status semantics](run-registry-latest-attempt.md) — laatste poging telt; oude succes-rij mag latere failure niet maskeren; run-historie-FK cascade.
 - [BQ keyset NULL-watermerken](bq-keyset-null-watermark.md) — keyset-paginatie op (watermerk, pk) verliest rijen met NULL-watermerk; COALESCE naar vroegst mogelijke timestamp in filter én ORDER BY.
 - [ImportJob-residu breekt volgordetests](importjob-residue.md) — connector-synctests laten geimporteerde api_sync_priceshape jobs achter; tests die "meest recente job = mijn faaljob" aannemen moeten created_at nu zetten en completed_at terugdateren.
+- [Rebase drops adjacent blocks](rebase-dropped-blocks.md) — task-merge rebases can silently drop module-level constant blocks; grep for definitions after every rebase.
