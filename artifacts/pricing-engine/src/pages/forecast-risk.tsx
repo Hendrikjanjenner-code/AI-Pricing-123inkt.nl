@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TrendingUp, Euro, AlertTriangle, RefreshCw } from "lucide-react";
 import { getAuthHeaders } from "@/lib/auth";
-import { longRunSignal } from "@/lib/fetch-timeout";
+import { useEngineRun } from "@/lib/use-engine-run";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -82,13 +82,9 @@ export default function ForecastRisk() {
     },
   });
 
-  const runMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(`${BASE}/api/forecast/run`, { method: "POST", headers: getAuthHeaders(), signal: longRunSignal() });
-      if (!res.ok) throw new Error("Run mislukt");
-      return res.json();
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["forecast-dashboard"] }),
+  const run = useEngineRun({
+    runUrl: `${BASE}/api/forecast/run`,
+    onCompleted: () => qc.invalidateQueries({ queryKey: ["forecast-dashboard"] }),
   });
 
   return (
@@ -113,15 +109,20 @@ export default function ForecastRisk() {
               </button>
             ))}
           </div>
-          <Button onClick={() => runMutation.mutate()} disabled={runMutation.isPending}>
-            <RefreshCw className={`w-4 h-4 mr-2 ${runMutation.isPending ? "animate-spin" : ""}`} />
-            Herbereken
+          <Button onClick={() => run.start()} disabled={run.isRunning}>
+            <RefreshCw className={`w-4 h-4 mr-2 ${run.isRunning ? "animate-spin" : ""}`} />
+            {run.isRunning ? "Bezig met herberekenen…" : "Herbereken"}
           </Button>
         </div>
       </div>
 
-      {runMutation.isError && (
-        <p className="text-sm text-destructive">Forecast-run mislukt. Probeer het opnieuw.</p>
+      {run.isRunning && (
+        <p className="text-sm text-muted-foreground">
+          De forecast-run draait op de achtergrond. Dit kan enkele minuten duren; de resultaten verschijnen automatisch.
+        </p>
+      )}
+      {run.error && (
+        <p className="text-sm text-destructive">{run.error}</p>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">

@@ -12,11 +12,10 @@
 const DEFAULT_GLOBAL_FETCH_TIMEOUT_MS = 15_000;
 
 /**
- * Timeout for known long-running synchronous requests (engine "run"
- * endpoints such as basket/promotion/forecast/opportunity recalculation).
- * These can legitimately take minutes on a large catalog; pass
- * `signal: longRunSignal()` on those fetches so they bypass the global
- * 15s safety net without hanging forever.
+ * Timeout for known long-running synchronous requests. The engine "run"
+ * endpoints (basket/promotion/forecast/opportunity) are now asynchronous
+ * job-starts (see lib/use-engine-run.ts) and no longer need this; keep the
+ * helper for any remaining call that legitimately holds a connection open.
  */
 export const LONG_RUN_FETCH_TIMEOUT_MS = 5 * 60_000;
 

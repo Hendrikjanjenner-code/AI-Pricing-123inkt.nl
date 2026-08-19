@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from auth import get_current_user, require_role
 import models
+from services.engine_jobs import start_engine_job
 from engine.opportunity_engine import run_opportunity_engine, get_opportunity_dashboard
 
 router = APIRouter(prefix="/api/opportunities", tags=["opportunities"])
@@ -29,14 +30,12 @@ def trigger_opportunity_run(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role("admin", "pricing_manager")),
 ) -> Any:
-    result = run_opportunity_engine(db, shop_id=shop_id)
-    db.add(models.AuditLog(
-        entity_type="engine", entity_id="opportunity", action="run",
-        performed_by=current_user.username,
-        details=f"Opportunity engine: {result.get('opportunities', 0)} kansen",
-    ))
-    db.commit()
-    return result
+    return start_engine_job(
+        "opportunity", run_opportunity_engine,
+        shop_id=shop_id, username=current_user.username,
+        audit_entity_id="opportunity",
+        audit_details=lambda r: f"Opportunity engine: {r.get('opportunities', 0)} kansen",
+    )
 
 
 @router.post("/{opportunity_id}/status")

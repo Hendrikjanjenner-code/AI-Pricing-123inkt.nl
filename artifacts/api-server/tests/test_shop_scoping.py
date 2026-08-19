@@ -99,10 +99,22 @@ def _own(rows, key, tag):
 
 def test_basket_run_and_dashboard_isolated(client, admin_headers, two_shops):
     sid_a, sid_b = two_shops
+    import time
     for sid in (sid_a, sid_b):
         r = client.post(f"/api/basket/run?shop_id={sid}", headers=admin_headers)
         assert r.status_code == 200, r.text
-        assert r.json()["shop_id"] == sid
+        job = r.json()
+        assert job["status"] == "running" and job["job_id"]
+        # Run draait nu async; poll de jobstatus tot afronding
+        for _ in range(120):
+            s = client.get(f"/api/engine-jobs/{job['job_id']}", headers=admin_headers)
+            assert s.status_code == 200, s.text
+            job = s.json()
+            if job["status"] != "running":
+                break
+            time.sleep(0.25)
+        assert job["status"] == "completed", job.get("error")
+        assert job["result"]["shop_id"] == sid
     d = client.get(f"/api/basket/associations?shop_id={sid_b}", headers=admin_headers).json()
     assert d["shop_id"] == sid_b
     skus = [a["antecedent_sku"] for a in d["associaties"] if a["antecedent_sku"].startswith(PFX)]

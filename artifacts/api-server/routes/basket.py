@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from auth import get_current_user, require_role
 import models
+from services.engine_jobs import start_engine_job
 from engine.basket_engine import (
     run_basket_engine,
     get_basket_association_dashboard,
@@ -43,12 +44,10 @@ def trigger_basket_run(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role("admin", "pricing_manager")),
 ) -> Any:
-    """Herbereken alle basket-associaties en publiceer signalen."""
-    result = run_basket_engine(db, shop_id=shop_id)
-    db.add(models.AuditLog(
-        entity_type="engine", entity_id="basket", action="run",
-        performed_by=current_user.username,
-        details=f"Basket engine: {result.get('associations', 0)} associaties",
-    ))
-    db.commit()
-    return result
+    """Start herberekening van basket-associaties op de achtergrond; retourneert een job-id."""
+    return start_engine_job(
+        "basket", run_basket_engine,
+        shop_id=shop_id, username=current_user.username,
+        audit_entity_id="basket",
+        audit_details=lambda r: f"Basket engine: {r.get('associations', 0)} associaties",
+    )

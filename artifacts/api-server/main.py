@@ -32,7 +32,7 @@ from routes import (
     signals, shops, platform, loyalty,
     basket, promotion_intelligence, forecast, opportunities, model_registry, decisions,
     pim,
-    command_center, governance,
+    command_center, governance, engine_jobs,
 )
 
 # Optional modules (DRS import, PriceShape feed import) are imported
@@ -475,6 +475,7 @@ app.include_router(basket.router)
 app.include_router(promotion_intelligence.router)
 app.include_router(forecast.router)
 app.include_router(opportunities.router)
+app.include_router(engine_jobs.router)
 app.include_router(model_registry.router)
 app.include_router(decisions.router)
 app.include_router(copilot.router)

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from auth import get_current_user, require_role
 import models
+from services.engine_jobs import start_engine_job
 from engine.forecast_engine import run_forecast_engine, get_forecast_dashboard
 
 router = APIRouter(prefix="/api/forecast", tags=["forecast-risk"])
@@ -64,12 +65,10 @@ def trigger_forecast_run(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role("admin", "pricing_manager")),
 ) -> Any:
-    result = run_forecast_engine(db, shop_id=shop_id)
-    db.add(models.AuditLog(
-        entity_type="engine", entity_id="forecast_risk", action="run",
-        performed_by=current_user.username,
-        details=(f"Forecast engine: {result.get('forecasts', 0)} forecasts, "
-                 f"{result.get('risk_signals', 0)} risicosignalen"),
-    ))
-    db.commit()
-    return result
+    return start_engine_job(
+        "forecast", run_forecast_engine,
+        shop_id=shop_id, username=current_user.username,
+        audit_entity_id="forecast_risk",
+        audit_details=lambda r: (f"Forecast engine: {r.get('forecasts', 0)} forecasts, "
+                                 f"{r.get('risk_signals', 0)} risicosignalen"),
+    )

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from auth import get_current_user, require_role
 import models
+from services.engine_jobs import start_engine_job
 from engine.promotion_engine import run_promotion_engine, get_promotion_dashboard
 
 router = APIRouter(prefix="/api/promotion-intelligence", tags=["promotion-intelligence"])
@@ -55,11 +56,9 @@ def trigger_promotion_run(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role("admin", "pricing_manager")),
 ) -> Any:
-    result = run_promotion_engine(db, shop_id=shop_id)
-    db.add(models.AuditLog(
-        entity_type="engine", entity_id="promotion", action="run",
-        performed_by=current_user.username,
-        details=f"Promotion engine: {result.get('analyzed', 0)} promoties geanalyseerd",
-    ))
-    db.commit()
-    return result
+    return start_engine_job(
+        "promotion", run_promotion_engine,
+        shop_id=shop_id, username=current_user.username,
+        audit_entity_id="promotion",
+        audit_details=lambda r: f"Promotion engine: {r.get('analyzed', 0)} promoties geanalyseerd",
+    )

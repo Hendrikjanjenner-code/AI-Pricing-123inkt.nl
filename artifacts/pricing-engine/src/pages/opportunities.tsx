@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Lightbulb, Euro, RefreshCw, Check, X } from "lucide-react";
 import { getAuthHeaders } from "@/lib/auth";
-import { longRunSignal } from "@/lib/fetch-timeout";
+import { useEngineRun } from "@/lib/use-engine-run";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -64,13 +64,9 @@ export default function Opportunities() {
     },
   });
 
-  const runMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(`${BASE}/api/opportunities/run`, { method: "POST", headers: getAuthHeaders(), signal: longRunSignal() });
-      if (!res.ok) throw new Error("Run mislukt");
-      return res.json();
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["opportunities"] }),
+  const run = useEngineRun({
+    runUrl: `${BASE}/api/opportunities/run`,
+    onCompleted: () => qc.invalidateQueries({ queryKey: ["opportunities"] }),
   });
 
   const statusMutation = useMutation({
@@ -96,13 +92,21 @@ export default function Opportunities() {
             {data?.run_date && <> Laatste run: {data.run_date}.</>}
           </p>
         </div>
-        <Button onClick={() => runMutation.mutate()} disabled={runMutation.isPending}>
-          <RefreshCw className={`w-4 h-4 mr-2 ${runMutation.isPending ? "animate-spin" : ""}`} />
-          Vernieuw kansen
+        <Button onClick={() => run.start()} disabled={run.isRunning}>
+          <RefreshCw className={`w-4 h-4 mr-2 ${run.isRunning ? "animate-spin" : ""}`} />
+          {run.isRunning ? "Bezig met vernieuwen…" : "Vernieuw kansen"}
         </Button>
       </div>
 
-      {(runMutation.isError || statusMutation.isError) && (
+      {run.isRunning && (
+        <p className="text-sm text-muted-foreground">
+          De kansen worden op de achtergrond opnieuw berekend. Dit kan enkele minuten duren; de resultaten verschijnen automatisch.
+        </p>
+      )}
+      {run.error && (
+        <p className="text-sm text-destructive">{run.error}</p>
+      )}
+      {statusMutation.isError && (
         <p className="text-sm text-destructive">Actie mislukt. Probeer het opnieuw.</p>
       )}
 
