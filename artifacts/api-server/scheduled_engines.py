@@ -144,9 +144,6 @@ def main() -> int:
         db.close()
 
 
-if __name__ == "__main__":
-    sys.exit(main())
-
 def _log_run(db, *, name: str, shop_id: int, started_at, status: str,
              error_message: str | None = None, result_summary=None) -> None:
     """Schrijf een EngineRun-rij weg zodat het dashboard de run-status kan tonen.

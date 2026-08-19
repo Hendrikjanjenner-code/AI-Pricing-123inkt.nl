@@ -637,7 +637,8 @@ class TestFeedUnreachable:
     job is mislukt met een netwerk-/verbindingsfout.  Een nieuwe succesvolle
     job verbergt het issue (meest-recente-job-semantiek)."""
 
-    def _make_ps_job(self, db, status, error_message=None, delta_seconds=0):
+    def _make_ps_job(self, db, status, error_message=None, delta_seconds=0,
+                     completed_delta_seconds=None):
         """Hulp: maak een api_sync_priceshape ImportJob en geef het id terug."""
         from engine.import_engine import new_batch_id
         job = models.ImportJob(
@@ -653,7 +654,10 @@ class TestFeedUnreachable:
             error_log=([{"rij": None, "veld": None, "bericht": error_message}]
                        if error_message else []),
             created_at=datetime.utcnow() + timedelta(seconds=delta_seconds),
-            completed_at=datetime.utcnow() + timedelta(seconds=delta_seconds),
+            completed_at=datetime.utcnow() + timedelta(
+                seconds=(completed_delta_seconds
+                         if completed_delta_seconds is not None
+                         else delta_seconds)),
         )
         db.add(job)
         db.commit()
@@ -724,16 +728,15 @@ class TestFeedUnreachable:
         """Feed >24u niet bereikt → severity stijgt naar 'error', ook als de
         mislukte poging zelf al dagen oud is (geen nieuwe pogingen gedaan)."""
         db = SessionLocal()
-        # Mislukte poging van 2 dagen geleden; géén geslaagde sync sindsdien.
-        # created_at blijft "nu" zodat dit gegarandeerd de nieuwste ps-job is
-        # (de dev-DB kan echte recente syncs bevatten); completed_at bepaalt
-        # de leeftijd van de mislukking.
+        # Mislukte poging die 2 dagen geleden voltooide. created_at = nu zodat
+        # dit gegarandeerd de meest recente sync-poging is, óók op een dev-DB
+        # waar andere (geslaagde) PriceShape-jobs bestaan; detectie kijkt naar
+        # de laatste poging op created_at en naar completed_at als faalmoment.
         fail_id = self._make_ps_job(
             db, "fout",
-            error_message="PriceShape feed niet bereikbaar: timeout")
-        db.query(models.ImportJob).filter(models.ImportJob.id == fail_id).update(
-            {"completed_at": datetime.utcnow() - timedelta(days=2)})
-        db.commit()
+            error_message="PriceShape feed niet bereikbaar: timeout",
+            delta_seconds=0,
+            completed_delta_seconds=-2 * 24 * 3600)
         last_ok = (
             db.query(func.max(func.coalesce(
                 models.ImportJob.completed_at, models.ImportJob.created_at)))

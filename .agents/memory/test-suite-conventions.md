@@ -25,6 +25,10 @@ crowd-out entirely. Pass shop_id everywhere: detail-by-id and transition are
 shop-scoped and return 404/`{"detail":...}` for the wrong scope (transition
 takes shop_id in the JSON body, not as a query param).
 
+Data-quality detections look at the most recent ImportJob per upload_type:
+tests must make their synthetic job the newest (created_at = now), otherwise a
+real dev-DB sync wins and the issue never fires.
+
 ## Isolated runs: never assume pre-existing rows or tables
 Test setup must call Base.metadata.create_all(bind=engine) and create its own
 DimShop rows instead of assuming shop id 1 exists — a hardcoded shop_id=1 fails

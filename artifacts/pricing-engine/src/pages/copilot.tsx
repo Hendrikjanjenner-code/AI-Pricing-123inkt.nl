@@ -19,7 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Bot, Send, Plus, Trash2, Sparkles, AlertTriangle, Info,
   Database, Clock, Link2, Loader2, ShieldCheck, ThumbsUp, ThumbsDown,
-  Brain, Pencil,
+  Brain, Pencil, Gauge,
 } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -45,6 +45,16 @@ type ChatMessage = {
   dbId?: number | null;
 };
 
+type BudgetMe = {
+  date: string;
+  calls_used: number;
+  max_calls_per_day: number | null;
+  calls_pct: number | null;
+  tokens_used: number;
+  tokens_reserved: number;
+  max_tokens_per_day: number | null;
+  tokens_pct: number | null;
+};
 function FeedbackButtons({ messageId }: { messageId: number }) {
   const [given, setGiven] = useState<1 | -1 | null>(null);
   const [showComment, setShowComment] = useState(false);
@@ -496,6 +506,7 @@ export default function CopilotPage() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [statusLine, setStatusLine] = useState<string | null>(null);
+  const [budgetRefresh, setBudgetRefresh] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const { data: status } = useGetCopilotStatus();
@@ -621,6 +632,7 @@ export default function CopilotPage() {
     } finally {
       setBusy(false);
       setStatusLine(null);
+      setBudgetRefresh((n) => n + 1);
     }
   };
 
@@ -693,6 +705,7 @@ export default function CopilotPage() {
               Stel vragen over pricing, marge, concurrentie, promoties en kansen.
             </p>
           </div>
+          <BudgetIndicator refreshKey={budgetRefresh} />
           {status && (
             <Badge variant={status.ai_available ? "default" : "destructive"}>
               {status.ai_available ? `AI actief (${status.model})` : "AI niet beschikbaar"}
@@ -785,6 +798,74 @@ export default function CopilotPage() {
             </form>
           </CardContent>
         </Card>
+      </div>
+    </div>
+  );
+}
+
+function BudgetIndicator({ refreshKey }: { refreshKey: number }) {
+  const [budget, setBudget] = useState<BudgetMe | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${BASE}/api/copilot/budget/me`, {
+          headers: getAuthHeaders(),
+        });
+        if (!res.ok) return;
+        const data: BudgetMe = await res.json();
+        if (!cancelled) setBudget(data);
+      } catch {
+        /* indicator is informatief; stil falen */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshKey]);
+
+  // Toon de indicator zodra er minstens één limiet actief is.
+  if (!budget || (budget.max_calls_per_day == null && budget.max_tokens_per_day == null)) {
+    return null;
+  }
+
+  const fmt = (n: number) =>
+    n >= 10_000 ? `${Math.round(n / 1000).toLocaleString("nl-NL")}k` : n.toLocaleString("nl-NL");
+
+  const parts: string[] = [];
+  if (budget.max_calls_per_day != null) {
+    parts.push(`${budget.calls_used} van ${budget.max_calls_per_day} vragen`);
+  }
+  if (budget.max_tokens_per_day != null) {
+    parts.push(`${fmt(budget.tokens_reserved)} van ${fmt(budget.max_tokens_per_day)} tokens`);
+  }
+
+  // Voortgang en status volgen de meest restrictieve teller: blokkering
+  // gebeurt server-side op zowel calls als (gereserveerde) tokens.
+  const pct = Math.max(budget.calls_pct ?? 0, budget.tokens_pct ?? 0);
+  const atLimit =
+    (budget.max_calls_per_day != null && budget.calls_used >= budget.max_calls_per_day) ||
+    (budget.max_tokens_per_day != null && budget.tokens_reserved >= budget.max_tokens_per_day);
+  const nearLimit = pct >= 80;
+
+  return (
+    <div
+      className={`flex items-center gap-2 text-xs ${
+        atLimit ? "text-destructive" : nearLimit ? "text-amber-600" : "text-muted-foreground"
+      }`}
+      title={`AI-dagbudget vandaag gebruikt: ${parts.join(" · ")}`}
+      data-testid="budget-indicator"
+    >
+      <Gauge className="h-3.5 w-3.5 shrink-0" />
+      <span>{parts.join(" · ")} vandaag gebruikt</span>
+      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-muted">
+        <div
+          className={`h-full rounded-full ${
+            atLimit ? "bg-destructive" : nearLimit ? "bg-amber-500" : "bg-primary"
+          }`}
+          style={{ width: `${Math.min(100, pct)}%` }}
+        />
       </div>
     </div>
   );

@@ -718,6 +718,40 @@ def quality_dashboard(
         "open_improvement_suggestions": int(suggestions_open),
     }
 
+@router.get("/budget/me")
+def budget_usage_me(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """
+    Eigen AI-dagbudgetverbruik van vandaag (§34, Task #121).
+    Compact overzicht voor de verbruiksindicator in het Copilot-scherm:
+    gebruikte calls/tokens versus de effectieve limiet.
+    """
+    today = date.today()
+    max_calls, max_tokens = ai_gateway._get_budget_config(db, current_user.username)
+
+    slot = db.query(models.AiBudgetSlot).filter(
+        models.AiBudgetSlot.username == current_user.username,
+        models.AiBudgetSlot.slot_date == today,
+    ).first()
+
+    calls_used = slot.calls_reserved if slot else 0
+    # Gereserveerde tokens zijn een tijdelijke worst-case-claim; toon het
+    # werkelijke verbruik zodra dat gereconcilieerd is, anders de reservering.
+    tokens_used = max(slot.tokens_actual or 0, 0) if slot else 0
+    tokens_reserved = slot.tokens_reserved if slot else 0
+
+    return {
+        "date": today.isoformat(),
+        "calls_used": calls_used,
+        "max_calls_per_day": max_calls,
+        "calls_pct": round(calls_used / max_calls * 100, 1) if max_calls else None,
+        "tokens_used": tokens_used,
+        "tokens_reserved": tokens_reserved,
+        "max_tokens_per_day": max_tokens,
+        "tokens_pct": round(tokens_reserved / max_tokens * 100, 1) if max_tokens else None,
+    }
 @router.get("/budget/usage")
 def budget_usage_today(
     db: Session = Depends(get_db),
