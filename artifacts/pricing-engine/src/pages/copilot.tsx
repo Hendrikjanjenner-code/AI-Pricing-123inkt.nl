@@ -46,6 +46,7 @@ type ChatMessage = {
 };
 
 type BudgetMe = {
+  exhausted?: boolean;
   date: string;
   calls_used: number;
   max_calls_per_day: number | null;
@@ -627,6 +628,50 @@ function AnswerCard({ answer }: { answer: CopilotAnswer }) {
   );
 }
 
+// Task #159: budget centraal ophalen zodat zowel de indicator als het
+// invoerveld erop kunnen reageren. Bij bereikt budget pollen we periodiek,
+// zodat het veld weer werkt zodra het budget beschikbaar is (nieuwe dag of
+// verhoogde limiet) zonder dat de pagina herladen hoeft te worden.
+function useBudgetMe(refreshKey: number) {
+  const [budget, setBudget] = useState<BudgetMe | null>(null);
+
+  // De server is autoritatief: `exhausted` volgt exact dezelfde regel als de
+  // budgetbewaking (incl. upfront-tokenreservering per call). De fallback op
+  // ruwe tellers dekt alleen oudere API-responses zonder dit veld.
+  const atLimit =
+    budget != null &&
+    (budget.exhausted ??
+      ((budget.max_calls_per_day != null && budget.calls_used >= budget.max_calls_per_day) ||
+        (budget.max_tokens_per_day != null &&
+          budget.tokens_reserved >= budget.max_tokens_per_day)));
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch(`${BASE}/api/copilot/budget/me`, {
+          headers: getAuthHeaders(),
+        });
+        if (!res.ok) return;
+        const data: BudgetMe = await res.json();
+        if (!cancelled) setBudget(data);
+      } catch {
+        /* indicator is informatief; stil falen */
+      }
+    };
+    void load();
+    // Alleen pollen zolang het budget op is: dan willen we het veld
+    // automatisch weer vrijgeven zodra er ruimte is.
+    const timer = atLimit ? window.setInterval(() => void load(), 60_000) : null;
+    return () => {
+      cancelled = true;
+      if (timer != null) window.clearInterval(timer);
+    };
+  }, [refreshKey, atLimit]);
+
+  return { budget, atLimit };
+}
+
 export default function CopilotPage() {
   const queryClient = useQueryClient();
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -635,6 +680,7 @@ export default function CopilotPage() {
   const [busy, setBusy] = useState(false);
   const [statusLine, setStatusLine] = useState<string | null>(null);
   const [budgetRefresh, setBudgetRefresh] = useState(0);
+  const { budget, atLimit: budgetExhausted } = useBudgetMe(budgetRefresh);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const { data: status } = useGetCopilotStatus();
@@ -683,7 +729,7 @@ export default function CopilotPage() {
 
   const ask = async (question: string) => {
     const q = question.trim();
-    if (!q || busy) return;
+    if (!q || busy || budgetExhausted) return;
     let convId = activeId;
     if (convId == null) {
       convId = await newConversation();
@@ -702,6 +748,27 @@ export default function CopilotPage() {
         body: JSON.stringify({ content: q }),
         signal: AbortSignal.timeout(180_000),
       });
+      // Race met de server-side budgetbewaking (429): toon dan een specifieke
+      // budgetmelding in plaats van de generieke netwerk/AI-storing.
+      if (res.status === 429) {
+        let detail: string | null = null;
+        try {
+          detail = ((await res.json()) as { detail?: string }).detail ?? null;
+        } catch {
+          /* geen JSON-body */
+        }
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `a-${Date.now()}`,
+            role: "assistant",
+            content:
+              detail || "Dagbudget bereikt — morgen weer beschikbaar. Je vraag is niet verwerkt.",
+            answer: null,
+          },
+        ]);
+        return;
+      }
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -833,7 +900,7 @@ export default function CopilotPage() {
               Stel vragen over pricing, marge, concurrentie, promoties en kansen.
             </p>
           </div>
-          <BudgetIndicator refreshKey={budgetRefresh} />
+          <BudgetIndicator budget={budget} />
           {status && (
             <Badge variant={status.ai_available ? "default" : "destructive"}>
               {status.ai_available ? `AI actief (${status.model})` : "AI niet beschikbaar"}
@@ -862,7 +929,7 @@ export default function CopilotPage() {
                         size="sm"
                         className="h-auto whitespace-normal py-1.5 text-left text-xs"
                         onClick={() => void ask(q)}
-                        disabled={busy}
+                        disabled={busy || budgetExhausted}
                       >
                         {q}
                       </Button>
@@ -898,6 +965,18 @@ export default function CopilotPage() {
               <div ref={bottomRef} />
             </div>
 
+            {budgetExhausted && (
+              <div
+                className="mt-3 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-2.5 text-sm text-amber-900"
+                data-testid="budget-exhausted-notice"
+              >
+                <Gauge className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>
+                  Dagbudget bereikt — morgen weer beschikbaar. Je kunt vandaag geen nieuwe vragen
+                  stellen; eerdere antwoorden blijven gewoon zichtbaar.
+                </span>
+              </div>
+            )}
             <form
               className="mt-3 flex items-end gap-2 border-t pt-3"
               onSubmit={(e) => {
@@ -914,12 +993,20 @@ export default function CopilotPage() {
                     void ask(input);
                   }
                 }}
-                placeholder="Stel een vraag, bv. 'Waar verliezen we marge?'"
+                placeholder={
+                  budgetExhausted
+                    ? "Dagbudget bereikt — morgen weer beschikbaar"
+                    : "Stel een vraag, bv. 'Waar verliezen we marge?'"
+                }
                 className="min-h-[44px] flex-1 resize-none"
                 rows={1}
-                disabled={busy}
+                disabled={busy || budgetExhausted}
               />
-              <Button type="submit" disabled={busy || !input.trim()} className="gap-1.5">
+              <Button
+                type="submit"
+                disabled={busy || budgetExhausted || !input.trim()}
+                className="gap-1.5"
+              >
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 Vraag
               </Button>
@@ -931,28 +1018,7 @@ export default function CopilotPage() {
   );
 }
 
-function BudgetIndicator({ refreshKey }: { refreshKey: number }) {
-  const [budget, setBudget] = useState<BudgetMe | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`${BASE}/api/copilot/budget/me`, {
-          headers: getAuthHeaders(),
-        });
-        if (!res.ok) return;
-        const data: BudgetMe = await res.json();
-        if (!cancelled) setBudget(data);
-      } catch {
-        /* indicator is informatief; stil falen */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [refreshKey]);
-
+function BudgetIndicator({ budget }: { budget: BudgetMe | null }) {
   // Toon de indicator zodra er minstens één limiet actief is.
   if (!budget || (budget.max_calls_per_day == null && budget.max_tokens_per_day == null)) {
     return null;

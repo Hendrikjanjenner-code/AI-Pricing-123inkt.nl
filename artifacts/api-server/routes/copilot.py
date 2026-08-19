@@ -769,7 +769,19 @@ def budget_usage_me(
     tokens_used = max(slot.tokens_actual or 0, 0) if slot else 0
     tokens_reserved = slot.tokens_reserved if slot else 0
 
+    # Autoritatieve toelatingsstatus (Task #159): dezelfde regel als
+    # check_and_reserve_budget, inclusief de upfront-tokenreservering per call.
+    # De frontend gebruikt dit om het vraagveld vriendelijk te blokkeren.
+    exhausted = (
+        (max_calls is not None and calls_used >= max_calls)
+        or (
+            max_tokens is not None
+            and tokens_reserved + ai_gateway._UPFRONT_TOKEN_RESERVATION > max_tokens
+        )
+    )
+
     return {
+        "exhausted": exhausted,
         "date": today.isoformat(),
         "calls_used": calls_used,
         "max_calls_per_day": max_calls,

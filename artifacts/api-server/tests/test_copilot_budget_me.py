@@ -146,6 +146,77 @@ class TestBudgetMe:
             finally:
                 db.close()
 
+    def test_exhausted_when_headroom_below_upfront_reservation(self, client, ctx):
+        """Task #159: resterend tokensaldo kleiner dan de upfront-reservering
+        betekent dat de volgende call server-side geweigerd wordt; het
+        `exhausted`-veld moet dat dan al melden, ook al is tokens_reserved
+        nog onder de limiet. Na een limietverhoging (polling) herstelt het."""
+        import ai_gateway
+        upfront = ai_gateway._UPFRONT_TOKEN_RESERVATION
+        # Slot uit eerdere test: 3000 gereserveerde tokens, 12 calls.
+        db = SessionLocal()
+        try:
+            db.add(models.AiBudgetConfig(
+                username=ctx["username"],
+                max_calls_per_day=50,
+                max_tokens_per_day=3_000 + upfront - 1,  # headroom < upfront
+            ))
+            db.commit()
+        finally:
+            db.close()
+        try:
+            r = client.get("/api/copilot/budget/me", headers=ctx["user"])
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["tokens_reserved"] == 3000
+            assert body["tokens_reserved"] < body["max_tokens_per_day"]
+            assert body["exhausted"] is True
+
+            # Verhoogde limiet: dezelfde poll geeft het veld weer vrij.
+            db = SessionLocal()
+            try:
+                cfg = db.query(models.AiBudgetConfig).filter(
+                    models.AiBudgetConfig.username == ctx["username"]).one()
+                cfg.max_tokens_per_day = 3_000 + upfront
+                db.commit()
+            finally:
+                db.close()
+            r = client.get("/api/copilot/budget/me", headers=ctx["user"])
+            assert r.status_code == 200, r.text
+            assert r.json()["exhausted"] is False
+        finally:
+            db = SessionLocal()
+            try:
+                db.query(models.AiBudgetConfig).filter(
+                    models.AiBudgetConfig.username == ctx["username"]).delete()
+                db.commit()
+            finally:
+                db.close()
+
+    def test_exhausted_on_call_limit(self, client, ctx):
+        """Calllimiet bereikt => exhausted, ongeacht tokenruimte."""
+        db = SessionLocal()
+        try:
+            db.add(models.AiBudgetConfig(
+                username=ctx["username"],
+                max_calls_per_day=12, max_tokens_per_day=1_000_000,
+            ))
+            db.commit()
+        finally:
+            db.close()
+        try:
+            r = client.get("/api/copilot/budget/me", headers=ctx["user"])
+            assert r.status_code == 200, r.text
+            assert r.json()["exhausted"] is True
+        finally:
+            db = SessionLocal()
+            try:
+                db.query(models.AiBudgetConfig).filter(
+                    models.AiBudgetConfig.username == ctx["username"]).delete()
+                db.commit()
+            finally:
+                db.close()
+
     def test_token_limit_reached_before_call_limit(self, client, ctx):
         """Tokenlimiet eerder bereikt dan calllimiet: tokens_pct >= 100."""
         db = SessionLocal()
