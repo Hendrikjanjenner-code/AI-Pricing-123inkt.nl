@@ -12,7 +12,7 @@ import {
   AlertTriangle, CheckCircle2, Database, FileSpreadsheet, FileText,
   Package, Percent, RefreshCw, Server, ShieldAlert, XCircle, Zap,
 } from "lucide-react";
-import { getAuthHeaders } from "@/lib/auth";
+import { getAuthHeaders, useAuth } from "@/lib/auth";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -251,11 +251,15 @@ function formatUsd(v: number) {
 }
 
 function BigQuerySection() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [status, setStatus] = useState<BqStatus | null>(null);
   const [history, setHistory] = useState<BqSyncRow[] | null>(null);
   const [costs, setCosts] = useState<BqCosts | null>(null);
   const [loading, setLoading] = useState(true);
   const [costDays, setCostDays] = useState<number>(30);
+  const [syncBusy, setSyncBusy] = useState<null | "incrementeel" | "volledig">(null);
+  const [syncMsg, setSyncMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const laad = useCallback(async () => {
     setLoading(true);
@@ -273,6 +277,40 @@ function BigQuerySection() {
   }, [costDays]);
 
   useEffect(() => { laad(); }, [laad]);
+
+  const startSync = useCallback(async (mode: "incrementeel" | "volledig") => {
+    setSyncBusy(mode);
+    setSyncMsg(null);
+    try {
+      const resp = await fetch(
+        `${BASE}/api/bigquery/sync${mode === "volledig" ? "/full" : ""}`,
+        {
+          method: "POST",
+          headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+          signal: AbortSignal.timeout(30_000),
+        },
+      );
+      const data = await resp.json().catch(() => null);
+      if (resp.ok) {
+        setSyncMsg({
+          ok: true,
+          text: data?.message || `Sync (${mode}) gestart in achtergrond.`,
+        });
+        // Historie kort daarna verversen zodat de nieuwe batch zichtbaar wordt
+        setTimeout(() => { laad(); }, 2000);
+      } else {
+        setSyncMsg({
+          ok: false,
+          text: data?.detail ? String(data.detail) : `Sync starten mislukt (HTTP ${resp.status}).`,
+        });
+      }
+    } catch {
+      setSyncMsg({ ok: false, text: "Netwerkfout bij starten van de sync." });
+    } finally {
+      setSyncBusy(null);
+    }
+  }, [laad]);
 
   // Laatste sync per tabel (history staat al gesorteerd op completed_at desc)
   const perTabel = useMemo(() => {
@@ -303,9 +341,34 @@ function BigQuerySection() {
               </CardTitle>
               <CardDescription>Verbindingsstatus en laatste sync per tabel.</CardDescription>
             </div>
-            <button type="button" onClick={laad} className="text-xs text-primary hover:underline" disabled={loading}>
-              {loading ? "Laden..." : "Vernieuwen"}
-            </button>
+            <div className="flex items-center gap-3">
+              {isAdmin && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => startSync("incrementeel")}
+                    disabled={syncBusy !== null || !verbonden}
+                    title={!verbonden ? "BigQuery is niet gekoppeld" : "Start een incrementele sync"}
+                    className="inline-flex items-center gap-1 rounded-md border border-primary/40 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/5 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${syncBusy === "incrementeel" ? "animate-spin" : ""}`} />
+                    {syncBusy === "incrementeel" ? "Starten..." : "Sync starten"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => startSync("volledig")}
+                    disabled={syncBusy !== null || !verbonden}
+                    title={!verbonden ? "BigQuery is niet gekoppeld" : "Herlaad alle tabellen volledig (kan lang duren)"}
+                    className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {syncBusy === "volledig" ? "Starten..." : "Volledige herlaad"}
+                  </button>
+                </>
+              )}
+              <button type="button" onClick={laad} className="text-xs text-primary hover:underline" disabled={loading}>
+                {loading ? "Laden..." : "Vernieuwen"}
+              </button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -319,6 +382,18 @@ function BigQuerySection() {
                   {verbonden ? `Verbonden${status?.project ? ` — project ${status.project}` : ""}` : "Niet gekoppeld"}
                 </span>
               </div>
+              {syncMsg && (
+                <div
+                  className={`rounded-md border p-2 text-xs flex items-center gap-1.5 ${
+                    syncMsg.ok
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : "border-red-200 bg-red-50 text-red-700"
+                  }`}
+                >
+                  {syncMsg.ok ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <XCircle className="w-3.5 h-3.5 shrink-0" />}
+                  <span>{syncMsg.text}</span>
+                </div>
+              )}
               {!verbonden && (
                 <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 space-y-1">
                   <div className="font-medium flex items-center gap-1">
