@@ -53,7 +53,7 @@ async def _process_upload(
         content = await file.read()
         file_warnings: list = []
         rows = _file_to_rows(content, fname, file_warnings)
-        duplicates = _count_duplicates(rows)
+        rows, duplicates = _dedupe_rows(rows, file_warnings)
         processed, failed, warnings = processor(rows, db)
         warnings = file_warnings + warnings
         job.rows_processed = processed
@@ -937,6 +937,7 @@ async def upload_bulk(
                             "reden": "Type niet herkend op basis van kolomnamen of bestandsnaam"})
             continue
 
+        rows, dup_count = _dedupe_rows(rows, file_warns)
         job = models.ImportJob(
             upload_type=upload_type,
             filename=f"{file.filename}::{csv_name}",
@@ -945,7 +946,7 @@ async def upload_bulk(
             created_at=datetime.utcnow(),
             source="Handmatig",
             batch_id=_new_batch_id(),
-            rows_duplicates=_count_duplicates(rows),
+            rows_duplicates=dup_count,
         )
         db.add(job)
         db.commit()
@@ -1278,22 +1279,36 @@ async def upload_loyalty_transactions(
 ):
     return await _process_upload(file, "loyalty-transactions", db, current_user, _process_loyalty_transactions)
 
-def _count_duplicates(rows: list[dict]) -> int:
-    """Tel dubbele rijen binnen een batch op basis van SKU (+datum indien aanwezig)."""
-    seen: set[tuple] = set()
+def _dedupe_rows(rows: list[dict], warnings: list) -> tuple[list[dict], int]:
+    """
+    Dedupliceer rijen binnen een batch op basis van SKU (+datum en concurrent
+    indien aanwezig). Retourneert (unieke_rijen, aantal_duplicaten) en voegt per
+    overgeslagen duplicaat een waarschuwing toe zodat het foutlog vermeldt welke
+    rijen als duplicaat zijn overgeslagen. Zo laat één dubbele rij niet de hele
+    upload op de primary key mislukken.
+    """
+    seen: dict[tuple, int] = {}
+    unique: list[dict] = []
     dups = 0
-    for row in rows:
+    for i, row in enumerate(rows, start=1):
         norm = {k.lower().strip(): (v or "").strip() for k, v in row.items() if isinstance(k, str)}
         sku = norm.get("own_sku_id") or norm.get("sku_id") or ""
         if not sku:
+            unique.append(row)
             continue
         key = (sku, norm.get("date") or norm.get("datum") or "",
                norm.get("competitor_name") or norm.get("concurrent_naam") or "")
         if key in seen:
             dups += 1
+            warnings.append(
+                f"Rij {i}: duplicaat van rij {seen[key]} (SKU '{sku}'"
+                + (f", datum {key[1]}" if key[1] else "")
+                + ") — overgeslagen als duplicaat"
+            )
         else:
-            seen.add(key)
-    return dups
+            seen[key] = i
+            unique.append(row)
+    return unique, dups
 
 
 # ─── PIM: supplier-contentimport (§23) ───────────────────────────────────────
