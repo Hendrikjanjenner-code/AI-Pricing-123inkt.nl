@@ -77,8 +77,13 @@ def main() -> int:
             logger.warning("Geen actieve shops gevonden — engines overgeslagen.")
             return 0
 
+        # Snapshot id/code als platte waardes: commits in de engine-loop
+        # expiren ORM-instanties, en een tussentijds verwijderde shop-rij
+        # zou anders de hele run met ObjectDeletedError afbreken.
+        shop_infos = [(s.id, s.shop_code) for s in shops]
+
         logger.info("Nachtelijke engine-run gestart voor %d shop(s): %s",
-                    len(shops), [s.shop_code for s in shops])
+                    len(shop_infos), [code for _, code in shop_infos])
 
         from engine.basket_engine import run_basket_engine
         from engine.promotion_engine import run_promotion_engine
@@ -93,10 +98,10 @@ def main() -> int:
         ]
 
         failures = 0
-        for shop in shops:
-            logger.info("=== Shop %s (id=%d) ===", shop.shop_code, shop.id)
+        for shop_id, shop_code in shop_infos:
+            logger.info("=== Shop %s (id=%d) ===", shop_code, shop_id)
             for engine_name, engine_fn in engines:
-                ok = _run_engine(engine_name, engine_fn, db, shop.id)
+                ok = _run_engine(engine_name, engine_fn, db, shop_id)
                 if not ok:
                     failures += 1
 
