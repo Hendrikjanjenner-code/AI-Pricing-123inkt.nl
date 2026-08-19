@@ -728,6 +728,9 @@ def _run_sync(name: str, db: Session, current_user, force_full: bool = False) ->
     # subtellers rapporteert, zet het deze expliciet i.p.v. sum(counts).
     processed_rows: int | None = None
     errors: list[str] = []
+    # Structurele waarschuwingen uit de ingest (bv. afgekapte te lange
+    # feedwaarden) — belanden vooraan in warnings_json van de ImportJob.
+    sync_warnings: list[str] = []
     # Bestandsnaam voor de ImportJob in de importgeschiedenis; het REST-pad
     # overschrijft deze om volledige vs. incrementele runs te onderscheiden.
     job_filename = f"handmatige-sync-{name}"
@@ -748,6 +751,7 @@ def _run_sync(name: str, db: Session, current_user, force_full: bool = False) ->
                     # Retries bij tijdelijke verbindingsfout: pas de laatste
                     # mislukking persisteert hieronder als ImportJob 'fout'.
                     res = _ingest_feed_with_retry(db, source="priceshape")
+                    sync_warnings = list(res.get("warnings") or [])
                     counts["producten_nieuw"] = res["products_new"]
                     counts["producten_bijgewerkt"] = res["products_updated"]
                     counts["eigen_prijzen"] = res["own_prices"]
@@ -980,6 +984,9 @@ def _run_sync(name: str, db: Session, current_user, force_full: bool = False) ->
                     rows_duplicates=0,
                     error_log=([{"rij": None, "veld": None, "bericht": message}]
                                if status != "ok" else []),
+                    # Structurele waarschuwingen (afgekapte waarden e.d.) vooraan,
+                    # zodat ze nooit door een cap op de lijst wegvallen.
+                    warnings_json=sync_warnings[:50] or None,
                     error_message=message if status != "ok" else None,
                     uploaded_by=current_user.username,
                     created_at=datetime.now(timezone.utc),

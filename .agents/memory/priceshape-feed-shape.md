@@ -46,3 +46,5 @@ first byte. The connection *test* therefore streams only a bounded sample and pa
 it tolerantly (partial/truncated JSON) instead of downloading the full feed; the real
 sync still pulls everything. Don't expect a "test" to be instant — it's gated by
 their first-byte latency, not by transfer size.
+
+- Sommige feedrijen hebben MEERDERE komma-gescheiden EAN's in het ean-veld (>50 tekens) — ingest kapt begrensde stringkolommen centraal af via clamp_rows_to_model (origineel in raw_attributes, waarschuwing in ImportJob); identiteit (sku_id) wordt nooit afgekapt maar in quarantaine gezet.

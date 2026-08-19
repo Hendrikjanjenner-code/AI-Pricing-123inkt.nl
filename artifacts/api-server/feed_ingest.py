@@ -483,6 +483,36 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
             )
         raise
 
+    # Centrale bescherming tegen te lange feedwaarden: kap ALLE begrensde
+    # stringkolommen af op de kolombreedte (origineel blijft bewaard in
+    # raw_attributes) zodat één afwijkende waarde nooit de complete
+    # catalogus-import laat crashen op "value too long for varchar(N)".
+    clamp_warnings: list[str] = []
+
+    # Identiteit (sku_id, primary key) mag NOOIT afgekapt worden: twee
+    # verschillende te lange sku's zouden na truncatie op elkaar (of op een
+    # bestaand product) kunnen mappen en zo andermans rijen overschrijven of
+    # de replace-deletes corrumperen. Te lange sku's worden daarom in
+    # quarantaine gezet (overgeslagen) met een zichtbare waarschuwing.
+    _sku_limit = _string_limits(models.DimProduct)["sku_id"]
+    oversized = {p["sku_id"] for p in catalog if len(p["sku_id"]) > _sku_limit}
+    if oversized:
+        catalog = [p for p in catalog if p["sku_id"] not in oversized]
+        comp_rows = [r for r in comp_rows if r["sku_id"] not in oversized]
+        example = next(iter(oversized))
+        clamp_warnings.append(
+            f"{len(oversized)} product(en) overgeslagen: sku/gtin langer dan "
+            f"{_sku_limit} tekens (identiteit wordt nooit afgekapt). "
+            f"Voorbeeld — {example[:80]}…"
+        )
+        logger.warning("Feed-ingest: %s", clamp_warnings[-1])
+
+    _identity = frozenset({"sku_id"})
+    clamp_rows_to_model(models.DimProduct, catalog, clamp_warnings,
+                        skip_fields=_identity)
+    clamp_rows_to_model(models.FactCompetitorPriceDaily, comp_rows, clamp_warnings,
+                        skip_fields=_identity)
+
     # Importselectie (aan/uitvinken): uitgevinkte concurrenten overslaan.
     # Bestaande data wordt hierdoor NIET gewist (zie last-known-good hieronder):
     # de delete is beperkt tot rijen die vervangen worden.
@@ -697,6 +727,7 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
         "competitor_rows": len(comp_maps),
         "offer_rows": offers_written,
         "skipped_by_settings": skipped_competitor_rows,
+        "warnings": clamp_warnings,
     }
 
 
@@ -840,6 +871,61 @@ def _persist_offers(db: Session, today: date, comp_maps: list[dict]) -> int:
 
 
 # ── PCIS-scoring uit echte concurrentprijzen ────────────────────────────────
+def _string_limits(model) -> dict[str, int]:
+    """Kolomnaam → maximale lengte voor alle begrensde stringkolommen."""
+    from sqlalchemy import String as _Str
+    return {c.name: c.type.length for c in model.__table__.columns
+            if isinstance(c.type, _Str) and getattr(c.type, "length", None)}
+
+
+def clamp_rows_to_model(model, rows: list[dict],
+                        warnings: list[str] | None = None,
+                        skip_fields: frozenset[str] = frozenset()) -> list[str]:
+    """
+    Kap alle te lange stringwaarden centraal af op de kolombreedte van het
+    model, zodat één afwijkende feedwaarde nooit de complete bulk-insert kan
+    laten crashen ("value too long for type character varying(N)").
+
+    - Werkt op ALLE begrensde stringkolommen van het model — nieuwe kolommen
+      zijn automatisch gedekt, dit kan niet per kolom opnieuw breken.
+    - Verliesvrij waar mogelijk: als de rij een raw_attributes-dict heeft (of
+      kan krijgen), wordt de originele waarde daar bewaard als "_<veld>_full".
+    - Elke afgekapte kolom levert één geaggregeerde waarschuwing (met aantal
+      en een voorbeeld) voor het importlogboek.
+
+    Retourneert de (eventueel aangevulde) lijst waarschuwingen.
+    """
+    if warnings is None:
+        warnings = []
+    limits = {k: v for k, v in _string_limits(model).items()
+              if k not in skip_fields}
+    has_raw = "raw_attributes" in {c.name for c in model.__table__.columns}
+    hits: dict[str, dict] = {}
+    for row in rows:
+        for field, limit in limits.items():
+            val = row.get(field)
+            if not isinstance(val, str) or len(val) <= limit:
+                continue
+            if has_raw and field != "raw_attributes":
+                raw = row.get("raw_attributes")
+                row["raw_attributes"] = {**(raw or {}), f"_{field}_full": val}
+            row[field] = val[:limit]
+            h = hits.setdefault(field, {"count": 0, "example": None})
+            h["count"] += 1
+            if h["example"] is None:
+                ident = row.get("sku_id") or row.get("competitor_name") or "?"
+                h["example"] = f"{ident}: {val[:80]}…" if len(val) > 80 else f"{ident}: {val}"
+    for field, h in sorted(hits.items()):
+        limit = limits[field]
+        warnings.append(
+            f"Te lange waarde afgekapt: kolom '{field}' (max {limit} tekens) bij "
+            f"{h['count']} rij(en); originele waarde bewaard in raw_attributes. "
+            f"Voorbeeld — {h['example']}"
+        )
+        logger.warning("Feed-ingest: %s", warnings[-1])
+    return warnings
+
+
 def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, x))
 
