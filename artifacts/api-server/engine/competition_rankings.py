@@ -85,21 +85,34 @@ def _run_for_shop(db: Session, today: date, sid: int) -> int:
 
     all_names = set(profiles) | set(cat_by_comp) | set(cis_by_comp)
 
-    # Vorige rankings voor trendbepaling (meest recente run vóór vandaag)
-    prev_date = (
-        db.query(models.CompetitorRanking.run_date)
-        .filter(models.CompetitorRanking.run_date < today,
-                models.CompetitorRanking.shop_id == sid)
-        .order_by(models.CompetitorRanking.run_date.desc())
-        .first()
-    )
+    # Vorige rankings voor trendbepaling: het direct voorafgaande gepubliceerde
+    # snapshot. Bij een herrun op dezelfde dag (bv. meerdere feed-syncs per dag)
+    # zijn dat de rijen van vandaag die zo dadelijk vervangen worden — vergelijken
+    # met eergisteren zou verschuivingen van de vorige sync maskeren. Alleen als
+    # er vandaag nog niets staat, valt de vergelijking terug op de meest recente
+    # run vóór vandaag.
     prev_ranks: dict[tuple[str, str], int] = {}
-    if prev_date:
-        for r in db.query(models.CompetitorRanking).filter(
-            models.CompetitorRanking.run_date == prev_date[0],
-            models.CompetitorRanking.shop_id == sid,
-        ).all():
+    todays_rows = db.query(models.CompetitorRanking).filter(
+        models.CompetitorRanking.run_date == today,
+        models.CompetitorRanking.shop_id == sid,
+    ).all()
+    if todays_rows:
+        for r in todays_rows:
             prev_ranks[(r.scope, r.competitor_name)] = r.rank
+    else:
+        prev_date = (
+            db.query(models.CompetitorRanking.run_date)
+            .filter(models.CompetitorRanking.run_date < today,
+                    models.CompetitorRanking.shop_id == sid)
+            .order_by(models.CompetitorRanking.run_date.desc())
+            .first()
+        )
+        if prev_date:
+            for r in db.query(models.CompetitorRanking).filter(
+                models.CompetitorRanking.run_date == prev_date[0],
+                models.CompetitorRanking.shop_id == sid,
+            ).all():
+                prev_ranks[(r.scope, r.competitor_name)] = r.rank
 
     # Verwijder eventuele rankings van vandaag (herrun = delete-then-insert)
     db.query(models.CompetitorRanking).filter(

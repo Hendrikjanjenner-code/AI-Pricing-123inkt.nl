@@ -61,3 +61,130 @@ def run_model_refresh(db, model_version: str = "autosync-v1.0.0",
     db.commit()
 
     return processed, skipped
+
+
+def run_rankings_refresh(db, shop_id: int | None = None,
+                         trigger: str = "feed_sync") -> dict | None:
+    """
+    Herbereken CIS-scores + concurrent-rankings direct na een feed-sync, zodat
+    het CI Dashboard altijd rankings toont die bij de laatste feed horen.
+
+    Fout-tolerant: gooit NOOIT door (de feed-sync zelf mag hier niet op falen),
+    maar registreert de uitkomst wel zichtbaar als EngineRun-rij
+    (engine_name="rankings", status success/failed) zodat een mislukking niet
+    stil verdwijnt. Retourneert een resultaat-dict bij succes, anders None.
+    """
+    import models
+    from datetime import datetime as _dt
+
+    started = _dt.utcnow()
+    try:
+        from engine.competitor_influence import run_cis_engine
+        from engine.competition_rankings import run_competitor_rankings
+
+        # Serialiseer met de feed-ingest: dezelfde advisory lock als _run_sync,
+        # zodat de rankings nooit lezen terwijl een tweede sync de feed-data
+        # aan het vervangen is (delete-then-insert → gemengd snapshot).
+        with _feed_sync_lock() as got:
+            if not got:
+                raise RuntimeError(
+                    "Kon de feed-sync-lock niet verkrijgen binnen de wachttijd; "
+                    "rankings-refresh overgeslagen om een gemengd snapshot te voorkomen."
+                )
+            return _do_rankings_refresh(
+                db, shop_id=shop_id, trigger=trigger, started=started,
+                run_cis_engine=run_cis_engine,
+                run_competitor_rankings=run_competitor_rankings)
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Rankings-refresh na %s mislukt — de feed-sync zelf blijft geslaagd.", trigger)
+        _log_engine_run(db, shop_id=shop_id, started_at=started, status="failed",
+                        error_message=f"{type(exc).__name__}: {exc}"[:4000])
+        return None
+
+
+def _feed_sync_lock():
+    """Blokkerende variant van de PriceShape-sync-lock (zelfde advisory key).
+
+    Wacht maximaal LOCK_TIMEOUT op een lopende ingest i.p.v. direct op te geven;
+    levert True/False (verkregen of niet) op een eigen verbinding."""
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _lock():
+        from sqlalchemy import text
+        from database import engine
+        from routes.connectors import _advisory_key
+        key = _advisory_key("priceshape")
+        conn = engine.connect()
+        got = False
+        try:
+            conn.execute(text("SET lock_timeout = '600s'"))
+            try:
+                conn.execute(text("SELECT pg_advisory_lock(:k)"), {"k": key})
+                got = True
+            except Exception:
+                got = False
+            yield got
+        finally:
+            try:
+                if got:
+                    conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})
+                    conn.commit()
+            except Exception:
+                try:
+                    conn.invalidate()
+                except Exception:
+                    pass
+            finally:
+                conn.close()
+
+    return _lock()
+
+
+def _do_rankings_refresh(db, *, shop_id, trigger, started,
+                         run_cis_engine, run_competitor_rankings) -> dict:
+    import models
+    try:
+        if shop_id is not None:
+            sku_ids = [p.sku_id for p in
+                       db.query(models.DimProduct.sku_id).filter(
+                           models.DimProduct.shop_id == shop_id).all()]
+            cis_written = run_cis_engine(db, sku_ids=sku_ids) if sku_ids else 0
+        else:
+            cis_written = run_cis_engine(db)
+        rankings_written = run_competitor_rankings(db, shop_id=shop_id)
+        result = {"trigger": trigger, "cis_scores": cis_written,
+                  "rankings": rankings_written}
+        logger.info("Rankings-refresh na %s klaar: %d CIS-rijen, %d ranking-rijen.",
+                    trigger, cis_written, rankings_written)
+        _log_engine_run(db, shop_id=shop_id, started_at=started,
+                        status="success", result_summary=result)
+        return result
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Rankings-refresh na %s mislukt — de feed-sync zelf blijft geslaagd.", trigger)
+        _log_engine_run(db, shop_id=shop_id, started_at=started, status="failed",
+                        error_message=f"{type(exc).__name__}: {exc}"[:4000])
+        return None
+
+
+def _log_engine_run(db, *, shop_id, started_at, status,
+                    error_message=None, result_summary=None) -> None:
+    """EngineRun-rij voor de rankings-refresh; logging faalt zelf nooit."""
+    import models
+    from datetime import datetime as _dt
+    try:
+        db.add(models.EngineRun(
+            engine_name="rankings",
+            shop_id=shop_id,
+            started_at=started_at,
+            completed_at=_dt.utcnow(),
+            status=status,
+            error_message=error_message,
+            result_summary=result_summary,
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Rankings-refresh: run-log kon niet worden weggeschreven.")

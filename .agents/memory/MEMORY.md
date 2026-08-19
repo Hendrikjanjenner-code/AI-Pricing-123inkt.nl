@@ -59,4 +59,5 @@
 - [Lifespan bootstrap once per process](test-startup-bootstrap.md) — DDL/migrations/seeding in main.py run once per process; keep new expensive startup work inside the guard.
 - [Budget-UI toelating](budget-ui-authoritative.md) — UI-blokkade moet de server-reserveringsregel (incl. upfront tokens) volgen via een exhausted-veld, niet eigen tellers.
 - [Export dubbel-uitvoer-guard](export-claim-atomic.md) — claim rijen atomisch (UPDATE...RETURNING) vóór job-aanmaak; post-hoc markeren faalt code review op race-safety.
+- [Rankings na feed-sync](rankings-post-sync.md) — refresh na elke sync fout-tolerant + advisory-lock-geserialiseerd; same-day rerun vergelijkt met de vervangen dagsnapshot.
 - [Upload warning caps](upload-warning-caps.md) — capped ImportJob logs evict structural warnings; pin "Onbekende kolommen"-type warnings to the front before persisting.

@@ -489,13 +489,29 @@ def test_combined_score_differs_with_vs_without_cis(seed_data):
 
 # ── Integratie: rankings/run-endpoint vult Influence-score ────────────────────
 
-def test_rankings_run_returns_cis_count(client, admin_headers, seed_data):
-    """POST /api/competition/rankings/run retourneert cis_scores_geschreven > 0."""
-    sid = seed_data["shop_id"]
-    resp = client.post("/api/competition/rankings/run", headers=admin_headers,
-                       json={"shop_id": sid})
+def _run_rankings_and_wait(client, admin_headers, sid):
+    """Start de (nu asynchrone) rankings-run en poll de job tot afronding."""
+    import time
+    resp = client.post(f"/api/competition/rankings/run?shop_id={sid}",
+                       headers=admin_headers)
     assert resp.status_code == 200, resp.text
-    body = resp.json()
+    job = resp.json()
+    assert job.get("job_id"), job
+    for _ in range(240):
+        s = client.get(f"/api/engine-jobs/{job['job_id']}", headers=admin_headers)
+        assert s.status_code == 200, s.text
+        job = s.json()
+        if job["status"] != "running":
+            break
+        time.sleep(0.25)
+    assert job["status"] == "completed", job.get("error")
+    return job["result"]
+
+
+def test_rankings_run_returns_cis_count(client, admin_headers, seed_data):
+    """De rankings-run-job retourneert cis_scores_geschreven > 0."""
+    sid = seed_data["shop_id"]
+    body = _run_rankings_and_wait(client, admin_headers, sid)
     assert "cis_scores_geschreven" in body, "Ontbrekend veld cis_scores_geschreven"
     assert body["cis_scores_geschreven"] > 0, (
         f"cis_scores_geschreven is {body['cis_scores_geschreven']} — CIS-engine draait niet"
@@ -510,9 +526,7 @@ def test_rankings_influence_score_nonzero_after_run(client, admin_headers, seed_
     """
     sid = seed_data["shop_id"]
     # Trigger de run — scope tot de test-shop (snel + bevat onze CIS-data)
-    resp = client.post("/api/competition/rankings/run", headers=admin_headers,
-                       json={"shop_id": sid})
-    assert resp.status_code == 200, resp.text
+    _run_rankings_and_wait(client, admin_headers, sid)
 
     # Lees de rankings op voor dezelfde test-shop
     resp = client.get(f"/api/competition/rankings?scope=overall&shop_id={sid}",

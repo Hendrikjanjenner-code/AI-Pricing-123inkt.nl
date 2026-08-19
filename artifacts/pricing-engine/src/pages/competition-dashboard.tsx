@@ -1,15 +1,20 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
-import { Search, TrendingDown, TrendingUp, Target, AlertTriangle, Circle, Minus, Sparkles, Ban } from "lucide-react";
+import { Search, TrendingDown, TrendingUp, Target, AlertTriangle, Circle, Minus, Sparkles, Ban, RefreshCw, Loader2 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState } from "react";
 import { useShopId, withShop } from "@/hooks/use-shop-id";
+import { useAuth } from "@/lib/auth";
+import { useEngineRun } from "@/lib/use-engine-run";
+
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 function apiFetch(path: string) {
   const token = localStorage.getItem("auth_token");
@@ -64,8 +69,18 @@ function ScoreBar({ label, value }: { label: string; value: number }) {
   );
 }
 
+function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : `${iso}Z`);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString("nl-NL", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 export default function CompetitionDashboard() {
   const shopId = useShopId();
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const canRunRankings = user?.role === "admin" || user?.role === "pricing_manager";
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [zoekterm, setZoekterm] = useState("");
 
@@ -95,6 +110,13 @@ export default function CompetitionDashboard() {
     },
   });
   const rankings = rankData?.rankings || [];
+  const { start: startRankingsRun, isRunning: rankingsRunning, error: rankingsRunError } = useEngineRun({
+    runUrl: `${BASE}/api/competition/rankings/run${shopId !== undefined ? `?shop_id=${shopId}` : ""}`,
+    onCompleted: () => {
+      queryClient.invalidateQueries({ queryKey: ["competition-rankings"] });
+      queryClient.invalidateQueries({ queryKey: ["competition-rankings-history"] });
+    },
+  });
   const [openHistory, setOpenHistory] = useState<string | null>(null);
   const { data: histData } = useQuery({
     queryKey: ["competition-rankings-history", rankScope, shopId],
@@ -180,21 +202,55 @@ export default function CompetitionDashboard() {
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div>
-              <CardTitle className="text-base">Concurrent-rankings</CardTitle>
-              <CardDescription>
+              <CardTitle className="text-base flex items-center gap-2">
+                Concurrent-rankings
+                {rankData?.stale && (
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/10 text-amber-700 border-amber-300" data-testid="badge-rankings-stale">
+                    verouderd — nieuwe feed-sync sinds laatste berekening
+                  </Badge>
+                )}
+              </CardTitle>
+              <CardDescription data-testid="text-rankings-freshness">
                 Rank, Competition Relevance, Price Relevance en Influence per concurrent
-                {rankData?.run_date ? ` — run van ${rankData.run_date}` : ""}
+                {rankData?.computed_at ? ` — berekend op ${formatDateTime(rankData.computed_at)}` : rankData?.run_date ? ` — run van ${rankData.run_date}` : ""}
+                {rankData?.last_feed_sync_at ? ` · laatste feed-sync ${formatDateTime(rankData.last_feed_sync_at)}` : ""}
               </CardDescription>
             </div>
-            <Select value={rankScope} onValueChange={setRankScope}>
-              <SelectTrigger className="w-52"><SelectValue placeholder="Scope" /></SelectTrigger>
-              <SelectContent>
-                {rankScopes.map(s => (
-                  <SelectItem key={s} value={s}>{s === "overall" ? "Totaal (overall)" : s}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-2">
+              <Select value={rankScope} onValueChange={setRankScope}>
+                <SelectTrigger className="w-52"><SelectValue placeholder="Scope" /></SelectTrigger>
+                <SelectContent>
+                  {rankScopes.map(s => (
+                    <SelectItem key={s} value={s}>{s === "overall" ? "Totaal (overall)" : s}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {canRunRankings && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={startRankingsRun}
+                  disabled={rankingsRunning}
+                  data-testid="button-run-rankings"
+                >
+                  {rankingsRunning
+                    ? (<><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Bezig met berekenen...</>)
+                    : (<><RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Bereken rankings</>)}
+                </Button>
+              )}
+            </div>
           </div>
+          {rankingsRunError && (
+            <p className="text-xs text-red-600 mt-2" data-testid="text-rankings-run-error">
+              Herberekening mislukt: {rankingsRunError}
+            </p>
+          )}
+          {rankData?.changed && (
+            <div className="mt-2 flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-800" data-testid="banner-rankings-changed">
+              <Sparkles className="h-3.5 w-3.5 shrink-0" />
+              De ranking is gewijzigd t.o.v. de vorige berekening — verschuivingen zijn per concurrent gemarkeerd (▲ omhoog, ▼ omlaag, ✦ nieuw).
+            </div>
+          )}
         </CardHeader>
         <CardContent className="p-0">
           <div className="border-t">
@@ -224,10 +280,25 @@ export default function CompetitionDashboard() {
                       <div className="grid grid-cols-12 items-center px-4 py-2.5 text-sm">
                         <div className="col-span-1 flex items-center gap-1 tabular-nums font-medium">
                           {r.rank}
-                          {r.trend === "up" && <TrendingUp className="h-3.5 w-3.5 text-emerald-600" />}
-                          {r.trend === "down" && <TrendingDown className="h-3.5 w-3.5 text-red-500" />}
+                          {r.trend === "up" && (
+                            <span className="flex items-center gap-0.5 text-emerald-600" title={`Gestegen: was #${r.previous_rank}`} data-testid={`rank-delta-${r.competitor_name}`}>
+                              <TrendingUp className="h-3.5 w-3.5" />
+                              <span className="text-[10px]">+{r.previous_rank - r.rank}</span>
+                            </span>
+                          )}
+                          {r.trend === "down" && (
+                            <span className="flex items-center gap-0.5 text-red-500" title={`Gedaald: was #${r.previous_rank}`} data-testid={`rank-delta-${r.competitor_name}`}>
+                              <TrendingDown className="h-3.5 w-3.5" />
+                              <span className="text-[10px]">-{r.rank - r.previous_rank}</span>
+                            </span>
+                          )}
                           {r.trend === "stable" && <Minus className="h-3.5 w-3.5 text-muted-foreground" />}
-                          {r.trend === "new" && <Sparkles className="h-3.5 w-3.5 text-blue-500" />}
+                          {r.trend === "new" && (
+                            <span className="flex items-center gap-0.5 text-blue-500" title="Nieuw in de ranking" data-testid={`rank-delta-${r.competitor_name}`}>
+                              <Sparkles className="h-3.5 w-3.5" />
+                              <span className="text-[10px]">nieuw</span>
+                            </span>
+                          )}
                         </div>
                         <div className="col-span-4 flex items-center gap-2 min-w-0">
                           <Link href={`/competition/competitors/${encodeURIComponent(r.competitor_name)}`}>

@@ -599,6 +599,13 @@ def sync_connector(
         # upsert voorkomt races.
         if result.get("status") == "ok":
             touch_last_synced(sync_db, name)
+            # Na een geslaagde handmatige feed-sync ook de concurrent-rankings
+            # meevernieuwen, zodat het CI Dashboard direct actueel is.
+            # Fout-tolerant: een mislukking wordt zichtbaar gelogd (EngineRun)
+            # maar laat de sync-respons niet falen.
+            if name == "priceshape":
+                from services.refresh import run_rankings_refresh
+                run_rankings_refresh(sync_db, trigger="handmatige sync")
     finally:
         sync_db.close()
 

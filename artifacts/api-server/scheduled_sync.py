@@ -89,6 +89,14 @@ def _run_priceshape_refresh() -> int:
         # (Env-only config heeft geen config-rij; de upsert werkt dan alsnog.)
         touch_last_synced(db, "priceshape")
 
+        # Rankings (CIS + drie-scoremodel) direct meevernieuwen zodat het
+        # CI Dashboard na de nachtelijke sync actuele rankings toont.
+        # Fout-tolerant: een mislukking is zichtbaar (EngineRun-rij + log)
+        # maar laat de feed-refresh zelf niet falen.
+        logger.info("Stap 4b: concurrent-rankings herberekenen ...")
+        from services.refresh import run_rankings_refresh
+        run_rankings_refresh(db, trigger="scheduled_sync")
+
         logger.info("Geplande PriceShape-refresh volledig voltooid.")
         return 0
     except Exception:

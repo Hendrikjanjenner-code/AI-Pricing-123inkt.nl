@@ -1146,8 +1146,13 @@ def get_competitor_rankings(
         models.CompetitorRanking.scope == scope,
         models.CompetitorRanking.shop_id == sid,
     ).scalar()
+    last_sync_at = _last_feed_sync_at(db)
     if not latest:
         return {"scope": scope, "run_date": None, "rankings": [],
+                "computed_at": None,
+                "last_feed_sync_at": last_sync_at.isoformat() if last_sync_at else None,
+                "stale": last_sync_at is not None,
+                "changed": False,
                 "scopes": _ranking_scopes(db, sid)}
 
     rows = (
@@ -1158,9 +1163,23 @@ def get_competitor_rankings(
         .order_by(models.CompetitorRanking.rank)
         .all()
     )
+    # Versheid: wanneer zijn deze rankings berekend, en is er sindsdien een
+    # nieuwe feed-sync geweest (dan zijn ze "verouderd")?
+    computed_at = max((r.created_at for r in rows if r.created_at), default=None)
+    stale = bool(last_sync_at and computed_at and computed_at < last_sync_at)
+    # "Gewijzigd" = er is een vorige run om mee te vergelijken én er zijn
+    # verschuivingen. Bij de allereerste run (alles "new", geen previous_rank)
+    # is er niets gewijzigd — dan zou een banner misleidend zijn.
+    had_previous = any(r.previous_rank is not None for r in rows)
+    changed = had_previous and any(
+        (r.rank_trend or "stable") not in ("stable",) for r in rows)
     return {
         "scope": scope,
         "run_date": str(latest),
+        "computed_at": computed_at.isoformat() if computed_at else None,
+        "last_feed_sync_at": last_sync_at.isoformat() if last_sync_at else None,
+        "stale": stale,
+        "changed": changed,
         "scopes": _ranking_scopes(db, sid),
         "rankings": [
             {
@@ -1233,6 +1252,14 @@ def get_competitor_ranking_history(
     }
 
 
+def _last_feed_sync_at(db: Session):
+    """Tijdstip van de laatste geslaagde PriceShape-feed-sync (of None)."""
+    cfg = (db.query(models.ConnectorConfig)
+           .filter(models.ConnectorConfig.connector_name == "priceshape")
+           .first())
+    return cfg.last_synced_at if cfg else None
+
+
 def _ranking_scopes(db: Session, shop_id: Optional[int] = None) -> list[str]:
     q = db.query(models.CompetitorRanking.scope).distinct()
     if shop_id is not None:
@@ -1241,12 +1268,7 @@ def _ranking_scopes(db: Session, shop_id: Optional[int] = None) -> list[str]:
     return sorted(scopes, key=lambda s: (s != "overall", s))
 
 
-@router.post("/rankings/run")
-def run_rankings(
-    payload: dict = Body(default={}),
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
-):
+def _run_rankings_job(db: Session, shop_id: Optional[int] = None) -> dict:
     """
     Herbereken de competitor rankings (drie-scoremodel §9-§11).
 
@@ -1254,11 +1276,21 @@ def run_rankings(
             schrijf ze naar competitor_influence_scores.
     Stap 2: bereken rankings die de CIS-scores als Influence-component lezen.
 
-    shop_id (optioneel in body): beperk de run tot één shop (sneller bij tests/gefocuste runs).
+    shop_id (optioneel): beperk de run tot één shop (sneller bij tests/gefocuste runs).
     """
     from engine.competitor_influence import run_cis_engine
     from engine.competition_rankings import run_competitor_rankings
-    shop_id: Optional[int] = payload.get("shop_id")
+    from services.refresh import _feed_sync_lock
+
+    with _feed_sync_lock() as got:
+        if not got:
+            raise RuntimeError(
+                "Er draait momenteel een feed-sync; probeer het zo dadelijk opnieuw."
+            )
+        return _do_rankings_run(db, shop_id, run_cis_engine, run_competitor_rankings)
+
+
+def _do_rankings_run(db, shop_id, run_cis_engine, run_competitor_rankings) -> dict:
     if shop_id is not None:
         sku_ids = [p.sku_id for p in
                    db.query(models.DimProduct).filter(
@@ -1277,6 +1309,28 @@ def run_rankings(
         "cis_scores_geschreven": cis_written,
         "rankings_geschreven": rankings_written,
     }
+
+
+@router.post("/rankings/run")
+def run_rankings(
+    shop_id: Optional[int] = Query(None),
+    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
+):
+    """Start de rankings-herberekening op de achtergrond; retourneert een job-id.
+
+    De CIS-engine kan bij grote catalogi ruim langer duren dan de request-
+    timeout; daarom loopt de run als achtergrondjob (poll /api/engine-jobs/{id}).
+    """
+    from services.engine_jobs import start_engine_job
+    return start_engine_job(
+        "rankings", _run_rankings_job,
+        shop_id=shop_id, username=current_user.username,
+        audit_entity_id="rankings",
+        audit_details=lambda r: (
+            f"Rankings-run: {r.get('cis_scores_geschreven', 0)} CIS-scores, "
+            f"{r.get('rankings_geschreven', 0)} ranking-rijen"
+        ),
+    )
 
 
 # ── NIEUW: Competition Intelligence — trends, events, dekking, kwaliteit ──────
