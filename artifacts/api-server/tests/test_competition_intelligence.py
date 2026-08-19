@@ -1259,7 +1259,8 @@ def test_slow_full_run_publishes_engine_slow_run_signal(monkeypatch):
         db.close()
 
 
-ED_PFX = f"EDTEST-{uuid.uuid4().hex[:8].upper()}"
+# Uniek prefix voor de elasticiteit-degradatietests (eigen test-shop + SKU's)
+ED_PFX = f"ED-{uuid.uuid4().hex[:8]}"
 
 
 

@@ -9,6 +9,7 @@ Alle eindpunten voor de Competition Intelligence module:
 from typing import Optional
 from datetime import date, timedelta
 from fastapi import APIRouter, Body, Depends, Query, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from database import get_db
 import models
@@ -385,10 +386,14 @@ def list_discovery_queue(
     status: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
+    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    q = db.query(models.CompetitorDiscoveryQueue)
+    sid = _scope(db, shop_id)
+    # Legacy-rijen (shop_id NULL, van vóór shop-scoping) horen bij de default shop.
+    q = db.query(models.CompetitorDiscoveryQueue).filter(
+        _shop_or_legacy(models.CompetitorDiscoveryQueue.shop_id, sid, db))
     if status:
         q = q.filter(models.CompetitorDiscoveryQueue.status == status)
     total = q.count()
@@ -410,24 +415,41 @@ def list_discovery_queue(
 @router.post("/discovery/run")
 def trigger_discovery_run(
     categories: Optional[list[str]] = None,
-    min_confidence: float = Query(0.60, ge=0.0, le=1.0),
+    min_confidence: Optional[float] = Query(None, ge=0.0, le=1.0),
+    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
-    """Start een nieuwe discovery-run (synchronous voor de pilot)."""
+    """Start een nieuwe discovery-run (synchronous voor de pilot).
+
+    min_confidence weggelaten = per-shop instelling uit competition_setting."""
     from engine.competitor_discovery import run_discovery
-    result = run_discovery(db, categories=categories, min_confidence=min_confidence)
+    sid = _scope(db, shop_id)
+    result = run_discovery(db, categories=categories,
+                           min_confidence=min_confidence, shop_id=sid)
     return {"status": "completed", **result}
 
-
+@router.get("/settings")
+def get_competition_settings(
+    shop_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """Effectieve competition-instellingen voor een shop (defaults gemerged)."""
+    from services import competition_settings as cs
+    sid = _scope(db, shop_id)
+    return {"shop_id": sid, "settings": cs.get_settings(db, sid)}
 @router.post("/discovery/{item_id}/approve")
 def approve_discovery_item(
     item_id: int,
+    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
+    sid = _scope(db, shop_id)
     item = db.query(models.CompetitorDiscoveryQueue).filter(
-        models.CompetitorDiscoveryQueue.id == item_id
+        models.CompetitorDiscoveryQueue.id == item_id,
+        _shop_or_legacy(models.CompetitorDiscoveryQueue.shop_id, sid, db),
     ).first()
     if not item:
         raise HTTPException(404, "Discovery-item niet gevonden")
@@ -442,11 +464,14 @@ def approve_discovery_item(
 @router.post("/discovery/{item_id}/reject")
 def reject_discovery_item(
     item_id: int,
+    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
 ):
+    sid = _scope(db, shop_id)
     item = db.query(models.CompetitorDiscoveryQueue).filter(
-        models.CompetitorDiscoveryQueue.id == item_id
+        models.CompetitorDiscoveryQueue.id == item_id,
+        _shop_or_legacy(models.CompetitorDiscoveryQueue.shop_id, sid, db),
     ).first()
     if not item:
         raise HTTPException(404, "Discovery-item niet gevonden")
@@ -620,12 +645,18 @@ def list_ai_matches(
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     sid = _scope(db, shop_id)
-    # Begrens tot SKU's van deze shop via DimProduct (AiMatchResult heeft geen shop_id)
+    # Shop-scope: sku_id is globaal uniek (één shop per SKU), dus begrenzen op
+    # SKU's van deze shop is sluitend; de shop_id-kolomfilter sluit daarnaast
+    # mislabelde rijen uit (legacy-rijen dragen de default shop_id).
+    from services.competition_settings import default_shop_id
     shop_sku_ids = [r.sku_id for r in
                     db.query(models.DimProduct.sku_id)
                     .filter(models.DimProduct.shop_id == sid).all()]
     q = db.query(models.AiMatchResult).filter(
-        models.AiMatchResult.own_sku_id.in_(shop_sku_ids)
+        models.AiMatchResult.own_sku_id.in_(shop_sku_ids),
+        or_(models.AiMatchResult.shop_id == sid,
+            models.AiMatchResult.shop_id == default_shop_id(db),
+            models.AiMatchResult.shop_id.is_(None)),
     )
     if match_type:
         q = q.filter(models.AiMatchResult.match_type == match_type)
@@ -842,12 +873,16 @@ def get_management_intelligence(
 def list_discovery_runs(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    total = db.query(models.CompetitorDiscoveryRun).count()
+    sid = _scope(db, shop_id)
+    scoped = db.query(models.CompetitorDiscoveryRun).filter(
+        _shop_or_legacy(models.CompetitorDiscoveryRun.shop_id, sid, db))
+    total = scoped.count()
     items = (
-        db.query(models.CompetitorDiscoveryRun)
+        scoped
         .order_by(models.CompetitorDiscoveryRun.started_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -1155,7 +1190,13 @@ def _scope(db: Session, shop_id: Optional[int]) -> int:
     from semantic_layer import _shop_scope
     return _shop_scope(db, shop_id)
 
-
+def _shop_or_legacy(col, sid: int, db: Session):
+    """Shop-filter voor tabellen met legacy-rijen: rijen met shop_id NULL
+    stammen van vóór de shop-scoping en horen bij de default shop."""
+    from services.competition_settings import default_shop_id
+    if sid == default_shop_id(db):
+        return or_(col == sid, col.is_(None))
+    return col == sid
 @router.get("/trends/price-index")
 def get_price_index_trend(
     days: int = Query(30, ge=1, le=365),
@@ -1502,3 +1543,19 @@ def simulate_scenario(
         assume_no_follow=payload.get("assume_no_follow"),
         shop_id=payload.get("shop_id"),
     )
+
+@router.put("/settings")
+def update_competition_settings(
+    payload: dict = Body(...),
+    shop_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
+):
+    """Sla competition-instellingen op voor een shop (gevalideerd)."""
+    from services import competition_settings as cs
+    sid = _scope(db, shop_id)
+    try:
+        effective = cs.upsert_settings(db, sid, payload, current_user.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"shop_id": sid, "settings": effective}

@@ -122,11 +122,19 @@ def calculate_category_scores(
         1,
     )
 
-    # Gecombineerde score
+    # Gecombineerde score — gewichten komen uit de per-shop instellingen
+    # (competition_setting.relevance_weights, procenten die samen 100 zijn):
+    #   pricing → pricing_relevance_score, assortment → relevance_score,
+    #   traffic → traffic_relevance_score, authority → authority_score,
+    #   coverage → coverage_index.
+    from services import competition_settings as cs
+    weights = cs.get_settings(db, sid)["relevance_weights"]
     combined = round(
-        (relevance_score * 0.2 + coverage_index * 0.2 + authority_score * 0.15
-         + pricing_relevance_score * 0.15 + traffic_relevance_score * 0.15
-         + opportunity_score * 0.15),
+        (pricing_relevance_score * weights["pricing"]
+         + relevance_score * weights["assortment"]
+         + traffic_relevance_score * weights["traffic"]
+         + authority_score * weights["authority"]
+         + coverage_index * weights["coverage"]) / 100.0,
         1,
     )
 

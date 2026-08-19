@@ -725,10 +725,15 @@ class TestFeedUnreachable:
         mislukte poging zelf al dagen oud is (geen nieuwe pogingen gedaan)."""
         db = SessionLocal()
         # Mislukte poging van 2 dagen geleden; géén geslaagde sync sindsdien.
+        # created_at blijft "nu" zodat dit gegarandeerd de nieuwste ps-job is
+        # (de dev-DB kan echte recente syncs bevatten); completed_at bepaalt
+        # de leeftijd van de mislukking.
         fail_id = self._make_ps_job(
             db, "fout",
-            error_message="PriceShape feed niet bereikbaar: timeout",
-            delta_seconds=-2 * 24 * 3600)
+            error_message="PriceShape feed niet bereikbaar: timeout")
+        db.query(models.ImportJob).filter(models.ImportJob.id == fail_id).update(
+            {"completed_at": datetime.utcnow() - timedelta(days=2)})
+        db.commit()
         last_ok = (
             db.query(func.max(func.coalesce(
                 models.ImportJob.completed_at, models.ImportJob.created_at)))

@@ -31,39 +31,58 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
 def run_discovery(
     db: Session,
     categories: Optional[list[str]] = None,
-    min_confidence: float = 0.60,
+    min_confidence: Optional[float] = None,
+    shop_id: Optional[int] = None,
 ) -> dict:
     """
     Voer een discovery-run uit op basis van de PriceShape-feed en sla nieuwe
     concurrenten op in competitor_discovery_queue.
 
+    min_confidence: expliciete drempel; None = per-shop instelling
+    (competition_setting) van de opgegeven of default shop.
+
     Returns:
         dict met run_id, candidates_found, candidates_new
     """
+    from services import competition_settings as cs
+
+    sid = shop_id if shop_id is not None else cs.default_shop_id(db)
+    settings = cs.get_settings(db, sid) if sid is not None else dict(cs.DEFAULTS)
+    if min_confidence is None:
+        min_confidence = float(settings["min_discovery_confidence"])
+    auto_approve_threshold = float(settings["auto_approve_threshold"])
+
     run_id = f"run-{uuid.uuid4().hex[:12]}"
     run = models.CompetitorDiscoveryRun(
         run_id=run_id,
         started_at=datetime.utcnow(),
         status="running",
         categories_searched=categories or [],
-        parameters={"min_confidence": min_confidence, "source": "priceshape_feed"},
+        shop_id=sid,
+        parameters={"min_confidence": min_confidence, "source": "priceshape_feed",
+                    "shop_id": sid},
     )
     db.add(run)
     db.flush()
 
-    # Gebruik de meest recente feed-datum als momentopname van het landschap.
-    latest = db.query(func.max(models.FactCompetitorPriceDaily.date)).scalar()
+    # Gebruik de meest recente feed-datum als momentopname van het landschap
+    # (shop-scoped zodat winkels elkaar niet beïnvloeden).
+    latest = (
+        db.query(func.max(models.FactCompetitorPriceDaily.date))
+        .filter(models.FactCompetitorPriceDaily.shop_id == sid)
+        .scalar()
+    )
 
     candidates: list[dict] = []
     if latest is not None:
-        # Eigen catalogus: categorie + huidige prijs per SKU.
+        # Eigen catalogus van déze shop: categorie + huidige prijs per SKU.
         products = {
             p.sku_id: (p.category, float(p.current_price) if p.current_price else None)
             for p in db.query(
                 models.DimProduct.sku_id,
                 models.DimProduct.category,
                 models.DimProduct.current_price,
-            ).all()
+            ).filter(models.DimProduct.shop_id == sid).all()
         }
         total_skus = max(len(products), 1)
 
@@ -71,12 +90,15 @@ def run_discovery(
             models.FactCompetitorPriceDaily.competitor_name,
             models.FactCompetitorPriceDaily.sku_id,
             models.FactCompetitorPriceDaily.price,
-        ).filter(models.FactCompetitorPriceDaily.date == latest).all()
+        ).filter(models.FactCompetitorPriceDaily.date == latest,
+                 models.FactCompetitorPriceDaily.shop_id == sid).all()
 
-        # Aggregeer per concurrent-domein.
+        # Aggregeer per concurrent-domein (alleen SKU's van deze shop).
         agg: dict[str, dict] = {}
         for naam, sku_id, price in rows:
             if not naam or price is None:
+                continue
+            if sku_id not in products:
                 continue
             cat, own_price = products.get(sku_id, (None, None))
             entry = agg.setdefault(naam, {"skus": set(), "cats": {}, "indices": []})
@@ -119,17 +141,22 @@ def run_discovery(
 
     candidates = [c for c in candidates if c["confidence"] >= min_confidence]
 
-    # Dedupliceer tegen reeds bekende domeinen in de queue.
+    # Dedupliceer tegen reeds bekende domeinen in de queue van déze shop
+    # (legacy-rijen zonder shop_id tellen ook mee om dubbelingen te voorkomen).
     bestaande = {
         q.domain
         for q in db.query(models.CompetitorDiscoveryQueue).filter(
-            models.CompetitorDiscoveryQueue.domain.in_([c["domain"] for c in candidates])
+            models.CompetitorDiscoveryQueue.domain.in_([c["domain"] for c in candidates]),
+            (models.CompetitorDiscoveryQueue.shop_id == sid)
+            | (models.CompetitorDiscoveryQueue.shop_id.is_(None)),
         ).all()
     } if candidates else set()
 
     nieuw = 0
     for candidate in candidates:
         if candidate["domain"] not in bestaande:
+            # Boven de auto-goedkeuringsdrempel: direct goedkeuren zonder review.
+            auto_approved = candidate["confidence"] >= auto_approve_threshold
             item = models.CompetitorDiscoveryQueue(
                 domain=candidate["domain"],
                 competitor_name=candidate["competitor_name"],
@@ -137,9 +164,13 @@ def run_discovery(
                 discovery_method=candidate["discovery_method"],
                 categories=candidate["categories"],
                 confidence=candidate["confidence"],
-                status="PROPOSED",
+                status="APPROVED" if auto_approved else "PROPOSED",
                 run_id=run_id,
+                shop_id=sid,
             )
+            if auto_approved:
+                item.approved_by = "auto-approve"
+                item.approved_at = datetime.utcnow()
             db.add(item)
             nieuw += 1
 

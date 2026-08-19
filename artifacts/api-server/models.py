@@ -630,7 +630,27 @@ class FeedImportSetting(Base):
     updated_by = Column(String(100))
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+class CompetitionSetting(Base):
+    """
+    Competition-intelligence instellingen per shop: discovery/matching-drempels
+    en relevantiegewichten. Persistent (overleeft herstart) en gelezen door de
+    discovery-, matching- en categoriescore-engines.
 
+    settings: {"min_discovery_confidence": 0.6, "auto_approve_threshold": 0.9,
+               "auto_discovery_enabled": false, "lookback_days": 30,
+               "min_match_confidence": 0.5,
+               "relevance_weights": {"pricing": 25, "assortment": 30,
+                                     "traffic": 20, "authority": 15,
+                                     "coverage": 10}}
+    """
+    __tablename__ = "competition_setting"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), unique=True,
+                     nullable=False, index=True)
+    settings = Column(JSON, nullable=False)
+    updated_by = Column(String(100))
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 class DimCompetitor(Base):
     """Concurrentenregister (gevoed vanuit de PriceShape-feed / handmatig)."""
     __tablename__ = "dim_competitor"
@@ -1527,6 +1547,7 @@ class CompetitorDiscoveryQueue(Base):
     approved_by = Column(String(100))
     approved_at = Column(DateTime)
     run_id = Column(String(100), index=True) # koppeling aan discovery-run
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), index=True)  # eigenaar-shop
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -1722,6 +1743,7 @@ class CompetitorDiscoveryRun(Base):
     status = Column(String(50), default="running")  # running / completed / failed
 
     categories_searched = Column(JSON)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), index=True)  # eigenaar-shop
     candidates_found = Column(Integer, default=0)
     candidates_new = Column(Integer, default=0)
     candidates_approved = Column(Integer, default=0)

@@ -195,15 +195,29 @@ def match_sku_to_competitor(
     }
 
 
-def run_matching_for_all(db: Session, lookback_days: int = 14) -> int:
+def run_matching_for_all(db: Session, lookback_days: int | None = None,
+                         shop_id: int | None = None) -> int:
     """
     Voer matching uit voor alle eigen SKU's × alle recent beschikbare
     concurrent-prijzen. Slaat resultaten op in ai_match_result.
+
+    lookback_days: expliciete terugkijkperiode; None = per-shop instelling
+    (competition_setting). Matches onder min_match_confidence worden niet
+    opgeslagen.
     """
+    from services import competition_settings as cs
+
+    sid = shop_id if shop_id is not None else cs.default_shop_id(db)
+    settings = cs.get_settings(db, sid) if sid is not None else dict(cs.DEFAULTS)
+    if lookback_days is None:
+        lookback_days = int(settings["lookback_days"])
+    min_match_confidence = float(settings["min_match_confidence"])
+
     since = date.today() - timedelta(days=lookback_days)
     comp_prices = (
         db.query(models.FactCompetitorPriceDaily)
-        .filter(models.FactCompetitorPriceDaily.date >= since)
+        .filter(models.FactCompetitorPriceDaily.date >= since,
+                models.FactCompetitorPriceDaily.shop_id == sid)
         .order_by(
             models.FactCompetitorPriceDaily.sku_id,
             models.FactCompetitorPriceDaily.competitor_name,
@@ -221,18 +235,21 @@ def run_matching_for_all(db: Session, lookback_days: int = 14) -> int:
             seen.add(key)
             deduped.append(row)
 
+    # Alleen producten van déze shop: drempels/instellingen van winkel A mogen
+    # matches van winkel B nooit beïnvloeden of overschrijven.
     products = {
         p.sku_id: p
-        for p in db.query(models.DimProduct).all()
+        for p in db.query(models.DimProduct)
+        .filter(models.DimProduct.shop_id == sid).all()
     }
 
-    # PIM-verrijkte attributen per SKU (§23): code -> waarde
+    # PIM-verrijkte attributen per SKU (§23): code -> waarde (shop-scoped)
     attr_defs = {d.id: d.code for d in db.query(models.PimAttributeDefinition).all()}
     pim_attrs: dict[str, dict] = {}
     if attr_defs:
         for v in db.query(models.PimAttributeValue).all():
             code = attr_defs.get(v.attribute_id)
-            if code and v.value:
+            if code and v.value and v.sku_id in products:
                 pim_attrs.setdefault(v.sku_id, {})[code] = v.value
 
     count = 0
@@ -241,18 +258,30 @@ def run_matching_for_all(db: Session, lookback_days: int = 14) -> int:
         if not own_product or not row.price:
             continue
 
+        # Verrijk met vendorvelden uit de feed (verliesvrij opgeslagen in
+        # raw_attributes) zodat EAN/merk/titel-signalen meetellen als de feed
+        # ze levert.
+        raw = row.raw_attributes if isinstance(row.raw_attributes, dict) else {}
         result = match_sku_to_competitor(
             own_product=own_product,
             competitor_name=row.competitor_name,
             competitor_price=float(row.price),
             competitor_url=row.url,
+            competitor_ean=raw.get("ean") or raw.get("gtin"),
+            competitor_brand=raw.get("brand"),
+            competitor_product_name=raw.get("title") or raw.get("productTitle"),
             own_attributes=pim_attrs.get(row.sku_id),
         )
+
+        # Onder de per-shop drempel: niet opslaan (instelling min_match_confidence).
+        if result["confidence"] < min_match_confidence:
+            continue
 
         # Upsert
         existing = (
             db.query(models.AiMatchResult)
             .filter(
+                models.AiMatchResult.shop_id == sid,
                 models.AiMatchResult.own_sku_id == row.sku_id,
                 models.AiMatchResult.competitor_name == row.competitor_name,
             )
@@ -260,6 +289,7 @@ def run_matching_for_all(db: Session, lookback_days: int = 14) -> int:
         )
         if not existing:
             existing = models.AiMatchResult(
+                shop_id=sid,
                 own_sku_id=row.sku_id,
                 competitor_name=row.competitor_name,
             )
