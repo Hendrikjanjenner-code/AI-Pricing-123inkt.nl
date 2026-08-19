@@ -24,3 +24,10 @@ shop_id, so a private shop dodges the MAX_DECISIONS_PER_RUN severity-ranking
 crowd-out entirely. Pass shop_id everywhere: detail-by-id and transition are
 shop-scoped and return 404/`{"detail":...}` for the wrong scope (transition
 takes shop_id in the JSON body, not as a query param).
+
+## Isolated runs: never assume pre-existing rows or tables
+Test setup must call Base.metadata.create_all(bind=engine) and create its own
+DimShop rows instead of assuming shop id 1 exists — a hardcoded shop_id=1 fails
+on a fresh/empty DB with "Shop 1 not found" or "relation dim_shop does not exist".
+**Why:** modules must pass standalone (pytest tests/test_x.py), not only after
+another module happened to create tables/shops.

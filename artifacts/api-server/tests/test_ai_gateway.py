@@ -217,13 +217,18 @@ class TestCrossShopScoping(unittest.TestCase):
     def setUpClass(cls):
         import uuid
         from datetime import date
-        from database import SessionLocal
+        from database import SessionLocal, engine
         import models
+        # Zorg dat de tests ook geïsoleerd draaien: maak ontbrekende tabellen aan.
+        models.Base.metadata.create_all(bind=engine)
         cls.db = SessionLocal()
         cls.pfx = f"AIGW-{uuid.uuid4().hex[:6]}"
+        shop_a = models.DimShop(shop_code=f"{cls.pfx}-a", name=f"{cls.pfx} Shop A")
         shop_b = models.DimShop(shop_code=f"{cls.pfx}-b", name=f"{cls.pfx} Shop B")
+        cls.db.add(shop_a)
         cls.db.add(shop_b)
         cls.db.flush()
+        cls.sid_a = shop_a.id
         cls.sid_b = shop_b.id
         cls.sku_b = f"{cls.pfx}-SKU-B"
         cls.db.add(models.DimProduct(sku_id=cls.sku_b, product_name=f"{cls.pfx} B",
@@ -244,29 +249,29 @@ class TestCrossShopScoping(unittest.TestCase):
                            (models.DimProduct, models.DimProduct.sku_id)):
             cls.db.query(model).filter(col == cls.sku_b).delete()
         cls.db.query(__import__("models").DimShop).filter(
-            __import__("models").DimShop.id == cls.sid_b).delete()
+            __import__("models").DimShop.id.in_([cls.sid_a, cls.sid_b])).delete()
         cls.db.commit()
         cls.db.close()
 
-    def test_shop1_does_not_see_shop_b_rows(self):
+    def test_shop_a_does_not_see_shop_b_rows(self):
         from semantic_layer import get_private_label_potential, get_supplier_risk
         u = _user("admin")
         for fn in (get_private_label_potential, get_supplier_risk):
-            res = fn(self.db, u, limit=500, shop_id=1)
+            res = fn(self.db, u, limit=500, shop_id=self.sid_a)
             self.assertTrue(res["shop_scope_applied"])
             skus = {i["sku_id"] for i in res.get("items", [])}
             self.assertNotIn(self.sku_b, skus)
 
     def test_injected_shop_id_cannot_alter_scope(self):
         """Prompt-injection: een door het model meegegeven shop_id wordt
-        verworpen; de server-side scope (shop 1) blijft gelden."""
+        verworpen; de server-side scope (shop A) blijft gelden."""
         result, meta = ai_gateway._execute_tool(
             self.db, _user("admin"), "get_supplier_risk",
             {"shop_id": self.sid_b, "limit": 500, "bogus_arg": 1},
-            shop_id=1)
+            shop_id=self.sid_a)
         self.assertIn("shop_id", meta.get("dropped_arguments", []))
         self.assertIn("bogus_arg", meta.get("dropped_arguments", []))
-        self.assertEqual(result.get("shop_id"), 1)
+        self.assertEqual(result.get("shop_id"), self.sid_a)
         skus = {i["sku_id"] for i in result.get("items", [])}
         self.assertNotIn(self.sku_b, skus)
 
