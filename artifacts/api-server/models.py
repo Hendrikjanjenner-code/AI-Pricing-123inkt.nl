@@ -425,6 +425,7 @@ class SkuCompetitionScore(Base):
     __tablename__ = "sku_competition_score"
 
     id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
     sku_id = Column(String(100), nullable=False, index=True)
     run_date = Column(Date, nullable=False)
     product_comparability_score = Column(Float, default=0.0)
@@ -1603,6 +1604,7 @@ class AiMatchResult(Base):
     __tablename__ = "ai_match_result"
 
     id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
     own_sku_id = Column(String(100), nullable=False, index=True)
     competitor_name = Column(String(255), nullable=False)
     competitor_sku = Column(String(200))

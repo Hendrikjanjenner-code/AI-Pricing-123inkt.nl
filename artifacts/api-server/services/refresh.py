@@ -23,7 +23,8 @@ from datetime import datetime, timezone
 logger = logging.getLogger("uvicorn.error")
 
 
-def run_model_refresh(db, model_version: str = "autosync-v1.0.0") -> tuple[int, int]:
+def run_model_refresh(db, model_version: str = "autosync-v1.0.0",
+                      shop_id: int = 1) -> tuple[int, int]:
     """
     Draai de volledige modelrun op een reeds-geopende sessie en registreer een
     ModelRun. Geeft (verwerkt, overgeslagen) terug.
@@ -42,10 +43,10 @@ def run_model_refresh(db, model_version: str = "autosync-v1.0.0") -> tuple[int, 
     logger.info("Pricing engine klaar: %d verwerkt, %d overgeslagen.", processed, skipped)
 
     logger.info("Modelrun: concurrentie-scores (PCIS) berekenen ...")
-    feed_ingest.score_competition(db)
+    feed_ingest.score_competition(db, shop_id=shop_id)
 
     logger.info("Modelrun: AI-matches opbouwen ...")
-    feed_ingest.build_ai_matches(db)
+    feed_ingest.build_ai_matches(db, shop_id=shop_id)
 
     db.add(
         models.ModelRun(

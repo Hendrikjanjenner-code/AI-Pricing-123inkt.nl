@@ -757,14 +757,19 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, x))
 
 
-def score_competition(db: Session) -> int:
-    """Bereken SkuCompetitionScore per SKU uit de concurrentprijzen van vandaag."""
+def score_competition(db: Session, shop_id: int = 1) -> int:
+    """Bereken SkuCompetitionScore per SKU uit de concurrentprijzen van vandaag.
+
+    `shop_id` scopeert de hele berekening: alleen producten en concurrentprijzen
+    van die winkel worden gelezen, en alleen scores van die winkel worden
+    gewist/herschreven. Een score-run voor winkel A raakt winkel B dus nooit.
+    """
     today = date.today()
 
     products = {
         p.sku_id: p for p in db.query(
             models.DimProduct.sku_id, models.DimProduct.current_price, models.DimProduct.category
-        ).all()
+        ).filter(models.DimProduct.shop_id == shop_id).all()
     }
 
     # Concurrentprijzen van vandaag groeperen per SKU.
@@ -780,7 +785,10 @@ def score_competition(db: Session) -> int:
         models.FactCompetitorPriceDaily.competitor_name,
         models.FactCompetitorPriceDaily.price,
         models.FactCompetitorPriceDaily.in_stock,
-    ).filter(models.FactCompetitorPriceDaily.date == today).all()
+    ).filter(
+        models.FactCompetitorPriceDaily.date == today,
+        models.FactCompetitorPriceDaily.shop_id == shop_id,
+    ).all()
     for sku_id, competitor_name, price, in_stock in rows:
         if price is None or (sku_id, competitor_name) in rejected:
             continue
@@ -790,7 +798,8 @@ def score_competition(db: Session) -> int:
         by_sku.setdefault(sku_id, []).append(float(price))
 
     db.query(models.SkuCompetitionScore).filter(
-        models.SkuCompetitionScore.run_date == today
+        models.SkuCompetitionScore.run_date == today,
+        models.SkuCompetitionScore.shop_id == shop_id,
     ).delete(synchronize_session=False)
 
     score_maps: list[dict] = []
@@ -826,7 +835,7 @@ def score_competition(db: Session) -> int:
         pcis = round(sum(sub[k] * weights.get(k, 0.0) for k in sub), 4)
 
         score_maps.append({
-            "sku_id": sku_id, "run_date": today,
+            "sku_id": sku_id, "run_date": today, "shop_id": shop_id,
             "product_comparability_score": sub["product_comparability"],
             "price_sensitivity_score": sub["price_sensitivity"],
             "substitution_score": sub["substitution"],
@@ -849,7 +858,7 @@ def score_competition(db: Session) -> int:
     return len(score_maps)
 
 
-def build_ai_matches(db: Session) -> int:
+def build_ai_matches(db: Session, shop_id: int = 1) -> int:
     """
     Bouw AI-matchresultaten uit de PriceShape-feed van vandaag.
 
@@ -858,6 +867,10 @@ def build_ai_matches(db: Session) -> int:
     vendor-aanbod levert één AiMatchResult van het type "Exact" met
     confidence 1.0. Bestaande rijen van vandaag worden vervangen zodat de
     matching de actuele feed weerspiegelt.
+
+    `shop_id` scopeert de hele opbouw: alleen producten en concurrentprijzen
+    van die winkel worden gelezen, en alleen matches van die winkel worden
+    gewist/herschreven. Een match-run voor winkel A raakt winkel B dus nooit.
     """
     today = date.today()
 
@@ -866,7 +879,7 @@ def build_ai_matches(db: Session) -> int:
             models.DimProduct.sku_id,
             models.DimProduct.current_price,
             models.DimProduct.ean,
-        ).all()
+        ).filter(models.DimProduct.shop_id == shop_id).all()
     }
 
     rows = db.query(
@@ -874,7 +887,10 @@ def build_ai_matches(db: Session) -> int:
         models.FactCompetitorPriceDaily.competitor_name,
         models.FactCompetitorPriceDaily.price,
         models.FactCompetitorPriceDaily.url,
-    ).filter(models.FactCompetitorPriceDaily.date == today).all()
+    ).filter(
+        models.FactCompetitorPriceDaily.date == today,
+        models.FactCompetitorPriceDaily.shop_id == shop_id,
+    ).all()
 
     # Bewaar analistenbeoordelingen: een eerder goed-/afgekeurd paar behoudt
     # zijn status ook wanneer de matches uit de verse feed worden herbouwd.
@@ -884,11 +900,15 @@ def build_ai_matches(db: Session) -> int:
             models.AiMatchResult.own_sku_id,
             models.AiMatchResult.competitor_name,
             models.AiMatchResult.status,
-        ).filter(models.AiMatchResult.status.in_(["APPROVED", "REJECTED"])).all()
+        ).filter(
+            models.AiMatchResult.status.in_(["APPROVED", "REJECTED"]),
+            models.AiMatchResult.shop_id == shop_id,
+        ).all()
     }
 
     db.query(models.AiMatchResult).filter(
-        models.AiMatchResult.run_date == today
+        models.AiMatchResult.run_date == today,
+        models.AiMatchResult.shop_id == shop_id,
     ).delete(synchronize_session=False)
 
     matches: list[dict] = []
@@ -934,6 +954,7 @@ def build_ai_matches(db: Session) -> int:
             "price_diff_pct": diff_pct,
             "status": review_status.get((sku_id, naam), "PENDING"),
             "run_date": today,
+            "shop_id": shop_id,
         })
 
     for chunk in _chunks(matches):

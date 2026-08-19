@@ -327,13 +327,13 @@ def test_simulation_validation(client, admin_headers, seed):
     assert resp.status_code == 400
 
 
-def test_rejection_survives_match_rebuild(client, admin_headers, run_engines):
+def test_rejection_survives_match_rebuild(client, admin_headers, run_engines, seed):
     """build_ai_matches herbouwt de matches uit de feed, maar mag een
     analistenbeoordeling (REJECTED/APPROVED) niet wissen."""
     import feed_ingest
     db = SessionLocal()
     try:
-        feed_ingest.build_ai_matches(db)
+        feed_ingest.build_ai_matches(db, shop_id=seed["shop_id"])
         db.commit()
         m = db.query(models.AiMatchResult).filter(
             models.AiMatchResult.own_sku_id == SKU_B,

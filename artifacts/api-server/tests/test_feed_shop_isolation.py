@@ -192,3 +192,58 @@ def test_sync_never_overwrites_foreign_shop_sku(seeded, monkeypatch):
             models.FactCompetitorPriceDaily.shop_id == 1).count() == 0
     finally:
         db.close()
+
+
+def test_score_and_matches_leave_other_shop_intact(seeded, monkeypatch):
+    """Taak 110: score_competition en build_ai_matches voor winkel A (shop 1)
+    mogen de PCIS-scores en AI-matches van winkel B niet wissen of herbouwen."""
+    sid_b, _ = seeded
+    today = date.today()
+    db = SessionLocal()
+    try:
+        # Bestaande score + match van winkel B op dezelfde run_date.
+        db.add(models.SkuCompetitionScore(
+            sku_id=SKU_B, run_date=today, shop_id=sid_b,
+            pcis_score=0.77, competition_class="Strong",
+            reference_price=48.0, price_index=1.0417, competitors_used=1))
+        db.add(models.AiMatchResult(
+            own_sku_id=SKU_B, competitor_name=COMP, match_type="Exact",
+            confidence=1.0, competitor_price=48.0, own_price=50.0,
+            status="APPROVED", run_date=today, shop_id=sid_b))
+        db.commit()
+
+        # Feed + score-run voor winkel A (shop 1).
+        monkeypatch.setattr(
+            feed_ingest, "_read_feed",
+            lambda *a, **k: feed_ingest._normalize(iter(FEED_A)))
+        feed_ingest.ingest_feed(db, source="priceshape", shop_id=1)
+        feed_ingest.score_competition(db, shop_id=1)
+        feed_ingest.build_ai_matches(db, shop_id=1)
+        db.expire_all()
+
+        # Winkel B: score en match onaangeroerd.
+        score_b = db.query(models.SkuCompetitionScore).filter(
+            models.SkuCompetitionScore.sku_id == SKU_B).all()
+        assert len(score_b) == 1
+        assert score_b[0].shop_id == sid_b
+        assert score_b[0].pcis_score == 0.77
+        match_b = db.query(models.AiMatchResult).filter(
+            models.AiMatchResult.own_sku_id == SKU_B).all()
+        assert len(match_b) == 1
+        assert match_b[0].shop_id == sid_b
+        assert match_b[0].status == "APPROVED"
+
+        # Winkel A: score en match wél geschreven, met shop_id=1, en zonder
+        # dat B-data (48.0) in A's berekening lekt.
+        score_a = db.query(models.SkuCompetitionScore).filter(
+            models.SkuCompetitionScore.sku_id == SKU_A).all()
+        assert len(score_a) == 1
+        assert score_a[0].shop_id == 1
+        assert float(score_a[0].reference_price) == 18.5
+        match_a = db.query(models.AiMatchResult).filter(
+            models.AiMatchResult.own_sku_id == SKU_A).all()
+        assert len(match_a) == 1
+        assert match_a[0].shop_id == 1
+        assert float(match_a[0].competitor_price) == 18.5
+    finally:
+        db.close()
