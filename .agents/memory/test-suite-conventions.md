@@ -17,3 +17,10 @@ and assertions relying on default page-1 lists or top-N signal/decision budgets
 scanning page 1; seed extreme values (e.g. price_index 9.99/0.01) to survive
 top-N caps, or `patch.object` the cap; never assume "latest model run" is the
 one the test created.
+
+Decision-engine tests: the cleanest fix is a dedicated DimShop — the engine's
+signal query, /api/decisions/run, list, detail-by-id and transition all accept
+shop_id, so a private shop dodges the MAX_DECISIONS_PER_RUN severity-ranking
+crowd-out entirely. Pass shop_id everywhere: detail-by-id and transition are
+shop-scoped and return 404/`{"detail":...}` for the wrong scope (transition
+takes shop_id in the JSON body, not as a query param).

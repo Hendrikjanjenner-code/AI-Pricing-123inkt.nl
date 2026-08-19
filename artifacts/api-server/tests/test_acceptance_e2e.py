@@ -49,6 +49,50 @@ def db():
     s.close()
 
 
+@pytest.fixture(scope="module")
+def shop_id():
+    """
+    Dedicated testshop: de dev-DB is gedeeld (3k+ producten met echte actieve
+    signalen na een feed-sync). De Decision Engine rankt signalen op severity
+    met een cap (MAX_DECISIONS_PER_RUN), dus in shop 1 wordt een vers geseede
+    SKU verdrongen en ontstaat er geen decision. Alle e2e-tests draaien
+    daarom in hun eigen shop-scope.
+    """
+    s = SessionLocal()
+    shop = models.DimShop(
+        shop_code=f"acc-e2e-{uuid.uuid4().hex[:8]}",
+        name="Acceptance e2e testshop", is_default=False, active=True,
+    )
+    s.add(shop)
+    s.commit()
+    sid = shop.id
+    try:
+        yield sid
+    finally:
+        try:
+            # Volgorde: eerst afhankelijke rijen (o.a. cost-usage via request-
+            # middleware), dan de shop zelf.
+            s.query(models.CostUsageRecord).filter(
+                models.CostUsageRecord.shop_id == sid).delete(synchronize_session=False)
+            s.query(models.IntelligenceSignal).filter(
+                models.IntelligenceSignal.shop_id == sid).delete(synchronize_session=False)
+            dids = [d.id for d in s.query(models.Decision).filter(
+                models.Decision.shop_id == sid).all()]
+            if dids:
+                s.query(models.DecisionScenario).filter(
+                    models.DecisionScenario.decision_id.in_(dids)).delete(synchronize_session=False)
+                s.query(models.DecisionEvent).filter(
+                    models.DecisionEvent.decision_id.in_(dids)).delete(synchronize_session=False)
+                s.query(models.Decision).filter(
+                    models.Decision.id.in_(dids)).delete(synchronize_session=False)
+            s.query(models.DimShop).filter(models.DimShop.id == sid).delete()
+            s.commit()
+        except Exception:
+            s.rollback()
+        finally:
+            s.close()
+
+
 def _seed_product(db, sku, name="Acceptance product", category="Acceptance",
                   price=20.0, cost=10.0, brand=None, private_label=False,
                   shop_id=1, days=30, units=5):
@@ -113,54 +157,63 @@ def _sku(prefix):
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
 
-def _run_decisions(client, admin_headers):
-    r = client.post("/api/decisions/run", headers=admin_headers)
+def _run_decisions(client, admin_headers, shop_id):
+    r = client.post("/api/decisions/run", params={"shop_id": shop_id},
+                    headers=admin_headers)
     assert r.status_code == 200, r.text
     return r.json()
 
 
-def _get_decision(client, admin_headers, sku):
-    items = client.get("/api/decisions", params={"entity_id": sku},
+def _get_decision(client, admin_headers, sku, shop_id):
+    items = client.get("/api/decisions",
+                       params={"entity_id": sku, "shop_id": shop_id},
                        headers=admin_headers).json()["items"]
     assert items, f"geen decision voor {sku}"
-    return client.get(f"/api/decisions/{items[0]['id']}", headers=admin_headers).json()
+    return client.get(f"/api/decisions/{items[0]['id']}",
+                      params={"shop_id": shop_id}, headers=admin_headers).json()
 
 
 # TEST 1: DRS Product → Competition Matching → Competitor Price → Pricing
 #         Intelligence → Decision Engine → Human Approval
-def test_1_product_to_pricing_decision_and_approval(client, admin_headers, db):
+def test_1_product_to_pricing_decision_and_approval(client, admin_headers, db, shop_id):
     sku = _sku("ACC1")
     try:
-        _seed_product(db, sku)
-        _seed_competitor_price(db, sku, price=26.0)
-        _signal(db, sku, engine="pricing", signal_type="price_increase_opportunity")
+        _seed_product(db, sku, shop_id=shop_id)
+        _seed_competitor_price(db, sku, price=26.0, shop_id=shop_id)
+        _signal(db, sku, engine="pricing", signal_type="price_increase_opportunity",
+                shop_id=shop_id)
         db.commit()
 
-        _run_decisions(client, admin_headers)
-        det = _get_decision(client, admin_headers, sku)
+        _run_decisions(client, admin_headers, shop_id)
+        det = _get_decision(client, admin_headers, sku, shop_id)
         assert det["status"] == "proposed"
         did = det["id"]
 
         # Human approval-flow
         for target in ("in_review", "approved"):
             r = client.post(f"/api/decisions/{did}/transition",
-                            json={"to_status": target, "note": "acceptance"},
+                            json={"to_status": target, "note": "acceptance",
+                                  "shop_id": shop_id},
                             headers=admin_headers)
             assert r.status_code == 200, r.text
-        assert client.get(f"/api/decisions/{did}", headers=admin_headers).json()["status"] == "approved"
+        assert client.get(f"/api/decisions/{did}", params={"shop_id": shop_id},
+                          headers=admin_headers).json()["status"] == "approved"
     finally:
         _cleanup(db, [sku])
 
 
 # TEST 2: Office Food → Competition Analysis → Ranking → Match validation →
 #         Pricing signal
-def test_2_competition_analysis_ranking_and_signal(client, admin_headers, db):
+def test_2_competition_analysis_ranking_and_signal(client, admin_headers, db, shop_id):
     sku = _sku("ACC2")
     try:
-        _seed_product(db, sku, name="Office Food acceptance", category="Office Food")
-        _seed_competitor_price(db, sku, competitor="OfficeRival", price=18.0)
+        _seed_product(db, sku, name="Office Food acceptance", category="Office Food",
+                      shop_id=shop_id)
+        _seed_competitor_price(db, sku, competitor="OfficeRival", price=18.0,
+                               shop_id=shop_id)
         _signal(db, sku, engine="competition", signal_type="price_pressure",
-                direction="negative", current_value=1.11, change_pct=11.0)
+                direction="negative", current_value=1.11, change_pct=11.0,
+                shop_id=shop_id)
         db.commit()
 
         # Competition-overzichten zijn bereikbaar en bevatten gestructureerde data
@@ -170,7 +223,8 @@ def test_2_competition_analysis_ranking_and_signal(client, admin_headers, db):
         assert r.status_code == 200
 
         # Pricing-signaal is gepubliceerd en opvraagbaar
-        sigs = client.get("/api/signals", params={"entity_id": sku},
+        sigs = client.get("/api/signals",
+                          params={"entity_id": sku, "shop_id": shop_id},
                           headers=admin_headers).json()
         items = sigs.get("signals", []) if isinstance(sigs, dict) else sigs
         assert any(s["entity_id"] == sku for s in items)
@@ -180,23 +234,24 @@ def test_2_competition_analysis_ranking_and_signal(client, admin_headers, db):
 
 # TEST 3: Huismerk koffie → Lazzaro → Customer Switching → Brand/Basket/Margin
 #         impact → Decision Engine
-def test_3_private_label_switching_to_decision(client, admin_headers, db):
+def test_3_private_label_switching_to_decision(client, admin_headers, db, shop_id):
     pl = _sku("ACC3PL")
     ab = _sku("ACC3AB")
     try:
         _seed_product(db, pl, name="Huismerk koffie 1kg", category="Koffie",
-                      brand="Huismerk", private_label=True, price=8.0, cost=4.0)
+                      brand="Huismerk", private_label=True, price=8.0, cost=4.0,
+                      shop_id=shop_id)
         _seed_product(db, ab, name="Lazzaro koffie 1kg", category="Koffie",
-                      brand="Lazzaro", price=12.0, cost=7.0)
+                      brand="Lazzaro", price=12.0, cost=7.0, shop_id=shop_id)
         _signal(db, ab, engine="internal_competition",
                 signal_type="switching_opportunity", metric="isv",
                 current_value=0.45, change_pct=0.0,
                 evidence={"switch_probability": 0.6, "margin_gap": 0.35,
-                          "private_label_sku": pl})
+                          "private_label_sku": pl}, shop_id=shop_id)
         db.commit()
 
-        _run_decisions(client, admin_headers)
-        det = _get_decision(client, admin_headers, ab)
+        _run_decisions(client, admin_headers, shop_id)
+        det = _get_decision(client, admin_headers, ab, shop_id)
         assert det["scenarios"], "decision zonder scenario's"
         rec = [s for s in det["scenarios"] if s["is_recommended"]]
         assert len(rec) == 1 and rec[0]["why"]
@@ -206,18 +261,18 @@ def test_3_private_label_switching_to_decision(client, admin_headers, db):
 
 # TEST 4: Supplier cost increase → Supplier Intelligence → Forecast → Pricing
 #         → Decision Engine
-def test_4_cost_increase_to_decision(client, admin_headers, db):
+def test_4_cost_increase_to_decision(client, admin_headers, db, shop_id):
     sku = _sku("ACC4")
     try:
-        _seed_product(db, sku, price=20.0, cost=12.0)
+        _seed_product(db, sku, price=20.0, cost=12.0, shop_id=shop_id)
         _signal(db, sku, engine="cost", signal_type="cost_increase",
                 direction="negative", metric="cost_price",
                 current_value=12.0, change_pct=20.0,
-                evidence={"old_cost": 10.0, "new_cost": 12.0})
+                evidence={"old_cost": 10.0, "new_cost": 12.0}, shop_id=shop_id)
         db.commit()
 
-        _run_decisions(client, admin_headers)
-        det = _get_decision(client, admin_headers, sku)
+        _run_decisions(client, admin_headers, shop_id)
+        det = _get_decision(client, admin_headers, sku, shop_id)
         assert det["status"] == "proposed"
         assert any("cost" in (w or "").lower() or "kost" in (w or "").lower()
                    for s in det["scenarios"] for w in [str(s.get("why"))]) or det["scenarios"]
@@ -227,42 +282,44 @@ def test_4_cost_increase_to_decision(client, admin_headers, db):
 
 # TEST 5: Promotion → Promotion Intelligence → Incremental margin →
 #         Cannibalisation → Decision recommendation
-def test_5_promotion_to_decision(client, admin_headers, db):
+def test_5_promotion_to_decision(client, admin_headers, db, shop_id):
     sku = _sku("ACC5")
     try:
-        _seed_product(db, sku)
+        _seed_product(db, sku, shop_id=shop_id)
         _signal(db, sku, engine="promotion", signal_type="promotion_evaluation",
                 metric="incremental_margin", current_value=-50.0,
                 direction="negative", change_pct=-8.0,
-                evidence={"incremental_margin": -50.0, "cannibalisation_pct": 0.3})
+                evidence={"incremental_margin": -50.0, "cannibalisation_pct": 0.3},
+                shop_id=shop_id)
         db.commit()
 
         r = client.get("/api/promotion-intelligence/dashboard", headers=admin_headers)
         assert r.status_code == 200
 
-        _run_decisions(client, admin_headers)
-        det = _get_decision(client, admin_headers, sku)
+        _run_decisions(client, admin_headers, shop_id)
+        det = _get_decision(client, admin_headers, sku, shop_id)
         assert any(s["scenario_type"] == "promotion" for s in det["scenarios"])
     finally:
         _cleanup(db, [sku])
 
 
 # TEST 6: Customer churn → Loyalty → Next Best Action → Decision Engine
-def test_6_churn_loyalty_to_decision(client, admin_headers, db):
+def test_6_churn_loyalty_to_decision(client, admin_headers, db, shop_id):
     sku = _sku("ACC6")
     try:
-        _seed_product(db, sku)
+        _seed_product(db, sku, shop_id=shop_id)
         _signal(db, sku, engine="loyalty", signal_type="churn_risk",
                 direction="negative", metric="churn_probability",
                 current_value=0.7, change_pct=15.0,
-                evidence={"churn_probability": 0.7, "segment": "vaste klanten"})
+                evidence={"churn_probability": 0.7, "segment": "vaste klanten"},
+                shop_id=shop_id)
         db.commit()
 
         r = client.get("/api/loyalty/overview", headers=admin_headers)
         assert r.status_code == 200
 
-        _run_decisions(client, admin_headers)
-        det = _get_decision(client, admin_headers, sku)
+        _run_decisions(client, admin_headers, shop_id)
+        det = _get_decision(client, admin_headers, sku, shop_id)
         # Loyalty-scenario aanwezig als handelingsoptie (Next Best Action)
         assert any(s["scenario_type"] == "loyalty_incentive" for s in det["scenarios"])
     finally:
@@ -271,12 +328,12 @@ def test_6_churn_loyalty_to_decision(client, admin_headers, db):
 
 # TEST 7: Copilot vraag → authorization → semantic function → multiple
 #         engines → evidence → answer (via semantic layer, de Copilot-basis)
-def test_7_semantic_layer_authorized_answer_with_evidence(client, admin_headers, db):
+def test_7_semantic_layer_authorized_answer_with_evidence(client, admin_headers, db, shop_id):
     sku = _sku("ACC7")
     try:
-        _seed_product(db, sku)
-        _seed_competitor_price(db, sku, price=22.0)
-        _signal(db, sku)
+        _seed_product(db, sku, shop_id=shop_id)
+        _seed_competitor_price(db, sku, price=22.0, shop_id=shop_id)
+        _signal(db, sku, shop_id=shop_id)
         db.commit()
 
         # Authorization: signals-API (Copilot-datalaag) weigert zonder token
@@ -285,11 +342,12 @@ def test_7_semantic_layer_authorized_answer_with_evidence(client, admin_headers,
         # Semantic function beantwoordt de vraag met engine-data (Copilot-basis)
         from semantic_layer import get_product_performance
         user = db.query(models.User).filter(models.User.username == "dev_admin").first()
-        answer = get_product_performance(db, user, sku)
+        answer = get_product_performance(db, user, sku, shop_id=shop_id)
         assert answer, "semantic function gaf geen antwoord"
 
         # Evidence: signaal opvraagbaar met bronnen
-        sigs = client.get("/api/signals", params={"entity_id": sku},
+        sigs = client.get("/api/signals",
+                          params={"entity_id": sku, "shop_id": shop_id},
                           headers=admin_headers).json()
         items = sigs.get("signals", []) if isinstance(sigs, dict) else sigs
         mine = [s for s in items if s["entity_id"] == sku]
@@ -299,19 +357,21 @@ def test_7_semantic_layer_authorized_answer_with_evidence(client, admin_headers,
 
 
 # TEST 8: Management dashboard → Opportunity → Category → SKU → Evidence
-def test_8_management_dashboard_drilldown(client, admin_headers, db):
+def test_8_management_dashboard_drilldown(client, admin_headers, db, shop_id):
     sku = _sku("ACC8")
     try:
-        _seed_product(db, sku, category="AcceptanceCat8")
-        _seed_competitor_price(db, sku)
+        _seed_product(db, sku, category="AcceptanceCat8", shop_id=shop_id)
+        _seed_competitor_price(db, sku, shop_id=shop_id)
         _signal(db, sku, engine="opportunity", signal_type="margin_opportunity",
-                metric="margin_pct", current_value=50.0, change_pct=5.0)
+                metric="margin_pct", current_value=50.0, change_pct=5.0,
+                shop_id=shop_id)
         db.commit()
 
         assert client.get("/api/dashboard/summary", headers=admin_headers).status_code == 200
         assert client.get("/api/opportunities", headers=admin_headers).status_code == 200
         # Drill-down naar SKU-niveau met evidence via signals
-        sigs = client.get("/api/signals", params={"entity_id": sku},
+        sigs = client.get("/api/signals",
+                          params={"entity_id": sku, "shop_id": shop_id},
                           headers=admin_headers).json()
         items = sigs.get("signals", []) if isinstance(sigs, dict) else sigs
         mine = [s for s in items if s["entity_id"] == sku]
