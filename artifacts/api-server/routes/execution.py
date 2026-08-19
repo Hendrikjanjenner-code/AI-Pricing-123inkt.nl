@@ -133,13 +133,27 @@ def export_csv(
     if not lines:
         raise HTTPException(status_code=404, detail="Geen goedgekeurde adviezen beschikbaar voor export")
 
-    job_info = create_execution_job(db, lines, current_user.username, MANUAL_EXPORT)
+    # Claim de regels atomisch vóór job-aanmaak: bij twee overlappende
+    # exports krijgt precies één verzoek de claim; de ander ziet niets meer.
+    lines = _claim_adviezen(db, lines)
+    if not lines:
+        raise HTTPException(status_code=404, detail="Geen goedgekeurde adviezen beschikbaar voor export")
 
-    # Update job status
-    job = db.query(PriceExecutionJob).filter(PriceExecutionJob.job_id == job_info["job_id"]).first()
-    if job:
-        job.status = "geëxporteerd"
-        db.commit()
+    try:
+        job_info = create_execution_job(db, lines, current_user.username, MANUAL_EXPORT)
+
+        # Regels die de safety-controle niet doorstonden zijn niet uitgevoerd:
+        # geef hun claim weer vrij zodat ze na correctie opnieuw mee kunnen.
+        _geef_afgewezen_claims_vrij(db, job_info["job_id"], lines)
+
+        # Update job status
+        job = db.query(PriceExecutionJob).filter(PriceExecutionJob.job_id == job_info["job_id"]).first()
+        if job:
+            job.status = "geëxporteerd"
+            db.commit()
+    except Exception:
+        _geef_claims_vrij(db, lines)
+        raise
 
     csv_inhoud = generate_export_csv(lines)
 
@@ -172,16 +186,27 @@ def push_prices(
     if not lines:
         raise HTTPException(status_code=404, detail="Geen goedgekeurde adviezen")
 
-    job_info = create_execution_job(db, lines, current_user.username, API_PUSH_READY)
+    # Claim de regels atomisch vóór job-aanmaak/push: bij twee overlappende
+    # verzoeken wint er precies één; de ander ziet geen adviezen meer.
+    lines = _claim_adviezen(db, lines)
+    if not lines:
+        raise HTTPException(status_code=404, detail="Geen goedgekeurde adviezen")
 
-    connector = DemoCommerceConnector()
-    push_resultaat = connector.push_prices(lines)
+    try:
+        job_info = create_execution_job(db, lines, current_user.username, API_PUSH_READY)
+        _geef_afgewezen_claims_vrij(db, job_info["job_id"], lines)
 
-    # Update job status
-    job = db.query(PriceExecutionJob).filter(PriceExecutionJob.job_id == job_info["job_id"]).first()
-    if job:
-        job.status = "verstuurd_demo"
-        db.commit()
+        connector = DemoCommerceConnector()
+        push_resultaat = connector.push_prices(lines)
+
+        # Update job status
+        job = db.query(PriceExecutionJob).filter(PriceExecutionJob.job_id == job_info["job_id"]).first()
+        if job:
+            job.status = "verstuurd_demo"
+            db.commit()
+    except Exception:
+        _geef_claims_vrij(db, lines)
+        raise
 
     _log_audit(db, current_user.username, "api_push", "execution_job",
                str(job_info["job_id"]), f"API push: {push_resultaat.get('geslaagd', 0)} geslaagd")
@@ -218,10 +243,30 @@ def rollback_job(
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _haal_goedgekeurde_adviezen(db: Session, datum=None) -> list[dict]:
-    """Haal goedgekeurde aanbevelingen op als uitvoering-payload."""
-    q = db.query(FactPricingRecommendationDaily, DimProduct).join(
-        DimProduct, DimProduct.sku_id == FactPricingRecommendationDaily.sku_id
-    ).filter(FactPricingRecommendationDaily.approval_status == "approved")
+    """
+    Haal goedgekeurde aanbevelingen op als uitvoering-payload.
+
+    Dubbel-uitvoer-guard: regels die al verwerkt zijn (processing_status
+    'verwerkt' na een eerdere export/push) of die horen bij een beslissing
+    die al als uitgevoerd is gemarkeerd, gaan niet nogmaals mee in een
+    nieuwe execution-job.
+    """
+    from sqlalchemy import or_
+    from models import Decision
+
+    q = (
+        db.query(FactPricingRecommendationDaily, DimProduct)
+        .join(DimProduct, DimProduct.sku_id == FactPricingRecommendationDaily.sku_id)
+        .outerjoin(Decision, Decision.id == FactPricingRecommendationDaily.source_decision_id)
+        .filter(
+            FactPricingRecommendationDaily.approval_status == "approved",
+            or_(
+                FactPricingRecommendationDaily.processing_status.is_(None),
+                FactPricingRecommendationDaily.processing_status != "verwerkt",
+            ),
+            or_(Decision.id.is_(None), Decision.status != "executed"),
+        )
+    )
 
     if datum:
         q = q.filter(FactPricingRecommendationDaily.date == datum)
@@ -243,6 +288,78 @@ def _haal_goedgekeurde_adviezen(db: Session, datum=None) -> list[dict]:
             "execution_status": "klaar",
         })
     return lines
+
+
+def _claim_adviezen(db: Session, lines: list[dict]) -> list[dict]:
+    """
+    Claim aanbevelingen atomisch als 'verwerkt' vóór export/push (conditionele
+    UPDATE ... RETURNING). Bij twee overlappende verzoeken kan elke regel maar
+    door één verzoek geclaimd worden; de rest valt hier af. Geeft alleen de
+    regels terug waarvan de claim gelukt is. Dry-runs claimen bewust niet.
+    """
+    from sqlalchemy import or_, update
+
+    rec_ids = [l["recommendation_id"] for l in lines if l.get("recommendation_id") is not None]
+    if not rec_ids:
+        return []
+    result = db.execute(
+        update(FactPricingRecommendationDaily)
+        .where(
+            FactPricingRecommendationDaily.id.in_(rec_ids),
+            FactPricingRecommendationDaily.approval_status == "approved",
+            or_(
+                FactPricingRecommendationDaily.processing_status.is_(None),
+                FactPricingRecommendationDaily.processing_status != "verwerkt",
+            ),
+        )
+        .values(processing_status="verwerkt", processed_at=datetime.utcnow(), exported=True)
+        .returning(FactPricingRecommendationDaily.id)
+    )
+    geclaimd = {row[0] for row in result}
+    db.commit()
+    return [l for l in lines if l.get("recommendation_id") in geclaimd]
+
+
+def _geef_claims_vrij(db: Session, lines: list[dict]) -> None:
+    """Zet de claim van deze regels terug naar 'niet_verwerkt' (bij een fout)."""
+    rec_ids = [l["recommendation_id"] for l in lines if l.get("recommendation_id") is not None]
+    if not rec_ids:
+        return
+    db.rollback()
+    db.query(FactPricingRecommendationDaily).filter(
+        FactPricingRecommendationDaily.id.in_(rec_ids),
+        FactPricingRecommendationDaily.processing_status == "verwerkt",
+    ).update(
+        {"processing_status": "niet_verwerkt", "processed_at": None, "exported": False},
+        synchronize_session=False,
+    )
+    db.commit()
+
+
+def _geef_afgewezen_claims_vrij(db: Session, job_id: int, lines: list[dict]) -> None:
+    """
+    Regels die in de job door de safety-controle zijn afgewezen, zijn niet
+    daadwerkelijk uitgevoerd: geef hun claim weer vrij zodat ze na correctie
+    opnieuw geëxporteerd kunnen worden.
+    """
+    afgewezen_rec_ids = [
+        l.recommendation_id
+        for l in db.query(PriceExecutionLine).filter(
+            PriceExecutionLine.job_id == job_id,
+            PriceExecutionLine.status != "goedgekeurd",
+        ).all()
+        if l.recommendation_id is not None
+    ]
+    if not afgewezen_rec_ids:
+        return
+    db.query(FactPricingRecommendationDaily).filter(
+        FactPricingRecommendationDaily.id.in_(afgewezen_rec_ids),
+        FactPricingRecommendationDaily.processing_status == "verwerkt",
+    ).update(
+        {"processing_status": "niet_verwerkt", "processed_at": None, "exported": False},
+        synchronize_session=False,
+    )
+    db.commit()
 
 
 def _log_audit(db: Session, gebruiker: str, actie: str, entiteit: str, entiteit_id: str, details: str):

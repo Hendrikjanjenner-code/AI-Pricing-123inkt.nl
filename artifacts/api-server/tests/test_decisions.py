@@ -307,6 +307,145 @@ def test_approved_price_scenario_flows_into_execution(client, admin_headers, db,
         ).delete(synchronize_session=False)
         db.commit()
         _cleanup(db, [sku])
+
+def test_second_export_skips_already_processed_lines(client, admin_headers, db, shop_id):
+    """Dubbel-uitvoer-guard: een klaargezette regel gaat niet nogmaals mee.
+    - Twee opeenvolgende exports: de tweede vindt de al verwerkte regel niet meer.
+    - Een dry-run markeert niets als verwerkt.
+    - Regels van een 'executed' beslissing gaan niet mee in nieuwe jobs."""
+    sku = f"TDEC-{uuid.uuid4().hex[:8]}"
+    datum1 = date.today() - timedelta(days=40)
+    datum2 = date.today() - timedelta(days=41)
+    decision_id = None
+    try:
+        _seed_product(db, sku, shop_id=shop_id, days=0)
+        rec1 = models.FactPricingRecommendationDaily(
+            date=datum1, sku_id=sku, shop_id=shop_id,
+            current_price=20.0, recommended_price=21.0,
+            confidence_score=0.9, reason_code="test_dubbel_export",
+            approval_status="approved", approved_by="test",
+        )
+        db.add(rec1)
+        db.commit()
+
+        # Dry-run neemt de regel mee maar markeert niets als verwerkt
+        dr = client.post("/api/execution/dry-run", json={"datum": str(datum1)}, headers=admin_headers)
+        assert dr.status_code == 200, dr.text
+        db.refresh(rec1)
+        assert rec1.processing_status != "verwerkt"
+
+        # Eerste export: regel gaat mee en wordt verwerkt
+        exp1 = client.post("/api/execution/export-csv", json={"datum": str(datum1)}, headers=admin_headers)
+        assert exp1.status_code == 200, exp1.text
+        db.refresh(rec1)
+        assert rec1.processing_status == "verwerkt"
+        assert rec1.exported is True
+        assert rec1.processed_at is not None
+
+        # Tweede export met dezelfde datum: de regel gaat NIET nogmaals mee
+        exp2 = client.post("/api/execution/export-csv", json={"datum": str(datum1)}, headers=admin_headers)
+        assert exp2.status_code == 404, exp2.text
+        from services.execution_engine import DRY_RUN
+        lijnen = (
+            db.query(models.PriceExecutionLine)
+            .join(models.PriceExecutionJob,
+                  models.PriceExecutionJob.job_id == models.PriceExecutionLine.job_id)
+            .filter(
+                models.PriceExecutionLine.recommendation_id == rec1.id,
+                models.PriceExecutionJob.execution_mode != DRY_RUN,
+            )
+            .count()
+        )
+        assert lijnen == 1, "regel mag maar in één export-job zitten"
+
+        # Regel van een beslissing met status 'executed' gaat niet meer mee,
+        # ook als processing_status (nog) niet is bijgewerkt
+        d = models.Decision(
+            shop_id=shop_id, run_date=date.today(), entity_type="sku",
+            entity_id=sku, title="Test executed", status="executed",
+        )
+        db.add(d)
+        db.flush()
+        decision_id = d.id
+        rec2 = models.FactPricingRecommendationDaily(
+            date=datum2, sku_id=sku, shop_id=shop_id,
+            current_price=20.0, recommended_price=22.0,
+            confidence_score=0.9, reason_code="test_executed_decision",
+            approval_status="approved", approved_by="test",
+            source_decision_id=d.id,
+        )
+        db.add(rec2)
+        db.commit()
+
+        exp3 = client.post("/api/execution/export-csv", json={"datum": str(datum2)}, headers=admin_headers)
+        assert exp3.status_code == 404, exp3.text
+    finally:
+        db.rollback()
+        job_ids = [
+            l.job_id for l in db.query(models.PriceExecutionLine)
+            .filter(models.PriceExecutionLine.sku_id == sku).all()
+        ]
+        if job_ids:
+            db.query(models.PriceExecutionLine).filter(models.PriceExecutionLine.job_id.in_(job_ids)).delete(synchronize_session=False)
+            db.query(models.PriceExecutionJob).filter(models.PriceExecutionJob.job_id.in_(job_ids)).delete(synchronize_session=False)
+        db.query(models.FactPricingRecommendationDaily).filter(
+            models.FactPricingRecommendationDaily.sku_id == sku
+        ).delete(synchronize_session=False)
+        if decision_id:
+            db.query(models.DecisionEvent).filter(models.DecisionEvent.decision_id == decision_id).delete(synchronize_session=False)
+            db.query(models.Decision).filter(models.Decision.id == decision_id).delete(synchronize_session=False)
+        db.commit()
+        _cleanup(db, [sku])
+
+def test_concurrent_exports_execute_line_only_once(client, admin_headers, db, shop_id):
+    """Race-guard: twee gelijktijdige exports van dezelfde klaargezette regel
+    leiden tot precies één uitvoering — de claim is atomisch (conditionele
+    UPDATE), dus maar één verzoek krijgt de regel mee."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    sku = f"TDEC-{uuid.uuid4().hex[:8]}"
+    datum = date.today() - timedelta(days=50)
+    try:
+        _seed_product(db, sku, shop_id=shop_id, days=0)
+        rec = models.FactPricingRecommendationDaily(
+            date=datum, sku_id=sku, shop_id=shop_id,
+            current_price=20.0, recommended_price=21.0,
+            confidence_score=0.9, reason_code="test_race_export",
+            approval_status="approved", approved_by="test",
+        )
+        db.add(rec)
+        db.commit()
+        rec_id = rec.id
+
+        doe_export = lambda _: client.post(
+            "/api/execution/export-csv", json={"datum": str(datum)}, headers=admin_headers)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            resp_a, resp_b = list(pool.map(doe_export, range(2)))
+
+        statussen = sorted([resp_a.status_code, resp_b.status_code])
+        assert statussen in ([200, 404], [200, 200]), (resp_a.text, resp_b.text)
+
+        # Ongeacht de timing: de regel zit in precies één export-job
+        lijnen = db.query(models.PriceExecutionLine).filter(
+            models.PriceExecutionLine.recommendation_id == rec_id
+        ).count()
+        assert lijnen == 1, f"regel is {lijnen}x uitgevoerd i.p.v. 1x"
+        db.refresh(rec)
+        assert rec.processing_status == "verwerkt"
+    finally:
+        db.rollback()
+        job_ids = [
+            l.job_id for l in db.query(models.PriceExecutionLine)
+            .filter(models.PriceExecutionLine.sku_id == sku).all()
+        ]
+        if job_ids:
+            db.query(models.PriceExecutionLine).filter(models.PriceExecutionLine.job_id.in_(job_ids)).delete(synchronize_session=False)
+            db.query(models.PriceExecutionJob).filter(models.PriceExecutionJob.job_id.in_(job_ids)).delete(synchronize_session=False)
+        db.query(models.FactPricingRecommendationDaily).filter(
+            models.FactPricingRecommendationDaily.sku_id == sku
+        ).delete(synchronize_session=False)
+        db.commit()
+        _cleanup(db, [sku])
 def test_shop_isolation_idor(client, admin_headers, db):
     """Beslissingen van een andere shop zijn niet zichtbaar of muteerbaar."""
     sku = f"TDEC-{uuid.uuid4().hex[:8]}"
