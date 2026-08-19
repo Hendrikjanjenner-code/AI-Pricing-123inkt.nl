@@ -105,10 +105,6 @@ SUMMARY_KEEP_RECENT = 6
 MEMORY_EXTRACT_EVERY = 5
 # Few-shot hergebruik: maximaal N voorbeelden per vraag
 FEWSHOT_LIMIT = 3
-# Minimale ts_rank voor few-shot FTS-matches: filtert pure ruis weg maar laat
-# een enkel inhoudelijk overlappend woord (bijv. 'marge') wél door. Een
-# OR-tsquery met één matchend lexeem in een langere vraag geeft rank ~0.0076.
-FTS_MIN_RANK = 0.005
 # Geheugen: maximaal N geheugenitems per gebruiker+organisatie
 MAX_MEMORY_ITEMS = 20
 

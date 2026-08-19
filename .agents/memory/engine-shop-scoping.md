@@ -9,4 +9,4 @@ Rule: every engine and its API must be shop-scoped end-to-end — resolve an exp
 **Uniekheid verschuiven:** een unieke sleutel versmallen of verbreden vereist dat ALLE oude uniekheids-handhavers in de live DB meebewegen; test-DB's die vers uit de ORM worden opgebouwd verbergen dit verschil.
 
 ## Feed-ingest replace-deletes
-De feed-sync (`ingest_feed`) is nu shop-gescopeerd (param `shop_id`, default 1): alle replace-deletes (fact_price_daily, fact_competitor_price_daily) filteren op shop_id en alle geschreven rijen krijgen shop_id. Omdat sku_id een GLOBALE primary key is, worden feed-sku's die al bij een andere winkel horen volledig overgeslagen (insert zou crashen, update zou de andere winkel overschrijven).
+Replace-then-insert ingest must scope its deletes to the shop it writes for, or one shop's sync wipes another's facts. SKU-ids are globally unique: a feed row whose sku already belongs to another shop must be skipped explicitly (insert would crash, update would overwrite the other shop).

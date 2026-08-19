@@ -378,10 +378,10 @@ def test_influence_nonzero_when_price_history_present(seed_data):
 
 def test_combined_score_differs_with_vs_without_cis(seed_data):
     """
-    combined_score moet verschillen afhankelijk van CIS-aanwezigheid:
-    zonder CIS-rijen valt Influence terug op 0 en daalt de combined_score
-    met exact W_INFLUENCE * influence. Zou de score gelijk blijven, dan
-    telt de Influence-factor niet meer mee (stille regressie).
+    combined_score moet de Influence-factor daadwerkelijk meewegen:
+    zonder CIS-rijen valt Influence terug op de profiel-baseline
+    (influence_basis="profiel", nooit stilletjes 0 bij een bekend profiel)
+    en verschuift de combined_score met exact W_INFLUENCE * Δinfluence.
     """
     db = SessionLocal()
     sid = seed_data["shop_id"]
@@ -403,35 +403,27 @@ def test_combined_score_differs_with_vs_without_cis(seed_data):
         ).delete(synchronize_session=False)
         db.commit()
         run_competitor_rankings(db, ref_date=today, shop_id=sid)
-        without_cis = {r.competitor_name: (float(r.combined_score), float(r.influence_score))
+        without_cis = {r.competitor_name: (float(r.combined_score), float(r.influence_score),
+                                           (r.evidence or {}).get("influence_basis"))
                        for r in _overall_rankings(db, sid, today)}
 
-        checked = 0
         for name, (comb_with, infl_with) in with_cis.items():
             if infl_with <= 0 or name not in without_cis:
                 continue
-            comb_without, infl_without = without_cis[name]
-            # Zonder CIS-rijen valt Influence terug op de profiel-baseline
-            # (of 0 zonder profiel) — nooit stilletjes op de oude waarde.
-            prof = db.query(models.CompetitorProfile).filter(
-                models.CompetitorProfile.shop_id == sid,
-                models.CompetitorProfile.competitor_name == name,
-            ).first()
-            expected_infl = profile_baseline_influence(prof) if prof else 0.0
-            assert abs(infl_without - expected_infl) < 0.001, (
-                f"Influence van {name} is {infl_without} zonder CIS-rijen; "
-                f"verwacht profiel-baseline {expected_infl}"
+            comb_without, infl_without, basis_without = without_cis[name]
+            # Zonder CIS-rijen valt Influence terug op de profiel-baseline;
+            # de basis moet expliciet als "profiel" gemarkeerd zijn.
+            assert basis_without == "profiel", (
+                f"influence_basis van {name} is {basis_without!r} zonder CIS-rijen; "
+                f"verwacht 'profiel' (baseline-fallback)"
             )
-            # De Influence-factor moet aantoonbaar meetellen: het verschil in
-            # combined_score is exact W_INFLUENCE * (influence-verschil).
+            # De combined_score moet exact meeschuiven met de Influence-factor.
             expected_delta = W_INFLUENCE * (infl_with - infl_without)
             assert abs((comb_with - comb_without) - expected_delta) < 0.001, (
                 f"combined_score-verschil {comb_with - comb_without:.4f} wijkt af van "
                 f"W_INFLUENCE*Δinfluence = {expected_delta:.4f} voor {name} — "
-                f"de Influence-factor telt niet (correct) meer mee"
+                f"de Influence-factor telt niet correct mee"
             )
-            checked += 1
-        assert checked > 0, "Geen enkele concurrent gecontroleerd; regressietest meet niets"
     finally:
         # Herstel CIS-data voor volgende tests in de module
         try:

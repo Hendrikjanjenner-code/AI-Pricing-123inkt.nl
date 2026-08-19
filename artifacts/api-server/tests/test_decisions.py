@@ -447,7 +447,51 @@ def test_entity_type_filter_isolates_sku_and_category(client, admin_headers, db)
             db.query(models.Decision).filter(models.Decision.id.in_(cat_dids)).delete(synchronize_session=False)
         _cleanup(db, [sku])
 
+def test_build_category_decision_empty_category_returns_none(client, db):
+    """Lege categorie (geen producten) → None: expliciet overslaan i.p.v. lege beslissing."""
+    decision, n_gaps = decision_engine._build_category_decision(
+        db, date.today(), 1, f"LeegCat-{uuid.uuid4().hex[:6]}", [], []
+    )
+    assert decision is None
+    assert n_gaps == 0
+    db.rollback()
 
+def test_category_cap_defers_explicitly_with_stable_order(client, db):
+    """Meer categorieën dan het budget: de overloop wordt expliciet gerapporteerd
+    (categories_deferred) en de selectie is deterministisch (alfabetisch bij
+    gelijk signaalgewicht) — geen stille, willekeurige gaten in het dashboard."""
+    n_cats = decision_engine.MAX_DECISIONS_PER_RUN + 5
+    other = models.DimShop(shop_code=f"tshop-{uuid.uuid4().hex[:6]}", name="Cap shop")
+    db.add(other)
+    db.commit()
+    skus, cats = [], []
+    try:
+        for i in range(n_cats):
+            cat = f"CapCat-{i:03d}"
+            sku = f"TDEC-CAP-{i:03d}-{uuid.uuid4().hex[:4]}"
+            cats.append(cat)
+            skus.append(sku)
+            db.add(models.DimProduct(
+                sku_id=sku, product_name=f"Cap {sku}", category=cat,
+                current_price=10.0, cost_price=5.0, min_price=7.0, max_price=14.0,
+                stock_quantity=10, lifecycle_status="active", shop_id=other.id,
+            ))
+        # Bewust géén signalen: alle categorieën hebben gelijk gewicht
+        db.commit()
+
+        result = run_decision_engine(db, shop_id=other.id)
+        # Geen SKU-signalen → volledig budget voor categorieën
+        assert result["decisions_created"] == decision_engine.MAX_DECISIONS_PER_RUN
+        assert result["categories_deferred"] == n_cats - decision_engine.MAX_DECISIONS_PER_RUN
+
+        decided = sorted(d.entity_id for d in db.query(models.Decision).filter(
+            models.Decision.shop_id == other.id,
+            models.Decision.entity_type == "category",
+        ).all())
+        # Deterministisch: exact de eerste N categorieën op alfabet
+        assert decided == sorted(cats)[:decision_engine.MAX_DECISIONS_PER_RUN]
+    finally:
+        _cleanup(db, skus, extra_shop_id=other.id)
 def test_single_entity_failure_does_not_erase_prior_work(client, db, monkeypatch):
     """Savepoint per entiteit: een crash bij één SKU wist eerdere beslissingen niet."""
     ok_sku = f"TDEC-{uuid.uuid4().hex[:8]}"
@@ -481,3 +525,147 @@ def test_single_entity_failure_does_not_erase_prior_work(client, db, monkeypatch
         assert today_count == 1
     finally:
         _cleanup(db, [ok_sku, bad_sku])
+
+def test_build_category_decision_mix_shift_requires_private_label(client, db):
+    """Mix-shift scenario alleen wanneer er huismerk-SKU's naast A-merken staan."""
+    cat = f"UnitCat-PL-{uuid.uuid4().hex[:6]}"
+
+    def make_products(pl_flags):
+        rows = []
+        for flag in pl_flags:
+            sku = f"TDEC-PL-{uuid.uuid4().hex[:6]}"
+            p = models.DimProduct(
+                sku_id=sku, product_name=f"PL {sku}", category=cat,
+                current_price=12.0, cost_price=6.0, min_price=9.0, max_price=16.0,
+                stock_quantity=30, lifecycle_status="active", shop_id=1,
+                is_private_label=flag,
+            )
+            db.add(p)
+            db.flush()
+            db.add(models.FactSalesDaily(
+                sku_id=sku, date=date.today(), shop_id=1,
+                units_sold=2, revenue=24.0, margin=12.0, margin_pct=50.0,
+            ))
+            rows.append(p)
+        return rows
+
+    def scenario_types(decision):
+        return {
+            s.scenario_type
+            for s in db.query(models.DecisionScenario).filter(
+                models.DecisionScenario.decision_id == decision.id
+            ).all()
+        }
+
+    try:
+        # Mix van huismerk + A-merk → mix-shift scenario aanwezig
+        d1, _ = decision_engine._build_category_decision(
+            db, date.today(), 1, cat, [], make_products([True, False])
+        )
+        assert "house_brand_action" in scenario_types(d1)
+        db.rollback()
+
+        # Alleen A-merken → geen mix-shift, wel expliciete gap
+        d2, _ = decision_engine._build_category_decision(
+            db, date.today(), 1, cat, [], make_products([False, False])
+        )
+        assert "house_brand_action" not in scenario_types(d2)
+        assert any("huismerk" in g for g in d2.data_gaps)
+    finally:
+        db.rollback()
+
+def test_run_decision_engine_category_without_signals_gets_decision(client, admin_headers, db):
+    """Categorie met producten maar zonder actieve signalen krijgt tóch een
+    beslissing (baseline) — het dashboard blijft niet stilletjes leeg."""
+    cat = f"TestCat-NoSig-{uuid.uuid4().hex[:6]}"
+    sku = f"TDEC-NSG-{uuid.uuid4().hex[:6]}"
+    other = models.DimShop(shop_code=f"tshop-{uuid.uuid4().hex[:6]}", name="No-signal shop")
+    db.add(other)
+    db.commit()
+    try:
+        db.add(models.DimProduct(
+            sku_id=sku, product_name=f"Nosig {sku}", category=cat,
+            current_price=15.0, cost_price=8.0, min_price=10.0, max_price=20.0,
+            stock_quantity=50, lifecycle_status="active", shop_id=other.id,
+        ))
+        # Bewust géén signalen; ook geen verkoop → expliciete data_gaps
+        db.commit()
+
+        result = run_decision_engine(db, shop_id=other.id)
+        assert result["decisions_created"] >= 1
+
+        cat_decisions = db.query(models.Decision).filter(
+            models.Decision.shop_id == other.id,
+            models.Decision.entity_type == "category",
+            models.Decision.entity_id == cat,
+        ).all()
+        assert len(cat_decisions) == 1, "Categorie zonder signalen moet een baseline-beslissing krijgen"
+        d = cat_decisions[0]
+        assert d.recommended_scenario_id is not None
+        assert d.signal_ids == []
+        assert any("data unavailable" in g for g in (d.data_gaps or []))
+    finally:
+        _cleanup(db, [sku], extra_shop_id=other.id)
+def test_build_category_decision_no_sales_fills_data_gaps(client, db):
+    """Geen verkoophistorie → beslissing mét expliciete data_gaps, impactvelden None."""
+    cat = f"UnitCat-NS-{uuid.uuid4().hex[:6]}"
+    sku = f"TDEC-UNS-{uuid.uuid4().hex[:6]}"
+    try:
+        p = models.DimProduct(
+            sku_id=sku, product_name=f"Nosales {sku}", category=cat,
+            current_price=10.0, cost_price=5.0, min_price=7.0, max_price=14.0,
+            stock_quantity=20, lifecycle_status="active", shop_id=1,
+        )
+        db.add(p)
+        db.flush()
+
+        decision, n_gaps = decision_engine._build_category_decision(
+            db, date.today(), 1, cat, [], [p]
+        )
+        assert decision is not None
+        assert n_gaps >= 1
+        assert any("verkoophistorie" in g for g in decision.data_gaps)
+        assert any("data unavailable" in g for g in decision.data_gaps)
+        # Impactcijfers zijn expliciet onbekend, niet stilletjes 0
+        promo = db.query(models.DecisionScenario).filter(
+            models.DecisionScenario.decision_id == decision.id,
+            models.DecisionScenario.scenario_type == "promotion",
+        ).one()
+        assert promo.expected_units is None
+        assert promo.expected_revenue is None
+        assert promo.expected_margin is None
+    finally:
+        db.rollback()
+
+def test_run_decision_engine_counts_category_decisions(client, admin_headers, db):
+    """run_decision_engine pikt categorieën op uit SKU-signalen en telt ze in de return."""
+    cat = f"TestCat-RC-{uuid.uuid4().hex[:6]}"
+    sku = f"TDEC-RC-{uuid.uuid4().hex[:6]}"
+    other = models.DimShop(shop_code=f"tshop-{uuid.uuid4().hex[:6]}", name="Count shop")
+    db.add(other)
+    db.commit()
+    try:
+        db.add(models.DimProduct(
+            sku_id=sku, product_name=f"Count {sku}", category=cat,
+            current_price=15.0, cost_price=8.0, min_price=10.0, max_price=20.0,
+            stock_quantity=50, lifecycle_status="active", shop_id=other.id,
+        ))
+        for i in range(10):
+            db.add(models.FactSalesDaily(
+                sku_id=sku, date=date.today() - timedelta(days=i), shop_id=other.id,
+                units_sold=3, revenue=45.0, margin=21.0, margin_pct=46.7,
+            ))
+        _seed_signal(db, sku, shop_id=other.id)
+        db.commit()
+
+        # Geïsoleerde shop: exact 1 SKU- en 1 categoriebeslissing verwacht
+        result = run_decision_engine(db, shop_id=other.id)
+        assert result["decisions_created"] == 2
+        cat_decisions = db.query(models.Decision).filter(
+            models.Decision.shop_id == other.id,
+            models.Decision.entity_type == "category",
+        ).all()
+        assert len(cat_decisions) == 1
+        assert cat_decisions[0].entity_id == cat
+    finally:
+        _cleanup(db, [sku], extra_shop_id=other.id)

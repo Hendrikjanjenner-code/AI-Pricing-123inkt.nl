@@ -139,15 +139,22 @@ def run_decision_engine(db: Session, shop_id: int | None = None) -> dict:
     # Leid categorie-beslissingen af uit de actieve SKU-signalen: groepeer de
     # signalen van alle SKU's in dezelfde categorie (via DimProduct.category).
     # Er zijn geen aparte category-type signals nodig.
-    per_category: dict[str, list] = {}
+    # Start met álle niet-lege categorieën (ook zonder actieve signalen) zodat
+    # categoriebeslissingen niet stilletjes leeg blijven; voeg SKU-signalen toe.
+    per_category: dict[str, list] = {c: [] for c in products_by_category}
     for sku_id, sigs in per_sku.items():
         p = products.get(sku_id)
         if p and p.category:
             per_category.setdefault(p.category, []).extend(sigs)
 
-    ranked_cat = sorted(per_category.items(), key=lambda kv: entity_weight(kv[1]), reverse=True)
-    # Geef categorieën het resterende budget (minimaal 10 slots).
+    # Deterministische volgorde: zwaarste signalen eerst, daarna alfabetisch
+    # zodat signaalloze categorieën (gelijk gewicht) stabiel gerangschikt zijn.
+    ranked_cat = sorted(per_category.items(), key=lambda kv: (-entity_weight(kv[1]), kv[0]))
+    # Geef categorieën het resterende budget (minimaal 10 slots). Categorieën
+    # buiten het budget worden NIET stilletjes overgeslagen maar expliciet
+    # geteld en gerapporteerd als categories_deferred.
     cat_budget = max(10, MAX_DECISIONS_PER_RUN - created)
+    categories_deferred = max(0, len(ranked_cat) - cat_budget)
     for category_id, cat_sigs in ranked_cat[:cat_budget]:
         if category_id in locked_entities:
             skipped += 1
@@ -168,7 +175,12 @@ def run_decision_engine(db: Session, shop_id: int | None = None) -> dict:
             continue
 
     db.commit()
-    return {"decisions_created": created, "entities_skipped": skipped, "data_gaps_total": gaps_total}
+    return {
+        "decisions_created": created,
+        "entities_skipped": skipped,
+        "data_gaps_total": gaps_total,
+        "categories_deferred": categories_deferred,
+    }
 
 
 def _build_category_decision(
@@ -180,6 +192,11 @@ def _build_category_decision(
     Ontbrekende data → expliciete gap (§56).
     Returns (decision, n_gaps).
     """
+    # Lege categorie (geen producten): geen zinvolle beslissing mogelijk.
+    # Expliciet overslaan (skip) in plaats van een lege beslissing aanmaken.
+    if not cat_products:
+        return None, 0
+
     gaps: list[str] = []
 
     # Aggregeer verkoopdata over alle SKU's in de categorie
@@ -209,8 +226,6 @@ def _build_category_decision(
             total_revenue += sum(_f(r.revenue, 0.0) for r in sales)
             total_margin += sum(_f(r.margin, 0.0) for r in sales)
 
-    if not cat_products:
-        gaps.append("data unavailable: geen producten gevonden in deze categorie")
     if not has_sales:
         gaps.append("data unavailable: geen verkoophistorie in deze categorie — impactcijfers niet berekenbaar")
         total_units = total_revenue = total_margin = None  # type: ignore[assignment]
