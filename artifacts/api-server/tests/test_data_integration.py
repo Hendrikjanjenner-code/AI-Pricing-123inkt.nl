@@ -202,6 +202,106 @@ def test_upload_gets_batch_id_and_duplicate_count(client, admin_headers):
             db.close()
 
 
+# ── Onbekende kolommen in de product-/Paper_Copy-import ────────────────────
+
+def test_products_upload_unknown_columns_warn(client, admin_headers):
+    """Onbekende kolommen ('naam' i.p.v. 'product_name') mogen niet stil
+    verdwijnen — zelfde patroon als de supplier-contentimport (§23)."""
+    sku = f"TST-{uuid.uuid4().hex[:8].upper()}"
+    csv = (f"sku_id,naam,gewicht_gram,product_name,paper_size\n"
+           f"{sku},Testproduct,80,Testproduct,A4\n").encode()
+    resp = client.post("/api/uploads/products",
+                       files={"file": ("papercopy.csv", csv, "text/csv")},
+                       headers=admin_headers)
+    try:
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["rows_processed"] == 1
+        w = [x for x in body["warnings"] if "Onbekende kolommen" in x]
+        assert len(w) == 1
+        assert "naam" in w[0] and "gewicht_gram" in w[0]
+        # Bekende kolommen worden NIET als onbekend gemeld
+        assert "paper_size" not in w[0].split("Geldige kolommen")[0]
+        # ...en de waarschuwing staat ook in het ImportJob-foutlog
+        db = SessionLocal()
+        try:
+            job = db.query(models.ImportJob).get(body["job_id"])
+            assert any("Onbekende kolommen" in (e.get("bericht") or "")
+                       for e in (job.error_log or []))
+        finally:
+            db.close()
+    finally:
+        db = SessionLocal()
+        try:
+            db.query(models.DimProduct).filter(models.DimProduct.sku_id == sku).delete()
+            db.commit()
+        finally:
+            db.close()
+
+
+def test_products_upload_known_columns_no_unknown_warning(client, admin_headers):
+    sku = f"TST-{uuid.uuid4().hex[:8].upper()}"
+    csv = (f"sku_id,product_name,cost_price,paper_size,paper_weight_gsm,sheets_per_pack\n"
+           f"{sku},Kopieerpapier A4,3.10,A4,80,500\n").encode()
+    resp = client.post("/api/uploads/products",
+                       files={"file": ("papercopy_ok.csv", csv, "text/csv")},
+                       headers=admin_headers)
+    try:
+        assert resp.status_code == 200, resp.text
+        assert not [x for x in resp.json()["warnings"] if "Onbekende kolommen" in x]
+    finally:
+        db = SessionLocal()
+        try:
+            db.query(models.DimProduct).filter(models.DimProduct.sku_id == sku).delete()
+            db.commit()
+        finally:
+            db.close()
+
+
+def test_products_upload_unknown_column_survives_log_cap(client, admin_headers):
+    """Onbekende-kolommenwaarschuwing mag niet wegvallen uit het ImportJob-
+    foutlog als er >100 rij-waarschuwingen (bv. duplicaten) zijn."""
+    sku = f"TST-{uuid.uuid4().hex[:8].upper()}"
+    lines = ["sku_id,naamtypo,product_name"]
+    # 1 originele rij + 120 duplicaten → 120 duplicaat-waarschuwingen
+    lines += [f"{sku},x,Testproduct"] * 121
+    csv = ("\n".join(lines) + "\n").encode()
+    resp = client.post("/api/uploads/products",
+                       files={"file": ("veel_dups.csv", csv, "text/csv")},
+                       headers=admin_headers)
+    try:
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert any("Onbekende kolommen" in w and "naamtypo" in w
+                   for w in body["warnings"])
+        db = SessionLocal()
+        try:
+            job = db.get(models.ImportJob, body["job_id"])
+            assert any("Onbekende kolommen" in (e.get("bericht") or "")
+                       for e in (job.error_log or []))
+            assert any("Onbekende kolommen" in w for w in (job.warnings_json or []))
+        finally:
+            db.close()
+    finally:
+        db = SessionLocal()
+        try:
+            db.query(models.DimProduct).filter(models.DimProduct.sku_id == sku).delete()
+            db.commit()
+        finally:
+            db.close()
+
+
+def test_products_upload_unknown_header_without_rows_warns(client, admin_headers):
+    # Header-only bestand: waarschuwing moet er tóch komen (geen stille no-op)
+    csv = b"sku_id,kleurcode\n"
+    resp = client.post("/api/uploads/products",
+                       files={"file": ("leeg.csv", csv, "text/csv")},
+                       headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    w = [x for x in resp.json()["warnings"] if "Onbekende kolommen" in x]
+    assert len(w) == 1 and "kleurcode" in w[0]
+
+
 # ── Microsoft Ads: idempotente persistentie ─────────────────────────────────
 
 def test_ms_ads_persist_rows_idempotent():

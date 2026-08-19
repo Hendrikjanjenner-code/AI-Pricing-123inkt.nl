@@ -57,3 +57,4 @@
 - [Granular authz action permissions](authz-action-permissions.md) — write-methods need per-segment action perms; require_role defers to a matching permission rule; fresh test-viewers need grant_legacy_views.
 - [Lifespan bootstrap once per process](test-startup-bootstrap.md) — DDL/migrations/seeding in main.py run once per process; keep new expensive startup work inside the guard.
 - [Budget-UI toelating](budget-ui-authoritative.md) — UI-blokkade moet de server-reserveringsregel (incl. upfront tokens) volgen via een exhausted-veld, niet eigen tellers.
+- [Upload warning caps](upload-warning-caps.md) — capped ImportJob logs evict structural warnings; pin "Onbekende kolommen"-type warnings to the front before persisting.

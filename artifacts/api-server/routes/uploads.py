@@ -56,6 +56,11 @@ async def _process_upload(
         rows, duplicates = _dedupe_rows(rows, file_warnings)
         processed, failed, warnings = processor(rows, db)
         warnings = file_warnings + warnings
+        # Structurele waarschuwingen (zoals onbekende kolommen) mogen nooit
+        # wegvallen door de cap op warnings_json/error_log wanneer er veel
+        # rij-waarschuwingen (bv. duplicaten) zijn — zet ze vooraan.
+        warnings = ([w for w in warnings if w.startswith("Onbekende kolommen")]
+                    + [w for w in warnings if not w.startswith("Onbekende kolommen")])
         job.rows_processed = processed
         job.rows_failed = failed
         job.rows_duplicates = duplicates
@@ -151,8 +156,37 @@ def _enforce_row_validation(row: dict, rij: int, warnings: list) -> bool:
     return not invalid
 
 
+# Alle kolommen die de product-/Paper_Copy-import daadwerkelijk leest
+# (incl. pilot-aliassen) of valideert. Al het overige wordt stil genegeerd
+# en moet daarom als waarschuwing worden gerapporteerd (zelfde patroon als
+# de supplier-contentimport, §23).
+_PRODUCT_BEKENDE_KOLOMMEN: set[str] = {
+    "sku_id", "own_sku_id",
+    "product_name", "brand", "category", "subcategory", "product_group",
+    "strategy_type", "lifecycle_status",
+    "is_private_label", "is_a_brand",
+    "cost_price", "cost_price_exc_vat", "inkoopprijs",
+    "current_price", "current_sales_price_inc_vat", "current_sales_price",
+    "verkoopprijs",
+    "min_price", "min_price_inc_vat",
+    "max_price", "max_price_inc_vat",
+    # Paper_Copy-specifieke velden
+    "paper_size", "paper_weight_gsm", "sheets_per_pack",
+} | _EAN_KOLOMMEN_SET
+
+
+def _collect_unknown_columns(rows, known: set[str]) -> set[str]:
+    """Bepaal onbekende kolommen op basis van de bestandsheaders zelf —
+    onafhankelijk van rij-geldigheid en ook bij een bestand zonder datarijen."""
+    headers = list(getattr(rows, "headers", None) or [])
+    if not headers and rows:
+        headers = [k.lower().strip() for k in rows[0].keys() if isinstance(k, str)]
+    return {h for h in headers if h and h.lower().strip() not in known}
+
+
 def _process_products(rows, db: Session):
     processed, failed, warnings = 0, 0, []
+    unknown_columns = _collect_unknown_columns(rows, _PRODUCT_BEKENDE_KOLOMMEN)
     for i, row in enumerate(rows, start=1):
         try:
             if not _enforce_row_validation(row, i, warnings):
@@ -234,6 +268,12 @@ def _process_products(rows, db: Session):
         except Exception as e:
             warnings.append(f"Row error: {str(e)}")
             failed += 1
+    if unknown_columns:
+        warnings.insert(0, (
+            f"Onbekende kolommen genegeerd: {', '.join(sorted(unknown_columns))}. "
+            f"Waarden in deze kolommen zijn NIET geïmporteerd. Geldige kolommen: "
+            f"{', '.join(sorted(_PRODUCT_BEKENDE_KOLOMMEN))}."
+        ))
     db.commit()
     return processed, failed, warnings
 
