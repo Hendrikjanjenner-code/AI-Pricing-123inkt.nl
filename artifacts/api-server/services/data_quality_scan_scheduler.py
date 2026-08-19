@@ -18,10 +18,19 @@ zonder configuratie wordt de alert alleen gelogd.
 Elke run persisteert een ImportJob (upload_type="data_quality_scan") zodat
 de scan-timestamp zichtbaar is op de Data Quality-pagina.
 
+Mislukt de scan zélf meerdere keren op rij, dan gaat er één alert naar de
+standaard alert-ontvangers (zelfde kanalen: SMTP/webhook/log). De teller is
+gebaseerd op de ImportJob-historie (aantal opeenvolgende 'fout'-runs), dus
+robuust tegen herstarts; er wordt alleen gealarmeerd op het moment dat de
+drempel exact wordt bereikt (geen herhaling elke nacht) en een geslaagde run
+reset de teller vanzelf.
+
 Omgevingsvariabelen:
   DISABLE_DQ_SCAN          — zet op true om de nachtelijke scan uit te schakelen
   DQ_SCAN_INTERVAL         — interval in seconden (standaard 86400 = 24 uur)
   DQ_SCAN_STARTUP_DELAY    — aanloopvertraging in seconden (standaard 120)
+  DQ_SCAN_FAILURE_ALERT_THRESHOLD — aantal opeenvolgende mislukte runs waarna
+                             een alert uitgaat (standaard 2)
 """
 from __future__ import annotations
 
@@ -36,6 +45,7 @@ DEFAULT_INTERVAL_SECONDS = 24 * 60 * 60
 DEFAULT_STARTUP_DELAY = 120
 
 SCAN_JOB_TYPE = "data_quality_scan"
+DEFAULT_FAILURE_ALERT_THRESHOLD = 2
 
 
 def _int_env(name: str, default: int) -> int:
@@ -161,7 +171,26 @@ def _notify_issue(db, row, kind: str) -> None:
             row.issue_code, label.lower(), row.message,
         )
 
+def _consecutive_failed_scans(db) -> int:
+    """Tel het aantal meest recente, opeenvolgende 'fout'-scanruns.
 
+    Loopt door de ImportJob-historie (nieuwste eerst) en stopt bij de eerste
+    run die niet 'fout' is. Persistente teller: overleeft herstarts en reset
+    automatisch zodra een run slaagt.
+    """
+    import models
+    count = 0
+    q = (
+        db.query(models.ImportJob.status)
+        .filter(models.ImportJob.upload_type == SCAN_JOB_TYPE)
+        .order_by(models.ImportJob.id.desc())
+    )
+    for (status,) in q.yield_per(50):
+        if status == "fout":
+            count += 1
+        else:
+            break
+    return count
 def run_scan_once() -> dict:
     """
     Voer één datakwaliteits-scan uit (blokkerend — bedoeld voor asyncio.to_thread).
@@ -248,6 +277,19 @@ def run_scan_once() -> dict:
             job.completed_at = datetime.utcnow()
             db.add(job)
             db.commit()
+
+            # Herhaaldelijk mislukte scans: alarmeer beheerders precies één
+            # keer, op het moment dat de drempel wordt bereikt. Een geslaagde
+            # run onderbreekt de reeks en reset de teller automatisch.
+            threshold = _int_env(
+                "DQ_SCAN_FAILURE_ALERT_THRESHOLD", DEFAULT_FAILURE_ALERT_THRESHOLD
+            )
+            consecutive = _consecutive_failed_scans(db)
+            if consecutive == threshold:
+                try:
+                    _notify_scan_failure(db, consecutive, job.error_message or "")
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("DQ-scan: falen-alert versturen mislukte: %s", exc)
         except Exception:  # noqa: BLE001
             db.rollback()
         raise
@@ -276,3 +318,33 @@ async def _scan_loop() -> None:
 def start_dq_scan_scheduler() -> asyncio.Task:
     """Start de nachtelijke datakwaliteits-scan als asyncio-achtergrondtaak."""
     return asyncio.get_event_loop().create_task(_scan_loop())
+
+def _notify_scan_failure(db, consecutive: int, error_message: str) -> None:
+    """Alarmeer de standaard ontvangers dat de nachtscan herhaaldelijk faalt."""
+    from services.health_notifier import get_alert_recipients, _send_email, _send_webhook
+
+    recipients = get_alert_recipients(db)
+    subject = (
+        f"[AI Pricing] Nachtelijke datakwaliteits-scan is {consecutive}x op rij mislukt"
+    )
+    body = (
+        f"De nachtelijke datakwaliteits-scan is {consecutive} keer op rij mislukt.\n\n"
+        f"Zolang de scan faalt, worden nieuwe datakwaliteitsissues NIET gedetecteerd\n"
+        f"en gaan er geen issue-alerts uit.\n\n"
+        f"Laatste foutmelding:\n{(error_message or '-')[:1500]}\n\n"
+        f"Controleer de serverlogs en het Data Quality Center. Na een geslaagde run\n"
+        f"reset de teller vanzelf.\n"
+    )
+    payload = {
+        "type": "data_quality_scan_failure",
+        "consecutive_failures": consecutive,
+        "error": (error_message or "")[:500],
+    }
+    emailed = _send_email(recipients, subject, body)
+    hooked = _send_webhook(subject, body, payload)
+    if not emailed and not hooked:
+        logger.warning(
+            "DQ-scan: %d opeenvolgende mislukte runs, maar er is geen meldingskanaal "
+            "geconfigureerd (SMTP_HOST / ALERT_WEBHOOK_URL). Fout: %s",
+            consecutive, (error_message or "")[:500],
+        )

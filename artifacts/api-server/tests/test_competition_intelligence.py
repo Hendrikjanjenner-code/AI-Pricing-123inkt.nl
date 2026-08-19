@@ -25,6 +25,9 @@ SKU_B = f"{PFX}-B"
 COMP_1 = f"{PFX}-shop1.nl"
 COMP_2 = f"{PFX}-shop2.nl"
 
+# Constanten voor elasticiteits-degradatietests
+ED_PFX = f"EDTEST{uuid.uuid4().hex[:6]}"
+
 # Constanten voor warn_suspicious_matches-tests (taak 47)
 WM_PFX = f"WMTEST{uuid.uuid4().hex[:6]}"
 WM_SKU = f"{WM_PFX}-sku"

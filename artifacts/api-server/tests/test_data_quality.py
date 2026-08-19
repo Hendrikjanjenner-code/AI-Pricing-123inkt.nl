@@ -758,6 +758,17 @@ class TestFeedUnreachable:
             pytest.skip("Dev-DB bevat een recentere echte sync-job; scenario "
                         "'oude mislukking zonder nieuwe pogingen' niet opbouwbaar")
         try:
+            # De detector kijkt alleen naar de méést recente priceshape-job;
+            # als de gedeelde dev-DB intussen een nieuwere (echte) sync-job
+            # heeft, is dit scenario niet reproduceerbaar.
+            newest = (
+                db.query(models.ImportJob)
+                .filter(models.ImportJob.upload_type == "api_sync_priceshape")
+                .order_by(models.ImportJob.created_at.desc())
+                .first())
+            if newest is None or newest.id != fail_id:
+                pytest.skip("Dev-DB bevat een recentere PriceShape-sync; "
+                            "oud-falen-scenario niet reproduceerbaar")
             detected = _detect_issues(db, db.query(models.DimProduct).count())
             issue = next(d for d in detected if d["issue_code"] == "FEED_UNREACHABLE")
             if recent_success:
@@ -1571,6 +1582,8 @@ class TestNightScanAlerts:
             db.close()
 
     def test_failed_scan_registers_fout_importjob(self, client):
+        # _notify_scan_failure ook mocken zodat een toevallige reeks eerdere
+        # 'fout'-jobs in de gedeelde DB geen echte alert-poging triggert.
         db = SessionLocal()
         job_ids = set()
         since = self._max_job_id(db)
@@ -1583,7 +1596,8 @@ class TestNightScanAlerts:
 
             with patch.object(dq_module, "_detect_issues",
                               side_effect=RuntimeError(boom_msg)), \
-                 patch("services.data_quality_scan_scheduler._notify_issue", notify):
+                 patch("services.data_quality_scan_scheduler._notify_issue", notify), \
+                 patch("services.data_quality_scan_scheduler._notify_scan_failure"):
                 with pytest.raises(RuntimeError):
                     run_scan_once()
 
@@ -1602,3 +1616,113 @@ class TestNightScanAlerts:
                 ).delete(synchronize_session=False)
                 db.commit()
             db.close()
+
+class TestNightScanFailureAlerts:
+    """run_scan_once(): alert na N opeenvolgende 'fout'-runs, reset bij herstel."""
+
+    THRESHOLD_ENV = {"DQ_SCAN_FAILURE_ALERT_THRESHOLD": "2"}
+
+    def _insert_success_job(self, db, job_ids):
+        """Synthetische geslaagde scanjob — doorbreekt een bestaande fout-reeks."""
+        job = models.ImportJob(
+            upload_type=SCAN_JOB_TYPE,
+            filename="test-reset",
+            status="geimporteerd",
+            uploaded_by="system-dq-scan",
+            source="Systeem",
+            completed_at=datetime.utcnow(),
+        )
+        db.add(job)
+        db.commit()
+        job_ids.add(job.id)
+        return job
+
+    def _fail_once(self, db, job_ids, since, failure_calls, msg="scan kapot (test)"):
+        """Draai run_scan_once met falende detectie; verzamel falen-alerts."""
+        def on_failure(_db, consecutive, error_message):
+            failure_calls.append((consecutive, error_message))
+
+        with patch.object(dq_module, "_detect_issues",
+                          side_effect=RuntimeError(msg)), \
+             patch("services.data_quality_scan_scheduler._notify_issue"), \
+             patch("services.data_quality_scan_scheduler._notify_scan_failure",
+                   side_effect=on_failure), \
+             patch.dict(os.environ, self.THRESHOLD_ENV):
+            with pytest.raises(RuntimeError):
+                run_scan_once()
+        db.expire_all()
+        job = (db.query(models.ImportJob)
+               .filter(models.ImportJob.upload_type == SCAN_JOB_TYPE,
+                       models.ImportJob.id > since)
+               .order_by(models.ImportJob.id.desc()).first())
+        assert job is not None and job.status == "fout"
+        job_ids.add(job.id)
+        return job.id
+
+    def _run_success(self, db, job_ids, since):
+        """Echte geslaagde run (echte detecties, issue-notifier gemockt)."""
+        with patch("services.data_quality_scan_scheduler._notify_issue"), \
+             patch.dict(os.environ, self.THRESHOLD_ENV):
+            run_scan_once()
+        db.expire_all()
+        job = (db.query(models.ImportJob)
+               .filter(models.ImportJob.upload_type == SCAN_JOB_TYPE,
+                       models.ImportJob.id > since)
+               .order_by(models.ImportJob.id.desc()).first())
+        assert job is not None and job.status == "geimporteerd"
+        job_ids.add(job.id)
+        return job.id
+
+    def _cleanup(self, db, job_ids):
+        if job_ids:
+            db.query(models.ImportJob).filter(
+                models.ImportJob.id.in_(list(job_ids))
+            ).delete(synchronize_session=False)
+            db.commit()
+        db.close()
+
+    def test_alert_fires_once_at_threshold_and_not_again(self, client):
+        db = SessionLocal()
+        job_ids = set()
+        try:
+            since = self._insert_success_job(db, job_ids).id
+            failure_calls = []
+            boom = f"detectie kapot (test {uuid.uuid4().hex[:8]})"
+
+            # Run 1 (fout): onder de drempel → geen alert
+            since = self._fail_once(db, job_ids, since, failure_calls, boom)
+            assert failure_calls == [], "Eerste mislukte run mag nog niet alarmeren"
+
+            # Run 2 (fout): drempel bereikt → precies één alert met teller=2
+            since = self._fail_once(db, job_ids, since, failure_calls, boom)
+            assert len(failure_calls) == 1
+            consecutive, error_message = failure_calls[0]
+            assert consecutive == 2
+            assert boom in error_message
+
+            # Run 3 (fout): boven de drempel → geen herhaalde alert
+            self._fail_once(db, job_ids, since, failure_calls, boom)
+            assert len(failure_calls) == 1, \
+                "Boven de drempel mag er geen herhaalde alert per nacht uitgaan"
+        finally:
+            self._cleanup(db, job_ids)
+
+    def test_recovered_run_resets_counter(self, client):
+        db = SessionLocal()
+        job_ids = set()
+        try:
+            since = self._insert_success_job(db, job_ids).id
+            failure_calls = []
+
+            # fout → herstel → fout: teller staat weer op 1, dus geen alert
+            since = self._fail_once(db, job_ids, since, failure_calls)
+            since = self._run_success(db, job_ids, since)
+            since = self._fail_once(db, job_ids, since, failure_calls)
+            assert failure_calls == [], \
+                "Een geslaagde run moet de fout-teller resetten"
+
+            # Tweede opeenvolgende fout ná herstel → alert gaat alsnog uit
+            self._fail_once(db, job_ids, since, failure_calls)
+            assert [c[0] for c in failure_calls] == [2]
+        finally:
+            self._cleanup(db, job_ids)
