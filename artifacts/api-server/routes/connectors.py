@@ -670,6 +670,10 @@ def _run_live_check(name: str, db: Session) -> dict:
 # sync verschuldigd is.
 REST_SYNC_FULL_FILENAME = "priceshape-rest-sync-volledig"
 REST_SYNC_INCR_FILENAME = "priceshape-rest-sync-incrementeel"
+# Feed-modus: de dagelijkse ingest vervangt alleen de snapshot van vandaag.
+# Een periodieke "volledige" feed-sync doet daarbovenop een opschoning van
+# historische rijen van concurrenten die volledig uit de feed verdwenen zijn.
+FEED_SYNC_FULL_FILENAME = "priceshape-feed-sync-volledig"
 DEFAULT_FULL_SYNC_DAYS = 7
 
 
@@ -747,11 +751,52 @@ def _run_sync(name: str, db: Session, current_user, force_full: bool = False) ->
                         f" {res['skipped_by_settings']} rijen overgeslagen door importinstellingen."
                         if res.get("skipped_by_settings") else ""
                     )
+                    # Periodieke volledige opschoning (feed-modus): de ingest
+                    # vervangt alleen de snapshot van vandaag, dus historische
+                    # rijen van concurrenten die volledig uit de feed verdwenen
+                    # zijn blijven anders eeuwig staan. Elke
+                    # PRICESHAPE_FULL_SYNC_DAYS dagen (standaard 7) — of op
+                    # verzoek (?full=true) — worden die na een geslaagde ingest
+                    # opgeschoond.
+                    full_reason = None
+                    if force_full:
+                        full_reason = "handmatig aangevraagd"
+                    else:
+                        last_full = _last_full_feed_sync_at(db)
+                        interval_days = _full_sync_interval_days()
+                        if (last_full is None
+                                or datetime.now(timezone.utc) - last_full
+                                >= timedelta(days=interval_days)):
+                            full_reason = f"periodieke opschoning, elke {interval_days} dagen"
+                    cleanup_note = ""
+                    if full_reason:
+                        import feed_ingest
+                        cleanup = feed_ingest.cleanup_vanished_competitors(
+                            db, source="priceshape")
+                        job_filename = FEED_SYNC_FULL_FILENAME
+                        counts["verdwenen_concurrenten"] = len(
+                            cleanup["removed_competitors"])
+                        counts["opgeschoonde_historische_rijen"] = cleanup["removed_rows"]
+                        if cleanup["removed_competitors"]:
+                            cleanup_note = (
+                                f" Volledige sync ({full_reason}): "
+                                f"{cleanup['removed_rows']} historische concurrentprijsrijen "
+                                f"opgeschoond van {len(cleanup['removed_competitors'])} "
+                                f"verdwenen concurrent(en): "
+                                f"{', '.join(cleanup['removed_competitors'][:10])}"
+                                + ("…" if len(cleanup["removed_competitors"]) > 10 else "")
+                                + "."
+                            )
+                        else:
+                            cleanup_note = (
+                                f" Volledige sync ({full_reason}): geen verdwenen "
+                                "concurrenten gevonden, niets opgeschoond."
+                            )
                     message = (
                         f"PriceShape feed-sync voltooid: {res['products_total']} producten "
                         f"({res['products_new']} nieuw, {res['products_updated']} bijgewerkt), "
                         f"{res['competitor_rows']} concurrentprijzen ingelezen."
-                        + skipped_note +
+                        + skipped_note + cleanup_note +
                         " Draai een modelrun om aanbevelingen en concurrentie-scores te vernieuwen."
                     )
                 else:
@@ -1299,6 +1344,25 @@ def _ingest_feed_with_retry(db: Session, source: str = "priceshape") -> dict:
             time.sleep(delay)
 
     raise RuntimeError("unreachable")  # pragma: no cover
+
+def _last_full_feed_sync_at(db: Session):
+    """Tijdstip van de laatste geslaagde volledige feed-sync (met opschoning
+    van verdwenen concurrenten), of None."""
+    job = (
+        db.query(models.ImportJob)
+        .filter(
+            models.ImportJob.upload_type == "api_sync_priceshape",
+            models.ImportJob.filename == FEED_SYNC_FULL_FILENAME,
+            models.ImportJob.status == "geimporteerd",
+        )
+        .order_by(models.ImportJob.created_at.desc())
+        .first()
+    )
+    if not job or not job.created_at:
+        return None
+    ts = job.created_at
+    return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+
 
 def _last_full_rest_sync_at(db: Session):
     """Tijdstip van de laatste geslaagde volledige REST-sync, of None."""

@@ -54,3 +54,4 @@
 - [Keyset pagination & NULL watermarks](keyset-pagination-nulls.md) — row-tuple keyset compare drops NULL-watermark rows; coalesce both sides to a fixed minimum.
 - [Canonieke producthiërarchie](product-hierarchy.md) — staged niet-destructieve import; padtabel-sync verplicht bij elke boommutatie; apply claimt job atomisch.
 - [Shared-DB test isolation](shared-db-test-isolation.md) — future-dated max(date) seeds, purge residue for most-recent semantics, always set shop_id explicitly.
+- [Feed full-sync cleanup](feed-full-sync-cleanup.md) — feed-modus volledige sync ruimt historie van verdwenen concurrenten op; lege dag-snapshot of uitgevinkte concurrent nooit als verdwenen behandelen.

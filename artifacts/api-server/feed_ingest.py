@@ -700,6 +700,93 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
     }
 
 
+def cleanup_vanished_competitors(db: Session, source: str = SOURCE_NAME,
+                                 shop_id: int = 1) -> dict:
+    """Verwijder historische concurrentprijzen van concurrenten die volledig
+    uit de feed verdwenen zijn (volledige-sync-opschoning, feed-modus).
+
+    De feed-ingest vervangt alleen de snapshot van vandaag; concurrenten die
+    niet meer in de feed staan behouden daardoor eeuwig hun oude dagrijen.
+    Deze opschoning draait alleen bij een volledige sync en verwijdert de
+    rijen van vóór vandaag van concurrenten die vandaag géén enkele rij meer
+    hebben, strikt beperkt tot deze bron en deze winkel.
+
+    Veiligheidskleppen:
+    - Lege snapshot van vandaag → geen opschoning (last-known-good: een
+      mislukte/lege feed mag nooit historie wissen).
+    - Uitgevinkte concurrenten (importinstellingen) tellen als bewust
+      overgeslagen, niet als verdwenen — hun historie blijft staan.
+    """
+    today = date.today()
+    from services import import_settings as imps
+    settings = imps.get_settings(db, "priceshape")
+    disabled = set(settings.get("disabled_competitors") or [])
+
+    present_today = {
+        (name or "").lower()
+        for (name,) in db.query(models.FactCompetitorPriceDaily.competitor_name)
+        .filter(
+            models.FactCompetitorPriceDaily.date == today,
+            models.FactCompetitorPriceDaily.source == source,
+            models.FactCompetitorPriceDaily.shop_id == shop_id,
+        ).distinct().all()
+    }
+    if not present_today:
+        # Geen snapshot van vandaag → sync leverde niets; niets opschonen.
+        return {"removed_rows": 0, "removed_competitors": []}
+
+    historical = {
+        (name or "").lower(): name
+        for (name,) in db.query(models.FactCompetitorPriceDaily.competitor_name)
+        .filter(
+            models.FactCompetitorPriceDaily.date < today,
+            models.FactCompetitorPriceDaily.source == source,
+            models.FactCompetitorPriceDaily.shop_id == shop_id,
+        ).distinct().all()
+    }
+    vanished_lower = set(historical) - present_today - disabled
+    if not vanished_lower:
+        return {"removed_rows": 0, "removed_competitors": []}
+
+    removed = (
+        db.query(models.FactCompetitorPriceDaily)
+        .filter(
+            models.FactCompetitorPriceDaily.date < today,
+            models.FactCompetitorPriceDaily.source == source,
+            models.FactCompetitorPriceDaily.shop_id == shop_id,
+            func.lower(models.FactCompetitorPriceDaily.competitor_name)
+            .in_(vanished_lower),
+        )
+        .delete(synchronize_session=False)
+    )
+
+    # Bijbehorende beschikbaarheidsrijen (fact_competitor_offer_daily) van
+    # dezelfde bron, beperkt tot SKU's van deze winkel.
+    vanished_ids = [
+        c.competitor_id
+        for c in db.query(models.DimCompetitor)
+        .filter(func.lower(models.DimCompetitor.competitor_name).in_(vanished_lower))
+        .all()
+    ]
+    if vanished_ids:
+        shop_skus = db.query(models.DimProduct.sku_id).filter(
+            models.DimProduct.shop_id == shop_id)
+        db.query(models.FactCompetitorOfferDaily).filter(
+            models.FactCompetitorOfferDaily.source == source,
+            models.FactCompetitorOfferDaily.competitor_id.in_(vanished_ids),
+            models.FactCompetitorOfferDaily.own_sku_id.in_(shop_skus),
+        ).delete(synchronize_session=False)
+    db.commit()
+
+    names = sorted(historical[low] for low in vanished_lower)
+    logger.info(
+        "Feed volledige sync: %d historische concurrentprijsrijen opgeschoond "
+        "van %d verdwenen concurrent(en): %s",
+        removed, len(names), ", ".join(names),
+    )
+    return {"removed_rows": removed, "removed_competitors": names}
+
+
 def _persist_offers(db: Session, today: date, comp_maps: list[dict]) -> int:
     """
     Schrijf vendor-voorraaddata door naar fact_competitor_offer_daily, zodat het
