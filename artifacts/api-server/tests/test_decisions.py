@@ -344,6 +344,15 @@ def test_category_decisions_derived_from_sku_signals(client, admin_headers, db):
         assert ctx["total_margin_30d"] == pytest.approx(1260.0)
         assert ctx["private_label_share_revenue"] == pytest.approx(0.5)
         assert {"name": "TestSub", "sku_count": 2} in ctx["subcategories"]
+        # Top-SKU's op omzet (doorklik naar onderliggende SKU's)
+        top = ctx["top_skus"]
+        assert {t["sku_id"] for t in top} == {sku1, sku2}
+        for t in top:
+            assert t["revenue_30d"] == pytest.approx(1350.0)
+            assert t["margin_30d"] == pytest.approx(630.0)
+            assert t["units_30d"] == 90
+            assert t["is_private_label"] == (t["sku_id"] == sku1)
+            assert t["product_name"] == f"Catproduct {t['sku_id']}"
         # Scenario-parameters bevatten de huismerk-SKU's (mix-shift scenario)
         mix = [s for s in det["scenarios"] if s["parameters"].get("private_label_skus")]
         assert mix and sku1 in mix[0]["parameters"]["private_label_skus"]
@@ -525,6 +534,44 @@ def test_single_entity_failure_does_not_erase_prior_work(client, db, monkeypatch
         assert today_count == 1
     finally:
         _cleanup(db, [ok_sku, bad_sku])
+
+def test_products_deeplink_filters_server_side(client, admin_headers, db):
+    """Doorklik vanaf een categoriebeslissing: /api/products moet subcategory
+    en is_private_label server-side filteren (incl. correcte totalen), zodat
+    deep-links ook kloppen bij categorieën groter dan één pagina."""
+    cat = f"TCATP-{uuid.uuid4().hex[:8]}"
+    skus = [f"{cat}-S{i}" for i in range(4)]
+    try:
+        for i, sku in enumerate(skus):
+            db.add(models.DimProduct(
+                sku_id=sku, product_name=f"Deeplink {sku}", category=cat,
+                subcategory="SubA" if i < 3 else "SubB",
+                is_private_label=(i % 2 == 0),
+                current_price=10.0, cost_price=5.0,
+                stock_quantity=10, lifecycle_status="active", shop_id=1,
+            ))
+        db.commit()
+
+        # Subcategorie server-side, totalen op dezelfde predicaten
+        r = client.get("/api/products", params={"category": cat, "subcategory": "SubA", "page_size": 2}, headers=admin_headers).json()
+        assert r["total"] == 3
+        assert all(p["subcategory"] == "SubA" for p in r["items"])
+        # Paginatie over het gefilterde resultaat
+        r2 = client.get("/api/products", params={"category": cat, "subcategory": "SubA", "page_size": 2, "page": 2}, headers=admin_headers).json()
+        assert len(r["items"]) + len(r2["items"]) == 3
+
+        # Huismerk server-side
+        r3 = client.get("/api/products", params={"category": cat, "is_private_label": True}, headers=admin_headers).json()
+        assert r3["total"] == 2
+        assert all(p["is_private_label"] for p in r3["items"])
+
+        # Combinatie subcategorie + huismerk
+        r4 = client.get("/api/products", params={"category": cat, "subcategory": "SubA", "is_private_label": True}, headers=admin_headers).json()
+        assert r4["total"] == 2
+        assert {p["sku_id"] for p in r4["items"]} == {skus[0], skus[2]}
+    finally:
+        db.query(models.DimProduct).filter(models.DimProduct.sku_id.in_(skus)).delete(synchronize_session=False)
+        db.commit()
 
 def test_build_category_decision_mix_shift_requires_private_label(client, db):
     """Mix-shift scenario alleen wanneer er huismerk-SKU's naast A-merken staan."""

@@ -194,6 +194,14 @@ paths:
           in: query
           schema:
             type: ["string", "null"]
+        - name: subcategory
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: is_private_label
+          in: query
+          schema:
+            type: ["boolean", "null"]
         - name: strategy_type
           in: query
           schema:

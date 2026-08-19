@@ -33,8 +33,11 @@ const LIFECYCLE_LABELS: Record<string, string> = {
 function isEmptyFilters(f: SmartFilterValues): boolean {
   return (
     f.categorie_id === null &&
+    f.categorie_naam === null &&
     f.subcategorie_id === null &&
+    f.subcategorie_naam === null &&
     f.sub_subcategorie_id === null &&
+    f.sub_subcategorie_naam === null &&
     f.merken.length === 0 &&
     f.merktype === null &&
     f.bcg_intern === null &&
@@ -46,8 +49,11 @@ function isEmptyFilters(f: SmartFilterValues): boolean {
 function filtersEqual(a: SmartFilterValues, b: SmartFilterValues): boolean {
   return (
     a.categorie_id === b.categorie_id &&
+    a.categorie_naam === b.categorie_naam &&
     a.subcategorie_id === b.subcategorie_id &&
+    a.subcategorie_naam === b.subcategorie_naam &&
     a.sub_subcategorie_id === b.sub_subcategorie_id &&
+    a.sub_subcategorie_naam === b.sub_subcategorie_naam &&
     a.merken.length === b.merken.length &&
     a.merken.every((m, i) => m === b.merken[i]) &&
     a.merktype === b.merktype &&
@@ -57,19 +63,47 @@ function filtersEqual(a: SmartFilterValues, b: SmartFilterValues): boolean {
   );
 }
 
+/** Gelijk op alles behalve de hiërarchie-ids (die worden asynchroon op naam
+ *  opgelost na een deep-link; dat mag geen 'pending changes' opleveren). */
+function filtersEqualIgnoringIds(a: SmartFilterValues, b: SmartFilterValues): boolean {
+  return filtersEqual(
+    { ...a, categorie_id: null, subcategorie_id: null, sub_subcategorie_id: null },
+    { ...b, categorie_id: null, subcategorie_id: null, sub_subcategorie_id: null },
+  );
+}
+
+/** Leest deep-link filters uit de URL-querystring (bv. vanaf een beslissingsdetail):
+ *  /producten?category=X&subcategory=Y&merktype=huismerk */
+function filtersFromUrl(): SmartFilterValues {
+  const qs = new URLSearchParams(window.location.search);
+  const category = qs.get("category");
+  const subcategory = qs.get("subcategory");
+  const merktype = qs.get("merktype");
+  if (!category && !subcategory && !merktype) return EMPTY_FILTERS;
+  return {
+    ...EMPTY_FILTERS,
+    categorie_naam: category,
+    subcategorie_naam: subcategory,
+    merktype: merktype === "huismerk" || merktype === "a_merk" || merktype === "overig" ? merktype : null,
+  };
+}
+
 export default function Producten() {
   const [page, setPage] = useState(1);
+
+  // Deep-link filters uit de URL (eenmalig bij mount gelezen)
+  const [initialFilters] = useState<SmartFilterValues>(() => filtersFromUrl());
 
   // resetKey: incrementing counter passed to SmartFilters to reset its internal UI
   const [resetKey, setResetKey] = useState(0);
 
   // Staged: what the user is composing but hasn't applied yet
   const [stagedZoekterm, setStagedZoekterm] = useState("");
-  const [stagedFilters, setStagedFilters] = useState<SmartFilterValues>(EMPTY_FILTERS);
+  const [stagedFilters, setStagedFilters] = useState<SmartFilterValues>(initialFilters);
 
   // Applied: what actually drives the API call and client-side filter
   const [zoekterm, setZoekterm] = useState("");
-  const [appliedFilters, setAppliedFilters] = useState<SmartFilterValues>(EMPTY_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState<SmartFilterValues>(initialFilters);
 
   const hasPendingChanges =
     stagedZoekterm !== zoekterm || !filtersEqual(stagedFilters, appliedFilters);
@@ -97,10 +131,17 @@ export default function Producten() {
     page_size: 100,
     search: zoekterm || undefined,
     category: appliedFilters.categorie_naam || undefined,
+    subcategory: appliedFilters.subcategorie_naam || undefined,
+    is_private_label:
+      appliedFilters.merktype === "huismerk" ? true : undefined,
   });
 
   const handleFiltersChange = useCallback((f: SmartFilterValues) => {
     setStagedFilters(f);
+    // Na een deep-link lost SmartFilters de hiërarchie-ids asynchroon op naam
+    // op; neem die ids dan ook direct over in de toegepaste filters zodat er
+    // geen onterecht 'pending changes' ontstaat.
+    setAppliedFilters(prev => (filtersEqualIgnoringIds(prev, f) ? f : prev));
   }, []);
 
   // Client-side filtering on all 8 dimensions using applied (not staged) filters
@@ -187,9 +228,22 @@ export default function Producten() {
         )}
       </div>
 
+      {/* Actieve filters (o.a. via deep-link vanaf een beslissing) */}
+      {!isEmptyFilters(appliedFilters) && (
+        <div className="flex flex-wrap items-center gap-2 text-sm" data-testid="active-filter-chips">
+          <span className="text-muted-foreground text-xs">Actieve filters:</span>
+          {appliedFilters.categorie_naam && <Badge variant="secondary">Categorie: {appliedFilters.categorie_naam}</Badge>}
+          {appliedFilters.subcategorie_naam && <Badge variant="secondary">Subcategorie: {appliedFilters.subcategorie_naam}</Badge>}
+          {appliedFilters.sub_subcategorie_naam && <Badge variant="secondary">Sub-subcategorie: {appliedFilters.sub_subcategorie_naam}</Badge>}
+          {appliedFilters.merktype && <Badge variant="secondary">Merktype: {appliedFilters.merktype === "huismerk" ? "Huismerk" : appliedFilters.merktype === "a_merk" ? "A-merk" : "Overig"}</Badge>}
+          {appliedFilters.merken.length > 0 && <Badge variant="secondary">Merken: {appliedFilters.merken.join(", ")}</Badge>}
+        </div>
+      )}
+
       {/* Slimme filters — resetKey lets the parent reset filter UI; onClearAll wires panel clear to parent */}
       <SmartFilters
         onChange={handleFiltersChange}
+        initialValues={initialFilters}
         resetKey={resetKey}
         onClearAll={clearAll}
       />

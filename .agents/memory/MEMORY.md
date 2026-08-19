@@ -36,3 +36,4 @@
 - [Reasoning-model tools 400](model-tools-reasoning-effort.md) — gpt-5.6-terra weigert tools + reasoning_effort op chat completions; gateway retryt met none; smoke-test tool-vragen na modelwissel.
 - [Few-shot FTS retrieval](fewshot-fts.md) — fail-safe fallback maskeert FTS-fouten (zelfs NameError); rank-drempel ≤0.005 voor één-woord-matches.
 - [Signal dedupe per run](signal-dedupe-per-run.md) — max 1 signaal per dedupe-key per engine-run; uq_signal_active_dedupe komt uit canonical.py, niet uit create_all.
+- [API query-param codegen](api-param-codegen.md) — new query params need route + openapi.yaml + orval regen; client-side filtering over paged results gives wrong totals.

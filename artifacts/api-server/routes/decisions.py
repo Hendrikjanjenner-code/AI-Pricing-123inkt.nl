@@ -219,6 +219,8 @@ def _category_context(db: Session, sid: int, category: str) -> dict:
     # Omzet/marge over de laatste 30 dagen t.o.v. de meest recente verkoopdatum
     total_units = total_revenue = total_margin = None
     pl_revenue = None
+    top_skus: list[dict] = []
+    prod_by_sku = {p.sku_id: p for p in products}
     sku_ids = [p.sku_id for p in products]
     if sku_ids:
         max_date = (
@@ -256,6 +258,35 @@ def _category_context(db: Session, sid: int, category: str) -> dict:
             else:
                 pl_revenue = 0.0
 
+            # Top-SKU's op omzet binnen de categorie (laatste 30 dagen)
+            top_rows = (
+                db.query(
+                    models.FactSalesDaily.sku_id,
+                    func.coalesce(func.sum(models.FactSalesDaily.revenue), 0.0).label("rev"),
+                    func.coalesce(func.sum(models.FactSalesDaily.margin), 0.0).label("mar"),
+                    func.coalesce(func.sum(models.FactSalesDaily.units_sold), 0).label("units"),
+                )
+                .filter(
+                    models.FactSalesDaily.shop_id == sid,
+                    models.FactSalesDaily.date >= cutoff,
+                    models.FactSalesDaily.sku_id.in_(sku_ids),
+                )
+                .group_by(models.FactSalesDaily.sku_id)
+                .order_by(func.coalesce(func.sum(models.FactSalesDaily.revenue), 0.0).desc())
+                .limit(5)
+                .all()
+            )
+            for sku_id, rev, mar, units in top_rows:
+                p = prod_by_sku.get(sku_id)
+                top_skus.append({
+                    "sku_id": sku_id,
+                    "product_name": p.product_name if p else None,
+                    "is_private_label": bool(p.is_private_label) if p else False,
+                    "revenue_30d": float(rev or 0.0),
+                    "margin_30d": float(mar or 0.0),
+                    "units_30d": int(units or 0),
+                })
+
     return {
         "category": category,
         "sku_count": n_skus,
@@ -269,6 +300,7 @@ def _category_context(db: Session, sid: int, category: str) -> dict:
         "total_revenue_30d": total_revenue,
         "total_margin_30d": total_margin,
         "subcategories": subcategories,
+        "top_skus": top_skus,
         "horizon_days": 30,
     }
 

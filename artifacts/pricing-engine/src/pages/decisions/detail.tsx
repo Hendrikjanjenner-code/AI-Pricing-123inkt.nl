@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import {
-  ArrowLeft, Check, X, Star, AlertTriangle, History, Eye, PlayCircle, Ban,
+  ArrowLeft, Check, X, Star, AlertTriangle, History, Eye, PlayCircle, Ban, ExternalLink,
 } from "lucide-react";
 import { getAuthToken } from "@/lib/auth";
 
@@ -198,11 +198,64 @@ export default function BeslissingDetail() {
                   <div className="text-xs text-muted-foreground mb-1">Subcategorieën</div>
                   <div className="flex flex-wrap gap-2">
                     {catCtx.subcategories.map((sc: any) => (
-                      <Badge key={sc.name} variant="secondary">{sc.name} ({sc.sku_count})</Badge>
+                      <Link
+                        key={sc.name}
+                        href={`/producten?category=${encodeURIComponent(catCtx.category)}&subcategory=${encodeURIComponent(sc.name)}`}
+                      >
+                        <Badge
+                          variant="secondary"
+                          className="cursor-pointer hover:bg-primary/15 hover:text-primary transition-colors"
+                          data-testid={`link-subcategory-${sc.name}`}
+                          title={`Bekijk SKU's in ${sc.name}`}
+                        >
+                          {sc.name} ({sc.sku_count}) <ExternalLink className="h-3 w-3 ml-1 inline" />
+                        </Badge>
+                      </Link>
                     ))}
                   </div>
                 </div>
               )}
+              {catCtx.top_skus?.length > 0 && (
+                <div>
+                  <div className="text-xs text-muted-foreground mb-1">Top-SKU's op omzet ({catCtx.horizon_days}d)</div>
+                  <div className="border rounded-md overflow-hidden">
+                    <table className="w-full text-xs" data-testid="table-top-skus">
+                      <thead className="bg-muted/50 text-muted-foreground">
+                        <tr>
+                          <th className="text-left px-2 py-1.5 font-medium">SKU</th>
+                          <th className="text-left px-2 py-1.5 font-medium">Naam</th>
+                          <th className="text-right px-2 py-1.5 font-medium">Omzet</th>
+                          <th className="text-right px-2 py-1.5 font-medium">Marge</th>
+                          <th className="text-right px-2 py-1.5 font-medium">Units</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {catCtx.top_skus.map((t: any) => (
+                          <tr key={t.sku_id} className="border-t hover:bg-muted/30">
+                            <td className="px-2 py-1.5">
+                              <Link href={`/producten/${encodeURIComponent(t.sku_id)}`} className="font-mono text-primary hover:underline" data-testid={`link-top-sku-${t.sku_id}`}>
+                                {t.sku_id}
+                              </Link>
+                              {t.is_private_label && <Badge variant="secondary" className="ml-1 text-[9px] px-1 py-0">HM</Badge>}
+                            </td>
+                            <td className="px-2 py-1.5 max-w-[240px] truncate" title={t.product_name || undefined}>{t.product_name || "—"}</td>
+                            <td className="px-2 py-1.5 text-right tabular-nums">{eur(t.revenue_30d)}</td>
+                            <td className="px-2 py-1.5 text-right tabular-nums">{eur(t.margin_30d)}</td>
+                            <td className="px-2 py-1.5 text-right tabular-nums">{num(t.units_30d)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+              <div>
+                <Link href={`/producten?category=${encodeURIComponent(catCtx.category)}&merktype=huismerk`}>
+                  <Button variant="outline" size="sm" data-testid="link-pl-skus">
+                    Bekijk huismerk-SKU's in {catCtx.category} <ExternalLink className="h-3.5 w-3.5 ml-1" />
+                  </Button>
+                </Link>
+              </div>
             </CardContent>
           </Card>
         )}
@@ -282,7 +335,16 @@ export default function BeslissingDetail() {
                           <span className="font-medium">Huismerk-SKU's:</span>
                           <div className="flex flex-wrap gap-1 mt-1">
                             {s.parameters.private_label_skus.map((sku: string) => (
-                              <Badge key={sku} variant="outline" className="text-[10px]">{sku}</Badge>
+                              <Link key={sku} href={`/producten/${encodeURIComponent(sku)}`}>
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] cursor-pointer hover:bg-primary/15 hover:text-primary transition-colors"
+                                  data-testid={`link-pl-sku-${sku}`}
+                                  title={`Bekijk productdetail van ${sku}`}
+                                >
+                                  {sku}
+                                </Badge>
+                              </Link>
                             ))}
                           </div>
                         </div>

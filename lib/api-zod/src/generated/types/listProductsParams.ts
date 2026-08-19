@@ -14,6 +14,14 @@ export type ListProductsParams = {
   /**
    * @nullable
    */
+  subcategory?: string | null;
+  /**
+   * @nullable
+   */
+  is_private_label?: boolean | null;
+  /**
+   * @nullable
+   */
   strategy_type?: string | null;
   /**
    * @nullable

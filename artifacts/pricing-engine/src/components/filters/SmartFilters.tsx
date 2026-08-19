@@ -74,6 +74,10 @@ export const EMPTY_FILTERS: SmartFilterValues = {
 
 interface SmartFiltersProps {
   onChange: (filters: SmartFilterValues) => void;
+  /** Initiële filterwaarden (bv. via deep-link vanaf een beslissing).
+   *  Hiërarchie-ids mogen null zijn; ze worden op naam opgelost zodra de
+   *  hiërarchie geladen is. */
+  initialValues?: SmartFilterValues;
   /** Incrementing this value resets the internal filter state to EMPTY_FILTERS */
   resetKey?: number;
   /** Called when the user clicks "Wis alles" inside the filter panel */
@@ -236,8 +240,8 @@ function SingleCombobox({
 
 // ── Hoofd SmartFilters component ─────────────────────────────────────────────
 
-export default function SmartFilters({ onChange, resetKey, onClearAll, className }: SmartFiltersProps) {
-  const [filters, setFilters] = useState<SmartFilterValues>(EMPTY_FILTERS);
+export default function SmartFilters({ onChange, initialValues, resetKey, onClearAll, className }: SmartFiltersProps) {
+  const [filters, setFilters] = useState<SmartFilterValues>(initialValues ?? EMPTY_FILTERS);
   const [collapsed, setCollapsed] = useState(false);
 
   // Reset internal state whenever the parent increments resetKey
@@ -270,6 +274,30 @@ export default function SmartFilters({ onChange, resetKey, onClearAll, className
     fetch(`${BASE}/api/category-hierarchy/filter-options`, { headers: authHeader })
       .then(r => r.json()).then(setFilterOptions).catch(() => {});
   }, []);
+
+  // Deep-link: los ontbrekende hiërarchie-ids op zodra de betreffende lijst
+  // geladen is (initialValues bevatten alleen namen).
+  useEffect(() => {
+    if (categories.length === 0) return;
+    setFilters(prev => {
+      if (prev.categorie_naam && prev.categorie_id === null) {
+        const match = categories.find(c => c.category_name === prev.categorie_naam);
+        if (match) return { ...prev, categorie_id: match.category_id };
+      }
+      return prev;
+    });
+  }, [categories]);
+
+  useEffect(() => {
+    if (subcategories.length === 0) return;
+    setFilters(prev => {
+      if (prev.subcategorie_naam && prev.subcategorie_id === null) {
+        const match = subcategories.find(c => c.category_name === prev.subcategorie_naam);
+        if (match) return { ...prev, subcategorie_id: match.category_id };
+      }
+      return prev;
+    });
+  }, [subcategories]);
 
   // Cascade: wanneer categorie verandert → laad subcategorieën
   useEffect(() => {

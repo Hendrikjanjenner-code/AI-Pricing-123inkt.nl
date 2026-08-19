@@ -126,6 +126,8 @@ export const GetPriceChangeDistributionResponse = zod.array(
  */
 export const ListProductsQueryParams = zod.object({
   category: zod.coerce.string().nullish(),
+  subcategory: zod.coerce.string().nullish(),
+  is_private_label: zod.coerce.boolean().nullish(),
   strategy_type: zod.coerce.string().nullish(),
   lifecycle_status: zod.coerce.string().nullish(),
   search: zod.coerce.string().nullish(),
