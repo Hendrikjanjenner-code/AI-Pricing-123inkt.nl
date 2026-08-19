@@ -1438,22 +1438,36 @@ def maybe_extract_memory(db: Session, user: models.User,
 
 def get_memory_block(db: Session, user: models.User) -> Optional[str]:
     """Bouw het geheugen-contextblok: voorkeuren van deze gebruiker plus
-    organisatie-brede context (user_id NULL). None als er niets is."""
+    organisatie-brede context (user_id NULL). None als er niets is.
+
+    Voorrangsregel (Task #156): bestaat dezelfde key zowel persoonlijk als
+    organisatie-breed, dan wint de persoonlijke waarde. Het organisatie-item
+    wordt dan niet geïnjecteerd (voorkomt tegenstrijdige instructies), en
+    persoonlijke items staan bovendien vóór de organisatie-items in het blok.
+    Key-vergelijking is hoofdletter-ongevoelig."""
     try:
         rows = (db.query(models.AiUserMemory)
                 .filter((models.AiUserMemory.user_id == user.id) |
                         (models.AiUserMemory.user_id.is_(None)),
                         models.AiUserMemory.status == "active")
                 .order_by(models.AiUserMemory.updated_at.desc())
-                .limit(MAX_MEMORY_ITEMS).all())
+                .all())
     except Exception:
         return None
     if not rows:
         return None
+    personal = [r for r in rows if r.user_id is not None]
+    personal_keys = {(r.key or "").strip().casefold() for r in personal}
+    org = [r for r in rows if r.user_id is None
+           and (r.key or "").strip().casefold() not in personal_keys]
+    selected = (personal + org)[:MAX_MEMORY_ITEMS]
+    if not selected:
+        return None
     lines = [f"- {r.key}: {r.value}" + (" (organisatie-breed)" if r.user_id is None else "")
-             for r in rows]
+             for r in selected]
     return ("Bekende voorkeuren en vaste context van deze gebruiker/organisatie "
-            "(gebruik dit alleen als het relevant is voor de vraag):\n" + "\n".join(lines))
+            "(gebruik dit alleen als het relevant is voor de vraag; persoonlijke "
+            "voorkeuren hebben voorrang op organisatie-brede):\n" + "\n".join(lines))
 
 def _dedupe_examples(scored_rows, limit: int) -> list[dict]:
     """Ontdubbel op vraagtekst en knip af op `limit`.

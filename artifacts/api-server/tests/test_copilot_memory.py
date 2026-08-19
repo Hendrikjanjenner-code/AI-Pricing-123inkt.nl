@@ -333,6 +333,25 @@ def test_extraction_still_updates_extracted_rows(client, ctx, db, monkeypatch):
     finally:
         _cleanup(db, row.id)
 
+def test_personal_memory_wins_over_org_on_injection(client, ctx, db):
+    viewer_id = ctx["_user_ids"][1]
+    key = f"test_prec_{uuid.uuid4().hex[:8]}"
+    org = _add_memory(db, None, key=key, value="org-waarde")
+    personal = _add_memory(db, viewer_id, key=key, value="persoonlijke-waarde")
+    org_only = _add_memory(db, None, value="alleen-org")
+    try:
+        user = db.query(models.User).filter(models.User.id == viewer_id).first()
+        block = ai_gateway.get_memory_block(db, user)
+        assert block is not None
+        # Persoonlijke waarde wordt geïnjecteerd, de organisatie-dubbel niet.
+        assert "persoonlijke-waarde" in block
+        assert "org-waarde" not in block
+        # Niet-conflicterende organisatie-items blijven gewoon meegaan.
+        assert "alleen-org" in block
+        # Voorrangsregel is gedocumenteerd in het blok zelf.
+        assert "persoonlijke voorkeuren hebben voorrang" in block.lower()
+    finally:
+        _cleanup(db, org.id, personal.id, org_only.id)
 def test_org_scope_rbac_on_add(client, ctx, db):
     key = f"test_org_{uuid.uuid4().hex[:8]}"
     # Viewer mag geen organisatie-breed item toevoegen
@@ -494,3 +513,17 @@ def test_manual_add_of_deleted_key_reactivates(client, ctx, db):
         assert fresh.source == "manual"
     finally:
         _cleanup(db, row.id)
+
+def test_personal_precedence_is_case_insensitive(client, ctx, db):
+    viewer_id = ctx["_user_ids"][1]
+    base = f"test_case_{uuid.uuid4().hex[:8]}"
+    org = _add_memory(db, None, key=base.upper(), value="org-case-waarde")
+    personal = _add_memory(db, viewer_id, key=base, value="pers-case-waarde")
+    try:
+        user = db.query(models.User).filter(models.User.id == viewer_id).first()
+        block = ai_gateway.get_memory_block(db, user)
+        assert block is not None
+        assert "pers-case-waarde" in block
+        assert "org-case-waarde" not in block
+    finally:
+        _cleanup(db, org.id, personal.id)

@@ -171,6 +171,17 @@ function MemorySection() {
   const [showDeleted, setShowDeleted] = useState(false);
   const [deletedItems, setDeletedItems] = useState<MemoryItem[] | null>(null);
 
+  // Task #156: waarschuw (niet blokkeren) als dezelfde naam al in de andere
+  // scope bestaat; persoonlijke waarden winnen bij injectie in gesprekken.
+  const otherScope = newScope === "persoonlijk" ? "organisatie" : "persoonlijk";
+  const duplicateInOtherScope =
+    newKey.trim().length > 0 &&
+    (items || []).some(
+      (i) =>
+        i.scope === otherScope &&
+        i.key.trim().toLowerCase() === newKey.trim().toLowerCase(),
+    );
+
   const addItem = async () => {
     const key = newKey.trim();
     const value = newValue.trim();
@@ -350,6 +361,13 @@ function MemorySection() {
                   <option value="persoonlijk">Persoonlijk</option>
                   <option value="organisatie">Organisatie-breed</option>
                 </select>
+              )}
+              {duplicateInOtherScope && (
+                <p className="text-amber-600 dark:text-amber-500">
+                  {newScope === "persoonlijk"
+                    ? "Deze naam bestaat al organisatie-breed. Je persoonlijke waarde krijgt voorrang in jouw gesprekken."
+                    : "Je hebt al een persoonlijk item met deze naam. Voor jou blijft je persoonlijke waarde voorrang houden."}
+                </p>
               )}
               <div className="flex items-center gap-1">
                 <Button

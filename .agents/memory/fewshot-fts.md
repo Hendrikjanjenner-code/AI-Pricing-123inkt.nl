@@ -1,13 +1,11 @@
 ---
 name: Few-shot FTS retrieval
-description: Copilot few-shot retrieval via Postgres dutch FTS — thresholds, stemmer quirks, fail-safe valkuil
+description: Copilot few-shot retrieval via Postgres dutch FTS with word-overlap fallback; thresholds, stemmer quirks, fail-safe trap.
 ---
 Few-shot retrieval (ai_gateway) is primarily Postgres full-text: OR-tsquery over query words with to_tsvector('dutch', question), ranked by ts_rank; any exception rolls back and falls back to Jaccard word-overlap.
 
-**Why:** synonym/reformulated questions must still match; FTS may be unavailable (fail-safe requirement). But because the FTS route swallows every exception, a coding error (e.g. an undefined constant after a bad merge) silently disables FTS — the fallback masks it.
+**Why:** synonym/reformulated questions must still match; FTS may be unavailable (fail-safe requirement). But because the FTS route swallows every exception, a coding error (e.g. an undefined or duplicated constant after a bad merge) silently disables FTS — the fallback masks it and yields empty/degraded results. Keep one authoritative FTS_MIN_RANK definition close to its use.
 
-The tsvector is a STORED generated column (question_tsv) with a GIN index; the auto-migrator skips Computed columns, so generated columns need manual DDL in migrate.py's _MANUAL_INDEXES. ts_rank normalizes on document length: a strong single-stem match on a short question scores only ~0.008, so the min-rank cutoff must stay very low (≤0.005, currently 0.001) — the @@ filter already excludes zero-overlap questions. Any noise threshold ≥0.01 silently drops genuine matches.
+The tsvector is a STORED generated column (question_tsv) with a GIN index; the auto-migrator skips Computed columns, so generated columns need manual DDL in migrate.py's _MANUAL_INDEXES. ts_rank normalizes on document length: a strong single-stem match on a short question scores only ~0.008, so the min-rank cutoff must stay very low (FTS_MIN_RANK ≈ 0.003) — the @@ filter already excludes zero-overlap questions; one shared stem in a longer question ranks ≈ 0.0076, irrelevant questions 0.0.
 
-**How to apply:** the dutch snowball stemmer is quirky — 'marge'→'marg' but 'marges'→'marges' (no match!). When writing retrieval tests, verify stems via `SELECT to_tsvector('dutch', ...)` first, and run the retrieval tests after any FTS change to catch silently-disabled FTS.
-
-**FTS_MIN_RANK trap:** de FTS-route vangt élke exception op en valt stil terug op woordoverlap; een NameError (bijv. ontbrekende of dubbel gedefinieerde constante door een slechte merge) schakelt FTS dus onopgemerkt uit en levert lege resultaten. Houd één gezaghebbende FTS_MIN_RANK-definitie vlak bij het gebruik en draai de retrieval-tests na FTS-wijzigingen.
+**How to apply:** the dutch snowball stemmer is quirky — 'marge'→'marg' but 'marges'→'marges' (no match!). When writing retrieval tests, verify stems via `SELECT to_tsvector('dutch', ...)` first, and run the retrieval tests after any FTS change to catch silently-disabled FTS. FTS tests failing with [] usually mean the primary path is throwing, not that ranking changed.
