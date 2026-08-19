@@ -59,6 +59,9 @@ DEFAULT_ASSUMPTIONS = [
      "Basis voor het berekenen van omzet-/marge-impact per shop."),
     ("shop_gross_margin_pct", "Gemiddelde brutomarge per shop", 22.0, "%", "value",
      "Gebruikt om marge-impact in euro's te berekenen."),
+    # Wisselkoers voor BigQuery-kosten (USD) in EUR-overzichten
+    ("usd_eur_rate", "Wisselkoers USD → EUR", 0.92, "EUR/USD", "cost",
+     "Gebruikt om BigQuery-querykosten (USD) mee te tellen in EUR-kostenscenario's."),
     # Schaal-aannames voor LOW/EXPECTED/HIGH gebruiksscenario's
     ("usage_low_factor", "Gebruiksfactor LOW-scenario", 0.5, "x", "scaling",
      "Vermenigvuldiger op gemeten variabel gebruik in het LOW-scenario."),
@@ -393,9 +396,27 @@ def cost_scenarios(
         pass
     db_kosten_maand = db_gb * v["rate_db_gb_month_eur"]
 
+    # BigQuery-querykosten (USD, gemeten) — nul/nvt als BQ niet geconfigureerd is
+    bq_cost_usd = 0.0
+    bq_tb = 0.0
+    bq_queries = 0
+    try:
+        from bigquery.cost_tracker import get_cost_summary
+        bq = get_cost_summary(db, days=dagen)
+        bq_cost_usd = float(bq.get("total_cost_usd") or 0)
+        bq_tb = float(bq.get("total_tb") or 0)
+        bq_queries = sum(int(r.get("query_count") or 0) for r in bq.get("by_module", []))
+    except Exception:
+        pass
+    usd_eur = v.get("usd_eur_rate", 0.92)
+    bq_kosten_eur_maand = (bq_cost_usd * usd_eur) / dagen * 30.44
+
     centraal_maand = v["central_hosting_eur_month"] + v["central_maintenance_eur_month"]
-    # Variabel per shop = gemeten gebruik (1 shop nu) + vaste variabele opslag per shop
-    variabel_per_shop_expected = gemeten_per_maand + db_kosten_maand + v["shop_variable_eur_month"]
+    # Variabel per shop = gemeten gebruik (1 shop nu) + BigQuery-scankosten
+    # + vaste variabele opslag per shop
+    variabel_per_shop_expected = (
+        gemeten_per_maand + bq_kosten_eur_maand + db_kosten_maand + v["shop_variable_eur_month"]
+    )
 
     factoren = {"LOW": v["usage_low_factor"], "EXPECTED": 1.0, "HIGH": v["usage_high_factor"]}
     scenarios = []
@@ -419,6 +440,10 @@ def cost_scenarios(
             "geextrapoleerd_eur_maand": round(gemeten_per_maand, 2),
             "database_gb": round(db_gb, 3),
             "database_kosten_eur_maand": round(db_kosten_maand, 2),
+            "bigquery_kosten_usd": round(bq_cost_usd, 4),
+            "bigquery_tb_gescand": round(bq_tb, 6),
+            "bigquery_queries": bq_queries,
+            "bigquery_kosten_eur_maand": round(bq_kosten_eur_maand, 2),
         },
         "centrale_kosten_eur_maand": round(centraal_maand, 2),
         "variabele_kosten_per_shop_eur_maand_expected": round(variabel_per_shop_expected, 2),
@@ -426,7 +451,7 @@ def cost_scenarios(
         "aannames": _assumptions_public(aannames, [
             "central_hosting_eur_month", "central_maintenance_eur_month",
             "shop_variable_eur_month", "rate_db_gb_month_eur",
-            "usage_low_factor", "usage_high_factor",
+            "usd_eur_rate", "usage_low_factor", "usage_high_factor",
         ]),
     }
 

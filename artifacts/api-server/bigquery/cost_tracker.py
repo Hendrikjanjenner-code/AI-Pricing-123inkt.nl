@@ -129,7 +129,7 @@ def get_cost_summary(db, days: int = 30) -> dict:
         total_cost = 0.0
         rows = []
         for r in result:
-            tb = r[2] or 0
+            tb = int(r[2] or 0)  # SUM(BIGINT) komt terug als Decimal
             tc = float(r[3] or 0)
             total_bytes += tb
             total_cost += tc

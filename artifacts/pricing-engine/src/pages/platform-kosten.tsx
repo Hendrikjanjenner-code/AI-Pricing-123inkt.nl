@@ -11,9 +11,13 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 const eur = (v: number) => `€${(v ?? 0).toLocaleString("nl-NL", { maximumFractionDigits: 2 })}`;
+const usd = (v: number) => `$${(v ?? 0).toLocaleString("nl-NL", { maximumFractionDigits: 2 })}`;
+
+const EMPTY_BQ = { total_cost_usd: 0, total_tb: 0, by_module: [] as any[] };
 
 export default function PlatformKosten() {
   const [usage, setUsage] = useState<any>(null);
+  const [bqCosts, setBqCosts] = useState<any>(EMPTY_BQ);
   const [scenarios, setScenarios] = useState<any>(null);
   const [assumptions, setAssumptions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,8 +31,13 @@ export default function PlatformKosten() {
       fetch(`${BASE}/api/platform/usage?dagen=${dagen}`, { headers: authHeaders() }).then(r => r.json()),
       fetch(`${BASE}/api/platform/costs/scenarios?dagen=${Math.max(dagen, 7)}`, { headers: authHeaders() }).then(r => r.json()),
       fetch(`${BASE}/api/platform/assumptions`, { headers: authHeaders() }).then(r => r.json()),
-    ]).then(([u, s, a]) => {
+      // BigQuery-kosten: faalveilig — bij fout of niet-geconfigureerde BQ tonen we nul
+      fetch(`${BASE}/api/bigquery/costs?days=${dagen}`, { headers: authHeaders() })
+        .then(r => (r.ok ? r.json() : EMPTY_BQ))
+        .catch(() => EMPTY_BQ),
+    ]).then(([u, s, a, bq]) => {
       setUsage(u); setScenarios(s); setAssumptions(Array.isArray(a) ? a : []);
+      setBqCosts(bq && typeof bq === "object" && !bq.error ? bq : EMPTY_BQ);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [dagen]);
@@ -70,13 +79,14 @@ export default function PlatformKosten() {
       </div>
 
       {/* KPI's */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {[
           { label: "Gemeten kosten", value: eur(t.kosten_eur), sub: `${dagen} dagen (variabel)` },
           { label: "Usage-records", value: t.records, sub: "gemeten gebeurtenissen" },
           { label: "Modelruns", value: t.modelruns, sub: "in periode" },
           { label: "Import-rijen", value: (t.import_rijen ?? 0).toLocaleString("nl-NL"), sub: "verwerkt" },
           { label: "Database", value: `${t.database_gb ?? "?"} GB`, sub: `${eur(t.database_kosten_eur_maand)} p/maand` },
+          { label: "BigQuery-query's", value: usd(bqCosts.total_cost_usd), sub: `${(bqCosts.total_tb ?? 0).toLocaleString("nl-NL", { maximumFractionDigits: 4 })} TB gescand · ${dagen} dagen` },
         ].map(k => (
           <div key={k.label} className="bg-white rounded-xl border p-4 shadow-sm">
             <div className="text-2xl font-bold text-gray-900">{k.value}</div>
@@ -135,6 +145,31 @@ export default function PlatformKosten() {
           </ResponsiveContainer>
         </div>
 
+        {/* BigQuery-kosten per module */}
+        <div className="bg-white rounded-xl border p-4 shadow-sm">
+          <h3 className="font-semibold text-gray-800 mb-3">BigQuery-querykosten per module</h3>
+          {(bqCosts.by_module || []).length === 0 ? (
+            <div className="text-sm text-gray-400">Geen BigQuery-query's in deze periode (of BigQuery niet geconfigureerd).</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="text-left text-gray-500">
+                <tr><th className="py-1">Module</th><th className="py-1 text-right">Query's</th><th className="py-1 text-right">TB gescand</th><th className="py-1 text-right">Kosten (USD)</th></tr>
+              </thead>
+              <tbody>
+                {(bqCosts.by_module || []).map((r: any) => (
+                  <tr key={r.module} className="border-t">
+                    <td className="py-1.5">{r.module}</td>
+                    <td className="py-1.5 text-right">{(r.query_count ?? 0).toLocaleString("nl-NL")}</td>
+                    <td className="py-1.5 text-right">{(r.total_tb ?? 0).toLocaleString("nl-NL", { maximumFractionDigits: 4 })}</td>
+                    <td className="py-1.5 text-right">{usd(r.total_cost_usd)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <div className="text-xs text-gray-400 mt-2">{bqCosts.pricing_note || "$6.25/TB (on-demand EU)"}</div>
+        </div>
+
         {/* Per gebruiker/shop */}
         <div className="bg-white rounded-xl border p-4 shadow-sm">
           <h3 className="font-semibold text-gray-800 mb-3">Gebruik per gebruiker & shop</h3>
@@ -161,6 +196,9 @@ export default function PlatformKosten() {
           <div className="text-xs text-gray-500 mt-1">
             Centrale kosten: {eur(scenarios.centrale_kosten_eur_maand)}/maand · Variabel per shop (EXPECTED): {eur(scenarios.variabele_kosten_per_shop_eur_maand_expected)}/maand
             · Basis: gemeten gebruik {eur(scenarios.gemeten_basis?.geextrapoleerd_eur_maand)}/maand
+            {(scenarios.gemeten_basis?.bigquery_kosten_eur_maand ?? 0) > 0 && (
+              <> · incl. BigQuery {eur(scenarios.gemeten_basis.bigquery_kosten_eur_maand)}/maand</>
+            )}
           </div>
         </div>
         <table className="w-full text-sm">
