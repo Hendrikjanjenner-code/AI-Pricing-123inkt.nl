@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from database import get_db
 from auth import get_current_user
-from models import CompetitorInfluenceScore, DimProduct, User
+from models import CompetitorInfluenceScore, DimProduct, FactCompetitorPriceDaily, User
 from datetime import date
 
 router = APIRouter(prefix="/api/concurrentie", tags=["concurrentie"])
@@ -48,8 +48,29 @@ def get_sku_concurrentie(
                 4
             )
 
+    # Recentste voorraad/levertijd per concurrent uit de dagelijkse feed-facts
+    fact_rows = (
+        db.query(FactCompetitorPriceDaily)
+        .filter(FactCompetitorPriceDaily.sku_id == sku_id)
+        .order_by(
+            desc(FactCompetitorPriceDaily.date),
+            desc(FactCompetitorPriceDaily.observed_at).nulls_last(),
+            desc(FactCompetitorPriceDaily.id),
+        )
+        .all()
+    )
+    beschikbaarheid: dict = {}
+    for f in fact_rows:
+        if f.competitor_name and f.competitor_name not in beschikbaarheid:
+            beschikbaarheid[f.competitor_name] = {
+                "op_voorraad": f.in_stock,  # True/False/None (None = onbekend)
+                "levertijd_dagen": f.delivery_days,
+                "waargenomen_op": f.observed_at.isoformat() if f.observed_at else None,
+            }
+
     concurrenten = []
     for s in scores:
+        besch = beschikbaarheid.get(s.competitor_name, {})
         concurrenten.append({
             "id": s.id,
             "concurrent": s.competitor_name,
@@ -64,6 +85,10 @@ def get_sku_concurrentie(
             "concurrent_prijs": float(s.competitor_price) if s.competitor_price else None,
             "prijs_vs_eigen_pct": s.price_vs_own_pct,
             "concurrent_gewicht": round(float(s.competitor_weight or 0), 3),
+            # Voorraad & levertijd uit de meest recente feed-waarneming
+            "op_voorraad": besch.get("op_voorraad"),
+            "levertijd_dagen": besch.get("levertijd_dagen"),
+            "waargenomen_op": besch.get("waargenomen_op"),
             # CSRS sub-scores
             "beschikbaarheidsscore": s.availability_rate,
             "levertijdscore": s.delivery_speed_score,

@@ -197,11 +197,13 @@ export default function ConcurrentieDetail() {
         </CardHeader>
         <CardContent className="p-0">
           <div className="border-t">
-            <div className="grid grid-cols-6 border-b bg-muted/50 px-4 py-2 text-xs font-medium text-muted-foreground">
+            <div className="grid grid-cols-8 border-b bg-muted/50 px-4 py-2 text-xs font-medium text-muted-foreground">
               <div className="col-span-2">Concurrent</div>
               <div className="text-right">Prijs</div>
               <div className="text-right">vs Eigen</div>
               <div className="text-right">vs Ref.</div>
+              <div className="text-right">Voorraad</div>
+              <div className="text-right">Levertijd</div>
               <div className="text-right">Status</div>
             </div>
             {[...opgenomen, ...uitgesloten].length === 0 ? (
@@ -209,7 +211,7 @@ export default function ConcurrentieDetail() {
             ) : (
               <div className="divide-y">
                 {[...opgenomen, ...uitgesloten].map((c: any, i: number) => (
-                  <div key={i} className={`grid grid-cols-6 items-center px-4 py-3 text-sm ${c.is_excluded ? "opacity-50 bg-muted/30" : ""}`}>
+                  <div key={i} className={`grid grid-cols-8 items-center px-4 py-3 text-sm ${c.is_excluded ? "opacity-50 bg-muted/30" : ""}`}>
                     <div className="col-span-2 font-medium">{c.competitor_name}</div>
                     <div className="text-right tabular-nums">€{c.price?.toFixed(2) ?? "—"}</div>
                     <div className={`text-right tabular-nums text-xs font-medium ${c.price_vs_own_pct > 0 ? "text-emerald-600" : c.price_vs_own_pct < 0 ? "text-red-600" : "text-muted-foreground"}`}>
@@ -217,6 +219,22 @@ export default function ConcurrentieDetail() {
                     </div>
                     <div className={`text-right tabular-nums text-xs font-medium ${c.price_vs_reference_pct > 0 ? "text-emerald-600" : c.price_vs_reference_pct < 0 ? "text-red-600" : "text-muted-foreground"}`}>
                       {c.price_vs_reference_pct != null ? `${c.price_vs_reference_pct > 0 ? "+" : ""}${c.price_vs_reference_pct.toFixed(1)}%` : "—"}
+                    </div>
+                    <div className="text-right text-xs">
+                      {c.in_stock === true ? (
+                        <span className="font-medium text-emerald-600">Op voorraad</span>
+                      ) : c.in_stock === false ? (
+                        <span className="font-medium text-red-600">Niet op voorraad</span>
+                      ) : (
+                        <span className="text-muted-foreground">Onbekend</span>
+                      )}
+                    </div>
+                    <div className="text-right text-xs tabular-nums">
+                      {c.delivery_days != null ? (
+                        <span>{c.delivery_days} {c.delivery_days === 1 ? "dag" : "dagen"}</span>
+                      ) : (
+                        <span className="text-muted-foreground">Onbekend</span>
+                      )}
                     </div>
                     <div className="flex justify-end">
                       {c.is_excluded ? (

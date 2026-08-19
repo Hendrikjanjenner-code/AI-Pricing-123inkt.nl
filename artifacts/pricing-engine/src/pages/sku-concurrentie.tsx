@@ -205,6 +205,18 @@ export default function SkuConcurrentieAnalyse() {
                               )}
                             </span>
                           )}
+                          <Badge variant="outline" className={`text-[10px] ${
+                            c.op_voorraad === true ? "bg-emerald-500/10 text-emerald-600 border-emerald-200"
+                            : c.op_voorraad === false ? "bg-red-500/10 text-red-600 border-red-200"
+                            : "bg-slate-100 text-slate-500 border-slate-200"
+                          }`}>
+                            {c.op_voorraad === true ? "Op voorraad" : c.op_voorraad === false ? "Niet op voorraad" : "Voorraad onbekend"}
+                          </Badge>
+                          <Badge variant="outline" className="text-[10px] bg-slate-100 text-slate-600 border-slate-200">
+                            {c.levertijd_dagen != null
+                              ? `Levertijd ${c.levertijd_dagen} ${c.levertijd_dagen === 1 ? "dag" : "dgn"}`
+                              : "Levertijd onbekend"}
+                          </Badge>
                           <Badge variant="outline" className={`text-[10px] ${CIS_KLASSE_KLEUREN[c.cis_klasse] || ""}`}>
                             {c.cis_klasse}
                           </Badge>

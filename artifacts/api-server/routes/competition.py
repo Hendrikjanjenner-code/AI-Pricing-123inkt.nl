@@ -146,7 +146,11 @@ def get_sku_competition_detail(
             models.FactCompetitorPriceDaily.sku_id == sku_id,
             models.FactCompetitorPriceDaily.date >= recent_date,
         )
-        .order_by(models.FactCompetitorPriceDaily.date.desc())
+        .order_by(
+            models.FactCompetitorPriceDaily.date.desc(),
+            models.FactCompetitorPriceDaily.observed_at.desc().nulls_last(),
+            models.FactCompetitorPriceDaily.id.desc(),
+        )
         .all()
     )
 
@@ -168,6 +172,10 @@ def get_sku_competition_detail(
                 "competitor_name": c.competitor_name,
                 "price": price,
                 "date": c.date.isoformat() if c.date else None,
+                "in_stock": c.in_stock,  # True/False/None (None = onbekend)
+                "delivery_days": c.delivery_days,
+                "currency": c.currency,
+                "observed_at": c.observed_at.isoformat() if c.observed_at else None,
                 "is_excluded": is_excluded,
                 "exclusion_reason": exclusion_reason,
                 "price_vs_own_pct": (
