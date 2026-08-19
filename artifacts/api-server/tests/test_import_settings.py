@@ -428,8 +428,9 @@ def test_vervangen_mode_never_deletes_disabled_competitor_rows(client, admin_hea
         db.close()
 
 
-def test_rest_sync_respects_import_settings(monkeypatch):
-    """REST-modus van de connector past dezelfde importinstellingen toe."""
+def test_rest_sync_persists_rows_and_respects_import_settings(monkeypatch):
+    """REST-modus schrijft rijen weg via persist_competitor_rows en past
+    dezelfde importinstellingen toe als de feed-sync en de upload."""
     from routes import connectors as conn_routes
     from connectors import priceshape_connector
 
@@ -446,20 +447,90 @@ def test_rest_sync_respects_import_settings(monkeypatch):
 
     db = SessionLocal()
     try:
+        if not db.query(models.DimProduct).filter(
+                models.DimProduct.sku_id == "IMPSET-SKU-1").first():
+            db.add(models.DimProduct(sku_id="IMPSET-SKU-1", product_name="Test", is_active=True))
+            db.commit()
+
+        # Bestaande rij van een andere pipeline mag nooit worden aangeraakt.
+        from datetime import date
+        db.add(models.FactCompetitorPriceDaily(
+            date=date.today(), sku_id="IMPSET-SKU-1", competitor_name="compa.nl",
+            price=99.99, source="handmatig"))
+        db.commit()
+
         imps.save_settings(db, {}, ["compb.nl"], "test")
         res = conn_routes._run_sync("priceshape", db, FakeUser())
         assert res["status"] == "ok", res
-        assert res["counts"]["price_records"] == 1
+        assert res["counts"]["opgehaald"] == 2
+        assert res["counts"]["aangemaakt"] == 1
         assert res["counts"]["overgeslagen_door_instellingen"] == 1
         assert "importinstellingen" in res["message"]
 
-        # Onderdeel volledig uit: alles overgeslagen.
+        # Importgeschiedenis: canonieke teller = aantal opgehaalde rijen,
+        # geen som van overlappende subtellers.
+        job = db.query(models.ImportJob).filter(
+            models.ImportJob.upload_type == "api_sync_priceshape").order_by(
+            models.ImportJob.id.desc()).first()
+        assert job is not None and job.rows_processed == 2
+
+        # Rij is daadwerkelijk opgeslagen, met PriceShape als bron.
+        saved = db.query(models.FactCompetitorPriceDaily).filter(
+            models.FactCompetitorPriceDaily.sku_id == "IMPSET-SKU-1",
+            models.FactCompetitorPriceDaily.competitor_name == "compa.nl").all()
+        by_source = {r.source: r for r in saved}
+        assert float(by_source["PriceShape"].price) == pytest.approx(8.99)
+        # Andere pipeline is onaangetast gebleven.
+        assert float(by_source["handmatig"].price) == pytest.approx(99.99)
+
+        # Tweede sync met nieuwe prijs: bestaande PriceShape-rij bijgewerkt.
+        monkeypatch.setattr(priceshape_connector, "fetch_competitor_prices", lambda db=None: [
+            {"sku_id": "IMPSET-SKU-1", "competitor_name": "compa.nl", "competitor_price": 7.49},
+        ])
+        res = conn_routes._run_sync("priceshape", db, FakeUser())
+        assert res["counts"]["bijgewerkt"] == 1
+        db.expire_all()
+        row = db.query(models.FactCompetitorPriceDaily).filter(
+            models.FactCompetitorPriceDaily.sku_id == "IMPSET-SKU-1",
+            models.FactCompetitorPriceDaily.competitor_name == "compa.nl",
+            models.FactCompetitorPriceDaily.source == "PriceShape").first()
+        assert float(row.price) == pytest.approx(7.49)
+
+        # Onbekende SKU en ongeldige rij worden geteld, nooit stil gedropt.
+        monkeypatch.setattr(priceshape_connector, "fetch_competitor_prices", lambda db=None: [
+            {"sku_id": "IMPSET-ONBEKEND", "competitor_name": "compa.nl", "competitor_price": 5.0},
+            {"sku_id": "IMPSET-SKU-1", "competitor_name": "compa.nl"},  # geen prijs
+            {"sku_id": "IMPSET-SKU-1", "competitor_name": "compneg.nl", "competitor_price": -1},
+            {"sku_id": "IMPSET-SKU-1", "competitor_name": "compa.nl", "competitor_price": 7.49},
+        ])
+        res = conn_routes._run_sync("priceshape", db, FakeUser())
+        assert res["counts"]["niet_gematcht"] == 1
+        assert res["counts"]["ongeldig"] == 2
+        assert res["counts"]["overgeslagen"] == 3
+        # Negatieve prijs mag nooit worden opgeslagen.
+        assert db.query(models.FactCompetitorPriceDaily).filter(
+            models.FactCompetitorPriceDaily.sku_id == "IMPSET-SKU-1",
+            models.FactCompetitorPriceDaily.competitor_name == "compneg.nl").count() == 0
+        job = db.query(models.ImportJob).filter(
+            models.ImportJob.upload_type == "api_sync_priceshape").order_by(
+            models.ImportJob.id.desc()).first()
+        assert job.rows_processed == 4
+
+        # Onderdeel volledig uit: alles overgeslagen, niets gewist.
         imps.save_settings(db, {"competitor_prices": False}, [], "test")
         res = conn_routes._run_sync("priceshape", db, FakeUser())
-        assert res["counts"]["price_records"] == 0
-        assert res["counts"]["overgeslagen_door_instellingen"] == 2
+        assert res["counts"]["aangemaakt"] == 0
+        assert res["counts"]["overgeslagen_door_instellingen"] == 4
+        assert db.query(models.FactCompetitorPriceDaily).filter(
+            models.FactCompetitorPriceDaily.sku_id == "IMPSET-SKU-1",
+            models.FactCompetitorPriceDaily.source == "handmatig").count() == 1
 
         # Herstel standaardinstellingen voor andere tests.
         imps.save_settings(db, {"competitor_prices": True}, [], "test")
     finally:
+        db.rollback()
+        db.query(models.FactCompetitorPriceDaily).filter(
+            models.FactCompetitorPriceDaily.sku_id.like("IMPSET-%")).delete(
+            synchronize_session=False)
+        db.commit()
         db.close()

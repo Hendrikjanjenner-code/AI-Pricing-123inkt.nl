@@ -589,6 +589,9 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
     status = "ok"
     message = ""
     counts: dict[str, int] = {}
+    # Canonieke teller voor de importgeschiedenis; als een pad overlappende
+    # subtellers rapporteert, zet het deze expliciet i.p.v. sum(counts).
+    processed_rows: int | None = None
     errors: list[str] = []
 
     with _sync_lock(name) as got_lock:
@@ -626,29 +629,44 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
                 else:
                     priceshape_connector._get_credentials(db=db)
                     prices = priceshape_connector.fetch_competitor_prices(db=db)
-                    # Pas dezelfde importinstellingen toe als de feed-sync en de
-                    # handmatige upload: uitgevinkte onderdelen/concurrenten worden
-                    # overgeslagen — bestaande data wordt hierbij nooit gewist.
-                    from services import import_settings as imps
-                    settings = imps.get_settings(db, "priceshape")
-                    total = len(prices)
-                    if not imps.component_enabled(settings, "competitor_prices"):
-                        prices = []
-                    else:
-                        prices = [
-                            p for p in prices
-                            if not imps.competitor_disabled(settings, str(p.get("competitor_name") or ""))
-                        ]
-                    skipped_by_settings = total - len(prices)
-                    counts["price_records"] = len(prices)
-                    counts["overgeslagen_door_instellingen"] = skipped_by_settings
+                    # Schrijf de opgehaalde rijen weg via exact dezelfde route als
+                    # de handmatige upload en de feed-sync, zodat matching-,
+                    # herkomst- en importinstellingenregels identiek zijn.
+                    # Modus "vervangen" werkt eerdere PriceShape-rijen bij met de
+                    # actuele prijzen; verwijderen/overschrijven blijft strikt
+                    # beperkt tot rijen die deze connector zelf schreef
+                    # (source-gescoped) — data van andere pipelines blijft staan.
+                    from routes.priceshape import persist_competitor_rows
+                    res = persist_competitor_rows(
+                        db, prices, mode="vervangen", username="connector-sync",
+                        filename="priceshape-rest-sync",
+                    )
+                    rejected = res.get("unmatched", 0) + res.get("invalid", 0)
+                    counts["opgehaald"] = len(prices)
+                    counts["aangemaakt"] = res["created"]
+                    counts["bijgewerkt"] = res["updated"]
+                    counts["overgeslagen"] = res["skipped"] + rejected
+                    counts["niet_gematcht"] = res.get("unmatched", 0)
+                    counts["ongeldig"] = res.get("invalid", 0)
+                    counts["verwijderd"] = res["removed"]
+                    counts["overgeslagen_door_instellingen"] = res["skipped_by_settings"]
+                    # Eén canonieke teller voor de importgeschiedenis: het aantal
+                    # opgehaalde rijen (de subtellers overlappen elkaar).
+                    processed_rows = len(prices)
                     skipped_note = (
-                        f" {skipped_by_settings} rijen overgeslagen door importinstellingen."
-                        if skipped_by_settings else ""
+                        f" {res['skipped_by_settings']} rijen overgeslagen door importinstellingen."
+                        if res.get("skipped_by_settings") else ""
+                    )
+                    rejected_note = (
+                        f" {res.get('unmatched', 0)} rijen zonder bekende SKU en "
+                        f"{res.get('invalid', 0)} rijen met ontbrekende prijs/concurrent overgeslagen."
+                        if rejected else ""
                     )
                     message = (
-                        f"PriceShape sync voltooid: {len(prices)} prijzen opgehaald."
-                        + skipped_note
+                        f"PriceShape sync voltooid: {len(prices)} prijzen opgehaald, "
+                        f"{res['created']} nieuw opgeslagen, {res['updated']} bijgewerkt, "
+                        f"{res['skipped'] + rejected} overgeslagen."
+                        + rejected_note + skipped_note
                     )
 
             elif name == "drs":
@@ -721,7 +739,8 @@ def _run_sync(name: str, db: Session, current_user) -> dict:
                     filename=f"handmatige-sync-{name}",
                     source="API-Sync",
                     status=job_status,
-                    rows_processed=sum(counts.values()),
+                    rows_processed=(processed_rows if processed_rows is not None
+                                    else sum(counts.values())),
                     rows_failed=0,
                     rows_duplicates=0,
                     error_log=([{"rij": None, "veld": None, "bericht": message}]

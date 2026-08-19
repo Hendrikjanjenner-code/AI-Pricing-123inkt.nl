@@ -191,13 +191,15 @@ def persist_competitor_rows(db: Session, rows: list[dict], mode: str, username: 
     from services import import_settings as imps
     settings = imps.get_settings(db, "priceshape")
     created = updated = skipped = removed = skipped_by_settings = 0
+    unmatched = invalid = 0
     now = datetime.utcnow()
     today = now.date()
 
     if not imps.component_enabled(settings, "competitor_prices"):
         # Onderdeel volledig uitgevinkt: niets importeren, niets wissen.
         return {"created": 0, "updated": 0, "skipped": 0, "removed": 0,
-                "skipped_by_settings": len(rows)}
+                "skipped_by_settings": len(rows),
+                "unmatched": 0, "invalid": 0}
 
     all_products = db.query(models.DimProduct.sku_id, models.DimProduct.ean, models.DimProduct.oem_code).all()
     known_skus = {p.sku_id for p in all_products}
@@ -212,11 +214,17 @@ def persist_competitor_rows(db: Session, rows: list[dict], mode: str, username: 
     for row in rows:
         sku_id, matched_via = _match_sku(row, sku_by_ean, sku_by_oem, known_skus)
         if not sku_id:
-            continue  # onbekende rijen worden overgeslagen (gerapporteerd door de aanroeper)
+            # Onbekende rij: geteld als unmatched (de upload-aanroeper rapporteert
+            # deze rijen daarnaast zelf in detail).
+            unmatched += 1
+            continue
 
         comp_naam = _trunc(get_alias(row, *COMPETITOR_NAME_ALIASES), 255)
         prijs = _safe_float(get_alias(row, *COMPETITOR_PRICE_ALIASES))
-        if prijs is None or not comp_naam:
+        if prijs is None or prijs < 0 or not comp_naam:
+            # Ontbrekende, negatieve of ongeldige prijs of concurrentnaam:
+            # nooit stil droppen (zelfde regel als de upload-validator).
+            invalid += 1
             continue
 
         if imps.competitor_disabled(settings, comp_naam):
@@ -290,12 +298,14 @@ def persist_competitor_rows(db: Session, rows: list[dict], mode: str, username: 
     _log_audit(db, "fact_competitor_price_daily", "PRICESHAPE_IMPORT", "import", username,
                None, {"created": created, "updated": updated, "skipped": skipped, "removed": removed,
                       "skipped_by_settings": skipped_by_settings,
+                      "unmatched": unmatched, "invalid": invalid,
                       "mode": mode, "filename": filename},
                details=f"import_source={SOURCE_NAME} mode={mode}")
     db.commit()
 
     return {"created": created, "updated": updated, "skipped": skipped, "removed": removed,
-            "skipped_by_settings": skipped_by_settings}
+            "skipped_by_settings": skipped_by_settings,
+            "unmatched": unmatched, "invalid": invalid}
 
 
 @router.post("/validate")
