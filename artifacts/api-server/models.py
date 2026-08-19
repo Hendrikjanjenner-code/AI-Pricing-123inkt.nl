@@ -3224,3 +3224,248 @@ class UserUiPreference(Base):
     pref_key = Column(String(50), nullable=False)
     value = Column(JSON, nullable=False, default=dict)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Concurrentprofiel: datamodel & evidence-fundament (taak #246)
+# Alle tabellen koppelen aan de bestaande concurrent-identiteit per shop:
+# (shop_id, competitor_name) — géén tweede concurrententabel.
+# ═══════════════════════════════════════════════════════════════════════════
+
+class CompetitionEvidence(Base):
+    """
+    Evidence-record waarnaar alle profielvelden kunnen verwijzen.
+    Bronprioriteit voor financiële data ligt vast in
+    services/competitor_profile.py (jaarrekening > kvk > jaarverslag > ...).
+    """
+    __tablename__ = "competition_evidence"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    competitor_name = Column(String(255), nullable=False, index=True)
+
+    source_url = Column(Text)
+    source_type = Column(String(50), nullable=False)  # jaarrekening / kvk / jaarverslag / persbericht / nieuwsartikel / bedrijfswebsite / linkedin / social_media / externe_schatting / handmatig / demo_seed
+    source_priority = Column(Integer)                 # lager = betrouwbaarder (afgeleid van source_type)
+    title = Column(String(500))
+    observed_date = Column(Date)                      # peildatum van het feit
+    fetched_date = Column(Date)                       # wanneer opgehaald/ingevoerd
+    reliability = Column(String(20), default="medium")  # high / medium / low
+    status = Column(String(20), default="active")     # active / superseded / rejected / expired
+    confidence = Column(Float, default=0.5)           # 0..1
+    extracted_fact = Column(Text)                     # het geëxtraheerde feit (NL)
+    human_validated = Column(Boolean, default=False)
+    review_due_date = Column(Date)                    # wanneer opnieuw beoordelen
+    created_by = Column(String(100))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CompetitorBusinessProfile(Base):
+    """
+    Bedrijfsprofiel per concurrent: identiteit, omvang, klantmodel,
+    geografische schaal en ownership. Eén rij per (shop, concurrent).
+    field_meta bevat per veld: {information_layer, confidence, evidence_id,
+    source, as_of_date, last_verified_at, status} waarbij status expliciet
+    "unknown" kan zijn — unknown is nooit stilzwijgend 0/leeg.
+    """
+    __tablename__ = "competitor_business_profile"
+    __table_args__ = (
+        UniqueConstraint("shop_id", "competitor_name",
+                         name="uq_comp_business_profile_shop_name"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    competitor_name = Column(String(255), nullable=False, index=True)
+
+    legal_name = Column(String(255))
+    kvk_number = Column(String(50))
+    founded_year = Column(Integer)
+    customer_model = Column(String(50))         # b2c / b2b / hybrid
+    size_class = Column(String(50))             # micro / klein / middelgroot / groot / enterprise
+    employee_range_min = Column(Integer)
+    employee_range_max = Column(Integer)
+    revenue_range_min = Column(Numeric(16, 2))
+    revenue_range_max = Column(Numeric(16, 2))
+    revenue_currency = Column(String(3))        # ISO 4217
+    geographic_scale = Column(String(50))       # lokaal / nationaal / eu / globaal
+    ownership_type = Column(String(50))         # familiebedrijf / private_equity / beursgenoteerd / ...
+    headquarters_country = Column(String(2))    # ISO 3166-1 alpha-2 (nooit basis voor inferenties)
+
+    field_meta = Column(JSON, default=dict)     # per-veld: laag/bron/peildatum/confidence/status
+    last_verified_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CompetitorFulfilmentProfile(Base):
+    """Fulfilment-/voorraadmodel per concurrent. Eén rij per (shop, concurrent)."""
+    __tablename__ = "competitor_fulfilment_profile"
+    __table_args__ = (
+        UniqueConstraint("shop_id", "competitor_name",
+                         name="uq_comp_fulfilment_profile_shop_name"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    competitor_name = Column(String(255), nullable=False, index=True)
+
+    inventory_model = Column(String(50))        # eigen_voorraad / dropship / hybride
+    warehouse_count = Column(Integer)
+    warehouse_locations = Column(JSON)          # [{country, city}] — nooit basis voor inferenties
+    dropship_share_pct = Column(Float)          # 0..100
+    own_stock_share_pct = Column(Float)         # 0..100
+    next_day_delivery = Column(Boolean)
+    same_day_delivery = Column(Boolean)
+    marketplace_role = Column(String(50))       # geen / verkoper / platform / beide
+
+    field_meta = Column(JSON, default=dict)
+    last_verified_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CompetitorFinancialObservation(Base):
+    """Financiële observatie per concurrent per boekjaar per metric."""
+    __tablename__ = "competitor_financial_observation"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    competitor_name = Column(String(255), nullable=False, index=True)
+
+    fiscal_year = Column(Integer, nullable=False, index=True)
+    metric = Column(String(50), nullable=False)   # revenue / profit / employees / equity / ...
+    value_min = Column(Numeric(16, 2))
+    value_max = Column(Numeric(16, 2))
+    currency = Column(String(3))
+    is_unknown = Column(Boolean, default=False)   # expliciete unknown-markering
+
+    information_layer = Column(String(30), nullable=False, default="schatting")  # feit / schatting / afgeleid_signaal / hypothese
+    confidence = Column(Float, default=0.5)
+    evidence_id = Column(Integer, ForeignKey("competition_evidence.id"), index=True)
+    source_note = Column(String(255))
+    as_of_date = Column(Date)
+    last_verified_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CompetitorMarketRole(Base):
+    """Marktrollen (Competition DNA) — meerdere tegelijk mogelijk per concurrent."""
+    __tablename__ = "competitor_market_role"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    competitor_name = Column(String(255), nullable=False, index=True)
+
+    role = Column(String(50), nullable=False)     # prijsvechter / assortimentsleider / nichespeler / platform / premium_specialist / ...
+    information_layer = Column(String(30), nullable=False, default="afgeleid_signaal")
+    confidence = Column(Float, default=0.5)
+    evidence_id = Column(Integer, ForeignKey("competition_evidence.id"), index=True)
+    ai_assigned = Column(Boolean, default=False)
+    human_validated = Column(Boolean, default=False)
+    valid_from = Column(Date)
+    valid_to = Column(Date)                       # NULL = nog geldig
+    last_verified_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CompetitorGeographicPresence(Base):
+    """Geografische aanwezigheid per land, met expliciet presence-type."""
+    __tablename__ = "competitor_geographic_presence"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    competitor_name = Column(String(255), nullable=False, index=True)
+
+    country_code = Column(String(2), nullable=False)   # ISO 3166-1 alpha-2
+    presence_type = Column(String(30), nullable=False)  # webshop / operationeel
+    information_layer = Column(String(30), nullable=False, default="feit")
+    confidence = Column(Float, default=0.5)
+    evidence_id = Column(Integer, ForeignKey("competition_evidence.id"), index=True)
+    valid_from = Column(Date)
+    valid_to = Column(Date)                       # NULL = nog actief
+    last_verified_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CompetitorCorporateRelation(Base):
+    """Corporate structuur: parent / ultimate_parent / subsidiary / sister."""
+    __tablename__ = "competitor_corporate_relation"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    competitor_name = Column(String(255), nullable=False, index=True)
+
+    relation_type = Column(String(30), nullable=False)  # parent / ultimate_parent / subsidiary / sister
+    related_entity = Column(String(255), nullable=False)
+    related_country = Column(String(2))           # informatief; nooit basis voor claims
+    information_layer = Column(String(30), nullable=False, default="feit")
+    confidence = Column(Float, default=0.5)
+    evidence_id = Column(Integer, ForeignKey("competition_evidence.id"), index=True)
+    valid_from = Column(Date)
+    valid_to = Column(Date)                       # NULL = nog geldig
+    last_verified_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CompetitorEvolutionEvent(Base):
+    """
+    Historie: elke betekenisvolle profielwijziging als tijdlijn-event
+    (Competitor Evolution Timeline-data).
+    """
+    __tablename__ = "competitor_evolution_event"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    competitor_name = Column(String(255), nullable=False, index=True)
+
+    section = Column(String(50), nullable=False)   # business / fulfilment / financials / roles / geography / relations
+    field_name = Column(String(100))
+    event_type = Column(String(50), nullable=False, default="changed")  # created / changed / removed / validated
+    old_value = Column(JSON)
+    new_value = Column(JSON)
+    change_source = Column(String(30), default="handmatig")  # ai / handmatig / seed / import
+    changed_by = Column(String(100))
+    evidence_id = Column(Integer, ForeignKey("competition_evidence.id"))
+    occurred_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class CompetitorFieldValidation(Base):
+    """
+    Handmatige validatie-workflow: AI-waarde én menselijke waarde blijven
+    beide bewaard; de menselijke correctie wint operationeel.
+    """
+    __tablename__ = "competitor_field_validation"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
+    competitor_name = Column(String(255), nullable=False, index=True)
+
+    section = Column(String(50), nullable=False)
+    field_name = Column(String(100), nullable=False)
+    action = Column(String(30), nullable=False)   # bevestigen / corrigeren / blokkeren / unknown / heronderzoek
+    ai_value = Column(JSON)                       # bewaarde AI-waarde
+    human_value = Column(JSON)                    # menselijke waarde (bij corrigeren)
+    reason = Column(Text)
+    reviewer = Column(String(100), nullable=False)
+    is_current = Column(Boolean, default=True, index=True)  # laatste beoordeling per veld
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class CompetitorFreshnessRule(Base):
+    """
+    Configureerbare freshness-regels per veldtype: wanneer geldt een
+    profielveld als 'verouderd'. shop_id NULL = globale default-override.
+    """
+    __tablename__ = "competitor_freshness_rule"
+    __table_args__ = (
+        UniqueConstraint("shop_id", "field_type",
+                         name="uq_comp_freshness_shop_fieldtype"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), nullable=True, index=True)
+    field_type = Column(String(50), nullable=False)   # price / employees / revenue / countries / fulfilment / ownership / roles / default
+    max_age_days = Column(Integer, nullable=False)
+    updated_by = Column(String(100))
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

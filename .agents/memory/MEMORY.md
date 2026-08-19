@@ -61,3 +61,4 @@
 - [Export dubbel-uitvoer-guard](export-claim-atomic.md) — claim rijen atomisch (UPDATE...RETURNING) vóór job-aanmaak; post-hoc markeren faalt code review op race-safety.
 - [Rankings na feed-sync](rankings-post-sync.md) — refresh na elke sync fout-tolerant + advisory-lock-geserialiseerd; same-day rerun vergelijkt met de vervangen dagsnapshot.
 - [Upload warning caps](upload-warning-caps.md) — capped ImportJob logs evict structural warnings; pin "Onbekende kolommen"-type warnings to the front before persisting.
+- [Cross-referenced id's shop-scopen](scoped-reference-ids.md) — elk client-geleverd referentie-id (evidence_id e.d.) centraal resolven op shop+entiteit vóór opslag; PK-only lookup faalt code review als tenant-lek.

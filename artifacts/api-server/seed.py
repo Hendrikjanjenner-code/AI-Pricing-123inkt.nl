@@ -484,6 +484,136 @@ def seed_database():
             ))
         db.commit()
 
+        # ── Concurrentprofiel demo-verrijking (taak #246) ─────────────────
+        # Compleet demo-bedrijfsprofiel voor één bestaande concurrent
+        # ("Amazon"), duidelijk gemarkeerd als demo/estimate zodat
+        # vervolgtaken en E2E-tests echte profieldata hebben.
+        from services import competitor_profile as cp_svc
+        demo_comp = "Amazon"
+        today_dt = datetime.utcnow()
+
+        db.add(models.CompetitorProfile(competitor_name=demo_comp,
+                                        shop_id=1, run_date=today))
+        db.flush()
+
+        ev_fin = models.CompetitionEvidence(
+            shop_id=1, competitor_name=demo_comp,
+            source_url="https://example.com/demo/jaarverslag",
+            source_type="demo_seed",
+            source_priority=cp_svc.source_priority("demo_seed"),
+            title="[DEMO] Jaarverslag-schatting (seed)",
+            observed_date=today - timedelta(days=120),
+            fetched_date=today, reliability="low", confidence=0.4,
+            extracted_fact="[DEMO/ESTIMATE] Omzetindicatie op basis van publieke schattingen.",
+            human_validated=False,
+            review_due_date=today + timedelta(days=180),
+            created_by="seed")
+        ev_ops = models.CompetitionEvidence(
+            shop_id=1, competitor_name=demo_comp,
+            source_url="https://example.com/demo/bedrijfswebsite",
+            source_type="demo_seed",
+            source_priority=cp_svc.source_priority("demo_seed"),
+            title="[DEMO] Bedrijfswebsite-observatie (seed)",
+            observed_date=today - timedelta(days=30),
+            fetched_date=today, reliability="low", confidence=0.5,
+            extracted_fact="[DEMO/ESTIMATE] Fulfilment- en aanwezigheidsobservaties.",
+            created_by="seed")
+        db.add_all([ev_fin, ev_ops])
+        db.flush()
+
+        def _meta(layer, conf, ev_id=None, status="known"):
+            return {"status": status, "information_layer": layer,
+                    "confidence": conf, "evidence_id": ev_id,
+                    "source": "demo_seed", "as_of_date": today.isoformat(),
+                    "last_verified_at": today_dt.isoformat()}
+
+        biz = models.CompetitorBusinessProfile(
+            shop_id=1, competitor_name=demo_comp,
+            legal_name="Amazon EU S.à r.l. (demo)",
+            founded_year=1994, customer_model="hybrid",
+            size_class="enterprise",
+            employee_range_min=1000, employee_range_max=10000,
+            revenue_range_min=1_000_000_000, revenue_range_max=5_000_000_000,
+            revenue_currency="EUR", geographic_scale="globaal",
+            ownership_type="beursgenoteerd", headquarters_country="LU",
+            last_verified_at=today_dt,
+            field_meta={
+                "legal_name": _meta("feit", 0.9, ev_ops.id),
+                "founded_year": _meta("feit", 0.9, ev_ops.id),
+                "customer_model": _meta("feit", 0.8, ev_ops.id),
+                "size_class": _meta("schatting", 0.7, ev_fin.id),
+                "employee_range_min": _meta("schatting", 0.5, ev_fin.id),
+                "employee_range_max": _meta("schatting", 0.5, ev_fin.id),
+                "revenue_range_min": _meta("schatting", 0.4, ev_fin.id),
+                "revenue_range_max": _meta("schatting", 0.4, ev_fin.id),
+                "revenue_currency": _meta("schatting", 0.4, ev_fin.id),
+                "geographic_scale": _meta("feit", 0.9, ev_ops.id),
+                "ownership_type": _meta("feit", 0.9, ev_ops.id),
+                "headquarters_country": _meta("feit", 0.9, ev_ops.id),
+                # KvK-nummer bewust expliciet unknown — geen stille 0/leeg.
+                "kvk_number": _meta("hypothese", 0.0, None, status="unknown"),
+            })
+        ful = models.CompetitorFulfilmentProfile(
+            shop_id=1, competitor_name=demo_comp,
+            inventory_model="hybride", warehouse_count=5,
+            warehouse_locations=[{"country": "NL", "city": "demo"},
+                                 {"country": "DE", "city": "demo"}],
+            dropship_share_pct=30.0, own_stock_share_pct=70.0,
+            next_day_delivery=True, same_day_delivery=False,
+            marketplace_role="beide", last_verified_at=today_dt,
+            field_meta={f: _meta("schatting", 0.5, ev_ops.id)
+                        for f in cp_svc.FULFILMENT_FIELDS})
+        db.add_all([biz, ful])
+
+        db.add_all([
+            models.CompetitorFinancialObservation(
+                shop_id=1, competitor_name=demo_comp, fiscal_year=today.year - 1,
+                metric="revenue", value_min=1_000_000_000,
+                value_max=5_000_000_000, currency="EUR",
+                information_layer="schatting", confidence=0.4,
+                evidence_id=ev_fin.id, source_note="[DEMO/ESTIMATE] seed",
+                as_of_date=today),
+            models.CompetitorFinancialObservation(
+                shop_id=1, competitor_name=demo_comp, fiscal_year=today.year - 2,
+                metric="profit", is_unknown=True,
+                information_layer="hypothese", confidence=0.0,
+                source_note="[DEMO] expliciet unknown", as_of_date=today),
+            models.CompetitorMarketRole(
+                shop_id=1, competitor_name=demo_comp, role="assortimentsleider",
+                information_layer="afgeleid_signaal", confidence=0.7,
+                evidence_id=ev_ops.id, ai_assigned=True,
+                valid_from=today - timedelta(days=60)),
+            models.CompetitorMarketRole(
+                shop_id=1, competitor_name=demo_comp, role="platform",
+                information_layer="feit", confidence=0.9,
+                evidence_id=ev_ops.id, ai_assigned=False,
+                human_validated=True, valid_from=today - timedelta(days=60)),
+            models.CompetitorGeographicPresence(
+                shop_id=1, competitor_name=demo_comp, country_code="NL",
+                presence_type="operationeel", information_layer="feit",
+                confidence=0.9, evidence_id=ev_ops.id,
+                valid_from=today - timedelta(days=365)),
+            models.CompetitorGeographicPresence(
+                shop_id=1, competitor_name=demo_comp, country_code="BE",
+                presence_type="webshop", information_layer="feit",
+                confidence=0.8, evidence_id=ev_ops.id,
+                valid_from=today - timedelta(days=365)),
+            models.CompetitorCorporateRelation(
+                shop_id=1, competitor_name=demo_comp, relation_type="ultimate_parent",
+                related_entity="Amazon.com Inc. (demo)", related_country="US",
+                information_layer="feit", confidence=0.9,
+                evidence_id=ev_ops.id, valid_from=today - timedelta(days=365)),
+        ])
+        for section, fld in [("business", "revenue_range_min"),
+                             ("roles", "assortimentsleider"),
+                             ("geography", "NL")]:
+            db.add(models.CompetitorEvolutionEvent(
+                shop_id=1, competitor_name=demo_comp, section=section,
+                field_name=fld, event_type="created",
+                new_value="[DEMO] seed-verrijking", change_source="seed",
+                changed_by="seed"))
+        db.commit()
+
         # ── Model run record ──────────────────────────────────────────────
         db.add(models.ModelRun(
             started_at=datetime.utcnow() - timedelta(minutes=8),

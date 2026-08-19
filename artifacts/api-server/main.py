@@ -35,6 +35,7 @@ from routes import (
     command_center, governance, engine_jobs,
     product_hierarchy,
     saved_views, global_search, management_drilldown,
+    competitor_profile,
 )
 
 # Optional modules (DRS import, PriceShape feed import) are imported
@@ -528,6 +529,7 @@ app.include_router(exports.router)
 app.include_router(users.router)
 app.include_router(skus.router)
 app.include_router(competition.router)
+app.include_router(competitor_profile.router)
 app.include_router(ab_tests.router)
 app.include_router(concurrentie.router)
 app.include_router(elasticiteit.router)
