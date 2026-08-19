@@ -6,6 +6,8 @@ Few-shot retrieval (ai_gateway) is primarily Postgres full-text: OR-tsquery over
 
 **Why:** synonym/reformulated questions must still match; FTS may be unavailable (fail-safe requirement).
 
+The tsvector is a STORED generated column (question_tsv) with a GIN index; the auto-migrator skips Computed columns, so generated columns need manual DDL in migrate.py's _MANUAL_INDEXES. ts_rank normalizes on document length: a strong single-stem match on a short question scores only ~0.008, so the min-rank cutoff must stay very low (0.003) — the @@ filter already excludes zero-overlap questions.
+
 **How to apply:** the dutch snowball stemmer is quirky — 'marge'→'marg' but 'marges'→'marges' (no match!). When writing retrieval tests, verify stems via `SELECT to_tsvector('dutch', ...)` first.
 ---
 name: Few-shot FTS retrieval

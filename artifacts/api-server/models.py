@@ -5,8 +5,9 @@ All tables match the spec: users, dim_product, dim_category, etc.
 from datetime import datetime
 from sqlalchemy import (
     Column, Integer, String, Float, Boolean, DateTime, Text,
-    ForeignKey, Date, Numeric, JSON, Index, text, UniqueConstraint
+    ForeignKey, Date, Numeric, JSON, Index, text, UniqueConstraint, Computed
 )
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -2454,6 +2455,9 @@ class AiFeedback(Base):
     __tablename__ = "ai_feedback"
     __table_args__ = (
         UniqueConstraint("message_id", "user_id", name="uq_ai_feedback_msg_user"),
+        # GIN-index op de opgeslagen tsvector: houdt few-shot retrieval snel
+        # bij duizenden feedbackrijen (geen to_tsvector per rij meer).
+        Index("ix_ai_feedback_question_tsv", "question_tsv", postgresql_using="gin"),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -2467,6 +2471,13 @@ class AiFeedback(Base):
     answer_excerpt = Column(Text)                  # conclusion-tekst van het antwoord
     tools_used = Column(JSON)                      # [functienamen] uit answer.sources
     prompt_version_id = Column(Integer, index=True)
+    # Opgeslagen (STORED) generated column: Postgres onderhoudt de dutch-
+    # tsvector zelf bij insert/update; de GIN-index hierboven maakt de
+    # few-shot FTS-zoekopdracht een index-scan i.p.v. per-rij to_tsvector.
+    question_tsv = Column(
+        TSVECTOR,
+        Computed("to_tsvector('dutch', coalesce(question, ''))", persisted=True),
+    )
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 class PlatformModule(Base):

@@ -1595,10 +1595,11 @@ def _fewshot_rows_overlap(db: Session, question: str, limit: int) -> list[dict]:
     scored.sort(key=lambda t: t[0], reverse=True)
     return _dedupe_examples(scored, limit)
 
-# Minimale ts_rank om een FTS-match als relevant te beschouwen; filtert
-# toevalstreffers op één stopwoord-achtig lexeem uit de OR-query weg.
-# ts_rank met OR-semantiek geeft lage absolute waarden (één gedeeld lexeem
-# op een korte vraag ≈ 0.003–0.008), dus de drempel ligt daar net onder.
+# Minimale ts_rank om pure ruis te weren. Bewust laag: ts_rank normaliseert
+# op documentlengte, waardoor zelfs een sterke één-stam-match (bv. 'marge')
+# op een korte vraag rond ~0.008 uitkomt. Irrelevante vragen zonder gedeelde
+# lexemen halen de @@-filter al niet, dus de drempel hoeft alleen extreem
+# zwakke restmatches te knippen.
 FTS_MIN_RANK = 0.003
 
 
@@ -1616,7 +1617,11 @@ def _fewshot_rows_fts(db: Session, question: str, limit: int) -> list[dict]:
     # OR-tsquery over de losse woorden; _WORD_RE laat alleen letters door,
     # dus de lexemen zijn veilig om te concateneren.
     tsquery = func.to_tsquery("dutch", " | ".join(dict.fromkeys(words)))
-    tsvector = func.to_tsvector("dutch", models.AiFeedback.question)
+    # Gebruik de opgeslagen generated column (GIN-geïndexeerd) i.p.v.
+    # to_tsvector per rij: blijft snel bij duizenden feedbackrijen. Als de
+    # kolom in een oude DB nog ontbreekt gooit de query een exception en
+    # valt de caller terug op woordoverlap.
+    tsvector = models.AiFeedback.question_tsv
     rank = func.ts_rank(tsvector, tsquery)
     rows = (db.query(models.AiFeedback, rank.label("rank"))
             .filter(models.AiFeedback.score > 0,

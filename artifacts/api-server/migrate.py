@@ -274,6 +274,12 @@ def run_migrations(engine, metadata) -> None:
             )
 
             for column in table.columns:
+                if column.computed is not None:
+                    # Generated (Computed) kolommen kan dit additive framework
+                    # niet correct toevoegen (het zou een gewone kolom zonder
+                    # GENERATED-expressie aanmaken). Die worden via de
+                    # _MANUAL_INDEXES-DDL hieronder aangemaakt.
+                    continue
                 change_key = f"{table_name}.{column.name}"
 
                 if column.name in live_cols:
@@ -368,6 +374,19 @@ def run_migrations(engine, metadata) -> None:
         # Partiële unique index: dwingt de globale standaard-singleton af voor
         # ai_budget_config (username IS NULL). PostgreSQL's gewone UNIQUE op een
         # nullable kolom staat meerdere NULL-rijen toe; de partiële index niet.
+        # Few-shot retrieval: opgeslagen dutch-tsvector over ai_feedback.question
+        # (generated column) + GIN-index, zodat FTS een index-scan blijft bij
+        # duizenden feedbackrijen. Beide idempotent via IF NOT EXISTS.
+        (
+            "ai_feedback_question_tsv_generated",
+            "ALTER TABLE ai_feedback ADD COLUMN IF NOT EXISTS question_tsv tsvector "
+            "GENERATED ALWAYS AS (to_tsvector('dutch', coalesce(question, ''))) STORED",
+        ),
+        (
+            "ix_ai_feedback_question_tsv",
+            'CREATE INDEX IF NOT EXISTS ix_ai_feedback_question_tsv '
+            'ON ai_feedback USING gin (question_tsv)',
+        ),
         (
             "uq_ai_budget_config_global_singleton",
             'CREATE UNIQUE INDEX IF NOT EXISTS uq_ai_budget_config_global_singleton '
