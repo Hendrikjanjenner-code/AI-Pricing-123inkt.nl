@@ -149,14 +149,53 @@ class TestCheckAndReserveBudget(unittest.TestCase):
         return db, slot
 
     def test_returns_slot_date_and_max_tokens(self):
-        """check_and_reserve_budget geeft (slot_date, max_tokens) terug."""
+        """check_and_reserve_budget geeft (slot_date, max_tokens, warning) terug."""
         db, _ = _make_slot_db(max_calls=10, max_tokens=200000,
                               calls_reserved=0, tokens_reserved=0)
         with patch("ai_gateway.SessionLocal", return_value=db):
             result = ai_gateway.check_and_reserve_budget("u", "viewer")
-        slot_date, returned_max_tokens = result
+        slot_date, returned_max_tokens, budget_warning = result
         self.assertEqual(slot_date, date.today())
         self.assertEqual(returned_max_tokens, 200000)
+        self.assertIsNone(budget_warning)
+
+    def test_warning_at_80_percent_calls(self):
+        """≥ 80% van de call-limiet (na reservering) → waarschuwing."""
+        db, _ = _make_slot_db(max_calls=10, max_tokens=None,
+                              calls_reserved=7, tokens_reserved=0)
+        with patch("ai_gateway.SessionLocal", return_value=db):
+            _, _, warning = ai_gateway.check_and_reserve_budget("u", "viewer")
+        self.assertIsNotNone(warning)
+        self.assertIn("80%", warning)
+        self.assertIn("call-limiet", warning)
+
+    def test_no_warning_below_80_percent(self):
+        """< 80% verbruik → geen waarschuwing."""
+        db, _ = _make_slot_db(max_calls=10, max_tokens=None,
+                              calls_reserved=3, tokens_reserved=0)
+        with patch("ai_gateway.SessionLocal", return_value=db):
+            _, _, warning = ai_gateway.check_and_reserve_budget("u", "viewer")
+        self.assertIsNone(warning)
+
+    def test_warning_at_80_percent_tokens(self):
+        """≥ 80% van de tokenlimiet (na reservering) → waarschuwing."""
+        upfront = ai_gateway._UPFRONT_TOKEN_RESERVATION
+        max_tok = upfront * 10
+        already = upfront * 8  # na reservering: 9/10 = 90%
+        db, _ = _make_slot_db(max_calls=None, max_tokens=max_tok,
+                              calls_reserved=0, tokens_reserved=already)
+        with patch("ai_gateway.SessionLocal", return_value=db):
+            _, _, warning = ai_gateway.check_and_reserve_budget("u", "viewer")
+        self.assertIsNotNone(warning)
+        self.assertIn("tokenlimiet", warning)
+
+    def test_no_warning_without_limits(self):
+        """Geen limieten geconfigureerd → nooit een waarschuwing."""
+        db, _ = _make_slot_db(max_calls=None, max_tokens=None,
+                              calls_reserved=9999, tokens_reserved=9999999)
+        with patch("ai_gateway.SessionLocal", return_value=db):
+            _, _, warning = ai_gateway.check_and_reserve_budget("u", "viewer")
+        self.assertIsNone(warning)
 
     def test_within_limits_increments_slot(self):
         db, slot = self._run(max_calls=10, max_tokens=500000,
@@ -410,6 +449,32 @@ class TestNoProviderReconciliation(unittest.TestCase):
 
         self.assertEqual(reconcile_calls[0], yesterday,
                          "slot_date moet ongewijzigd bij reconcile aankomen")
+
+    def test_budget_warning_appears_in_answer_warnings(self):
+        """Een budget_warning (≥ 80% dagverbruik) komt zichtbaar in answer.warnings."""
+        warning_text = "Let op: je hebt 90% van je dagelijkse AI-call-limiet verbruikt."
+
+        # Client waarvan de LLM-call faalt → fail-safe antwoordpad; de
+        # verrijkingsstap (incl. budget_warning) moet alsnog lopen.
+        failing_client = MagicMock()
+        failing_client.chat.completions.create.side_effect = RuntimeError("boom")
+
+        with patch.object(ai_gateway, "_make_client",
+                          return_value=(failing_client, "test")), \
+             patch.object(ai_gateway, "get_data_freshness", return_value={}), \
+             patch.object(ai_gateway, "get_active_prompt",
+                          return_value=("prompt", None, None)), \
+             patch.object(ai_gateway, "build_messages", return_value=[]), \
+             patch.object(ai_gateway, "build_tools", return_value=[]), \
+             patch.object(ai_gateway, "_log_call"):
+            events = list(ai_gateway.run_copilot(
+                self._fake_db(), _user(), [], "test?",
+                budget_warning=warning_text,
+            ))
+
+        answers = [e["answer"] for e in events if e.get("type") == "answer"]
+        self.assertEqual(len(answers), 1)
+        self.assertIn(warning_text, answers[0]["warnings"])
 
 
 # ─── Per-ronde tokencontrole ──────────────────────────────────────────────────

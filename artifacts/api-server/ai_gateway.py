@@ -754,6 +754,7 @@ def run_copilot(
     history_summary: Optional[str] = None,
     slot_date: Optional[date] = None,
     max_tokens: Optional[int] = None,
+    budget_warning: Optional[str] = None,
 ) -> Generator[dict, None, None]:
     """
     Voer de volledige gateway-pipeline uit en yield events:
@@ -922,6 +923,9 @@ def run_copilot(
             answer["confidence"] = min(float(answer.get("confidence") or 0), 0.3)
         answer["prompt_version_id"] = prompt_version_id
         answer["prompt_version"] = prompt_version
+        # Vroegtijdige budgetwaarschuwing (Task #53): ≥ 80% dagverbruik
+        if budget_warning and budget_warning not in answer["warnings"]:
+            answer["warnings"].append(budget_warning)
         for k in ANSWER_KEYS:
             answer.setdefault(k, None)
 
@@ -1025,9 +1029,42 @@ def _log_call(
         except Exception:
             pass
 
+# Drempel waarboven een vroegtijdige budgetwaarschuwing wordt gegeven (§34):
+# bij ≥ 80% verbruik van calls of tokens krijgt de gebruiker een melding in
+# answer.warnings, zodat de harde 429-blokkade niet als verrassing komt.
+BUDGET_WARNING_THRESHOLD = 0.80
+
+
+def _budget_usage_warning(
+    calls_used: int, max_calls: Optional[int],
+    tokens_used: int, max_tokens: Optional[int],
+) -> Optional[str]:
+    """Bouw een waarschuwingstekst als het verbruik ≥ 80% van een daglimiet is.
+
+    calls_used/tokens_used zijn de tellers ná reservering van de huidige call,
+    zodat de melding het actuele verbruik weerspiegelt. Geen limiet (None of 0)
+    → nooit een waarschuwing voor die dimensie.
+    """
+    parts: list[str] = []
+    if max_calls and calls_used / max_calls >= BUDGET_WARNING_THRESHOLD:
+        pct = min(100, int(calls_used / max_calls * 100))
+        parts.append(f"{pct}% van je dagelijkse AI-call-limiet "
+                     f"({calls_used}/{max_calls} calls)")
+    if max_tokens and tokens_used / max_tokens >= BUDGET_WARNING_THRESHOLD:
+        pct = min(100, int(tokens_used / max_tokens * 100))
+        parts.append(f"{pct}% van je dagelijkse tokenlimiet "
+                     f"({tokens_used:,}/{max_tokens:,} tokens gereserveerd)")
+    if not parts:
+        return None
+    return ("Let op: je hebt " + " en ".join(parts) + " verbruikt. "
+            "Bij het bereiken van de limiet worden nieuwe vragen vandaag "
+            "geblokkeerd; stel vragen gerichter of neem contact op met een "
+            "beheerder voor een hogere limiet.")
+
+
 def check_and_reserve_budget(
     username: str, user_role: str
-) -> tuple[date, Optional[int]]:
+) -> tuple[date, Optional[int], Optional[str]]:
     """
     Atomisch budgetbewaking vóór elke LLM-call (§34).
 
@@ -1038,9 +1075,10 @@ def check_and_reserve_budget(
     die pas achteraf wordt geteld.
 
     Gooit HTTPException 429 met een Nederlandse foutmelding bij overschrijding.
-    Geeft (slot_date, max_tokens) terug zodat de beller dezelfde datum en limiet
-    kan doorgeven aan run_copilot (correcte reconciliatie bij middernacht) en
-    per-ronde token-controles kan uitvoeren.
+    Geeft (slot_date, max_tokens, budget_warning) terug zodat de beller dezelfde
+    datum en limiet kan doorgeven aan run_copilot (correcte reconciliatie bij
+    middernacht), per-ronde token-controles kan uitvoeren, en een vroegtijdige
+    waarschuwing (≥ 80% dagverbruik) in het antwoord kan tonen.
     """
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -1101,7 +1139,14 @@ def check_and_reserve_budget(
         slot.calls_reserved += 1
         slot.tokens_reserved += _UPFRONT_TOKEN_RESERVATION
         db.commit()
-        return today, max_tokens
+
+        # 6. Vroegtijdige waarschuwing (Task #53): meld ≥ 80% dagverbruik zodat
+        # de gebruiker niet verrast wordt door de harde blokkade op 100%.
+        budget_warning = _budget_usage_warning(
+            slot.calls_reserved, max_calls,
+            slot.tokens_reserved, max_tokens,
+        )
+        return today, max_tokens, budget_warning
 
     except HTTPException:
         raise

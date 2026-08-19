@@ -177,7 +177,9 @@ def send_message(
     # voor correcte reconciliatie bij calls die om middernacht eindigen).
     # max_tokens = de dagelijkse tokenlimiet voor deze gebruiker (voor per-ronde
     # controle in run_copilot zodat overruns door grote tool-output worden gestopt).
-    slot_date, max_tokens = ai_gateway.check_and_reserve_budget(
+    # budget_warning: melding als de gebruiker ≥ 80% van zijn dagbudget heeft
+    # verbruikt; wordt via answer.warnings zichtbaar in het Copilot-antwoord.
+    slot_date, max_tokens, budget_warning = ai_gateway.check_and_reserve_budget(
         current_user.username, current_user.role
     )
 
@@ -230,6 +232,7 @@ def send_message(
                 history_summary=history_summary,
                 slot_date=slot_date,
                 max_tokens=max_tokens,
+                budget_warning=budget_warning,
             ):
                 if event.get("type") == "answer":
                     final_answer = event["answer"]
