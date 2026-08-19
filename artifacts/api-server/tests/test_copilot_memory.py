@@ -198,7 +198,18 @@ def test_org_items_only_managed_by_admin_or_pm(client, ctx, db):
     finally:
         _cleanup(db, org_id)
 
-
+def test_user_can_add_personal_memory(client, ctx, db):
+    key = f"test_add_{uuid.uuid4().hex[:8]}"
+    r = client.post("/api/copilot/memory", headers=ctx["viewer"],
+                    json={"key": key, "value": "Dranken"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    try:
+        assert body["key"] == key and body["value"] == "Dranken"
+        assert body["scope"] == "persoonlijk"
+        assert body["editable"] is True
+    finally:
+        _cleanup(db, body["id"])
 def test_unknown_id_is_404(client, ctx):
     assert client.delete("/api/copilot/memory/99999999",
                          headers=ctx["admin"]).status_code == 404
@@ -321,3 +332,67 @@ def test_extraction_still_updates_extracted_rows(client, ctx, db, monkeypatch):
         assert fresh.status == "active"
     finally:
         _cleanup(db, row.id)
+
+def test_org_scope_rbac_on_add(client, ctx, db):
+    key = f"test_org_{uuid.uuid4().hex[:8]}"
+    # Viewer mag geen organisatie-breed item toevoegen
+    assert client.post("/api/copilot/memory", headers=ctx["viewer"],
+                       json={"key": key, "value": "x",
+                             "scope": "organisatie"}).status_code == 403
+    # pricing_manager wel
+    r = client.post("/api/copilot/memory", headers=ctx["pricing_manager"],
+                    json={"key": key, "value": "org-waarde",
+                          "scope": "organisatie"})
+    assert r.status_code == 200, r.text
+    org_id = r.json()["id"]
+    try:
+        assert r.json()["scope"] == "organisatie"
+        db.expire_all()
+        row = db.query(models.AiUserMemory).filter(
+            models.AiUserMemory.id == org_id).first()
+        assert row is not None and row.user_id is None
+        # Upsert binnen org-scope door admin
+        r2 = client.post("/api/copilot/memory", headers=ctx["admin"],
+                         json={"key": key, "value": "bijgewerkt",
+                               "scope": "organisatie"})
+        assert r2.status_code == 200 and r2.json()["id"] == org_id
+        assert r2.json()["value"] == "bijgewerkt"
+    finally:
+        _cleanup(db, org_id)
+
+def test_same_key_different_users_are_separate(client, ctx, db):
+    key = f"test_sep_{uuid.uuid4().hex[:8]}"
+    r1 = client.post("/api/copilot/memory", headers=ctx["viewer"],
+                     json={"key": key, "value": "viewer"})
+    r2 = client.post("/api/copilot/memory", headers=ctx["pricing_manager"],
+                     json={"key": key, "value": "pm"})
+    assert r1.status_code == 200 and r2.status_code == 200
+    try:
+        assert r1.json()["id"] != r2.json()["id"]
+    finally:
+        _cleanup(db, r1.json()["id"], r2.json()["id"])
+
+def test_duplicate_key_upserts_value(client, ctx, db):
+    key = f"test_dup_{uuid.uuid4().hex[:8]}"
+    r1 = client.post("/api/copilot/memory", headers=ctx["viewer"],
+                     json={"key": key, "value": "eerste"})
+    assert r1.status_code == 200
+    r2 = client.post("/api/copilot/memory", headers=ctx["viewer"],
+                     json={"key": key, "value": "tweede"})
+    assert r2.status_code == 200
+    try:
+        assert r2.json()["id"] == r1.json()["id"]
+        assert r2.json()["value"] == "tweede"
+    finally:
+        _cleanup(db, r1.json()["id"])
+
+def test_add_requires_key_and_value(client, ctx):
+    assert client.post("/api/copilot/memory", headers=ctx["viewer"],
+                       json={"key": "", "value": "x"}).status_code == 400
+    assert client.post("/api/copilot/memory", headers=ctx["viewer"],
+                       json={"key": "k", "value": "  "}).status_code == 400
+    assert client.post("/api/copilot/memory", headers=ctx["viewer"],
+                       json={"key": "k", "value": "x", "scope": "raar"}
+                       ).status_code == 400
+    assert client.post("/api/copilot/memory",
+                       json={"key": "k", "value": "x"}).status_code == 401

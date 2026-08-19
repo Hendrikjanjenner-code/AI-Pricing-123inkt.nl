@@ -450,7 +450,55 @@ def list_memory(
         out.append(item)
     return out
 
+@router.post("/memory")
+def create_memory(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """Voeg zelf een voorkeur toe aan het Copilot-geheugen.
 
+    Scope: "persoonlijk" (default) of "organisatie" — organisatie-breed alleen
+    voor admin/pricing_manager (zelfde RBAC als bewerken). Bestaat de key al
+    binnen dezelfde scope, dan wordt de waarde bijgewerkt (upsert)."""
+    key = (payload.get("key") or "").strip()[:200]
+    value = ai_gateway.pii_scrub((payload.get("value") or "").strip())[:2000]
+    scope = (payload.get("scope") or "persoonlijk").strip().lower()
+    if not key:
+        raise HTTPException(status_code=400, detail="key is verplicht")
+    if not value:
+        raise HTTPException(status_code=400, detail="value is verplicht")
+    if scope not in ("persoonlijk", "organisatie"):
+        raise HTTPException(
+            status_code=400,
+            detail="scope moet 'persoonlijk' of 'organisatie' zijn")
+    if scope == "organisatie" and current_user.role not in MEMORY_MANAGER_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail="Organisatie-brede geheugen-items kunnen alleen door "
+                   "admin of pricing_manager worden toegevoegd",
+        )
+    user_id = None if scope == "organisatie" else current_user.id
+    existing = db.query(models.AiUserMemory).filter(
+        models.AiUserMemory.user_id.is_(None) if user_id is None
+        else models.AiUserMemory.user_id == user_id,
+        models.AiUserMemory.key == key,
+    ).first()
+    if existing:
+        existing.value = value
+        existing.updated_at = models.datetime.utcnow()
+        db.commit()
+        db.refresh(existing)
+        item = _memory_out(existing)
+        item["editable"] = True
+        return item
+    row = models.AiUserMemory(user_id=user_id, key=key, value=value)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    item = _memory_out(row)
+    item["editable"] = True
+    return item
 @router.put("/memory/{memory_id}")
 def update_memory(
     memory_id: int,

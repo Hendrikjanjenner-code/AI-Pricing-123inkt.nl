@@ -10,7 +10,7 @@ import {
   getGetCopilotConversationQueryKey,
   getListCopilotConversationsQueryKey,
 } from "@workspace/api-client-react";
-import { getAuthHeaders } from "@/lib/auth";
+import { getAuthHeaders, useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -133,12 +133,48 @@ type MemoryItem = {
 };
 
 function MemorySection() {
+  const { user } = useAuth();
+  const canManageOrg = user?.role === "admin" || user?.role === "pricing_manager";
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<MemoryItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [newKey, setNewKey] = useState("");
+  const [newValue, setNewValue] = useState("");
+  const [newScope, setNewScope] = useState<"persoonlijk" | "organisatie">("persoonlijk");
+  const [adding, setAdding] = useState(false);
+
+  const addItem = async () => {
+    const key = newKey.trim();
+    const value = newValue.trim();
+    if (!key || !value) return;
+    setAdding(true);
+    setError(null);
+    try {
+      const res = await fetch(`${BASE}/api/copilot/memory`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify({ key, value, scope: newScope }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const created = (await res.json()) as MemoryItem;
+      setItems((prev) => {
+        const rest = (prev || []).filter((i) => i.id !== created.id);
+        return [created, ...rest];
+      });
+      setNewKey("");
+      setNewValue("");
+      setNewScope("persoonlijk");
+      setShowAdd(false);
+    } catch {
+      setError("Toevoegen mislukt.");
+    } finally {
+      setAdding(false);
+    }
+  };
 
   const load = async () => {
     setError(null);
@@ -207,6 +243,74 @@ function MemorySection() {
       {open && (
         <div className="mt-2 space-y-1.5">
           {error && <p className="text-destructive">{error}</p>}
+          {!showAdd ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-6 px-2 text-[10px]"
+              onClick={() => setShowAdd(true)}
+            >
+              <Plus className="mr-1 h-3 w-3" /> Voeg toe
+            </Button>
+          ) : (
+            <form
+              className="space-y-1 rounded border bg-background p-1.5"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void addItem();
+              }}
+            >
+              <input
+                value={newKey}
+                onChange={(e) => setNewKey(e.target.value)}
+                placeholder="Naam (bv. favoriete_categorie)"
+                className="h-6 w-full rounded border bg-background px-1.5 text-[11px]"
+                maxLength={200}
+                autoFocus
+              />
+              <input
+                value={newValue}
+                onChange={(e) => setNewValue(e.target.value)}
+                placeholder="Waarde (bv. Dranken)"
+                className="h-6 w-full rounded border bg-background px-1.5 text-[11px]"
+                maxLength={2000}
+              />
+              {canManageOrg && (
+                <select
+                  value={newScope}
+                  onChange={(e) =>
+                    setNewScope(e.target.value as "persoonlijk" | "organisatie")
+                  }
+                  className="h-6 w-full rounded border bg-background px-1 text-[11px]"
+                  aria-label="Scope van geheugen-item"
+                >
+                  <option value="persoonlijk">Persoonlijk</option>
+                  <option value="organisatie">Organisatie-breed</option>
+                </select>
+              )}
+              <div className="flex items-center gap-1">
+                <Button
+                  type="submit"
+                  size="sm"
+                  variant="outline"
+                  className="h-6 px-2 text-[10px]"
+                  disabled={adding || !newKey.trim() || !newValue.trim()}
+                >
+                  Opslaan
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-2 text-[10px]"
+                  onClick={() => setShowAdd(false)}
+                >
+                  Annuleren
+                </Button>
+              </div>
+            </form>
+          )}
           {items == null && !error && <Skeleton className="h-10 w-full" />}
           {items != null && items.length === 0 && (
             <p className="text-muted-foreground">
