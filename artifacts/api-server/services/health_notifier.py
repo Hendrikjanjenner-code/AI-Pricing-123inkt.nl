@@ -187,7 +187,6 @@ def send_connector_alert(
         return False
     return True
 
-
 def send_ai_key_alert(
     db,
     *,

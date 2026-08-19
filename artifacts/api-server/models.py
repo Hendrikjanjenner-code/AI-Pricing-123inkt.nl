@@ -429,8 +429,27 @@ class DataQualityIssue(Base):
     last_detected_at = Column(DateTime, default=datetime.utcnow)
     resolved_at = Column(DateTime)
     updated_by = Column(String(100))
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+class DataQualityScanRun(Base):
+    """
+    Audit van datakwaliteits-scans (§30): elke run — automatisch (scheduler)
+    of handmatig (dashboard) — wordt vastgelegd zodat eigenaren kunnen zien
+    wanneer de laatste scan liep en of die is geslaagd.
+    """
+    __tablename__ = "data_quality_scan_run"
+
+    id = Column(Integer, primary_key=True, index=True)
+    started_at = Column(DateTime, default=datetime.utcnow, index=True)
+    finished_at = Column(DateTime)
+    triggered_by = Column(String(50), default="scheduler")  # scheduler / dashboard
+    status = Column(String(20), default="bezig")            # bezig / geslaagd / fout
+    error_message = Column(Text)
+    issues_total = Column(Integer, default=0)
+    error_issues = Column(Integer, default=0)
+    warning_issues = Column(Integer, default=0)
+    new_or_worse_errors = Column(Integer, default=0)         # aantal nieuwe/verergerde error-issues
+    signals_published = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 class InAppNotification(Base):
     """
     In-app meldingen (taak: DQ-alerts ook in de app tonen).

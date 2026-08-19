@@ -727,6 +727,19 @@ class TestFeedUnreachable:
         """Feed >24u niet bereikt → severity stijgt naar 'error', ook als de
         mislukte poging zelf al dagen oud is (geen nieuwe pogingen gedaan)."""
         db = SessionLocal()
+        # Isolatie: verplaats bestaande PriceShape-jobs tijdelijk naar een
+        # ander upload_type — de detectie kijkt alleen naar de meest recente
+        # job, dus nieuwere echte jobs zouden de testopzet dubbelzinnig maken.
+        shadowed = [
+            j.id for j in db.query(models.ImportJob)
+            .filter(models.ImportJob.upload_type == "api_sync_priceshape").all()
+        ]
+        if shadowed:
+            db.query(models.ImportJob).filter(
+                models.ImportJob.id.in_(shadowed)
+            ).update({models.ImportJob.upload_type: "api_sync_priceshape__shadow"},
+                     synchronize_session=False)
+            db.commit()
         # Mislukte poging van 2 dagen geleden; géén geslaagde sync sindsdien.
         # created_at = nu zodat dit gegarandeerd de meest recente job is, ook
         # als de dev-DB echte sync-jobs van vandaag bevat; completed_at blijft
@@ -780,6 +793,12 @@ class TestFeedUnreachable:
                     "zijn ongeacht het aantal pogingen")
             assert "dagen" in issue["message"] or "uur" in issue["message"]
         finally:
+            if shadowed:
+                db.query(models.ImportJob).filter(
+                    models.ImportJob.id.in_(shadowed)
+                ).update({models.ImportJob.upload_type: "api_sync_priceshape"},
+                         synchronize_session=False)
+                db.commit()
             self._cleanup(db, fail_id)
 
     def test_empty_feed_guard_triggers_feed_unreachable(self, client, auth):

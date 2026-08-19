@@ -525,12 +525,18 @@ def get_data_quality(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    total_skus = db.query(models.DimProduct).count()
-    detected = _detect_issues(db, total_skus)
+    from services.data_quality_scan import run_quality_scan, last_scan_info
     if current_user.role in REGISTRY_WRITE_ROLES:
-        registry = _sync_issue_registry(db, detected)
+        # Volledige scan: registry-sync + signalen + scan-run audit.
+        scan = run_quality_scan(db, triggered_by="dashboard")
+        total_skus = scan["total_skus"]
+        detected = scan["detected"]
+        registry = scan["registry"]
     else:
-        # Read-only scan: verrijk met bestaande registry-rijen zonder te schrijven
+        # Read-only scan (viewers): detecteer wel, maar schrijf niets —
+        # verrijk met bestaande registry-rijen.
+        total_skus = db.query(models.DimProduct).count()
+        detected = _detect_issues(db, total_skus)
         registry = {r.issue_code: r for r in db.query(models.DataQualityIssue).all()}
 
     # Verrijk detecties met workflow-status uit het register
@@ -557,21 +563,8 @@ def get_data_quality(
     hier_count = db.query(models.DimCategoryHierarchy).filter(
         models.DimCategoryHierarchy.active == True).count()  # noqa: E712
 
-    # Laatste geplande (nachtelijke) scan — zichtbaar op de Data Quality-pagina.
-    last_scheduled = (
-        db.query(models.ImportJob)
-        .filter(models.ImportJob.upload_type == "data_quality_scan")
-        .order_by(models.ImportJob.created_at.desc())
-        .first()
-    )
-
     return {
-        "last_scan_at": datetime.utcnow().isoformat(),
-        "last_scheduled_scan_at": (
-            (last_scheduled.completed_at or last_scheduled.created_at).isoformat()
-            if last_scheduled else None
-        ),
-        "last_scheduled_scan_status": last_scheduled.status if last_scheduled else None,
+        "last_scan": last_scan_info(db),
         "overall_score": round(score * 100, 1),
         "total_skus": total_skus,
         "issues": issues,

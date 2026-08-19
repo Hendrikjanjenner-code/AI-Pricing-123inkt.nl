@@ -421,9 +421,12 @@ def test_multi_shop_isolation(client, admin_headers, run_engines):
                 # en dan telt hij niet mee in de dekking.
                 competitor_name=COMP_1, price=29.0 if i else 27.0,
                 shop_id=shop_b))
+        # APPROVED i.p.v. PENDING: nachtelijke modelreruns die parallel op de
+        # gedeelde dev-DB draaien verwijderen PENDING-matches, maar bewaren
+        # menselijke beslissingen — anders is deze test flaky in volle runs.
         db.add(models.AiMatchResult(own_sku_id=sku_b2, competitor_name=COMP_1,
                                     match_type="Exact", confidence=1.0,
-                                    explanation_nl="test", status="PENDING",
+                                    explanation_nl="test", status="APPROVED",
                                     run_date=today))
         db.commit()
 
@@ -439,10 +442,35 @@ def test_multi_shop_isolation(client, admin_headers, run_engines):
         resp = client.get(f"/api/competition/events?days=7&shop_id={shop_b}",
                           headers=admin_headers)
         assert any(e["sku_id"] == sku_b2 for e in resp.json()["items"])
-        # Coverage-rijen van shop B tellen alleen shop-B producten
-        cov_b = client.get(f"/api/competition/coverage?shop_id={shop_b}",
-                           headers=admin_headers).json()["items"]
-        tot = [i for i in cov_b if i["category"] is None]
+        # Coverage-rijen van shop B tellen alleen shop-B producten.
+        # Zelfherstellende her-run: parallelle schedulers van de dev-server
+        # (feed sync, modelruns) op de gedeelde DB kunnen tussentijds het
+        # testproduct/-match verwijderen of de coverage van vandaag
+        # herschrijven. Herstel de testdata en draai scoped opnieuw.
+        tot = []
+        for _attempt in range(3):
+            db.expire_all()
+            if db.query(models.DimProduct).filter(
+                    models.DimProduct.sku_id == sku_b2).first() is None:
+                db.add(models.DimProduct(
+                    sku_id=sku_b2, product_name="Shop B product",
+                    category=f"{PFX}-cat-b", current_price=30.0,
+                    shop_id=shop_b))
+            if db.query(models.AiMatchResult).filter(
+                    models.AiMatchResult.own_sku_id == sku_b2).first() is None:
+                db.add(models.AiMatchResult(
+                    own_sku_id=sku_b2, competitor_name=COMP_1,
+                    match_type="Exact", confidence=1.0,
+                    explanation_nl="test", status="APPROVED", run_date=today))
+            db.commit()
+            resp = client.post("/api/competition/intelligence/run",
+                               json={"shop_id": shop_b}, headers=admin_headers)
+            assert resp.status_code == 200
+            cov_b = client.get(f"/api/competition/coverage?shop_id={shop_b}",
+                               headers=admin_headers).json()["items"]
+            tot = [i for i in cov_b if i["category"] is None]
+            if tot:
+                break
         assert tot and tot[0]["own_products"] == 1
 
         # AI-matching isolatie: default shop ziet shop-B match niet

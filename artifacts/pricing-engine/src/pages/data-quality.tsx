@@ -34,14 +34,29 @@ interface QualityIssue {
 
 interface QualityReport {
   overall_score: number;
+
   total_skus: number;
+
   issues: QualityIssue[];
+
   counts?: { errors: number; warnings: number; info: number; open: number; in_behandeling: number };
-  last_scan_at?: string | null;
-  last_scheduled_scan_at?: string | null;
-  last_scheduled_scan_status?: string | null;
+
+  last_scan?: {
+    started_at?: string | null;
+    finished_at?: string | null;
+    triggered_by?: string;
+    status?: string;
+    new_or_worse_errors?: number;
+    signals_published?: number;
+
+  } | null;
 }
 
+function formatScanTijd(iso?: string | null): string {
+  if (!iso) return "onbekend";
+  const d = new Date(iso.endsWith("Z") ? iso : iso + "Z");
+  return d.toLocaleString("nl-NL", { dateStyle: "medium", timeStyle: "short" });
+}
 const STATUS_OPTIES = [
   { value: "open", label: "Open" },
   { value: "in_behandeling", label: "In behandeling" },
@@ -233,14 +248,12 @@ export default function DataQuality() {
           <p className="text-muted-foreground mt-1">
             Alle datakwaliteits-detecties met severity, business impact, aanbevolen actie en eigenaar-workflow.
           </p>
-          {report?.last_scan_at && (
+          {report?.last_scan && (
             <p className="text-xs text-muted-foreground mt-1" data-testid="text-last-scan">
-              Laatste scan: {new Date(report.last_scan_at).toLocaleString("nl-NL")}
-              {" · "}
-              Laatste nachtelijke scan:{" "}
-              {report.last_scheduled_scan_at
-                ? `${new Date(report.last_scheduled_scan_at).toLocaleString("nl-NL")}${report.last_scheduled_scan_status === "fout" ? " (mislukt)" : ""}`
-                : "nog niet uitgevoerd"}
+              Laatste scan: {formatScanTijd(report.last_scan.finished_at ?? report.last_scan.started_at)}
+              {" "}({report.last_scan.triggered_by === "scheduler" ? "automatisch" : "handmatig"})
+              {typeof report.last_scan.new_or_worse_errors === "number" && report.last_scan.new_or_worse_errors > 0 &&
+                ` — ${report.last_scan.new_or_worse_errors} nieuw/verergerd error-issue(s) gemeld`}
             </p>
           )}
         </div>

@@ -19,6 +19,7 @@
 - [Bounded "full" history lists](bounded-history-lists.md) — when a spec says "volledige"/full history but the API caps `limit`, add incremental load-more instead of silently truncating; code review flags fixed low caps as not-full.
 - [configureWorkflow does not expand $PORT](workflow-port-env.md) — literal `$PORT` in artifact.toml dev commands isn't shell-expanded via configureWorkflow; hardcode the artifact's localPort explicitly.
 - [Duplicate legacy workflows cause DB race 500s](duplicate-workflow-db-race.md) — manual .replit workflows left alongside auto-generated artifact workflows can double-start a service and race on create_all, crashing the backend.
+- [DQ-scan pipeline](dq-scan-pipeline.md) — one consolidated scan pipeline (scheduler → job-wrapper/alerts → core); never add a second scan entry point; one-shot mode must import models before create_all.
 - [Data quality issue registry](dq-issue-registry.md) — detections are stateless scans; owner/status live in a code-keyed registry upserted per scan (auto-resolve/reopen).
 - [Bulk refresh DB pitfalls](bulk-refresh-db-pitfalls.md) — numpy 2.x scalars leak as `np.float64(...)` into SQL (schema "np" error); bulk sync needs a separate long-timeout BackgroundSessionLocal, not the 4s request session.
 - [SessionLocal autoflush pitfall](session-autoflush.md) — sessions have autoflush=False; flush explicitly between write and read phases in engine pipelines, or queries see stale data.
@@ -45,3 +46,4 @@
 - [Loyalty expiry semantics](loyalty-expiry-semantics.md) — overdue points count as "expiring soon"; policy is per shop but apply_expiry_run keeps legacy expiry_cutoff/expiry_months fields.
 - [Schedulers uit in tests](test-scheduler-isolation.md) — TestClient start de lifespan; conftest zet alle DISABLE_*-vlaggen of full-suite runs krijgen StaleDataError/verdwenen rijen.
 - [Signal auto-resolve scoping](signal-auto-resolve.md) — auto_resolve_signals is shop-gescoped (default shop); emitters moeten brondata óók shop-filteren of cross-shop rijen uitsluiten, anders resolve je andermans signalen.
+- [Test-shop teardown FK](test-suite-conventions.md) — request middleware writes cost-usage rows per shop; any teardown that deletes a shop must delete those rows first or FK-fails only in full-suite runs.

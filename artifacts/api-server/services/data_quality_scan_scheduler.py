@@ -108,7 +108,7 @@ def _create_inapp_notifications(db, row, kind: str) -> int:
         recipients = _inapp_recipients(db, row.owner)
         if not recipients:
             return 0
-        label = "heropend" if kind == "reopened" else "nieuw"
+        label = {"reopened": "heropend", "worsened": "verergerd"}.get(kind, "nieuw")
         for username in recipients:
             db.add(models.InAppNotification(
                 username=username,
@@ -139,10 +139,10 @@ def _notify_issue(db, row, kind: str) -> None:
     if not recipients:
         recipients = get_alert_recipients(db)
 
-    label = "HEROPEND" if kind == "reopened" else "NIEUW"
+    label = {"reopened": "HEROPEND", "worsened": "VERERGERD"}.get(kind, "NIEUW")
     subject = f"[AI Pricing] Datakwaliteitsissue {label}: {row.title or row.issue_code}"
     body = (
-        f"De nachtelijke datakwaliteits-scan heeft een {('heropend' if kind == 'reopened' else 'nieuw')} "
+        f"De nachtelijke datakwaliteits-scan heeft een {label.lower()} "
         f"issue gedetecteerd.\n\n"
         f"Issue    : {row.title or row.issue_code} ({row.issue_code})\n"
         f"Ernst    : {row.severity}\n"
@@ -193,15 +193,18 @@ def _consecutive_failed_scans(db) -> int:
     return count
 def run_scan_once() -> dict:
     """
-    Voer één datakwaliteits-scan uit (blokkerend — bedoeld voor asyncio.to_thread).
+    Voer één datakwaliteits-scan uit (blokkerend — bedoeld voor asyncio.to_thread
+    of de one-shot mode van services.data_quality_scheduler).
 
-    Draait _detect_issues + _sync_issue_registry, bepaalt welke issues nieuw of
-    heropend zijn, stuurt daarvoor alerts en registreert een ImportJob zodat de
-    scan-timestamp zichtbaar is. Geeft een klein samenvattingsdict terug.
+    Delegeert de eigenlijke scan aan services.data_quality_scan.run_quality_scan
+    (detecties + registry-sync + IntelligenceSignals + notificaties via
+    _notify_issue in deze module) en registreert daarnaast een ImportJob zodat
+    de scan ook in de importgeschiedenis zichtbaar is. Geeft een klein
+    samenvattingsdict terug.
     """
     from database import BackgroundSessionLocal
     import models
-    from routes.data_quality import _detect_issues, _sync_issue_registry
+    from services.data_quality_scan import run_quality_scan
 
     db = BackgroundSessionLocal()
     job = models.ImportJob(
@@ -212,44 +215,13 @@ def run_scan_once() -> dict:
         source="Systeem",
     )
     try:
-        total_skus = db.query(models.DimProduct).count()
-
-        # Status vóór de sync vastleggen zodat nieuw/heropend bepaald kan worden.
-        before = {
-            r.issue_code: r.status
-            for r in db.query(models.DataQualityIssue).all()
-        }
-
-        detected = _detect_issues(db, total_skus)
-        registry = _sync_issue_registry(db, detected)  # commit gebeurt hier
-
-        new_codes: list[str] = []
-        reopened_codes: list[str] = []
-        for d in detected:
-            code = d["issue_code"]
-            prev = before.get(code)
-            if prev is None:
-                new_codes.append(code)
-            elif prev == "opgelost":
-                reopened_codes.append(code)
-
-        for code in new_codes:
-            row = registry.get(code)
-            if row is not None:
-                try:
-                    _notify_issue(db, row, "new")
-                except Exception as exc:  # noqa: BLE001
-                    logger.error("DQ-scan: alert voor nieuw issue %s mislukt: %s", code, exc)
-        for code in reopened_codes:
-            row = registry.get(code)
-            if row is not None:
-                try:
-                    _notify_issue(db, row, "reopened")
-                except Exception as exc:  # noqa: BLE001
-                    logger.error("DQ-scan: alert voor heropend issue %s mislukt: %s", code, exc)
+        result = run_quality_scan(db, triggered_by="scheduler")
+        changes = result["changes"]  # issue_code -> "new"|"reopened"|"worsened"
+        new_codes = [c for c, k in changes.items() if k == "new"]
+        reopened_codes = [c for c, k in changes.items() if k == "reopened"]
 
         job.status = "geimporteerd"
-        job.rows_processed = len(detected)
+        job.rows_processed = len(result["detected"])
         job.completed_at = datetime.utcnow()
         job.warnings_json = {
             "new_issues": new_codes,
@@ -258,13 +230,13 @@ def run_scan_once() -> dict:
         db.add(job)
         db.commit()
         summary = {
-            "detected": len(detected),
+            "detected": len(result["detected"]),
             "new": new_codes,
             "reopened": reopened_codes,
         }
         logger.info(
             "DQ-scan voltooid: %d issues gedetecteerd, %d nieuw, %d heropend.",
-            len(detected), len(new_codes), len(reopened_codes),
+            len(result["detected"]), len(new_codes), len(reopened_codes),
         )
         return summary
     except Exception:
@@ -295,29 +267,6 @@ def run_scan_once() -> dict:
         raise
     finally:
         db.close()
-
-
-async def _scan_loop() -> None:
-    interval = _int_env("DQ_SCAN_INTERVAL", DEFAULT_INTERVAL_SECONDS)
-    startup_delay = _int_env("DQ_SCAN_STARTUP_DELAY", DEFAULT_STARTUP_DELAY)
-    logger.info(
-        "DQ-scan scheduler actief (interval %ds, startvertraging %ds).",
-        interval, startup_delay,
-    )
-    await asyncio.sleep(startup_delay)
-    while True:
-        try:
-            await asyncio.to_thread(run_scan_once)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            logger.error("DQ-scan cyclus mislukt (volgende poging bij het volgende interval): %s", exc)
-        await asyncio.sleep(interval)
-
-
-def start_dq_scan_scheduler() -> asyncio.Task:
-    """Start de nachtelijke datakwaliteits-scan als asyncio-achtergrondtaak."""
-    return asyncio.get_event_loop().create_task(_scan_loop())
 
 def _notify_scan_failure(db, consecutive: int, error_message: str) -> None:
     """Alarmeer de standaard ontvangers dat de nachtscan herhaaldelijk faalt."""

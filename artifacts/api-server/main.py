@@ -147,16 +147,18 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("Startup: PriceShape feed-sync scheduler disabled via DISABLE_FEED_SYNC.")
 
-        # 5b. Start de nachtelijke datakwaliteits-scan (§30) die de volledige
-        # detectielijst draait en eigenaren waarschuwt bij nieuwe of heropende
-        # issues. Uit te schakelen via DISABLE_DQ_SCAN.
+        # 5b. Start de datakwaliteits-scan scheduler die de §30-detecties
+        # dagelijks draait en eigenaren waarschuwt bij nieuwe error-issues.
+        # Uit te schakelen via DISABLE_DATA_QUALITY_SCAN (bijv. op autoscale;
+        # gebruik daar een Scheduled Deployment met
+        # `python -m services.data_quality_scheduler`).
         dq_scan_task = None
-        if os.environ.get("DISABLE_DQ_SCAN", "false").lower() not in ("1", "true", "yes"):
-            from services.data_quality_scan_scheduler import start_dq_scan_scheduler
-            dq_scan_task = start_dq_scan_scheduler()
+        if os.environ.get("DISABLE_DATA_QUALITY_SCAN", "false").lower() not in ("1", "true", "yes"):
+            from services.data_quality_scheduler import start_data_quality_scheduler
+            dq_scan_task = start_data_quality_scheduler()
             logger.info("Startup: datakwaliteits-scan scheduler started.")
         else:
-            logger.info("Startup: datakwaliteits-scan scheduler disabled via DISABLE_DQ_SCAN.")
+            logger.info("Startup: datakwaliteits-scan scheduler disabled via DISABLE_DATA_QUALITY_SCAN.")
 
         # 5c. Start de onafhankelijke AI-budgetslot-opruiming: verwijdert
         # periodiek AiBudgetSlot-rijen ouder dan de bewaartermijn
