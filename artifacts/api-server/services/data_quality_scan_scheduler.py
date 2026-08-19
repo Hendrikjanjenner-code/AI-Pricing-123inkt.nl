@@ -67,9 +67,63 @@ def _owner_recipients(db, owner: str | None) -> list[str]:
     return []
 
 
+def _inapp_recipients(db, owner: str | None) -> list[str]:
+    """Usernames die een in-app melding krijgen: de actieve eigenaar, of —
+    zonder (actieve) eigenaar — alle actieve beheerders."""
+    import models
+    if owner:
+        user = (
+            db.query(models.User)
+            .filter(models.User.username == owner, models.User.is_active == True)  # noqa: E712
+            .first()
+        )
+        if user:
+            return [user.username]
+    admins = (
+        db.query(models.User)
+        .filter(models.User.role == "admin", models.User.is_active == True)  # noqa: E712
+        .all()
+    )
+    return [u.username for u in admins]
+
+
+def _create_inapp_notifications(db, row, kind: str) -> int:
+    """Maak in-app meldingen aan voor een nieuw/heropend issue.
+
+    Werkt onafhankelijk van SMTP/webhook zodat eigenaren de alerts altijd in
+    de app zien. Fouten worden gelogd en breken de scan niet.
+    """
+    import models
+    try:
+        recipients = _inapp_recipients(db, row.owner)
+        if not recipients:
+            return 0
+        label = "heropend" if kind == "reopened" else "nieuw"
+        for username in recipients:
+            db.add(models.InAppNotification(
+                username=username,
+                type="data_quality_issue",
+                kind=kind,
+                title=f"Datakwaliteitsissue {label}: {row.title or row.issue_code}",
+                message=row.message or row.business_impact or "",
+                severity=row.severity or "warning",
+                link="/datakwaliteit",
+                reference=row.issue_code,
+            ))
+        db.commit()
+        return len(recipients)
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        logger.error("DQ-scan: in-app melding voor issue %s mislukt: %s", row.issue_code, exc)
+        return 0
+
+
 def _notify_issue(db, row, kind: str) -> None:
-    """Stuur een alert voor een nieuw of heropend issue (e-mail/webhook/log)."""
+    """Stuur een alert voor een nieuw of heropend issue (in-app + e-mail/webhook/log)."""
     from services.health_notifier import get_alert_recipients, _send_email, _send_webhook
+
+    # In-app melding: altijd, ook zonder SMTP/webhook-configuratie.
+    _create_inapp_notifications(db, row, kind)
 
     recipients = _owner_recipients(db, row.owner)
     if not recipients:

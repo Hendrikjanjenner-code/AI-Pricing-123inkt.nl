@@ -23,7 +23,7 @@ from routes import (
     dashboard, uploads, data_quality, substitutions,
     model_health, exports, users, skus, copilot, competition, ab_tests,
     concurrentie, elasticiteit, huismerk,
-    monitoring, execution, audit_log,
+    monitoring, execution, audit_log, notifications,
     bcg,
     traffic, search_demand,
     cost, procurement, economic, reporting, bcg_transitions,
@@ -450,6 +450,7 @@ app.include_router(huismerk.router)
 app.include_router(monitoring.router)
 app.include_router(execution.router)
 app.include_router(audit_log.router)
+app.include_router(notifications.router)
 app.include_router(bcg.router)
 app.include_router(traffic.router)
 app.include_router(traffic.conversie_router)

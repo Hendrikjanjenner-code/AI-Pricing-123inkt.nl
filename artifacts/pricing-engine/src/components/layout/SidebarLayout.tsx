@@ -63,6 +63,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { ConnectorHealthIndicator } from "@/components/layout/ConnectorHealthIndicator";
 import { AiStatusIndicator } from "@/components/layout/AiStatusIndicator";
+import { NotificationBell } from "@/components/layout/NotificationBell";
 
 const navGroepen = [
   {
@@ -315,6 +316,7 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-2">
             <AiStatusIndicator />
             <ConnectorHealthIndicator />
+            <NotificationBell />
           </div>
         </header>
         <div className="flex-1 overflow-auto p-8">

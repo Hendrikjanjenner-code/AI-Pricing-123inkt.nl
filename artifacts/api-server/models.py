@@ -361,6 +361,28 @@ class DataQualityIssue(Base):
     resolved_at = Column(DateTime)
     updated_by = Column(String(100))
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class InAppNotification(Base):
+    """
+    In-app meldingen (taak: DQ-alerts ook in de app tonen).
+    Elke melding is gericht aan één gebruiker (username); de nachtelijke
+    datakwaliteits-scan maakt per nieuw/heropend issue een melding aan voor de
+    eigenaar, of — zonder eigenaar — voor alle actieve beheerders.
+    """
+    __tablename__ = "in_app_notification"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(100), nullable=False, index=True)  # ontvanger
+    type = Column(String(50), default="data_quality_issue")
+    kind = Column(String(20))            # new / reopened
+    title = Column(String(300), nullable=False)
+    message = Column(Text)
+    severity = Column(String(20), default="warning")
+    link = Column(String(300))           # frontend-route, bv. /datakwaliteit
+    reference = Column(String(150))      # bv. issue_code
+    is_read = Column(Boolean, default=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    read_at = Column(DateTime)
 class AuditLog(Base):
     __tablename__ = "audit_log"
 
