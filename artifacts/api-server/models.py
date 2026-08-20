@@ -728,7 +728,14 @@ class DimCompetitor(Base):
     __tablename__ = "dim_competitor"
 
     competitor_id = Column(Integer, primary_key=True, index=True)
+    # Canoniek domein (genormaliseerd via services.domain_normalize).
     competitor_name = Column(String(255), nullable=False, unique=True)
+    # Oorspronkelijke schrijfwijzen (aliassen) zoals ze in feeds voorkwamen,
+    # zodat de herkomst van een genormaliseerd domein herleidbaar blijft.
+    aliases = Column(JSON)
+    # Laatst gezien in een feed-sync; een concurrent die uit de feed verdwijnt
+    # wordt nooit verwijderd, alleen als "recent niet gezien" herkenbaar.
+    last_seen_date = Column(Date)
     base_url = Column(String(500))
     competitor_type = Column(String(50), default="online")
     default_relevance_score = Column(Float, default=0.5)

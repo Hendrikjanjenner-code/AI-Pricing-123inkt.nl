@@ -649,10 +649,18 @@ async def upload_competitor_prices(
                 price_raw = _r(row, "competitor_price_inc_vat", "competitor_price_incl_vat",
                                "price_inc_vat", "price_incl_vat", "prijs_concurrent", "price")
                 date_raw = _r(row, "date", "datum")
+                from services.domain_normalize import register_competitor_sighting
+                _comp_raw = _r(row, "competitor_name", "concurrent_naam", "concurrentnaam")
+                _row_date = date.fromisoformat(date_raw.strip())
+                # Canoniek domein: uploads mogen geen www./https-varianten als
+                # aparte concurrenten aanmaken; de ruwe schrijfwijze blijft
+                # herleidbaar als alias in het concurrentenregister.
+                _comp_canon = register_competitor_sighting(db, _comp_raw,
+                                                           seen_date=_row_date)
                 entry = models.FactCompetitorPriceDaily(
-                    date=date.fromisoformat(date_raw.strip()),
+                    date=_row_date,
                     sku_id=sku_id,
-                    competitor_name=_r(row, "competitor_name", "concurrent_naam", "concurrentnaam") or "Unknown",
+                    competitor_name=_comp_canon or "Unknown",
                     price=_safe_float(price_raw),
                     url=_r(row, "url", "product_url", "link"),
                 )
@@ -1058,10 +1066,17 @@ async def upload_bulk(
                             fail += 1; continue
                         price_raw = _r(row, "competitor_price_inc_vat", "prijs_concurrent", "price")
                         date_raw = _r(row, "date", "datum")
+                        from services.domain_normalize import register_competitor_sighting
+                        _comp_raw = _r(row, "competitor_name", "concurrent_naam")
+                        _row_date = _date.fromisoformat(date_raw.strip())
+                        # Canoniek domein + ruwe schrijfwijze als alias in het
+                        # register (zie services.domain_normalize).
+                        _comp_canon = register_competitor_sighting(
+                            db, _comp_raw, seen_date=_row_date)
                         entry = models.FactCompetitorPriceDaily(
-                            date=_date.fromisoformat(date_raw.strip()),
+                            date=_row_date,
                             sku_id=sku_id,
-                            competitor_name=_r(row, "competitor_name", "concurrent_naam") or "Unknown",
+                            competitor_name=_comp_canon or "Unknown",
                             price=_safe_float(price_raw),
                             url=_r(row, "url", "product_url"),
                         )

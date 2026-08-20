@@ -22,8 +22,8 @@ ADMIN_LOGIN = {"username": "dev_admin", "password": "admin123"}
 PFX = f"CITEST{uuid.uuid4().hex[:6]}"
 SKU_A = f"{PFX}-A"
 SKU_B = f"{PFX}-B"
-COMP_1 = f"{PFX}-shop1.nl"
-COMP_2 = f"{PFX}-shop2.nl"
+COMP_1 = f"{PFX.lower()}-shop1.nl"  # concurrentnamen zijn canonieke (kleingeschreven) domeinen
+COMP_2 = f"{PFX.lower()}-shop2.nl"
 
 # Constanten voor elasticiteits-degradatietests
 ED_PFX = f"EDTEST{uuid.uuid4().hex[:6]}"
@@ -31,7 +31,7 @@ ED_PFX = f"EDTEST{uuid.uuid4().hex[:6]}"
 # Constanten voor warn_suspicious_matches-tests (taak 47)
 WM_PFX = f"WMTEST{uuid.uuid4().hex[:6]}"
 WM_SKU = f"{WM_PFX}-sku"
-WM_COMP = f"{WM_PFX}-comp.nl"
+WM_COMP = f"{WM_PFX.lower()}-comp.nl"
 
 @pytest.fixture(scope="module")
 def client():

@@ -228,6 +228,7 @@ def persist_competitor_rows(db: Session, rows: list[dict], mode: str, username: 
     # (datum, sku_id, competitor_name) → gezien, om upserts te versnellen.
     seen_keys: set[tuple] = set()
 
+    _sighting_cache: dict = {}
     for row in rows:
         sku_id, matched_via = _match_sku(row, sku_by_ean, sku_by_oem, known_skus)
         if not sku_id:
@@ -236,7 +237,15 @@ def persist_competitor_rows(db: Session, rows: list[dict], mode: str, username: 
             unmatched += 1
             continue
 
-        comp_naam = _trunc(get_alias(row, *COMPETITOR_NAME_ALIASES), 255)
+        # Domeinnormalisatie: varianten (protocol/www/hoofdletters/slash) van
+        # hetzelfde domein worden als één concurrent opgeslagen; de ruwe
+        # schrijfwijze blijft herleidbaar als alias in dim_competitor.
+        # Cache per unieke schrijfwijze: geen per-rij registerquery.
+        from services.domain_normalize import register_competitor_sighting
+        comp_raw = get_alias(row, *COMPETITOR_NAME_ALIASES)
+        if comp_raw not in _sighting_cache:
+            _sighting_cache[comp_raw] = register_competitor_sighting(db, comp_raw)
+        comp_naam = _trunc(_sighting_cache[comp_raw] or "", 255)
         prijs = _safe_float(get_alias(row, *COMPETITOR_PRICE_ALIASES))
         if prijs is None or prijs < 0 or not comp_naam:
             # Ontbrekende, negatieve of ongeldige prijs of concurrentnaam:

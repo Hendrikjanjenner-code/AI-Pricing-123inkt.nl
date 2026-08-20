@@ -51,6 +51,12 @@ def build_or_update_profile(
     shop-scoped (default: de default shop) zodat data van test-/andere
     shops het profiel niet vervuilt.
     """
+    # Profielsleutel is altijd het canonieke domein: een aanroep met een ruwe
+    # variant (www./https-schrijfwijze) mag nooit een tweede profiel maken.
+    from services.domain_normalize import normalize_domain
+    competitor_name = normalize_domain(competitor_name) or competitor_name
+    if domain:
+        domain = normalize_domain(domain) or domain
     since = date.today() - timedelta(days=lookback_days)
     sid = _resolve_shop(db, shop_id)
 

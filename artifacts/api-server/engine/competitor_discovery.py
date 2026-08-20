@@ -94,8 +94,13 @@ def run_discovery(
                  models.FactCompetitorPriceDaily.shop_id == sid).all()
 
         # Aggregeer per concurrent-domein (alleen SKU's van deze shop).
+        # Domeinnormalisatie: historische factrijen kunnen nog ruwe varianten
+        # bevatten; aggregeer altijd op het canonieke domein zodat één
+        # concurrent nooit als meerdere kandidaten verschijnt.
+        from services.domain_normalize import normalize_domain
         agg: dict[str, dict] = {}
         for naam, sku_id, price in rows:
+            naam = normalize_domain(naam)
             if not naam or price is None:
                 continue
             if sku_id not in products:
@@ -143,10 +148,12 @@ def run_discovery(
 
     # Dedupliceer tegen reeds bekende domeinen in de queue van déze shop
     # (legacy-rijen zonder shop_id tellen ook mee om dubbelingen te voorkomen).
+    # Vergelijk op het CANONIEKE domein: ook een oude queue-rij met een ruwe
+    # variant (www./https-schrijfwijze) telt als bestaand.
+    from services.domain_normalize import normalize_domain as _nd
     bestaande = {
-        q.domain
+        _nd(q.domain)
         for q in db.query(models.CompetitorDiscoveryQueue).filter(
-            models.CompetitorDiscoveryQueue.domain.in_([c["domain"] for c in candidates]),
             (models.CompetitorDiscoveryQueue.shop_id == sid)
             | (models.CompetitorDiscoveryQueue.shop_id.is_(None)),
         ).all()

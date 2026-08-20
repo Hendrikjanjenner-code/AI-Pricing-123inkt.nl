@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 import models
 from connectors import priceshape_connector as pc
 from engine import competition_engine as ce
+from services.domain_normalize import normalize_domain
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -223,7 +224,8 @@ def _normalize(records) -> tuple[list[dict], list[dict]]:
         for v in vendors:
             if not isinstance(v, dict):
                 continue
-            domain = _s(v.get("domain") or v.get("name"))
+            domain_raw = _s(v.get("domain") or v.get("name"))
+            domain = normalize_domain(domain_raw)
             price = _f(v.get("price"))
             if not domain or price is None or domain in seen_domains:
                 continue
@@ -231,6 +233,7 @@ def _normalize(records) -> tuple[list[dict], list[dict]]:
             comp_rows.append({
                 "sku_id": gtin,
                 "competitor_name": domain[:255],
+                "competitor_alias": domain_raw if domain_raw != domain else None,
                 "price": price,
                 "url": _s(v.get("productUrl")) or None,
                 "in_stock": _parse_bool(_first(v, "instock", "in_stock", "stock",
@@ -242,7 +245,8 @@ def _normalize(records) -> tuple[list[dict], list[dict]]:
                 "observed_at": _parse_dt(_first(v, "scrapedat", "scraped_at",
                                                 "timestamp", "lastseen", "last_seen")),
                 "raw_attributes": _with_overflow(
-                    _raw_leftovers(v, _VENDOR_MAPPED_KEYS),
+                    ({} if domain_raw == domain else {"_domain_alias": domain_raw})
+                    | (_raw_leftovers(v, _VENDOR_MAPPED_KEYS) or {}) or None,
                     {
                         "_domain_full": (domain, 255),
                         "_name_full": (_s(v.get("name")), 255),
@@ -371,7 +375,7 @@ def _normalize_wide_csv(rows: list[dict]) -> tuple[list[dict], list[dict]]:
         for idx in sorted(vendors):
             v = vendors[idx]
             domain_raw = _s(v.get("domain"))
-            domain = domain_raw.lower()
+            domain = normalize_domain(domain_raw)
             price = _f(v.get("price"))
             if not domain or price is None:
                 continue
@@ -380,8 +384,11 @@ def _normalize_wide_csv(rows: list[dict]) -> tuple[list[dict], list[dict]]:
             seen_offers.add((sku, domain))
             vraw = {k: val for k, val in v.items()
                     if _s(val) and k not in _WIDE_VENDOR_MAPPED}
+            if domain_raw != domain:
+                vraw["_domain_alias"] = domain_raw
             comp_rows.append({
                 "sku_id": sku, "competitor_name": domain[:255], "price": price,
+                "competitor_alias": domain_raw if domain_raw != domain else None,
                 "url": _s(v.get("producturl")) or None,
                 "in_stock": _parse_bool(v.get("stockstatus")),
                 "delivery_days": None,
@@ -426,11 +433,13 @@ def _normalize_flat(rows: list[dict]) -> tuple[list[dict], list[dict]]:
                     {"_productTitle_full": (title, 500)},
                 ),
             }
-        domain = _s(r.get("domain") or r.get("competitor") or r.get("retailer"))
+        domain_raw = _s(r.get("domain") or r.get("competitor") or r.get("retailer"))
+        domain = normalize_domain(domain_raw)
         price = _f(r.get("price") or r.get("competitor_price"))
         if domain and price is not None:
             comp_rows.append({
                 "sku_id": gtin, "competitor_name": domain[:255], "price": price,
+                "competitor_alias": domain_raw if domain_raw != domain else None,
                 "url": _s(r.get("producturl") or r.get("url")) or None,
                 "in_stock": _parse_bool(_first(r, "instock", "in_stock", "stock",
                                                "availability", "available")),
@@ -525,6 +534,19 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
     if not imps.component_enabled(settings, "competitor_prices"):
         skipped_competitor_rows += len(comp_rows)
         comp_rows = []
+
+    # Reconciliatie-basis: ná de importselectie (uitgevinkte concurrenten en
+    # componenten tellen niet mee) — unieke concurrenten zoals de feed ze
+    # aanleverde (ruwe schrijfwijzen) versus na domeinnormalisatie (canoniek).
+    # Het verschil is het aantal voorkomen duplicaat-identiteiten.
+    feed_variants = {(r.get("competitor_alias") or r["competitor_name"]).lower()
+                     for r in comp_rows}
+    feed_canonical = {r["competitor_name"] for r in comp_rows}
+    alias_by_canon: dict[str, set[str]] = {}
+    for r in comp_rows:
+        if r.get("competitor_alias"):
+            alias_by_canon.setdefault(r["competitor_name"], set()).add(
+                r["competitor_alias"])
     # Uitgevinkte onderdelen zijn een echte no-op: de betreffende kolommen
     # worden niet geschreven, zodat bestaande waarden behouden blijven.
     own_on = imps.component_enabled(settings, "own_prices")
@@ -715,11 +737,36 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
 
     # 5. Beschikbaarheid van concurrenten (fact_competitor_offer_daily) — alleen
     # wanneer het onderdeel aan staat én de feed daadwerkelijk voorraaddata levert.
+    # Snapshot vóór _persist_offers: die upsert vult het register alvast,
+    # waardoor 'nieuw' anders ten onrechte als 'gematcht' zou tellen.
+    _recon_names = sorted(feed_canonical | {m["competitor_name"] for m in comp_maps})
+    pre_existing: set[str] = set()
+    for _chunk in (_recon_names[i:i + 1000]
+                   for i in range(0, len(_recon_names), 1000)):
+        pre_existing.update(
+            n for (n,) in db.query(models.DimCompetitor.competitor_name)
+            .filter(models.DimCompetitor.competitor_name.in_(_chunk)).all())
+
     offers_written = 0
     if imps.component_enabled(settings, "availability"):
         offers_written = _persist_offers(db, today, comp_maps)
 
+    # 6. Concurrentenregister + reconciliatie-samenvatting.
+    reconciliation = _reconcile_competitors(
+        db, today, comp_maps, feed_variants, feed_canonical, alias_by_canon,
+        pre_existing)
+    if reconciliation:
+        clamp_warnings.insert(0, (
+            "Concurrent-reconciliatie: "
+            f"{reconciliation['feed_unique']} uniek in feed, "
+            f"{reconciliation['matched']} gematcht, "
+            f"{reconciliation['new']} nieuw, "
+            f"{reconciliation['rows_written']} prijsrijen bijgewerkt, "
+            f"{reconciliation['duplicates_prevented']} duplicaatvarianten voorkomen."
+        ))
+
     return {
+        "competitor_reconciliation": reconciliation,
         "products_new": len(to_insert),
         "products_updated": len(to_update),
         "products_total": len(catalog),
@@ -868,6 +915,58 @@ def _persist_offers(db: Session, today: date, comp_maps: list[dict]) -> int:
         db.bulk_insert_mappings(models.FactCompetitorOfferDaily, chunk)
     db.commit()
     return len(offer_maps)
+
+
+def _reconcile_competitors(db: Session, today: date, comp_maps: list[dict],
+                           feed_variants: set[str], feed_canonical: set[str],
+                           alias_by_canon: dict[str, set[str]],
+                           pre_existing: set[str]) -> dict | None:
+    """Werk het concurrentenregister (dim_competitor) bij en lever de
+    reconciliatie-samenvatting van deze sync.
+
+    - matcht canonieke feeddomeinen tegen het register;
+    - maakt registerrijen aan voor nieuwe concurrenten;
+    - bewaart afwijkende oorspronkelijke schrijfwijzen als aliassen;
+    - markeert alle vandaag geziene concurrenten met last_seen_date (een
+      concurrent die uit de feed verdwijnt wordt nooit verwijderd, alleen
+      herkenbaar als "recent niet gezien").
+    """
+    written = {m["competitor_name"] for m in comp_maps}
+    if not feed_canonical and not written:
+        return None
+    names = sorted(feed_canonical | written)
+    existing: dict[str, models.DimCompetitor] = {}
+    for chunk in (names[i:i + 1000] for i in range(0, len(names), 1000)):
+        existing.update({
+            c.competitor_name: c
+            for c in db.query(models.DimCompetitor).filter(
+                models.DimCompetitor.competitor_name.in_(chunk)).all()})
+    # 'gematcht'/'nieuw' t.o.v. het register vóór deze sync (pre_existing):
+    # _persist_offers kan het register tussentijds al hebben aangevuld.
+    matched = sum(1 for n in names if n in pre_existing)
+    new = len(names) - matched
+    for n in names:
+        comp = existing.get(n)
+        if comp is None:
+            comp = models.DimCompetitor(competitor_name=n)
+            db.add(comp)
+        aliases = alias_by_canon.get(n)
+        if aliases:
+            merged = list(comp.aliases or [])
+            for a in sorted(aliases):
+                if a not in merged:
+                    merged.append(a)
+            comp.aliases = merged
+        if n in written:
+            comp.last_seen_date = today
+    db.commit()
+    return {
+        "feed_unique": len(feed_canonical),
+        "matched": matched,
+        "new": new,
+        "rows_written": len(comp_maps),
+        "duplicates_prevented": max(0, len(feed_variants) - len(feed_canonical)),
+    }
 
 
 # ── PCIS-scoring uit echte concurrentprijzen ────────────────────────────────

@@ -589,8 +589,9 @@ def list_competitors(
         .limit(page_size)
         .all()
     )
+    seen = _seen_info_bulk(db, sid, [p.competitor_name for p in items])
     return {
-        "items": [_profile_out(p) for p in items],
+        "items": [_profile_out(p) | seen[p.competitor_name] for p in items],
         "total": total, "page": page, "page_size": page_size,
     }
 
@@ -631,7 +632,7 @@ def get_competitor_profile(
     )
 
     return {
-        "profile": _profile_out(profile),
+        "profile": _profile_out(profile) | _seen_info(db, sid, profile.competitor_name),
         "category_scores": [_category_score_out(r) for r in cat_scores],
         "strategy": _strategy_out(strategie) if strategie else None,
     }
@@ -1019,6 +1020,49 @@ def _product_brief(p) -> dict:
         "max_price": float(p.max_price) if p.max_price else None,
         "stock_quantity": p.stock_quantity,
     }
+
+
+_RECENT_UNSEEN_DAYS = 3
+
+
+def _seen_info_bulk(db: Session, sid: int, names: list[str]) -> dict[str, dict]:
+    """"Recent niet gezien"-markering — SHOP-gescoped uit de waarnemingsdata.
+
+    Verdwenen concurrenten worden nooit verwijderd (last-known-good); ze
+    worden alleen gemarkeerd als hun laatste waarneming binnen déze shop
+    ≥ 3 dagen achterloopt op de nieuwste waarneming binnen dezelfde shop.
+    Referentie is dus niet 'vandaag' (een stilgevallen feed zou anders ineens
+    álle concurrenten als verdwenen aanmerken) en niet een andere shop (een
+    waarneming in shop A zegt niets over shop B).
+    """
+    from sqlalchemy import func
+    if not names:
+        return {}
+    F = models.FactCompetitorPriceDaily
+    latest = (db.query(func.max(F.date))
+              .filter(F.shop_id == sid).scalar())
+    seen_by_name: dict[str, object] = {}
+    for chunk in (names[i:i + 1000] for i in range(0, len(names), 1000)):
+        seen_by_name.update(dict(
+            db.query(F.competitor_name, func.max(F.date))
+            .filter(F.shop_id == sid, F.competitor_name.in_(chunk))
+            .group_by(F.competitor_name).all()))
+    out = {}
+    for n in names:
+        last_seen = seen_by_name.get(n)
+        out[n] = {
+            "last_seen_date": last_seen.isoformat() if last_seen else None,
+            "recently_unseen": bool(
+                last_seen is not None and latest is not None
+                and (latest - last_seen).days >= _RECENT_UNSEEN_DAYS),
+        }
+    return out
+
+
+def _seen_info(db: Session, sid: int, competitor_name: str) -> dict:
+    return _seen_info_bulk(db, sid, [competitor_name]).get(
+        competitor_name,
+        {"last_seen_date": None, "recently_unseen": False})
 
 
 def _profile_out(p: models.CompetitorProfile) -> dict:

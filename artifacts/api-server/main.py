@@ -128,6 +128,17 @@ async def lifespan(app: FastAPI):
             seed_authz()
             logger.info("Startup: authz (departments/permissies) ensured.")
 
+            # 3-ter. Eenmalige merge van concurrent-domeinvarianten
+            # (www./https-schrijfwijzen) — idempotent via AuditLog-marker.
+            from services.domain_normalize import merge_competitor_domain_variants
+            from database import SessionLocal as _SL
+            _mdb = _SL()
+            try:
+                merge_competitor_domain_variants(_mdb)
+            finally:
+                _mdb.close()
+            logger.info("Startup: concurrent-domeinmerge gecontroleerd/uitgevoerd.")
+
             # 3a. Dev-only safety net: guarantee a recoverable admin login exists
             # locally without ever touching/deleting existing data (no-op in prod).
             from auth import create_default_admin_if_missing

@@ -107,6 +107,15 @@ export default function CompetitionCompetitors() {
                         <Badge variant="outline" className={`text-xs ${tl.color} shrink-0`}>
                           <Circle className="h-2 w-2 mr-1 fill-current" />{tl.label}
                         </Badge>
+                        {comp.recently_unseen && (
+                          <Badge
+                            variant="outline"
+                            className="text-xs text-amber-700 border-amber-300 bg-amber-50 shrink-0"
+                            title={comp.last_seen_date ? `Laatst gezien in feed: ${comp.last_seen_date}` : undefined}
+                          >
+                            Recent niet gezien
+                          </Badge>
+                        )}
                         {comp.price_segment && (
                           <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${SEGMENT_COLORS[comp.price_segment] || ""}`}>
                             {comp.price_segment}
