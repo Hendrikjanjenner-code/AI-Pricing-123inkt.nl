@@ -234,6 +234,11 @@ export default function CompetitionDashboard() {
                     verouderd — nieuwe feed-sync sinds laatste berekening
                   </Badge>
                 )}
+                {rankData?.score_basis === "hierarchy_nodes" && (
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-500/10 text-blue-700 border-blue-300" data-testid="badge-rankings-node-scores">
+                    node-specifieke scores voor de geselecteerde hiërarchie
+                  </Badge>
+                )}
               </CardTitle>
               <CardDescription data-testid="text-rankings-freshness">
                 Rank, Competition Relevance, Price Relevance en Influence per concurrent
@@ -308,6 +313,11 @@ export default function CompetitionDashboard() {
             {rankData?.total != null && (
               <span className="text-xs text-muted-foreground ml-auto" data-testid="text-rankings-total">
                 {rankData.total} concurrent{rankData.total === 1 ? "" : "en"}
+                {rankData?.score_basis === "hierarchy_nodes" && rankData?.unmapped_observations > 0 && (
+                  <span className="ml-2 text-amber-700" data-testid="text-rankings-unmapped">
+                    · {rankData.unmapped_observations} waarneming{rankData.unmapped_observations === 1 ? "" : "en"} zonder hiërarchie-mapping (tellen niet mee)
+                  </span>
+                )}
               </span>
             )}
           </div>

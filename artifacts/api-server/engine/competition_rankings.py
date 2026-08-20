@@ -59,6 +59,23 @@ def run_competitor_rankings(db: Session, ref_date: date | None = None,
     for sid in shop_ids:
         total += _run_for_shop(db, today, sid)
     db.commit()
+
+    # Node-specifieke scores per hiërarchie-node (taak #265) draaien in
+    # dezelfde run mee — ná de rankings-commit en fout-tolerant per shop:
+    # een node-score-probleem mag de zojuist geschreven rankings nooit
+    # terugdraaien of de run laten falen, maar wordt wel zichtbaar gelogd.
+    import logging
+    _log = logging.getLogger("uvicorn.error")
+    from engine.competition_node_scores import run_competitor_node_scores
+    for sid in shop_ids:
+        try:
+            node_rows = run_competitor_node_scores(db, ref_date=today, shop_id=sid)
+            db.commit()
+            _log.info("Node-scores voor shop %s: %d rijen geschreven.", sid, node_rows)
+        except Exception:
+            db.rollback()
+            _log.exception("Node-scores voor shop %s mislukt — rankings blijven staan.", sid)
+
     return total
 
 

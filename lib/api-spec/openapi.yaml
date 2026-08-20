@@ -1497,6 +1497,20 @@ paths:
                   scope: { type: string }
                   run_date: { type: ["string", "null"] }
                   total: { type: integer }
+                  score_basis:
+                    type: string
+                    description: >-
+                      "overall" of "hierarchy_nodes" — bij een actieve
+                      hiërarchieselectie zijn de scores node-specifiek
+                      (berekend over uitsluitend descendants van de selectie).
+                  unmapped_observations:
+                    type: ["integer", "null"]
+                    description: Waarnemingen zonder interne hiërarchie-mapping ("mapping ontbreekt")
+                  nodes_used:
+                    type: ["array", "null"]
+                    items:
+                      type: object
+                      additionalProperties: true
                   rankings:
                     type: array
                     items:

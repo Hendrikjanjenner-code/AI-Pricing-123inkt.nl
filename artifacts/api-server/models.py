@@ -2093,6 +2093,57 @@ class CompetitorRanking(Base):
     model_version = Column(String(50))
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class CompetitorHierarchyNodeScore(Base):
+    """
+    Node-specifieke concurrentscores per canonieke hiërarchie-node (taak #265).
+
+    Per (shop, concurrent, hiërarchie-node) de drie gestandaardiseerde scores,
+    berekend over uitsluitend producten die descendant zijn van die node —
+    zodat één concurrent per tak verschillende scores kan hebben. De koppeling
+    loopt via interne SKU → ProductHierarchyAssignment; PriceShape-categorieën
+    zijn alleen bronmetadata. Waarnemingen op SKU's zonder actieve mapping
+    tellen niet mee in node-scores maar worden zichtbaar bewaard als rij met
+    node_id = NULL ("mapping ontbreekt").
+
+    Historie blijft behouden: per run_date een snapshot (delete-then-insert
+    per dag, net als CompetitorRanking).
+    """
+    __tablename__ = "competitor_hierarchy_node_scores"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # ON DELETE CASCADE: node-scores zijn afgeleide data; een shop-verwijdering
+    # (o.a. test-teardowns die deze afgeleide tabel niet kennen) mag nooit op
+    # deze FK stranden.
+    shop_id = Column(Integer, ForeignKey("dim_shop.id", ondelete="CASCADE"),
+                     default=1, index=True)
+    run_date = Column(Date, nullable=False, index=True)
+    # NULL = bucket "mapping ontbreekt" (waarnemingen zonder interne mapping)
+    node_id = Column(Integer, ForeignKey("product_hierarchy_nodes.id", ondelete="CASCADE"),
+                     nullable=True, index=True)
+    competitor_name = Column(String(255), nullable=False, index=True)
+
+    # Waarnemingen-tellers
+    node_sku_count = Column(Integer, default=0)       # producten onder de node
+    observed_sku_count = Column(Integer, default=0)   # daarvan waargenomen bij deze concurrent
+    observation_count = Column(Integer, default=0)    # aantal prijswaarnemingen
+
+    # Drie gestandaardiseerde scores (0..1) + combinatie, zoals CompetitorRanking
+    competition_relevance_score = Column(Float, default=0.0)
+    price_relevance_score = Column(Float, default=0.0)
+    influence_score = Column(Float, default=0.0)
+    combined_score = Column(Float, default=0.0)
+
+    confidence = Column(Float, default=0.0)
+    first_seen = Column(Date)
+    last_seen = Column(Date)
+    evidence = Column(JSON)
+    model_version = Column(String(50))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_chns_shop_run_node", "shop_id", "run_date", "node_id"),
+        Index("ix_chns_shop_node_comp", "shop_id", "node_id", "competitor_name"),
+    )
 class Decision(Base):
     """
     Een commerciële beslissing per entiteit (SKU/categorie), opgebouwd uit

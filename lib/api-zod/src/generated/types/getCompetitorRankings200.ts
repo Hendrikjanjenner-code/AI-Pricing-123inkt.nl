@@ -5,6 +5,7 @@
  * AI Pricing Decision Engine API
  * OpenAPI spec version: 0.1.0
  */
+import type { GetCompetitorRankings200NodesUsedItem } from "./getCompetitorRankings200NodesUsedItem";
 import type { GetCompetitorRankings200RankingsItem } from "./getCompetitorRankings200RankingsItem";
 
 export type GetCompetitorRankings200 = {
@@ -12,5 +13,14 @@ export type GetCompetitorRankings200 = {
   /** @nullable */
   run_date?: string | null;
   total?: number;
+  /** "overall" of "hierarchy_nodes" — bij een actieve hiërarchieselectie zijn de scores node-specifiek (berekend over uitsluitend descendants van de selectie). */
+  score_basis?: string;
+  /**
+   * Waarnemingen zonder interne hiërarchie-mapping ("mapping ontbreekt")
+   * @nullable
+   */
+  unmapped_observations?: number | null;
+  /** @nullable */
+  nodes_used?: GetCompetitorRankings200NodesUsedItem[] | null;
   rankings?: GetCompetitorRankings200RankingsItem[];
 };

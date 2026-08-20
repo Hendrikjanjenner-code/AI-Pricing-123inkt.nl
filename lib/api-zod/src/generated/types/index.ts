@@ -62,6 +62,7 @@ export * from "./getCompetitorLandscape200";
 export * from "./getCompetitorLandscape200ItemsItem";
 export * from "./getCompetitorLandscapeParams";
 export * from "./getCompetitorRankings200";
+export * from "./getCompetitorRankings200NodesUsedItem";
 export * from "./getCompetitorRankings200RankingsItem";
 export * from "./getCompetitorRankingsParams";
 export * from "./getCompetitorScoreDetailParams";

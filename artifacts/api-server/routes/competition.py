@@ -590,9 +590,27 @@ def list_competitors(
         .all()
     )
     seen = _seen_info_bulk(db, sid, [p.competitor_name for p in items])
+    # Node-specifieke scores (taak #265): bij een actieve hiërarchieselectie
+    # krijgt elke concurrent zijn scores voor die tak mee (i.p.v. overall).
+    node_ctx = _node_scores_for_selection(db, sid, hierarchy_node_ids)
+    node_by_comp = node_ctx[0] if node_ctx is not None else {}
+
+    def _node_score_out(name: str):
+        ns = node_by_comp.get(name)
+        if ns is None:
+            return None
+        return {k: ns[k] for k in (
+            "competition_relevance_score", "price_relevance_score",
+            "influence_score", "combined_score", "confidence",
+            "observed_sku_count", "node_sku_count")}
+
     return {
-        "items": [_profile_out(p) | seen[p.competitor_name] for p in items],
+        "items": [_profile_out(p) | seen[p.competitor_name]
+                  | {"node_score": _node_score_out(p.competitor_name)}
+                  for p in items],
         "total": total, "page": page, "page_size": page_size,
+        "score_basis": "hierarchy_nodes" if node_ctx is not None else "overall",
+        "unmapped_observations": node_ctx[2] if node_ctx is not None else None,
     }
 
 
@@ -1349,6 +1367,38 @@ def get_competitor_rankings(
             min_business_strength=min_business_strength,
             min_procurement_power=min_procurement_power,
             min_data_completeness=min_data_completeness)]
+    # Node-specifieke scores (taak #265): bij een actieve hiërarchieselectie
+    # vervangen we de overall-scores door scores berekend over uitsluitend
+    # descendants van de geselecteerde node(s). Overall blijft de fallback
+    # als er (nog) geen node-scores zijn.
+    node_ctx = _node_scores_for_selection(db, sid, hierarchy_node_ids)
+    score_basis = "overall"
+    node_rankings = None
+    if node_ctx is not None:
+        by_comp, nodes_used, unmapped = node_ctx
+        matched = [(r, by_comp[r.competitor_name]) for r in rows
+                   if r.competitor_name in by_comp]
+        if matched:
+            score_basis = "hierarchy_nodes"
+            matched.sort(key=lambda t: t[1]["combined_score"], reverse=True)
+            node_rankings = []
+            for idx, (r, ns) in enumerate(matched, start=1):
+                node_rankings.append({
+                    "rank": idx,
+                    # Trend/vorige rank zijn overall-begrippen; binnen een
+                    # node-context tonen we ze niet (misleidend).
+                    "previous_rank": None,
+                    "trend": None,
+                    "competitor_name": r.competitor_name,
+                    "competition_relevance_score": ns["competition_relevance_score"],
+                    "price_relevance_score": ns["price_relevance_score"],
+                    "influence_score": ns["influence_score"],
+                    "combined_score": ns["combined_score"],
+                    "confidence": ns["confidence"],
+                    "explanation": ns["explanation"],
+                    "evidence": ns["evidence"],
+                    "model_version": ns["model_version"],
+                })
     # Versheid: wanneer zijn deze rankings berekend, en is er sindsdien een
     # nieuwe feed-sync geweest (dan zijn ze "verouderd")?
     computed_at = max((r.created_at for r in rows if r.created_at), default=None)
@@ -1359,13 +1409,14 @@ def get_competitor_rankings(
     had_previous = any(r.previous_rank is not None for r in rows)
     changed = had_previous and any(
         (r.rank_trend or "stable") not in ("stable",) for r in rows)
-    return {
+    resp = {
         "scope": scope,
         "run_date": str(latest),
         "computed_at": computed_at.isoformat() if computed_at else None,
         "last_feed_sync_at": last_sync_at.isoformat() if last_sync_at else None,
         "stale": stale,
         "changed": changed,
+        "score_basis": score_basis,
         "total": len(rows),
         "scopes": _ranking_scopes(db, sid),
         "rankings": [
@@ -1386,6 +1437,12 @@ def get_competitor_rankings(
             for r in rows
         ],
     }
+    if node_rankings is not None:
+        resp["rankings"] = node_rankings
+        resp["total"] = len(node_rankings)
+        resp["nodes_used"] = node_ctx[1]
+        resp["unmapped_observations"] = node_ctx[2]
+    return resp
 
 
 @router.get("/rankings/history")
@@ -1468,7 +1525,117 @@ def _filtered_competitor_names_sq(
         q = q.filter(F.shop_id == sid)
     return q.distinct().scalar_subquery()
 
+def _node_scores_for_selection(
+    db: Session, sid: Optional[int],
+    hierarchy_node_ids: Optional[str] = None,
+):
+    """
+    Node-specifieke scores (taak #265) voor een actieve hiërarchieselectie.
 
+    Geeft None terug als er geen hiërarchieselectie is of als er (nog) geen
+    node-scores bestaan (dan valt de aanroeper terug op overall). Anders een
+    tuple (by_comp, nodes_used, unmapped_observations):
+      - by_comp: per concurrent de over de geselecteerde nodes geaggregeerde
+        scores (gewogen op waargenomen SKU's per node);
+      - nodes_used: welke gescoorde node per selectie is gebruikt (een dieper
+        geselecteerde node valt terug op de dichtstbijzijnde gescoorde
+        voorouder);
+      - unmapped_observations: aantal waarnemingen zonder interne mapping
+        ("mapping ontbreekt") in de laatste node-score-run van deze shop.
+    """
+    from routes.global_filters import parse_csv_ints
+    from sqlalchemy import func as _func
+
+    node_ids = parse_csv_ints(hierarchy_node_ids)
+    if not node_ids:
+        return None
+
+    S = models.CompetitorHierarchyNodeScore
+    N = models.ProductHierarchyNode
+    latest = (db.query(_func.max(S.run_date))
+              .filter(S.shop_id == sid).scalar())
+    if not latest:
+        return None
+
+    scored_node_ids = {nid for (nid,) in
+                       db.query(S.node_id).filter(
+                           S.shop_id == sid, S.run_date == latest,
+                           S.node_id.isnot(None)).distinct().all()}
+
+    # Resolve elke geselecteerde node naar zichzelf of de dichtstbijzijnde
+    # gescoorde voorouder (via het gematerialiseerde pad).
+    nodes = db.query(N).filter(N.id.in_(node_ids)).all()
+    resolved: dict[int, int] = {}
+    for n in nodes:
+        path_ids = [int(p) for p in (n.path or "").strip("/").split("/") if p]
+        for cand in reversed(path_ids or [n.id]):
+            if cand in scored_node_ids:
+                resolved[n.id] = cand
+                break
+    if not resolved:
+        return None
+
+    use_ids = sorted(set(resolved.values()))
+    rows = db.query(S).filter(
+        S.shop_id == sid, S.run_date == latest,
+        S.node_id.in_(use_ids)).all()
+    if not rows:
+        return None
+
+    by_comp: dict[str, dict] = {}
+    agg: dict[str, list] = {}
+    for r in rows:
+        agg.setdefault(r.competitor_name, []).append(r)
+    for name, rs in agg.items():
+        weights = [max(1, r.observed_sku_count or 0) for r in rs]
+        tw = float(sum(weights))
+
+        def _w(getter):
+            return round(sum(float(getter(r) or 0) * w for r, w in zip(rs, weights)) / tw, 4)
+
+        node_names = []
+        for r in rs:
+            nn = db.query(N.name).filter(N.id == r.node_id).scalar()
+            node_names.append(nn or str(r.node_id))
+        by_comp[name] = {
+            "competition_relevance_score": _w(lambda r: r.competition_relevance_score),
+            "price_relevance_score": _w(lambda r: r.price_relevance_score),
+            "influence_score": _w(lambda r: r.influence_score),
+            "combined_score": _w(lambda r: r.combined_score),
+            "confidence": round(max(float(r.confidence or 0) for r in rs), 2),
+            "observed_sku_count": sum(r.observed_sku_count or 0 for r in rs),
+            "node_sku_count": sum(r.node_sku_count or 0 for r in rs),
+            "explanation": (
+                f"{name}: node-specifieke scores over uitsluitend producten "
+                f"binnen {', '.join(node_names)} "
+                f"({sum(r.observed_sku_count or 0 for r in rs)} waargenomen van "
+                f"{sum(r.node_sku_count or 0 for r in rs)} producten in de tak)."
+            ),
+            "evidence": {
+                "score_basis": "hierarchy_nodes",
+                "run_date": str(latest),
+                "nodes": [
+                    {"node_id": r.node_id,
+                     "observed_sku_count": r.observed_sku_count,
+                     "node_sku_count": r.node_sku_count,
+                     "observation_count": r.observation_count,
+                     "combined_score": round(float(r.combined_score or 0), 4),
+                     "first_seen": str(r.first_seen) if r.first_seen else None,
+                     "last_seen": str(r.last_seen) if r.last_seen else None}
+                    for r in rs
+                ],
+            },
+            "model_version": rs[0].model_version,
+        }
+
+    nodes_used = [
+        {"selected_node_id": sel, "scored_node_id": use,
+         "name": db.query(N.name).filter(N.id == use).scalar()}
+        for sel, use in sorted(resolved.items())
+    ]
+    unmapped = int(db.query(_func.coalesce(_func.sum(S.observation_count), 0)).filter(
+        S.shop_id == sid, S.run_date == latest, S.node_id.is_(None)).scalar() or 0)
+    return by_comp, nodes_used, unmapped
 def _last_feed_sync_at(db: Session):
     """Tijdstip van de laatste geslaagde PriceShape-feed-sync (of None)."""
     cfg = (db.query(models.ConnectorConfig)

@@ -139,6 +139,30 @@ export default function CompetitionCompetitors() {
                         <div className="text-xs text-muted-foreground">Wijz./week</div>
                       </div>
                     </div>
+                    {comp.node_score && (
+                      <div className="rounded-md border border-blue-200 bg-blue-50/50 p-2 space-y-1" data-testid={`node-score-${comp.competitor_name}`}>
+                        <div className="text-[10px] font-medium text-blue-700 uppercase tracking-wide">
+                          Scores voor geselecteerde hiërarchie
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                          <div>
+                            <div className="font-semibold tabular-nums">{Math.round((comp.node_score.competition_relevance_score || 0) * 100)}</div>
+                            <div className="text-[10px] text-muted-foreground">Comp. rel.</div>
+                          </div>
+                          <div>
+                            <div className="font-semibold tabular-nums">{Math.round((comp.node_score.price_relevance_score || 0) * 100)}</div>
+                            <div className="text-[10px] text-muted-foreground">Price rel.</div>
+                          </div>
+                          <div>
+                            <div className="font-semibold tabular-nums">{Math.round((comp.node_score.influence_score || 0) * 100)}</div>
+                            <div className="text-[10px] text-muted-foreground">Influence</div>
+                          </div>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground text-center">
+                          {comp.node_score.observed_sku_count} van {comp.node_score.node_sku_count} producten in de tak waargenomen
+                        </div>
+                      </div>
+                    )}
                     <div>
                       <div className="flex justify-between text-xs mb-1">
                         <span className="text-muted-foreground">Functionele overlap</span>

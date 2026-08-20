@@ -1923,6 +1923,19 @@ export const GetCompetitorRankingsResponse = zod.object({
   scope: zod.string().optional(),
   run_date: zod.string().nullish(),
   total: zod.number().optional(),
+  score_basis: zod
+    .string()
+    .optional()
+    .describe(
+      '\"overall\" of \"hierarchy_nodes\" — bij een actieve hiërarchieselectie zijn de scores node-specifiek (berekend over uitsluitend descendants van de selectie).',
+    ),
+  unmapped_observations: zod
+    .number()
+    .nullish()
+    .describe(
+      'Waarnemingen zonder interne hiërarchie-mapping (\"mapping ontbreekt\")',
+    ),
+  nodes_used: zod.array(zod.record(zod.string(), zod.unknown())).nullish(),
   rankings: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
 });
 
