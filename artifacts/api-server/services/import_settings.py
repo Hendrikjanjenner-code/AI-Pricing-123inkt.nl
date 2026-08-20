@@ -25,6 +25,14 @@ DEFAULT_COMPONENTS: dict[str, bool] = {
 # Onbekende levertijd (None) telt wél mee. None als drempel = geen limiet.
 DEFAULT_MAX_DELIVERY_DAYS: int = 30
 
+# Standaard uitbijterdrempel (fractie van de mediaan): concurrentprijzen die
+# meer dan deze fractie van de SKU-mediaan afwijken tellen niet mee in de
+# referentieprijs (COMPETITOR_IGNORED_OUTLIER). Configureerbaar zodat een te
+# strakke drempel aantoonbaar kan worden gecorrigeerd (taak #266).
+DEFAULT_OUTLIER_THRESHOLD: float = 0.30
+OUTLIER_THRESHOLD_MIN = 0.05
+OUTLIER_THRESHOLD_MAX = 5.0
+
 COMPONENT_LABELS_NL: dict[str, str] = {
     "own_prices": "Eigen prijzen",
     "cost_prices": "Kostprijzen",
@@ -42,6 +50,7 @@ def get_settings(db: Session, connector_name: str = "priceshape") -> dict:
     components = dict(DEFAULT_COMPONENTS)
     disabled: list[str] = []
     mdd: int | None = DEFAULT_MAX_DELIVERY_DAYS
+    outlier_threshold: float = DEFAULT_OUTLIER_THRESHOLD
     if row:
         stored = row.components or {}
         for key in components:
@@ -50,6 +59,10 @@ def get_settings(db: Session, connector_name: str = "priceshape") -> dict:
         if "max_delivery_days" in stored:
             raw = stored.get("max_delivery_days")
             mdd = int(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else None
+        raw_ot = stored.get("outlier_threshold")
+        if isinstance(raw_ot, (int, float)) and not isinstance(raw_ot, bool) \
+                and OUTLIER_THRESHOLD_MIN <= float(raw_ot) <= OUTLIER_THRESHOLD_MAX:
+            outlier_threshold = float(raw_ot)
         from services.domain_normalize import normalize_domain
         # Canoniseer ook bij uitlezen: eerder opgeslagen varianten
         # (https://www.x.nl) blijven werken als uitsluiting van x.nl.
@@ -59,6 +72,7 @@ def get_settings(db: Session, connector_name: str = "priceshape") -> dict:
         "connector_name": connector_name,
         "components": components,
         "max_delivery_days": mdd,
+        "outlier_threshold": outlier_threshold,
         "disabled_competitors": sorted(set(disabled)),
         "updated_by": row.updated_by if row else None,
         "updated_at": row.updated_at.isoformat() if row and row.updated_at else None,
@@ -70,7 +84,7 @@ _KEEP = object()  # sentinel: max_delivery_days niet meegegeven → bestaande wa
 
 def save_settings(db: Session, components: dict, disabled_competitors: list[str],
                   username: str, connector_name: str = "priceshape",
-                  max_delivery_days=_KEEP) -> dict:
+                  max_delivery_days=_KEEP, outlier_threshold=_KEEP) -> dict:
     """Upsert de instellingen. Onbekende component-sleutels worden geweigerd."""
     unknown = [k for k in (components or {}) if k not in DEFAULT_COMPONENTS]
     if unknown:
@@ -79,6 +93,13 @@ def save_settings(db: Session, components: dict, disabled_competitors: list[str]
         if isinstance(max_delivery_days, bool) or not isinstance(max_delivery_days, int) \
                 or max_delivery_days < 1:
             raise ValueError("max_delivery_days moet een geheel getal ≥ 1 zijn (of null voor geen limiet)")
+    if outlier_threshold is not _KEEP and outlier_threshold is not None:
+        if isinstance(outlier_threshold, bool) or not isinstance(outlier_threshold, (int, float)) \
+                or not (OUTLIER_THRESHOLD_MIN <= float(outlier_threshold) <= OUTLIER_THRESHOLD_MAX):
+            raise ValueError(
+                f"outlier_threshold moet een getal tussen {OUTLIER_THRESHOLD_MIN} en "
+                f"{OUTLIER_THRESHOLD_MAX} zijn (fractie van de mediaan; null = standaard "
+                f"{DEFAULT_OUTLIER_THRESHOLD})")
     clean_components = {k: bool(v) for k, v in (components or {}).items()}
     from services.domain_normalize import normalize_domain
     clean_disabled = sorted({normalize_domain(d) or str(d).strip().lower()
@@ -100,6 +121,15 @@ def save_settings(db: Session, components: dict, disabled_competitors: list[str]
         merged["max_delivery_days"] = max_delivery_days
     elif "max_delivery_days" in stored:
         merged["max_delivery_days"] = stored["max_delivery_days"]
+    # Uitbijterdrempel: expliciet meegegeven → overschrijven (null = terug
+    # naar standaard); anders bestaande waarde behouden.
+    if outlier_threshold is not _KEEP:
+        if outlier_threshold is None:
+            merged.pop("outlier_threshold", None)
+        else:
+            merged["outlier_threshold"] = float(outlier_threshold)
+    elif "outlier_threshold" in stored:
+        merged["outlier_threshold"] = stored["outlier_threshold"]
     row.components = merged
     row.disabled_competitors = clean_disabled
     row.updated_by = username

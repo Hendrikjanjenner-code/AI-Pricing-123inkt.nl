@@ -254,6 +254,42 @@ def _detect_issues(db: Session, total_skus: int) -> list[dict]:  # noqa: C901
             "Verkeerde eenheden vertekenen prijs-per-eenheid vergelijkingen met concurrenten.",
             "Corrigeer grammage/pakgrootte in de productdata."))
 
+    # ── Prijsuitbijters in de referentieprijs (taak #266) ────────────────
+    # Uitgesloten observaties worden op de fact-rij gemarkeerd (nooit
+    # verwijderd); een hoog uitbijter-aandeel wijst op een dataprobleem
+    # (verpakkingsmaat, decimaalfout, verkeerde match) of te strakke drempel.
+    from engine import competition_engine as _ce
+    FC = models.FactCompetitorPriceDaily
+    outlier_run_date = db.query(func.max(FC.date)).filter(
+        FC.excluded_reason == _ce.EXCLUSION_OUTLIER).scalar()
+    if outlier_run_date is not None:
+        outlier_count = db.query(func.count(FC.id)).filter(
+            FC.date == outlier_run_date,
+            FC.excluded_reason == _ce.EXCLUSION_OUTLIER).scalar() or 0
+        obs_count = db.query(func.count(FC.id)).filter(
+            FC.date == outlier_run_date, FC.price.isnot(None)).scalar() or 0
+        rate = (outlier_count / obs_count) if obs_count else 0.0
+        if outlier_count and rate > 0.15:
+            causes: dict[str, int] = {}
+            for (detail,) in db.query(FC.exclusion_detail).filter(
+                    FC.date == outlier_run_date,
+                    FC.excluded_reason == _ce.EXCLUSION_OUTLIER).all():
+                c = (detail or {}).get("suspected_cause") or _ce.CAUSE_ABOVE_THRESHOLD
+                causes[c] = causes.get(c, 0) + 1
+            dominant = max(causes, key=lambda k: causes[k]) if causes else None
+            dominant_txt = f" Meest voorkomende vermoedelijke oorzaak: {dominant} ({causes.get(dominant, 0)}×)." if dominant else ""
+            issues.append(_issue(
+                "COMPETITOR_PRICE_OUTLIER_RATE", "error" if rate > 0.35 else "warning",
+                "Veel prijsuitbijters uitgesloten",
+                f"{outlier_count} van {obs_count} concurrentprijzen ({rate * 100:.0f}%) is als "
+                f"prijsuitbijter uitgesloten van de referentieprijs (run {outlier_run_date.isoformat()})."
+                + dominant_txt,
+                outlier_count, "PriceShape", "Concurrentie",
+                "Een hoog uitbijter-aandeel vertekent de referentieprijs en kan wijzen op "
+                "verpakkingsmaat-mismatches, decimaal-/valutafouten of een te strakke drempel.",
+                "Bekijk de uitbijter-reconciliatie hieronder (per reden en vermoedelijke oorzaak); "
+                "pas zo nodig de uitbijterdrempel aan via de importinstellingen op de connectoren-pagina."))
+
     pack_mismatch = db.query(models.ProductMatch).filter(
         models.ProductMatch.pack_size_warning == True  # noqa: E712
     ).count()
@@ -790,6 +826,113 @@ def list_quality_issues(
         q = q.filter(models.DataQualityIssue.source == source)
     rows = q.order_by(models.DataQualityIssue.last_detected_at.desc()).all()
     return [_issue_row_dict(r) for r in rows]
+
+
+@router.get("/data-quality/outliers")
+def get_outlier_reconciliation(
+    shop_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """Uitbijter-/reconciliatiesectie voor het datakwaliteitscentrum.
+
+    Uitgesloten concurrentprijzen worden nooit verwijderd, alleen gemarkeerd
+    (fact_competitor_price_daily.excluded_reason). Deze endpoint aggregeert
+    de meest recente gemarkeerde dag: totalen per reden, vermoedelijke
+    oorzaken van prijsuitbijters, meest geraakte concurrenten/categorieën en
+    voorbeelden per reden (drill-down).
+    """
+    from engine import competition_engine as ce
+    from services import import_settings as imps
+    import authz
+
+    F = models.FactCompetitorPriceDaily
+    P = models.DimProduct
+
+    # Effectieve shop-scope: expliciete shop buiten de toegestane set → 403;
+    # zonder shop-keuze zien gescopede gebruikers nooit cross-shop data.
+    allowed = authz.user_allowed_shop_ids(db, current_user)
+    if shop_id is not None:
+        if allowed is not None and shop_id not in allowed:
+            raise HTTPException(status_code=403, detail="Geen toegang tot deze shop")
+        shop_scope: set[int] | None = {shop_id}
+    else:
+        shop_scope = set(allowed) if allowed is not None else None
+
+    scoped = db.query(func.max(F.date)).filter(F.excluded_reason.isnot(None))
+    if shop_scope is not None:
+        scoped = scoped.filter(F.shop_id.in_(shop_scope))
+    run_date = scoped.scalar()
+    settings = imps.get_settings(db)
+    empty = {
+        "run_date": None, "total_observations": 0, "total_excluded": 0,
+        "outlier_threshold": settings.get("outlier_threshold"),
+        "by_reason": {}, "by_suspected_cause": {},
+        "top_competitors": [], "top_categories": [], "examples": {},
+    }
+    if run_date is None:
+        return empty
+
+    def _base(q):
+        q = q.filter(F.date == run_date)
+        if shop_scope is not None:
+            q = q.filter(F.shop_id.in_(shop_scope))
+        return q
+
+    total_observations = _base(db.query(func.count(F.id)).filter(F.price.isnot(None))).scalar() or 0
+    excluded_q = _base(db.query(F).filter(F.excluded_reason.isnot(None)))
+
+    by_reason = {
+        reason: count for reason, count in
+        _base(db.query(F.excluded_reason, func.count(F.id))
+              .filter(F.excluded_reason.isnot(None))).group_by(F.excluded_reason).all()
+    }
+    total_excluded = sum(by_reason.values())
+
+    # Vermoedelijke oorzaken (alleen uitbijters hebben een detail met cause).
+    by_cause: dict[str, int] = {}
+    for (detail,) in _base(db.query(F.exclusion_detail).filter(
+            F.excluded_reason == ce.EXCLUSION_OUTLIER)).all():
+        cause = (detail or {}).get("suspected_cause") or ce.CAUSE_ABOVE_THRESHOLD
+        by_cause[cause] = by_cause.get(cause, 0) + 1
+
+    top_competitors = [
+        {"competitor_name": name, "excluded": count}
+        for name, count in _base(db.query(F.competitor_name, func.count(F.id))
+                                 .filter(F.excluded_reason.isnot(None)))
+        .group_by(F.competitor_name).order_by(func.count(F.id).desc()).limit(10).all()
+    ]
+    cat_q = _base(db.query(func.coalesce(P.category, "Onbekend"), func.count(F.id))
+                  .filter(F.excluded_reason.isnot(None))
+                  .join(P, (P.sku_id == F.sku_id) & (P.shop_id == F.shop_id)))
+    top_categories = [
+        {"category": cat, "excluded": count}
+        for cat, count in cat_q.group_by(func.coalesce(P.category, "Onbekend"))
+        .order_by(func.count(F.id).desc()).limit(10).all()
+    ]
+
+    # Voorbeelden per reden (drill-down): max 5 per reden.
+    examples: dict[str, list[dict]] = {}
+    for reason in by_reason:
+        rows = excluded_q.filter(F.excluded_reason == reason).order_by(F.id).limit(5).all()
+        examples[reason] = [{
+            "sku_id": r.sku_id,
+            "competitor_name": r.competitor_name,
+            "price": float(r.price) if r.price is not None else None,
+            "detail": r.exclusion_detail,
+        } for r in rows]
+
+    return {
+        "run_date": run_date.isoformat(),
+        "total_observations": total_observations,
+        "total_excluded": total_excluded,
+        "outlier_threshold": settings.get("outlier_threshold"),
+        "by_reason": by_reason,
+        "by_suspected_cause": by_cause,
+        "top_competitors": top_competitors,
+        "top_categories": top_categories,
+        "examples": examples,
+    }
 
 
 class IssueUpdateRequest(BaseModel):

@@ -271,6 +271,11 @@ class FactCompetitorPriceDaily(Base):
     vendor_name = Column(String(255))          # weergavenaam (naast domein)
     observed_at = Column(DateTime)             # timestamp uit de feed
     raw_attributes = Column(JSON)              # alle overige vendorvelden (verliesvrij)
+    # Uitsluitings-markering (taak #266): uitgesloten observaties worden nooit
+    # verwijderd, alleen gemarkeerd met een expliciete reden. NULL = meegeteld
+    # in de referentieprijs (of nog niet gescoord).
+    excluded_reason = Column(String(60), index=True)   # bv. COMPETITOR_IGNORED_OUTLIER
+    exclusion_detail = Column(JSON)            # {deviation_pct, median, ratio, suspected_cause, ...}
 
 
 class FactInventoryDaily(Base):

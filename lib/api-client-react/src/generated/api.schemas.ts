@@ -705,6 +705,54 @@ export interface DataQualityReport {
   summary: DataQualityReportSummary;
 }
 
+export type OutlierReconciliationByReason = { [key: string]: number };
+
+export type OutlierReconciliationBySuspectedCause = { [key: string]: number };
+
+export type OutlierReconciliationTopCompetitorsItem = {
+  competitor_name: string;
+  excluded: number;
+};
+
+export type OutlierReconciliationTopCategoriesItem = {
+  category: string;
+  excluded: number;
+};
+
+/**
+ * @nullable
+ */
+export type OutlierReconciliationExamplesItemDetail = {
+  [key: string]: unknown;
+} | null;
+
+export type OutlierReconciliationExamplesItem = {
+  sku_id: string;
+  competitor_name: string;
+  /** @nullable */
+  price?: number | null;
+  /** @nullable */
+  detail?: OutlierReconciliationExamplesItemDetail;
+};
+
+export type OutlierReconciliationExamples = {
+  [key: string]: OutlierReconciliationExamplesItem[];
+};
+
+export interface OutlierReconciliation {
+  /** @nullable */
+  run_date: string | null;
+  total_observations: number;
+  total_excluded: number;
+  /** Actieve uitbijterdrempel (fractie van de mediaan) */
+  outlier_threshold?: number;
+  by_reason: OutlierReconciliationByReason;
+  by_suspected_cause: OutlierReconciliationBySuspectedCause;
+  top_competitors: OutlierReconciliationTopCompetitorsItem[];
+  top_categories: OutlierReconciliationTopCategoriesItem[];
+  examples: OutlierReconciliationExamples;
+}
+
 export interface ImportJob {
   id: number;
   upload_type: string;
@@ -1040,6 +1088,13 @@ export type ListRecommendationsParams = {
    * @nullable
    */
   sort_dir?: string | null;
+};
+
+export type GetDataQualityOutliersParams = {
+  /**
+   * Beperk de reconciliatie tot één winkel
+   */
+  shop_id?: number;
 };
 
 export type ListUploadsParams = {

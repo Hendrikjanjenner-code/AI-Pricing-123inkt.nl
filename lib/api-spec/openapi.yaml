@@ -556,6 +556,26 @@ paths:
               schema:
                 $ref: "#/components/schemas/DataQualityReport"
 
+  /data-quality/outliers:
+    get:
+      operationId: getDataQualityOutliers
+      tags: [data-quality]
+      summary: Outlier/reconciliation breakdown of excluded competitor prices
+      parameters:
+        - name: shop_id
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Beperk de reconciliatie tot één winkel
+      responses:
+        "200":
+          description: Totalen per uitsluitingsreden, vermoedelijke oorzaken, meest geraakte concurrenten/categorieën en voorbeelden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutlierReconciliation"
+
   /uploads:
     get:
       operationId: listUploads
@@ -2502,6 +2522,66 @@ components:
           additionalProperties:
             type: integer
       required: [overall_score, total_skus, issues, summary]
+
+    OutlierReconciliation:
+      type: object
+      properties:
+        run_date:
+          type: ["string", "null"]
+          format: date
+        total_observations:
+          type: integer
+        total_excluded:
+          type: integer
+        outlier_threshold:
+          type: number
+          description: Actieve uitbijterdrempel (fractie van de mediaan)
+        by_reason:
+          type: object
+          additionalProperties:
+            type: integer
+        by_suspected_cause:
+          type: object
+          additionalProperties:
+            type: integer
+        top_competitors:
+          type: array
+          items:
+            type: object
+            properties:
+              competitor_name:
+                type: string
+              excluded:
+                type: integer
+            required: [competitor_name, excluded]
+        top_categories:
+          type: array
+          items:
+            type: object
+            properties:
+              category:
+                type: string
+              excluded:
+                type: integer
+            required: [category, excluded]
+        examples:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: object
+              properties:
+                sku_id:
+                  type: string
+                competitor_name:
+                  type: string
+                price:
+                  type: ["number", "null"]
+                detail:
+                  type: ["object", "null"]
+                  additionalProperties: true
+              required: [sku_id, competitor_name]
+      required: [run_date, total_observations, total_excluded, by_reason, by_suspected_cause, top_competitors, top_categories, examples]
 
     DataQualityIssue:
       type: object

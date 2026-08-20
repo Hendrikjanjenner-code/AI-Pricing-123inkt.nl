@@ -57,6 +57,7 @@ import type {
   GetCompetitorRankingsParams,
   GetCompetitorScoreDetailParams,
   GetCompetitorScoreRankingsParams,
+  GetDataQualityOutliersParams,
   GetExportHistoryParams,
   HealthStatus,
   ImportJob,
@@ -72,6 +73,7 @@ import type {
   MessageResponse,
   ModelHealth,
   ModelRun,
+  OutlierReconciliation,
   OverrideRequest,
   PriceChangeBucket,
   Product,
@@ -2141,6 +2143,109 @@ export function useGetDataQuality<
   request?: SecondParameter<typeof customFetch>;
 }): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetDataQualityQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Outlier/reconciliation breakdown of excluded competitor prices
+ */
+export const getGetDataQualityOutliersUrl = (
+  params?: GetDataQualityOutliersParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/data-quality/outliers?${stringifiedParams}`
+    : `/api/data-quality/outliers`;
+};
+
+export const getDataQualityOutliers = async (
+  params?: GetDataQualityOutliersParams,
+  options?: RequestInit,
+): Promise<OutlierReconciliation> => {
+  return customFetch<OutlierReconciliation>(
+    getGetDataQualityOutliersUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetDataQualityOutliersQueryKey = (
+  params?: GetDataQualityOutliersParams,
+) => {
+  return [`/api/data-quality/outliers`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetDataQualityOutliersQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDataQualityOutliers>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetDataQualityOutliersParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDataQualityOutliers>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetDataQualityOutliersQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDataQualityOutliers>>
+  > = ({ signal }) =>
+    getDataQualityOutliers(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDataQualityOutliers>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDataQualityOutliersQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDataQualityOutliers>>
+>;
+export type GetDataQualityOutliersQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Outlier/reconciliation breakdown of excluded competitor prices
+ */
+
+export function useGetDataQualityOutliers<
+  TData = Awaited<ReturnType<typeof getDataQualityOutliers>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetDataQualityOutliersParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDataQualityOutliers>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDataQualityOutliersQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

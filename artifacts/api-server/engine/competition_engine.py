@@ -123,6 +123,51 @@ EXCLUSION_LOW_RELEVANCE = "COMPETITOR_IGNORED_LOW_RELEVANCE"
 EXCLUSION_PACK_SIZE = "COMPETITOR_IGNORED_DIFFERENT_PACK_SIZE"
 EXCLUSION_BAD_DELIVERY = "COMPETITOR_IGNORED_BAD_DELIVERY"
 
+# ── Vermoedelijke oorzaak-codes voor prijsuitbijters ────────────────────────
+# Een uitbijter wordt nooit stilzwijgend weggegooid: elke uitgesloten prijs
+# krijgt naast de reden (EXCLUSION_OUTLIER) ook een vermoedelijke oorzaak,
+# afgeleid uit de verhouding prijs/mediaan. Dit maakt de reconciliatie in het
+# datakwaliteitscentrum mogelijk (taak: uitbijters verklaarbaar maken).
+CAUSE_PACK_MULTIPLE = "PACK_SIZE_MULTIPLE"     # prijs ≈ n× mediaan (grotere verpakking)
+CAUSE_PACK_FRACTION = "PACK_SIZE_FRACTION"     # prijs ≈ mediaan/n (kleinere verpakking)
+CAUSE_DECIMAL_SHIFT = "DECIMAL_SHIFT"          # prijs ≈ 100×/0,01× (decimaal-/centenfout)
+CAUSE_VAT = "VAT_DIFFERENCE"                   # prijs ≈ ±21% (incl./excl. BTW)
+CAUSE_EXTREME = "EXTREME_DEVIATION"            # zeer grote afwijking zonder patroon
+CAUSE_ABOVE_THRESHOLD = "ABOVE_THRESHOLD"      # boven drempel, geen herkenbaar patroon
+
+# Standaard uitbijterdrempel (fractie van de mediaan). Configureerbaar via de
+# import-instellingen (services/import_settings.py, key "outlier_threshold").
+DEFAULT_OUTLIER_THRESHOLD = 0.30
+
+_PACK_MULTIPLES = (2, 3, 4, 5, 6, 8, 10, 12, 20, 24)
+
+
+def classify_outlier_cause(price: float, median: float) -> str:
+    """Vermoedelijke oorzaak van een uitbijter op basis van prijs/mediaan.
+
+    Heuristiek, geordend van sterk naar zwak signaal:
+    1. factor ~100 of ~0,01 → decimaal-/centenfout in de feed;
+    2. bijna exact geheel veelvoud (of 1/n) van de mediaan → verpakkingsmaat;
+    3. ±21% → BTW incl./excl.-verschil (alleen relevant bij lage drempels);
+    4. > 3× of < 1/3 → extreme afwijking (vermoedelijk verkeerde match);
+    5. anders → boven drempel zonder herkenbaar patroon.
+    """
+    if median is None or median <= 0 or price is None or price <= 0:
+        return CAUSE_ABOVE_THRESHOLD
+    r = price / median
+    if r >= 50 or r <= 0.02:
+        return CAUSE_DECIMAL_SHIFT
+    for m in _PACK_MULTIPLES:
+        if abs(r - m) <= 0.10 * m:
+            return CAUSE_PACK_MULTIPLE
+        if abs(r - 1.0 / m) <= 0.10 / m:
+            return CAUSE_PACK_FRACTION
+    if 1.15 <= r <= 1.27 or 0.79 <= r <= 0.87:
+        return CAUSE_VAT
+    if r >= 3.0 or r <= (1.0 / 3.0):
+        return CAUSE_EXTREME
+    return CAUSE_ABOVE_THRESHOLD
+
 
 def get_competition_class(pcis: float) -> str:
     """Map a PCIS score to its named competition class."""
@@ -152,25 +197,41 @@ def weighted_median(prices: list[float], weights: Optional[list[float]] = None) 
 
 def calculate_reference_price(
     raw_prices: list[float],
-    outlier_threshold: float = 0.30,
-) -> tuple[Optional[float], int, int, dict]:
+    outlier_threshold: float = DEFAULT_OUTLIER_THRESHOLD,
+) -> tuple[Optional[float], int, int, dict, list[dict]]:
     """
     Filter outliers from competitor prices and return the weighted median
     reference price plus exclusion statistics.
+
+    Returns ``(ref_price, used, excluded, excluded_reasons, excluded_details)``.
+    ``excluded_details`` bevat per uitgesloten prijs een dict met de index in
+    ``raw_prices``, de prijs, mediaan, afwijking, ratio en vermoedelijke
+    oorzaak — zodat de aanroeper de uitsluiting per observatie kan vastleggen
+    (nooit stilzwijgend verwijderen, alleen markeren).
     """
     if not raw_prices:
-        return None, 0, 0, {}
+        return None, 0, 0, {}, []
 
     excluded_reasons: dict[str, int] = {}
+    excluded_details: list[dict] = []
     median_raw = float(np.median(raw_prices))
     included: list[float] = []
 
-    for price in raw_prices:
+    for idx, price in enumerate(raw_prices):
         deviation = abs(price - median_raw) / (median_raw + 0.001)
         if deviation > outlier_threshold:
             excluded_reasons[EXCLUSION_OUTLIER] = excluded_reasons.get(EXCLUSION_OUTLIER, 0) + 1
+            excluded_details.append({
+                "index": idx,
+                "price": round(float(price), 4),
+                "median": round(median_raw, 4),
+                "deviation_pct": round(deviation * 100, 1),
+                "ratio": round(price / median_raw, 4) if median_raw > 0 else None,
+                "threshold_pct": round(outlier_threshold * 100, 1),
+                "suspected_cause": classify_outlier_cause(price, median_raw),
+            })
         else:
             included.append(price)
 
     ref_price = weighted_median(included)
-    return ref_price, len(included), len(raw_prices) - len(included), excluded_reasons
+    return ref_price, len(included), len(raw_prices) - len(included), excluded_reasons, excluded_details

@@ -106,6 +106,7 @@ interface ImportSettings {
   components: Record<string, boolean>;
   component_labels: Record<string, string>;
   max_delivery_days: number | null;
+  outlier_threshold: number;
   disabled_competitors: string[];
   competitors: { name: string; enabled: boolean }[];
   updated_by: string | null;
@@ -175,6 +176,7 @@ function ImportSettingsPanel() {
           components: settings.components,
           disabled_competitors: settings.disabled_competitors,
           max_delivery_days: settings.max_delivery_days,
+          outlier_threshold: settings.outlier_threshold,
         }),
       });
       if (!resp.ok) {
@@ -244,6 +246,33 @@ function ImportSettingsPanel() {
                     setSettings((s) => s && ({
                       ...s,
                       max_delivery_days: v === "" ? null : Math.max(1, Math.floor(Number(v))),
+                    }));
+                    setDirty(true);
+                    setFeedback(null);
+                  }}
+                />
+              </div>
+
+              <div>
+                <Label className="text-xs font-medium">Uitbijterdrempel referentieprijs (%)</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Concurrentprijzen die meer dan dit percentage van de SKU-mediaan afwijken
+                  tellen niet mee in de referentieprijs (gemarkeerd als prijsuitbijter — de
+                  data blijft bewaard). Standaard 30%.
+                </p>
+                <Input
+                  type="number"
+                  min={5}
+                  max={500}
+                  className="mt-1.5 h-8 w-32"
+                  data-testid="input-outlier-threshold"
+                  value={Math.round((settings.outlier_threshold ?? 0.3) * 100)}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (!Number.isFinite(v)) return;
+                    setSettings((s) => s && ({
+                      ...s,
+                      outlier_threshold: Math.min(500, Math.max(5, Math.round(v))) / 100,
                     }));
                     setDirty(true);
                     setFeedback(null);

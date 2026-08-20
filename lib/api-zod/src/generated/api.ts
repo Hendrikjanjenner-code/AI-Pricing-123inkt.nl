@@ -787,6 +787,51 @@ export const GetDataQualityResponse = zod.object({
 });
 
 /**
+ * @summary Outlier/reconciliation breakdown of excluded competitor prices
+ */
+export const GetDataQualityOutliersQueryParams = zod.object({
+  shop_id: zod.coerce
+    .number()
+    .optional()
+    .describe("Beperk de reconciliatie tot één winkel"),
+});
+
+export const GetDataQualityOutliersResponse = zod.object({
+  run_date: zod.coerce.date().nullable(),
+  total_observations: zod.number(),
+  total_excluded: zod.number(),
+  outlier_threshold: zod
+    .number()
+    .optional()
+    .describe("Actieve uitbijterdrempel (fractie van de mediaan)"),
+  by_reason: zod.record(zod.string(), zod.number()),
+  by_suspected_cause: zod.record(zod.string(), zod.number()),
+  top_competitors: zod.array(
+    zod.object({
+      competitor_name: zod.string(),
+      excluded: zod.number(),
+    }),
+  ),
+  top_categories: zod.array(
+    zod.object({
+      category: zod.string(),
+      excluded: zod.number(),
+    }),
+  ),
+  examples: zod.record(
+    zod.string(),
+    zod.array(
+      zod.object({
+        sku_id: zod.string(),
+        competitor_name: zod.string(),
+        price: zod.number().nullish(),
+        detail: zod.record(zod.string(), zod.unknown()).nullish(),
+      }),
+    ),
+  ),
+});
+
+/**
  * @summary List import jobs
  */
 export const listUploadsQueryLimitDefault = 50;

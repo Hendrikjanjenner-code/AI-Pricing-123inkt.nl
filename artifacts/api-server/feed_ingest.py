@@ -1056,9 +1056,17 @@ def score_competition(db: Session, shop_id: int = 1) -> int:
     # evenmin mee; onbekende levertijd (None) telt wél mee (§task-174).
     from services import import_settings as imps
     settings = imps.get_settings(db)
+    outlier_threshold = settings.get("outlier_threshold", imps.DEFAULT_OUTLIER_THRESHOLD)
     out_of_stock_by_sku: dict[str, int] = {}
     bad_delivery_by_sku: dict[str, int] = {}
+    # Per-observatie markeringen (taak #266): uitgesloten observaties worden
+    # nooit verwijderd, maar krijgen een expliciete reden op de fact-rij.
+    fact_marks: list[dict] = []
+    # Parallel aan by_sku: de fact-id per prijs, zodat een uitbijter-index uit
+    # calculate_reference_price terug te herleiden is naar de fact-rij.
+    fact_ids_by_sku: dict[str, list[int]] = {}
     rows = db.query(
+        models.FactCompetitorPriceDaily.id,
         models.FactCompetitorPriceDaily.sku_id,
         models.FactCompetitorPriceDaily.competitor_name,
         models.FactCompetitorPriceDaily.price,
@@ -1068,16 +1076,30 @@ def score_competition(db: Session, shop_id: int = 1) -> int:
         models.FactCompetitorPriceDaily.date == today,
         models.FactCompetitorPriceDaily.shop_id == shop_id,
     ).all()
-    for sku_id, competitor_name, price, in_stock, delivery_days in rows:
-        if price is None or (sku_id, competitor_name) in rejected:
+    for fact_id, sku_id, competitor_name, price, in_stock, delivery_days in rows:
+        if price is None:
+            continue
+        if (sku_id, competitor_name) in rejected:
+            # Afgekeurde productmatch: prijs telt niet mee, maar de uitsluiting
+            # blijft zichtbaar op de fact-rij (reconciliatie, nooit stil).
+            fact_marks.append({"id": fact_id, "excluded_reason": ce.EXCLUSION_BAD_MATCH,
+                               "exclusion_detail": None})
             continue
         if in_stock is False:
             out_of_stock_by_sku[sku_id] = out_of_stock_by_sku.get(sku_id, 0) + 1
+            fact_marks.append({"id": fact_id, "excluded_reason": ce.EXCLUSION_OUT_OF_STOCK,
+                               "exclusion_detail": None})
             continue
         if imps.delivery_excluded(settings, delivery_days):
             bad_delivery_by_sku[sku_id] = bad_delivery_by_sku.get(sku_id, 0) + 1
+            fact_marks.append({"id": fact_id, "excluded_reason": ce.EXCLUSION_BAD_DELIVERY,
+                               "exclusion_detail": {
+                                   "delivery_days": delivery_days,
+                                   "max_delivery_days": settings.get("max_delivery_days"),
+                               }})
             continue
         by_sku.setdefault(sku_id, []).append(float(price))
+        fact_ids_by_sku.setdefault(sku_id, []).append(fact_id)
 
     db.query(models.SkuCompetitionScore).filter(
         models.SkuCompetitionScore.run_date == today,
@@ -1124,7 +1146,15 @@ def score_competition(db: Session, shop_id: int = 1) -> int:
         prod = products.get(sku_id)
         if prod is None or not prices:
             continue
-        ref_price, used, excluded, reasons = ce.calculate_reference_price(prices)
+        ref_price, used, excluded, reasons, outlier_details = ce.calculate_reference_price(
+            prices, outlier_threshold=outlier_threshold)
+        fact_ids = fact_ids_by_sku.get(sku_id, [])
+        for det in outlier_details:
+            idx = det.pop("index")
+            if idx < len(fact_ids):
+                fact_marks.append({"id": fact_ids[idx],
+                                   "excluded_reason": ce.EXCLUSION_OUTLIER,
+                                   "exclusion_detail": det})
         excluded, reasons = _merge_stock_delivery(sku_id, excluded, reasons)
         if ref_price is None or used == 0:
             # Alle prijzen uitgesloten (bv. allemaal uitbijters): geen
@@ -1181,6 +1211,17 @@ def score_competition(db: Session, shop_id: int = 1) -> int:
 
     for chunk in _chunks(score_maps):
         db.bulk_insert_mappings(models.SkuCompetitionScore, chunk)
+
+    # Markeer uitgesloten observaties op de fact-rijen zelf: eerst eerdere
+    # markeringen van deze dag/shop wissen (een rerun kan een observatie weer
+    # includeren), dan de actuele redenen zetten. Data wordt nooit verwijderd.
+    db.query(models.FactCompetitorPriceDaily).filter(
+        models.FactCompetitorPriceDaily.date == today,
+        models.FactCompetitorPriceDaily.shop_id == shop_id,
+        models.FactCompetitorPriceDaily.excluded_reason.isnot(None),
+    ).update({"excluded_reason": None, "exclusion_detail": None}, synchronize_session=False)
+    for chunk in _chunks(fact_marks):
+        db.bulk_update_mappings(models.FactCompetitorPriceDaily, chunk)
     db.commit()
     return len(score_maps)
 

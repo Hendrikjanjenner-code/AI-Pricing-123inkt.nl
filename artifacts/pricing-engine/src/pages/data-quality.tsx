@@ -55,6 +55,43 @@ interface QualityReport {
   } | null;
 }
 
+interface OutlierExample {
+  sku_id: string;
+  competitor_name: string;
+  price: number | null;
+  detail?: Record<string, any> | null;
+}
+
+interface OutlierReport {
+  run_date: string | null;
+  total_observations: number;
+  total_excluded: number;
+  outlier_threshold?: number;
+  by_reason: Record<string, number>;
+  by_suspected_cause: Record<string, number>;
+  top_competitors: { competitor_name: string; excluded: number }[];
+  top_categories: { category: string; excluded: number }[];
+  examples: Record<string, OutlierExample[]>;
+}
+
+const REASON_LABELS: Record<string, string> = {
+  COMPETITOR_IGNORED_OUTLIER: "Prijsuitbijter (afwijking > drempel)",
+  COMPETITOR_IGNORED_OUT_OF_STOCK: "Niet op voorraad",
+  COMPETITOR_IGNORED_BAD_DELIVERY: "Levertijd te lang",
+  COMPETITOR_IGNORED_BAD_MATCH: "Afgekeurde productmatch",
+  COMPETITOR_IGNORED_DIFFERENT_PACK_SIZE: "Afwijkende verpakkingsmaat",
+  COMPETITOR_IGNORED_LOW_RELEVANCE: "Lage relevantie",
+};
+
+const CAUSE_LABELS: Record<string, string> = {
+  PACK_SIZE_MULTIPLE: "Vermoedelijk grotere verpakking (veelvoud van mediaan)",
+  PACK_SIZE_FRACTION: "Vermoedelijk kleinere verpakking (deel van mediaan)",
+  DECIMAL_SHIFT: "Vermoedelijke decimaal-/centenfout",
+  VAT_DIFFERENCE: "Vermoedelijk BTW-verschil (±21%)",
+  EXTREME_DEVIATION: "Extreme afwijking (mogelijk verkeerde match)",
+  ABOVE_THRESHOLD: "Boven drempel, geen herkenbaar patroon",
+};
+
 interface ScanRun {
   id: number;
   started_at?: string | null;
@@ -201,6 +238,8 @@ export default function DataQuality() {
   const [scans, setScans] = useState<ScanRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [fout, setFout] = useState<string | null>(null);
+  const [outliers, setOutliers] = useState<OutlierReport | null>(null);
+  const [openReason, setOpenReason] = useState<string | null>(null);
   const [severityFilter, setSeverityFilter] = useState("alle");
   const [bronFilter, setBronFilter] = useState("alle");
   const [statusFilter, setStatusFilter] = useState("actief");
@@ -234,6 +273,16 @@ export default function DataQuality() {
       }
     } catch {
       // stil: trendkaart toont dan gewoon geen historie
+    }
+    // Uitbijter-reconciliatie apart laden: falen mag het rapport niet blokkeren.
+    try {
+      const resp = await fetch(`${BASE}/api/data-quality/outliers`, {
+        headers: getAuthHeaders(),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (resp.ok) setOutliers(await resp.json());
+    } catch {
+      // stil: sectie toont dan een lege staat
     }
   }, []);
 
@@ -371,6 +420,122 @@ export default function DataQuality() {
           </CardContent>
         </Card>
       )}
+
+      <Card data-testid="card-outlier-reconciliation">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Prijsuitbijters & reconciliatie</CardTitle>
+          <CardDescription>
+            Uitgesloten concurrentprijzen worden nooit verwijderd, alleen gemarkeerd met een expliciete reden.
+            {outliers?.run_date ? ` Laatste scoring-run: ${outliers.run_date}.` : ""}
+            {typeof outliers?.outlier_threshold === "number"
+              ? ` Actieve uitbijterdrempel: ${(outliers.outlier_threshold * 100).toFixed(0)}% afwijking van de mediaan (instelbaar via de importinstellingen op de connectoren-pagina).`
+              : ""}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {!outliers || !outliers.run_date ? (
+            <p className="text-sm text-muted-foreground" data-testid="text-outliers-empty">
+              Nog geen gemarkeerde uitsluitingen — draai eerst een feed-sync/scoring-run.
+            </p>
+          ) : (
+            <>
+              <div className="text-sm text-muted-foreground" data-testid="text-outliers-totals">
+                <span className="font-semibold text-foreground tabular-nums">{outliers.total_excluded.toLocaleString("nl-NL")}</span>
+                {" "}van{" "}
+                <span className="tabular-nums">{outliers.total_observations.toLocaleString("nl-NL")}</span>
+                {" "}concurrentprijzen uitgesloten van de referentieprijs
+                {outliers.total_observations > 0 && (
+                  <> ({((outliers.total_excluded / outliers.total_observations) * 100).toFixed(1)}%)</>
+                )}.
+              </div>
+
+              {/* Totalen per reden + drill-down naar voorbeelden */}
+              <div className="grid gap-2">
+                {Object.entries(outliers.by_reason).sort((a, b) => b[1] - a[1]).map(([reason, count]) => (
+                  <div key={reason} className="rounded-md border border-input">
+                    <button
+                      type="button"
+                      className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-muted/40"
+                      onClick={() => setOpenReason(openReason === reason ? null : reason)}
+                      data-testid={`button-outlier-reason-${reason}`}
+                    >
+                      <span>{REASON_LABELS[reason] ?? reason}</span>
+                      <span className="flex items-center gap-2">
+                        <span className="font-semibold tabular-nums">{count.toLocaleString("nl-NL")}</span>
+                        {openReason === reason ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      </span>
+                    </button>
+                    {openReason === reason && (
+                      <div className="border-t px-3 py-2 space-y-1.5" data-testid={`panel-outlier-examples-${reason}`}>
+                        {(outliers.examples[reason] ?? []).length === 0 ? (
+                          <p className="text-xs text-muted-foreground">Geen voorbeelden beschikbaar.</p>
+                        ) : (
+                          (outliers.examples[reason] ?? []).map((ex, i) => (
+                            <div key={i} className="text-xs flex flex-wrap gap-x-3 gap-y-0.5">
+                              <span className="font-medium">{ex.sku_id}</span>
+                              <span className="text-muted-foreground">{ex.competitor_name}</span>
+                              {ex.price != null && <span className="tabular-nums">€ {ex.price.toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span>}
+                              {ex.detail?.median != null && <span className="text-muted-foreground tabular-nums">mediaan € {Number(ex.detail.median).toLocaleString("nl-NL", { minimumFractionDigits: 2 })}</span>}
+                              {ex.detail?.deviation_pct != null && <span className="text-muted-foreground tabular-nums">afwijking {ex.detail.deviation_pct}%</span>}
+                              {ex.detail?.suspected_cause && <span className="text-amber-700">{CAUSE_LABELS[ex.detail.suspected_cause] ?? ex.detail.suspected_cause}</span>}
+                              {ex.detail?.delivery_days != null && <span className="text-muted-foreground tabular-nums">levertijd {ex.detail.delivery_days} dgn</span>}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Vermoedelijke oorzaken van prijsuitbijters */}
+              {Object.keys(outliers.by_suspected_cause).length > 0 && (
+                <div data-testid="section-outlier-causes">
+                  <p className="text-xs font-medium mb-1.5">Vermoedelijke oorzaken van prijsuitbijters</p>
+                  <div className="grid gap-1">
+                    {Object.entries(outliers.by_suspected_cause).sort((a, b) => b[1] - a[1]).map(([cause, count]) => (
+                      <div key={cause} className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">{CAUSE_LABELS[cause] ?? cause}</span>
+                        <span className="font-medium tabular-nums">{count.toLocaleString("nl-NL")}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Meest geraakte concurrenten / categorieën */}
+              <div className="grid md:grid-cols-2 gap-4">
+                {outliers.top_competitors.length > 0 && (
+                  <div data-testid="section-outlier-competitors">
+                    <p className="text-xs font-medium mb-1.5">Meest geraakte concurrenten</p>
+                    <div className="grid gap-1">
+                      {outliers.top_competitors.map((c) => (
+                        <div key={c.competitor_name} className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground truncate">{c.competitor_name}</span>
+                          <span className="font-medium tabular-nums">{c.excluded.toLocaleString("nl-NL")}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {outliers.top_categories.length > 0 && (
+                  <div data-testid="section-outlier-categories">
+                    <p className="text-xs font-medium mb-1.5">Meest geraakte categorieën</p>
+                    <div className="grid gap-1">
+                      {outliers.top_categories.map((c) => (
+                        <div key={c.category} className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground truncate">{c.category}</span>
+                          <span className="font-medium tabular-nums">{c.excluded.toLocaleString("nl-NL")}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
