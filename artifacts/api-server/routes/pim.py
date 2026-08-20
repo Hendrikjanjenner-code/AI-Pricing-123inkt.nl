@@ -26,20 +26,39 @@ EDIT_ROLES = ("admin", "pricing_manager", "analyst")
 
 @router.get("/overview")
 def pim_overview(
+    hierarchy_node_ids: str | None = Query(None),
+    brands: str | None = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    total_skus = db.query(models.DimProduct).count()
-    scores = db.query(models.PimCompletenessScore).filter(
-        models.PimCompletenessScore.channel_code.is_(None)).all()
+    # Globale filtercontext (hiërarchie + merk): overview-aggregaten beperken
+    # tot de gefilterde SKU-set. Lege selectie ≠ geen filter.
+    from routes.global_filters import sku_filter_query
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+
+    total_q = db.query(models.DimProduct)
+    if sku_q is not None:
+        total_q = total_q.filter(models.DimProduct.sku_id.in_(sku_q.scalar_subquery()))
+    total_skus = total_q.count()
+
+    scores_q = db.query(models.PimCompletenessScore).filter(
+        models.PimCompletenessScore.channel_code.is_(None))
+    if sku_q is not None:
+        scores_q = scores_q.filter(
+            models.PimCompletenessScore.sku_id.in_(sku_q.scalar_subquery()))
+    scores = scores_q.all()
     avg_comp = round(sum(s.completeness_pct for s in scores) / len(scores), 1) if scores else 0.0
     avg_qual = round(sum(s.quality_score for s in scores) / len(scores), 1) if scores else 0.0
 
     channels = db.query(models.PimChannel).filter(models.PimChannel.active == True).all()  # noqa: E712
     channel_stats = []
     for ch in channels:
-        ch_scores = db.query(models.PimCompletenessScore).filter(
-            models.PimCompletenessScore.channel_code == ch.code).all()
+        ch_q = db.query(models.PimCompletenessScore).filter(
+            models.PimCompletenessScore.channel_code == ch.code)
+        if sku_q is not None:
+            ch_q = ch_q.filter(
+                models.PimCompletenessScore.sku_id.in_(sku_q.scalar_subquery()))
+        ch_scores = ch_q.all()
         ready = sum(1 for s in ch_scores if s.channel_ready)
         channel_stats.append({
             "code": ch.code, "name": ch.name,
@@ -50,8 +69,12 @@ def pim_overview(
                 sum(s.completeness_pct for s in ch_scores) / len(ch_scores), 1) if ch_scores else 0.0,
         })
 
-    pending = db.query(models.PimAiSuggestion).filter(
-        models.PimAiSuggestion.status == "PENDING").count()
+    pending_q = db.query(models.PimAiSuggestion).filter(
+        models.PimAiSuggestion.status == "PENDING")
+    if sku_q is not None:
+        pending_q = pending_q.filter(
+            models.PimAiSuggestion.sku_id.in_(sku_q.scalar_subquery()))
+    pending = pending_q.count()
     last_run = db.query(func.max(models.PimCompletenessScore.run_date)).scalar()
 
     return {
@@ -72,6 +95,8 @@ def list_completeness(
     max_pct: float | None = Query(None, description="Alleen SKU's onder dit percentage"),
     only_not_ready: bool = Query(False),
     search: str | None = Query(None),
+    hierarchy_node_ids: str | None = Query(None),
+    brands: str | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -80,6 +105,11 @@ def list_completeness(
     S = models.PimCompletenessScore
     q = db.query(S, models.DimProduct).join(
         models.DimProduct, models.DimProduct.sku_id == S.sku_id)
+    # Globale filtercontext (hiërarchie + merk). Lege selectie ≠ geen filter.
+    from routes.global_filters import sku_filter_query
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if sku_q is not None:
+        q = q.filter(models.DimProduct.sku_id.in_(sku_q.scalar_subquery()))
     q = q.filter(S.channel_code == channel) if channel else q.filter(S.channel_code.is_(None))
     if max_pct is not None:
         q = q.filter(S.completeness_pct <= max_pct)
@@ -751,11 +781,18 @@ def generate_suggestions(
 def list_suggestions(
     status: str | None = Query("PENDING"),
     sku_id: str | None = Query(None),
+    hierarchy_node_ids: str | None = Query(None),
+    brands: str | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     q = db.query(models.PimAiSuggestion)
+    # Globale filtercontext (hiërarchie + merk). Lege selectie ≠ geen filter.
+    from routes.global_filters import sku_filter_query
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if sku_q is not None:
+        q = q.filter(models.PimAiSuggestion.sku_id.in_(sku_q.scalar_subquery()))
     if status:
         q = q.filter(models.PimAiSuggestion.status == status.upper())
     if sku_id:

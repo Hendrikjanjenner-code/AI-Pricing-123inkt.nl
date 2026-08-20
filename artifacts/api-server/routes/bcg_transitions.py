@@ -17,11 +17,26 @@ def list_bcg_transities(
     entity_type: Optional[str] = Query(None, description="SKU of CATEGORY"),
     from_class: Optional[str] = Query(None),
     to_class: Optional[str] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
 ) -> Any:
     """Overzicht van alle BCG classificatiewijzigingen."""
     data = get_bcg_transitions(db, entity_type=entity_type)
+
+    # Globale filtercontext (hiërarchie + merk): SKU-transities beperken tot
+    # de gefilterde SKU-set (entity_id == sku_id). Categorie-transities zijn
+    # niet SKU-gekoppeld en vallen bij een actief filter weg. Lege selectie ≠
+    # geen filter.
+    from routes.global_filters import resolve_sku_filter
+    sku_set = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    if sku_set is not None:
+        data["transities"] = [
+            t for t in data["transities"]
+            if t.get("entiteit_type") == "SKU" and t.get("entiteit_id") in sku_set
+        ]
+        data["totaal"] = len(data["transities"])
 
     # Filter op classificaties als meegegeven
     if from_class or to_class:
@@ -78,18 +93,28 @@ def get_bcg_transities_sku(
 
 @router.get("/alerts")
 def get_bcg_alerts(
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
 ) -> Any:
     """Actieve BCG-alerts (laatste 30 dagen)."""
     from datetime import timedelta
     cutoff = date.today() - timedelta(days=30)
-    transities = (
+    q = (
         db.query(FactBcgTransition)
         .filter(FactBcgTransition.date >= cutoff)
-        .order_by(FactBcgTransition.date.desc())
-        .all()
     )
+    # Globale filtercontext: SKU-transities beperken tot de gefilterde SKU-set
+    # (entity_id == sku_id, alleen entity_type SKU). Lege selectie ≠ geen filter.
+    from routes.global_filters import sku_filter_query
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if sku_q is not None:
+        q = q.filter(
+            FactBcgTransition.entity_type == "SKU",
+            FactBcgTransition.entity_id.in_(sku_q.scalar_subquery()),
+        )
+    transities = q.order_by(FactBcgTransition.date.desc()).all()
 
     # Indelen op impact
     positief = [t for t in transities if t.to_classification in ("STAR",)]

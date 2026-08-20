@@ -6,6 +6,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { TrendingUp, TrendingDown, Activity, Percent, Users2 } from "lucide-react";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
+
+function withFp(url: string, fp: string) {
+  return url + (fp !== "" ? (url.includes("?") ? "&" : "?") + fp : "");
+}
 
 function apiFetch(path: string) {
   const token = localStorage.getItem("auth_token");
@@ -23,17 +30,20 @@ function DeltaBadge({ value, suffix = "" }: { value: number; suffix?: string }) 
 }
 
 export default function AbTestMonitor() {
+  const filters = useGlobalFilters();
+  const fp = apiFilterParams(filters);
+
   const { data: tests, isLoading: ladenTests } = useQuery({
-    queryKey: ["ab-tests"],
-    queryFn: () => apiFetch("/api/ab-tests"),
+    queryKey: ["ab-tests", fp],
+    queryFn: () => apiFetch(withFp("/api/ab-tests", fp)),
   });
 
   const [geselecTestId, setGeselecTestId] = useState<number | null>(null);
   const testId = geselecTestId ?? (tests?.[0]?.id ?? null);
 
   const { data: detail, isLoading: ladenDetail } = useQuery({
-    queryKey: ["ab-test-detail", testId],
-    queryFn: () => apiFetch(`/api/ab-tests/${testId}`),
+    queryKey: ["ab-test-detail", testId, fp],
+    queryFn: () => apiFetch(withFp(`/api/ab-tests/${testId}`, fp)),
     enabled: !!testId,
   });
 
@@ -70,6 +80,7 @@ export default function AbTestMonitor() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">A/B-testmonitor</h1>
           <p className="text-muted-foreground mt-1">AI-pricing vs. statische controlegroep — prestaties.</p>
+          <div className="mt-3"><GlobalFilterBar /></div>
         </div>
         {tests && tests.length > 1 && (
           <div className="flex gap-2">

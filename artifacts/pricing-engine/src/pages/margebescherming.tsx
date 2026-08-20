@@ -2,6 +2,9 @@ import { useState, useEffect } from "react";
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from "recharts";
 import { Shield, AlertTriangle, TrendingDown, TrendingUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const getToken = () => localStorage.getItem("auth_token") || "";
@@ -27,11 +30,15 @@ export default function Margebescherming() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [geselecteerd, setGeselecteerd] = useState<any>(null);
+  const filters = useGlobalFilters();
+  const fp = apiFilterParams(filters);
 
   useEffect(() => {
-    fetch(`${BASE}/api/margebescherming`, { headers: { Authorization: `Bearer ${getToken()}` } })
+    setLoading(true);
+    const url = `${BASE}/api/margebescherming`;
+    fetch(url + (fp !== "" ? (url.includes("?") ? "&" : "?") + fp : ""), { headers: { Authorization: `Bearer ${getToken()}` } })
       .then(r => r.json()).then(setData).catch(() => {}).finally(() => setLoading(false));
-  }, []);
+  }, [fp]);
 
   if (loading) return <div className="flex items-center justify-center h-64 text-muted-foreground">Laden…</div>;
   if (!data?.skus?.length) return <div className="text-muted-foreground p-8">Geen margebeschermingsdata beschikbaar.</div>;
@@ -57,6 +64,7 @@ export default function Margebescherming() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold tracking-tight">Margebescherming Dashboard</h1>
+      <GlobalFilterBar />
 
       {/* KPI's */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

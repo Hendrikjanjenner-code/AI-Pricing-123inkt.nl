@@ -193,8 +193,12 @@ def calculate_mps(
     return {"mps_score": mps, "mps_label": label, "severity": severity}
 
 
-def get_cost_change_dashboard(db: Session) -> Dict[str, Any]:
-    """Volledig kostprijswijziging dashboard."""
+def get_cost_change_dashboard(db: Session, sku_q=None) -> Dict[str, Any]:
+    """Volledig kostprijswijziging dashboard.
+
+    ``sku_q`` (optioneel): een 1-koloms SKU-query (uit sku_filter_query) om de
+    resultaten te beperken tot de globale filtercontext. None = geen filter.
+    """
     from models import FactCostChangeDaily
     from sqlalchemy import func
 
@@ -202,12 +206,13 @@ def get_cost_change_dashboard(db: Session) -> Dict[str, Any]:
     if not latest:
         return {"datum": None, "totaal_skus": 0, "skus": [], "samenvatting": {}}
 
-    recs = (
+    recs_q = (
         db.query(FactCostChangeDaily)
         .filter(FactCostChangeDaily.date == latest)
-        .order_by(FactCostChangeDaily.ppfs_score.asc())
-        .all()
     )
+    if sku_q is not None:
+        recs_q = recs_q.filter(FactCostChangeDaily.sku_id.in_(sku_q.scalar_subquery()))
+    recs = recs_q.order_by(FactCostChangeDaily.ppfs_score.asc()).all()
 
     kritiek = [r for r in recs if r.severity == "KRITIEK"]
     hoog = [r for r in recs if r.severity == "HOOG"]

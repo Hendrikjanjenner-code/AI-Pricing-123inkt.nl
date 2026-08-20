@@ -1121,6 +1121,17 @@ export type ListUploadsParams = {
   limit?: number;
 };
 
+export type ListSubstitutionsParams = {
+  /**
+   * @nullable
+   */
+  hierarchy_node_ids?: string | null;
+  /**
+   * @nullable
+   */
+  brands?: string | null;
+};
+
 export type ExportRecommendationsParams = {
   /**
    * @nullable
@@ -1321,6 +1332,14 @@ export type GetCompetitorLandscapeParams = {
    * @nullable
    */
   shop_id?: number | null;
+  /**
+   * @nullable
+   */
+  hierarchy_node_ids?: string | null;
+  /**
+   * @nullable
+   */
+  brands?: string | null;
 };
 
 export type GetCompetitorLandscape200ItemsItem = { [key: string]: unknown };

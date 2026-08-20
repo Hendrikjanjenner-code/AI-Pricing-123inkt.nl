@@ -1,5 +1,8 @@
 import { useState, useEffect } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const getToken = () => localStorage.getItem("auth_token") || "";
@@ -32,18 +35,22 @@ export default function BcgTransities() {
   const [selected, setSelected] = useState<any>(null);
   const [toFilter, setToFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
+  const filters = useGlobalFilters();
+  const fp = apiFilterParams(filters);
 
   useEffect(() => {
+    setLoading(true);
+    const withFp = (url: string) => url + (fp !== "" ? (url.includes("?") ? "&" : "?") + fp : "");
     Promise.all([
-      fetch(`${BASE}/api/bcg-transities`, { headers: { Authorization: `Bearer ${getToken()}` } }).then(r => r.json()),
-      fetch(`${BASE}/api/bcg-transities/alerts`, { headers: { Authorization: `Bearer ${getToken()}` } }).then(r => r.json()),
+      fetch(withFp(`${BASE}/api/bcg-transities`), { headers: { Authorization: `Bearer ${getToken()}` } }).then(r => r.json()),
+      fetch(withFp(`${BASE}/api/bcg-transities/alerts`), { headers: { Authorization: `Bearer ${getToken()}` } }).then(r => r.json()),
     ]).then(([d, al]) => {
       setData(d);
       setAlerts(al);
       if (d.transities?.length) setSelected(d.transities[0]);
       setLoading(false);
     }).catch(() => setLoading(false));
-  }, []);
+  }, [fp]);
 
   if (loading) return <div className="p-8 text-gray-500">BCG transities laden…</div>;
   if (!data) return <div className="p-8 text-red-500">Fout bij laden.</div>;
@@ -67,6 +74,7 @@ export default function BcgTransities() {
         <h1 className="text-2xl font-bold text-gray-900">BCG Transities</h1>
         <p className="text-gray-500 mt-1">BCG classificatiewijzigingen — wanneer, waarom, welk effect en aanbevolen actie</p>
       </div>
+      <GlobalFilterBar />
 
       {/* KPI's */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">

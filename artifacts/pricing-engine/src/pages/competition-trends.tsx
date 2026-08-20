@@ -6,6 +6,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TrendingUp, PackageX, Percent, Activity } from "lucide-react";
 import { useShopId, withShop } from "@/hooks/use-shop-id";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip,
   CartesianGrid, Legend, AreaChart, Area, ReferenceLine,
@@ -29,29 +32,50 @@ const LINE_COLORS = ["#2563eb", "#dc2626", "#059669", "#d97706", "#7c3aed", "#08
 
 export default function CompetitionTrends() {
   const shopId = useShopId();
+  const filters = useGlobalFilters();
+  const fp = apiFilterParams(filters);
   const [days, setDays] = useState("30");
   const [eventType, setEventType] = useState("all");
 
   const { data: priceTrend, isLoading: loadingTrend } = useQuery({
-    queryKey: ["comp-trend-price-index", days, shopId],
-    queryFn: () => apiFetch(`/api/competition/trends/price-index?${withShop(`days=${days}`, shopId)}`),
+    queryKey: ["comp-trend-price-index", days, shopId, fp],
+    queryFn: () => {
+      let url = `/api/competition/trends/price-index?${withShop(`days=${days}`, shopId)}`;
+      if (fp !== "") url += url.includes("?") ? `&${fp}` : `?${fp}`;
+      return apiFetch(url);
+    },
   });
   const { data: coverage } = useQuery({
-    queryKey: ["comp-coverage-latest", shopId],
-    queryFn: () => apiFetch(`/api/competition/coverage${shopId !== undefined ? `?shop_id=${shopId}` : ""}`),
+    queryKey: ["comp-coverage-latest", shopId, fp],
+    queryFn: () => {
+      let url = `/api/competition/coverage${shopId !== undefined ? `?shop_id=${shopId}` : ""}`;
+      if (fp !== "") url += url.includes("?") ? `&${fp}` : `?${fp}`;
+      return apiFetch(url);
+    },
   });
   const { data: coverageTrend } = useQuery({
-    queryKey: ["comp-coverage-trend", shopId],
-    queryFn: () => apiFetch(`/api/competition/trends/coverage?${withShop("days=90", shopId)}`),
+    queryKey: ["comp-coverage-trend", shopId, fp],
+    queryFn: () => {
+      let url = `/api/competition/trends/coverage?${withShop("days=90", shopId)}`;
+      if (fp !== "") url += url.includes("?") ? `&${fp}` : `?${fp}`;
+      return apiFetch(url);
+    },
   });
   const { data: availability } = useQuery({
-    queryKey: ["comp-availability", days, shopId],
-    queryFn: () => apiFetch(`/api/competition/availability?${withShop(`days=${days}`, shopId)}`),
+    queryKey: ["comp-availability", days, shopId, fp],
+    queryFn: () => {
+      let url = `/api/competition/availability?${withShop(`days=${days}`, shopId)}`;
+      if (fp !== "") url += url.includes("?") ? `&${fp}` : `?${fp}`;
+      return apiFetch(url);
+    },
   });
   const { data: events } = useQuery({
-    queryKey: ["comp-events", days, eventType, shopId],
-    queryFn: () => apiFetch(
-      `/api/competition/events?${withShop(`days=${days}${eventType !== "all" ? `&event_type=${eventType}` : ""}&page_size=100`, shopId)}`),
+    queryKey: ["comp-events", days, eventType, shopId, fp],
+    queryFn: () => {
+      let url = `/api/competition/events?${withShop(`days=${days}${eventType !== "all" ? `&event_type=${eventType}` : ""}&page_size=100`, shopId)}`;
+      if (fp !== "") url += url.includes("?") ? `&${fp}` : `?${fp}`;
+      return apiFetch(url);
+    },
   });
 
   const series = priceTrend?.series || [];
@@ -98,6 +122,8 @@ export default function CompetitionTrends() {
           </SelectContent>
         </Select>
       </div>
+
+      <GlobalFilterBar />
 
       {/* KPI-kaarten */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

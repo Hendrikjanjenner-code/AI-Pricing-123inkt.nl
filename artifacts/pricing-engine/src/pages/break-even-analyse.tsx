@@ -4,6 +4,9 @@ import { AlertTriangle, TrendingDown, CheckCircle, XCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const getToken = () => localStorage.getItem("auth_token") || "";
@@ -22,11 +25,15 @@ export default function BreakEvenAnalyse() {
   const [simPrijs, setSimPrijs] = useState("");
   const [simResult, setSimResult] = useState<any>(null);
   const [simLoading, setSimLoading] = useState(false);
+  const filters = useGlobalFilters();
+  const fp = apiFilterParams(filters);
 
   useEffect(() => {
-    fetch(`${BASE}/api/break-even`, { headers: { Authorization: `Bearer ${getToken()}` } })
+    setLoading(true);
+    const url = `${BASE}/api/break-even`;
+    fetch(url + (fp !== "" ? (url.includes("?") ? "&" : "?") + fp : ""), { headers: { Authorization: `Bearer ${getToken()}` } })
       .then(r => r.json()).then(setData).catch(() => {}).finally(() => setLoading(false));
-  }, []);
+  }, [fp]);
 
   const simuleer = async () => {
     if (!simSku || !simPrijs) return;
@@ -57,6 +64,7 @@ export default function BreakEvenAnalyse() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold tracking-tight">Break-even Analyse</h1>
+      <GlobalFilterBar />
 
       {/* KPI's */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

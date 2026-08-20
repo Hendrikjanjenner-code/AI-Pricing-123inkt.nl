@@ -18,3 +18,35 @@ os.environ.setdefault("DISABLE_DATA_QUALITY_SCAN", "true")
 os.environ.setdefault("DISABLE_AI_BUDGET_CLEANUP", "true")
 os.environ.setdefault("DISABLE_AI_KEY_MONITOR", "true")
 os.environ.setdefault("DISABLE_SCRAPE_SCHEDULER", "true")
+
+
+# ── Cross-run serialisatie van hiërarchie-mutatie-modules ────────────────────
+# Validatie- en code-review-runs draaien de volledige suite soms gelijktijdig
+# tegen dezelfde gedeelde dev-DB. Modules die de producthiërarchie globaal
+# muteren (autobuild/retire, import-apply, deactivate_missing) of er direct
+# van afhangen, serialiseren we met een sessie-gebonden Postgres advisory
+# lock zodat parallelle runs elkaars boomtoestand niet vernielen.
+import pytest as _pytest
+
+HIERARCHY_SUITE_LOCK_KEY = 774411277
+
+
+@_pytest.fixture(scope="module")
+def hierarchy_suite_lock():
+    from sqlalchemy import text as _text
+    from database import engine as _engine
+    conn = _engine.connect()
+    if conn.dialect.name != "postgresql":
+        yield
+        conn.close()
+        return
+    conn.execute(_text("SELECT pg_advisory_lock(:k)"),
+                 {"k": HIERARCHY_SUITE_LOCK_KEY})
+    try:
+        yield
+    finally:
+        try:
+            conn.execute(_text("SELECT pg_advisory_unlock(:k)"),
+                         {"k": HIERARCHY_SUITE_LOCK_KEY})
+        finally:
+            conn.close()

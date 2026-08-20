@@ -1,5 +1,8 @@
 import { useState, useEffect } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const getToken = () => localStorage.getItem("auth_token") || "";
@@ -17,13 +20,17 @@ export default function MarketingEfficiency() {
   const [loading, setLoading] = useState(true);
   const [zoek, setZoek] = useState("");
   const [sortBy, setSortBy] = useState("roas");
+  const filters = useGlobalFilters();
+  const fp = apiFilterParams(filters);
 
   useEffect(() => {
-    fetch(`${BASE}/api/kosten/marketing`, { headers: { Authorization: `Bearer ${getToken()}` } })
+    setLoading(true);
+    const url = `${BASE}/api/kosten/marketing`;
+    fetch(url + (fp !== "" ? (url.includes("?") ? "&" : "?") + fp : ""), { headers: { Authorization: `Bearer ${getToken()}` } })
       .then(r => r.json())
       .then(d => { setData(d); setLoading(false); })
       .catch(() => setLoading(false));
-  }, []);
+  }, [fp]);
 
   if (loading) return <div className="p-8 text-gray-500">Marketing data laden…</div>;
   if (!data) return <div className="p-8 text-red-500">Fout bij laden.</div>;
@@ -55,6 +62,7 @@ export default function MarketingEfficiency() {
         <h1 className="text-2xl font-bold text-gray-900">Marketing Efficiency</h1>
         <p className="text-gray-500 mt-1">CAC, ROAS, SEO/SEA efficiëntie en contributie marge per SKU</p>
       </div>
+      <GlobalFilterBar />
 
       {/* KPI's */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">

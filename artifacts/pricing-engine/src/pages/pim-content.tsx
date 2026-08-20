@@ -14,6 +14,9 @@ import {
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { getAuthHeaders } from "@/lib/auth";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -1068,6 +1071,8 @@ function BeheerTab() {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function PimContent() {
+  const filters = useGlobalFilters();
+  const fp = apiFilterParams(filters);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [rows, setRows] = useState<CompletenessRow[]>([]);
   const [totaal, setTotaal] = useState(0);
@@ -1086,9 +1091,13 @@ export default function PimContent() {
       const params = new URLSearchParams({ limit: "100" });
       if (kanaal !== "overall") params.set("channel", kanaal);
       if (zoek.trim()) params.set("search", zoek.trim());
+      let overviewUrl = `${BASE}/api/pim/overview`;
+      if (fp !== "") overviewUrl += overviewUrl.includes("?") ? `&${fp}` : `?${fp}`;
+      let completenessUrl = `${BASE}/api/pim/completeness?${params}`;
+      if (fp !== "") completenessUrl += completenessUrl.includes("?") ? `&${fp}` : `?${fp}`;
       const [ovRes, listRes] = await Promise.all([
-        fetch(`${BASE}/api/pim/overview`, { headers: getAuthHeaders(), signal: AbortSignal.timeout(60_000) }),
-        fetch(`${BASE}/api/pim/completeness?${params}`, { headers: getAuthHeaders(), signal: AbortSignal.timeout(60_000) }),
+        fetch(overviewUrl, { headers: getAuthHeaders(), signal: AbortSignal.timeout(60_000) }),
+        fetch(completenessUrl, { headers: getAuthHeaders(), signal: AbortSignal.timeout(60_000) }),
       ]);
       if (!ovRes.ok || !listRes.ok) throw new Error("Laden mislukt");
       const ov = await ovRes.json();
@@ -1101,7 +1110,7 @@ export default function PimContent() {
     } finally {
       setLaden(false);
     }
-  }, [kanaal, zoek]);
+  }, [kanaal, zoek, fp]);
 
   useEffect(() => { laad(); }, [laad]);
 
@@ -1139,6 +1148,8 @@ export default function PimContent() {
           )}
         </div>
       </div>
+
+      <GlobalFilterBar />
 
       {/* Tab switcher */}
       <div className="flex gap-2 border-b pb-0">

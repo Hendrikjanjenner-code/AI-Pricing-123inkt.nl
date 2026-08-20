@@ -8,6 +8,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { TrendingDown, TrendingUp, AlertTriangle, CheckCircle2, XCircle, RefreshCw, Play, Bell } from "lucide-react";
 import { getAuthToken } from "@/lib/auth";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -59,8 +62,10 @@ export default function ConcurrentieMonitoring() {
   const [severity, setSeverity] = useState("all");
   const [resolved, setResolved] = useState("false");
   const [runBezig, setRunBezig] = useState(false);
+  const filters = useGlobalFilters();
+  const fp = apiFilterParams(filters);
 
-  useEffect(() => { laadData(); }, [alertType, severity, resolved]);
+  useEffect(() => { laadData(); }, [alertType, severity, resolved, fp]);
 
   async function laadData() {
     setLaden(true);
@@ -69,7 +74,8 @@ export default function ConcurrentieMonitoring() {
       if (alertType !== "all") params.set("alert_type", alertType);
       if (severity !== "all") params.set("severity", severity);
       if (resolved !== "all") params.set("resolved", resolved);
-      const d = await apiFetch(`/api/monitoring/alerts?${params}`);
+      const url = `/api/monitoring/alerts?${params}`;
+      const d = await apiFetch(url + (fp !== "" ? (url.includes("?") ? "&" : "?") + fp : ""));
       setData(d);
     } catch { toast({ title: "Fout bij laden", variant: "destructive" }); }
     setLaden(false);
@@ -111,6 +117,7 @@ export default function ConcurrentieMonitoring() {
             <p className="text-muted-foreground text-sm mt-1">
               Realtime alerts voor prijswijzigingen, voorraad en betrouwbaarheid van concurrenten.
             </p>
+            <div className="mt-3"><GlobalFilterBar /></div>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={laadData}><RefreshCw className="w-4 h-4 mr-2" />Vernieuwen</Button>

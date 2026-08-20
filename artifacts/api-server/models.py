@@ -1376,7 +1376,7 @@ class ProductHierarchyStagingRow(Base):
     product_code = Column(String(100), index=True)
     path_names = Column(JSON)             # ["Kantoor", "Papier", "A4"]
     matched_sku_id = Column(String(100), index=True)
-    match_method = Column(String(30))     # drs_id / ean / oem / geen
+    match_method = Column(String(30))     # drs_id / feed_id / ean / oem / geen
     status = Column(String(20), default="nieuw", index=True)  # nieuw/geldig/fout/duplicaat
     message = Column(Text)
 

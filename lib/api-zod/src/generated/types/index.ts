@@ -79,6 +79,7 @@ export * from "./listCopilotModelCallsParams";
 export * from "./listProductsParams";
 export * from "./listRecommendationsParams";
 export * from "./listSignalsParams";
+export * from "./listSubstitutionsParams";
 export * from "./listUploadsParams";
 export * from "./loginRequest";
 export * from "./messageResponse";

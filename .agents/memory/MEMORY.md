@@ -66,4 +66,5 @@
 - [Feed-sync lock test flake](feed-sync-lock-test-flake.md) — workflow restart triggers a real sync ~45s in that holds the priceshape advisory lock; dev sets FEED_SYNC_STARTUP_DELAY=1800 or sync tests flake as "skipped".
 - [Outlier exclusion marking](outlier-exclusion-marking.md) — excluded competitor prices are marked on fact rows (reason + suspected cause), never deleted; threshold via import settings.
 - [Cross-referenced id's shop-scopen](scoped-reference-ids.md) — elk client-geleverd referentie-id (evidence_id e.d.) centraal resolven op shop+entiteit vóór opslag; PK-only lookup faalt code review als tenant-lek.
+- [Hierarchy deactivate_missing is global](hierarchy-deactivate-missing.md) — import-apply met deactivate_missing wist de hele echte boom in shared-DB tests; snapshot/restore verplicht.
 - [Afgeleide tabellen: shop-FK CASCADE](derived-table-shop-fk.md) — nieuwe afgeleide (engine-output) tabellen met shop_id-FK moeten ON DELETE CASCADE krijgen, anders breken bestaande test-teardowns die de tabel niet kennen; dev-DB apart ALTERen (create_all wijzigt niets).

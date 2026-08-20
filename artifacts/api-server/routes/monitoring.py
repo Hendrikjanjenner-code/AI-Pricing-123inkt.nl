@@ -20,6 +20,8 @@ def get_monitoring_alerts(
     severity: str = Query(None),
     resolved: bool = Query(None),
     dagen: int = Query(30),
+    hierarchy_node_ids: str = Query(None),
+    brands: str = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -28,6 +30,13 @@ def get_monitoring_alerts(
     """Haal monitoring-alerts op, gefilterd en gesorteerd op datum."""
     vanaf = date.today() - timedelta(days=dagen)
     q = db.query(FactMonitoringAlert).filter(FactMonitoringAlert.date >= vanaf)
+
+    # Globale filtercontext (hiërarchie + merk): beperk tot alerts op de
+    # gefilterde SKU-set (own_sku_id). Lege selectie ≠ geen filter.
+    from routes.global_filters import sku_filter_query
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if sku_q is not None:
+        q = q.filter(FactMonitoringAlert.own_sku_id.in_(sku_q.scalar_subquery()))
 
     if sku_id:
         q = q.filter(FactMonitoringAlert.own_sku_id == sku_id)
@@ -44,9 +53,13 @@ def get_monitoring_alerts(
     concurrenten = {c.competitor_id: c.competitor_name for c in db.query(DimCompetitor).all()}
     producten = {p.sku_id: p.product_name for p in db.query(DimProduct).all()}
 
-    # Samenvatting per type
+    # Samenvatting per type (respecteert de globale filtercontext)
     type_counts = {}
-    for a in db.query(FactMonitoringAlert).filter(FactMonitoringAlert.date >= vanaf, FactMonitoringAlert.resolved == False).all():
+    sum_q = db.query(FactMonitoringAlert).filter(
+        FactMonitoringAlert.date >= vanaf, FactMonitoringAlert.resolved == False)
+    if sku_q is not None:
+        sum_q = sum_q.filter(FactMonitoringAlert.own_sku_id.in_(sku_q.scalar_subquery()))
+    for a in sum_q.all():
         type_counts[a.alert_type] = type_counts.get(a.alert_type, 0) + 1
 
     return {

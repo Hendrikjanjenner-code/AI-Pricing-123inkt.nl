@@ -1,5 +1,8 @@
 import { useState, useEffect } from "react";
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from "recharts";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const getToken = () => localStorage.getItem("auth_token") || "";
@@ -22,9 +25,13 @@ export default function OperationeleComplexiteit() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<any>(null);
   const [zoek, setZoek] = useState("");
+  const filters = useGlobalFilters();
+  const fp = apiFilterParams(filters);
 
   useEffect(() => {
-    fetch(`${BASE}/api/kosten/operationeel`, { headers: { Authorization: `Bearer ${getToken()}` } })
+    setLoading(true);
+    const url = `${BASE}/api/kosten/operationeel`;
+    fetch(url + (fp !== "" ? (url.includes("?") ? "&" : "?") + fp : ""), { headers: { Authorization: `Bearer ${getToken()}` } })
       .then(r => r.json())
       .then(d => {
         setData(d);
@@ -32,7 +39,7 @@ export default function OperationeleComplexiteit() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, []);
+  }, [fp]);
 
   if (loading) return <div className="p-8 text-gray-500">OCS laden…</div>;
   if (!data) return <div className="p-8 text-red-500">Fout bij laden.</div>;
@@ -62,6 +69,7 @@ export default function OperationeleComplexiteit() {
         <h1 className="text-2xl font-bold text-gray-900">Operationele Complexiteit</h1>
         <p className="text-gray-500 mt-1">Activity-Based Costing (ABC) — OCS per SKU op 8 factoren</p>
       </div>
+      <GlobalFilterBar />
 
       {/* KPI's */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

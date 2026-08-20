@@ -7,7 +7,7 @@ lift, category breakdown and per-SKU detail.
 """
 import numpy as np
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from database import get_db
 import models
@@ -18,16 +18,33 @@ router = APIRouter(prefix="/api/ab-tests", tags=["ab-tests"])
 
 @router.get("")
 def list_ab_tests(
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    tests = db.query(models.AbTest).order_by(models.AbTest.created_at.desc()).all()
+    q = db.query(models.AbTest)
+    # Globale filtercontext (hiërarchie + merk): beperk tot A/B-tests die
+    # ten minste één resultaat op een gefilterde SKU hebben. Lege selectie ≠
+    # geen filter (dan blijven er simpelweg geen tests over).
+    from routes.global_filters import sku_filter_query
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if sku_q is not None:
+        test_ids_sq = (
+            db.query(models.AbTestResult.test_id)
+            .filter(models.AbTestResult.sku_id.in_(sku_q.scalar_subquery()))
+            .scalar_subquery()
+        )
+        q = q.filter(models.AbTest.id.in_(test_ids_sq))
+    tests = q.order_by(models.AbTest.created_at.desc()).all()
     return [_test_out(t) for t in tests]
 
 
 @router.get("/{test_id}")
 def get_ab_test_detail(
     test_id: int,
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -35,7 +52,17 @@ def get_ab_test_detail(
     if not test:
         raise HTTPException(status_code=404, detail="A/B test not found")
 
-    results = db.query(models.AbTestResult).filter(models.AbTestResult.test_id == test_id).all()
+    results_q = db.query(models.AbTestResult).filter(
+        models.AbTestResult.test_id == test_id)
+    # Globale filtercontext (hiërarchie + merk): beperk alle detailberekeningen
+    # (summary, categorie-breakdown, per-SKU) tot de gefilterde SKU-set.
+    # Lege selectie ≠ geen filter (dan blijven er geen resultaten over).
+    from routes.global_filters import sku_filter_query
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if sku_q is not None:
+        results_q = results_q.filter(
+            models.AbTestResult.sku_id.in_(sku_q.scalar_subquery()))
+    results = results_q.all()
     ai_results = [r for r in results if r.group_type == "AI"]
     ctrl_results = [r for r in results if r.group_type == "CONTROL"]
 

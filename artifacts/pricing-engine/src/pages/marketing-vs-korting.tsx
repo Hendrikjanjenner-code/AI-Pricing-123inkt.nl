@@ -4,6 +4,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TrendingUp, Megaphone, Tag, Zap } from "lucide-react";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const getToken = () => localStorage.getItem("auth_token") || "";
@@ -25,11 +28,15 @@ export default function MarketingVsKorting() {
   const [simSea, setSimSea] = useState("500");
   const [simResult, setSimResult] = useState<any>(null);
   const [simLoading, setSimLoading] = useState(false);
+  const filters = useGlobalFilters();
+  const fp = apiFilterParams(filters);
 
   useEffect(() => {
-    fetch(`${BASE}/api/marketing-vs-korting`, { headers: { Authorization: `Bearer ${getToken()}` } })
+    setLoading(true);
+    const url = `${BASE}/api/marketing-vs-korting`;
+    fetch(url + (fp !== "" ? (url.includes("?") ? "&" : "?") + fp : ""), { headers: { Authorization: `Bearer ${getToken()}` } })
       .then(r => r.json()).then(setData).catch(() => {}).finally(() => setLoading(false));
-  }, []);
+  }, [fp]);
 
   const simuleer = async () => {
     setSimLoading(true);
@@ -61,6 +68,7 @@ export default function MarketingVsKorting() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold tracking-tight">Marketing vs. Korting Simulator</h1>
       <p className="text-sm text-muted-foreground">Vergelijk of extra marketing of een prijsverlaging meer marge en omzet oplevert.</p>
+      <GlobalFilterBar />
 
       {/* KPI's */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

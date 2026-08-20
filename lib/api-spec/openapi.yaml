@@ -781,6 +781,15 @@ paths:
       operationId: listSubstitutions
       tags: [substitutions]
       summary: List A-brand/private-label substitution pairs
+      parameters:
+        - name: hierarchy_node_ids
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: brands
+          in: query
+          schema:
+            type: ["string", "null"]
       responses:
         "200":
           description: Substitution pairs
@@ -1534,6 +1543,12 @@ paths:
         - name: shop_id
           in: query
           schema: { type: ["integer", "null"] }
+        - name: hierarchy_node_ids
+          in: query
+          schema: { type: ["string", "null"] }
+        - name: brands
+          in: query
+          schema: { type: ["string", "null"] }
       responses:
         "200":
           description: Landscape-punten per concurrent; onbekende assen blijven null

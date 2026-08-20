@@ -64,20 +64,25 @@ def compute_ppfs_record(
     }
 
 
-def get_ppfs_dashboard(db: Session) -> Dict[str, Any]:
-    """PPFS overzichtsdashboard voor alle SKU's."""
+def get_ppfs_dashboard(db: Session, sku_q=None) -> Dict[str, Any]:
+    """PPFS overzichtsdashboard voor alle SKU's.
+
+    ``sku_q`` (optioneel): een 1-koloms SKU-query (uit sku_filter_query) om de
+    resultaten te beperken tot de globale filtercontext. None = geen filter.
+    """
     from sqlalchemy import func
 
     latest = db.query(func.max(FactPricePassThroughDaily.date)).scalar()
     if not latest:
         return {"datum": None, "totaal_skus": 0, "skus": []}
 
-    recs = (
+    recs_q = (
         db.query(FactPricePassThroughDaily)
         .filter(FactPricePassThroughDaily.date == latest)
-        .order_by(FactPricePassThroughDaily.ppfs_score.desc())
-        .all()
     )
+    if sku_q is not None:
+        recs_q = recs_q.filter(FactPricePassThroughDaily.sku_id.in_(sku_q.scalar_subquery()))
+    recs = recs_q.order_by(FactPricePassThroughDaily.ppfs_score.desc()).all()
 
     sterk = [r for r in recs if r.ppfs_label == "STERK"]
     risicovol = [r for r in recs if r.ppfs_label == "RISICOVOL"]

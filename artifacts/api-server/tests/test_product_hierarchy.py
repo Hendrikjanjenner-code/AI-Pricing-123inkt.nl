@@ -13,7 +13,7 @@ PFX = f"PHT{uuid.uuid4().hex[:6].upper()}"  # unieke prefix per testrun
 
 
 @pytest.fixture(scope="module")
-def client():
+def client(hierarchy_suite_lock):
     c = TestClient(app)
     c.__enter__()
     yield c
@@ -189,6 +189,37 @@ def test_volledige_import_flow(client, admin_headers, ph_products):
     assert "assignment_moved" in types
 
 
+def test_match_op_feed_product_id(client, admin_headers, ph_products):
+    """Productcodes uit een hiërarchie-export zijn vaak feed-product-id's
+    (raw_attributes.id), geen sku/EAN/OEM — de matcher moet die koppelen."""
+    sku1, sku2 = ph_products
+    feed_id = f"{PFX}-FEED-9001"
+    db = SessionLocal()
+    p = db.query(models.DimProduct).filter(models.DimProduct.sku_id == sku1).one()
+    p.raw_attributes = {"id": feed_id, "title": "feed product"}
+    db.commit()
+    db.close()
+
+    content = _csv([
+        f"{PFX}-F1,{feed_id},{PFX}-FeedCat > {PFX}-FeedSub",
+    ])
+    up = _upload(client, admin_headers, content)
+    val = client.post(f"/api/product-hierarchy/import/{up['job_id']}/validate",
+                      headers=admin_headers).json()
+    assert val["counts"]["gekoppeld"] == 1
+    assert val["counts"]["niet_gevonden"] == 0
+
+    db = SessionLocal()
+    row = (db.query(models.ProductHierarchyStagingRow)
+           .filter(models.ProductHierarchyStagingRow.job_id == up["job_id"]).one())
+    assert row.matched_sku_id == sku1
+    assert row.match_method == "feed_id"
+    db.query(models.ProductHierarchyStagingRow).filter(
+        models.ProductHierarchyStagingRow.job_id == up["job_id"]).delete()
+    db.commit()
+    db.close()
+
+
 def test_validatie_fouten(client, admin_headers, ph_products):
     content = _csv([
         f"{PFX}-OX,,",                                        # leeg pad
@@ -217,7 +248,32 @@ def test_sku_conflict_in_bestand(client, admin_headers, ph_products):
 
 
 def test_deactivate_missing_optin(client, admin_headers, ph_products):
-    """Met deactivate_missing worden verdwenen import-nodes gedeactiveerd."""
+    """Met deactivate_missing worden verdwenen import-nodes gedeactiveerd.
+
+    Let op: deactivate_missing werkt globaal over alle import-nodes (dat is
+    de productsemantiek: het bestand is een volledige vervanging). In deze
+    gedeelde test-DB moeten we daarom vooraf de actieve, niet-test nodes
+    vastleggen en achteraf herstellen, anders wist deze test de echte boom.
+    """
+    db = SessionLocal()
+    N = models.ProductHierarchyNode
+    pre_active_ids = [nid for (nid,) in db.query(N.id).filter(
+        N.is_active == True,  # noqa: E712
+        N.source == "import",
+        ~N.name.like(f"%{PFX}%"))]
+    db.close()
+    try:
+        _deactivate_missing_scenario(client, admin_headers, ph_products)
+    finally:
+        db = SessionLocal()
+        if pre_active_ids:
+            db.query(N).filter(N.id.in_(pre_active_ids)).update(
+                {"is_active": True, "valid_to": None}, synchronize_session=False)
+            db.commit()
+        db.close()
+
+
+def _deactivate_missing_scenario(client, admin_headers, ph_products):
     up = _upload(client, admin_headers, _csv([
         f"{PFX}-D1,{ph_products[0]},{PFX}-DRoot > {PFX}-DA",
         f"{PFX}-D2,{ph_products[1]},{PFX}-DRoot > {PFX}-DB",

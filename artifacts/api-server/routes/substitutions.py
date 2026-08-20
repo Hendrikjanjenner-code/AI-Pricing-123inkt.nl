@@ -1,5 +1,6 @@
 """Substitution monitor endpoint."""
-from fastapi import APIRouter, Depends
+from typing import Optional
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from database import get_db
@@ -11,10 +12,19 @@ router = APIRouter(prefix="/api/substitutions", tags=["substitutions"])
 
 @router.get("")
 def list_substitutions(
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    pairs = db.query(models.MapSubstitution).all()
+    q = db.query(models.MapSubstitution)
+    # Globale filtercontext (hiërarchie + merk): filter op de primaire SKU
+    # (a_brand_sku). Lege selectie ≠ geen filter.
+    from routes.global_filters import sku_filter_query
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if sku_q is not None:
+        q = q.filter(models.MapSubstitution.a_brand_sku.in_(sku_q.scalar_subquery()))
+    pairs = q.all()
     result = []
     for pair in pairs:
         a_product = db.query(models.DimProduct).filter(models.DimProduct.sku_id == pair.a_brand_sku).first()

@@ -8,6 +8,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Search, TrendingUp, Package, Tag, Layers, Euro } from "lucide-react";
 import { useShopId } from "@/hooks/use-shop-id";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 function apiFetch(path: string) {
   const token = localStorage.getItem("auth_token");
@@ -23,18 +26,22 @@ const GAP_TYPE_CONFIG: Record<string, { label: string; color: string; icon: any 
 
 export default function CompetitionAssortmentGap() {
   const shopId = useShopId();
+  const filters = useGlobalFilters();
+  const fp = apiFilterParams(filters);
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [gapTypeFilter, setGapTypeFilter] = useState("all");
   const [zoekterm, setZoekterm] = useState("");
 
   const { data, isLoading } = useQuery({
-    queryKey: ["competition-assortment-gap", categoryFilter, gapTypeFilter, shopId],
+    queryKey: ["competition-assortment-gap", categoryFilter, gapTypeFilter, shopId, fp],
     queryFn: () => {
       const p = new URLSearchParams({ page_size: "200" });
       if (categoryFilter !== "all") p.set("category", categoryFilter);
       if (gapTypeFilter !== "all") p.set("gap_type", gapTypeFilter);
       if (shopId !== undefined) p.set("shop_id", String(shopId));
-      return apiFetch(`/api/competition/assortment-gap?${p}`);
+      let url = `/api/competition/assortment-gap?${p}`;
+      if (fp !== "") url += url.includes("?") ? `&${fp}` : `?${fp}`;
+      return apiFetch(url);
     },
   });
 
@@ -64,6 +71,8 @@ export default function CompetitionAssortmentGap() {
         <h1 className="text-2xl font-bold tracking-tight">Assortiment Gap Analyse</h1>
         <p className="text-muted-foreground mt-1">Ontbrekende merken, producttypen, prijssegmenten en OEM/huismerk-kansen per categorie.</p>
       </div>
+
+      <GlobalFilterBar />
 
       {/* KPI */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

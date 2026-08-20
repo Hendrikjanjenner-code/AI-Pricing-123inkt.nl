@@ -11,4 +11,12 @@ export type GetCompetitorLandscapeParams = {
    * @nullable
    */
   shop_id?: number | null;
+  /**
+   * @nullable
+   */
+  hierarchy_node_ids?: string | null;
+  /**
+   * @nullable
+   */
+  brands?: string | null;
 };

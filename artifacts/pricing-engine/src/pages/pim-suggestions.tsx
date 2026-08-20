@@ -9,6 +9,9 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Check, Loader2, Sparkles, X } from "lucide-react";
 import { getAuthHeaders } from "@/lib/auth";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -33,6 +36,8 @@ function statusBadge(status: string) {
 }
 
 export default function PimSuggestions() {
+  const filters = useGlobalFilters();
+  const fp = apiFilterParams(filters);
   const [rijen, setRijen] = useState<Suggestie[]>([]);
   const [laden, setLaden] = useState(true);
   const [genereren, setGenereren] = useState(false);
@@ -45,7 +50,9 @@ export default function PimSuggestions() {
     setLaden(true);
     setFout(null);
     try {
-      const res = await fetch(`${BASE}/api/pim/suggestions?status=${statusFilter}`, {
+      let url = `${BASE}/api/pim/suggestions?status=${statusFilter}`;
+      if (fp !== "") url += url.includes("?") ? `&${fp}` : `?${fp}`;
+      const res = await fetch(url, {
         headers: getAuthHeaders(), signal: AbortSignal.timeout(60_000),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -55,7 +62,7 @@ export default function PimSuggestions() {
     } finally {
       setLaden(false);
     }
-  }, [statusFilter]);
+  }, [statusFilter, fp]);
 
   useEffect(() => { laad(); }, [laad]);
 
@@ -115,6 +122,8 @@ export default function PimSuggestions() {
           Genereer suggesties
         </Button>
       </div>
+
+      <GlobalFilterBar />
 
       <Card>
         <CardHeader className="pb-2">

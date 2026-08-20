@@ -1002,6 +1002,11 @@ export const UploadPriceRulesResponse = zod.object({
 /**
  * @summary List A-brand/private-label substitution pairs
  */
+export const ListSubstitutionsQueryParams = zod.object({
+  hierarchy_node_ids: zod.coerce.string().nullish(),
+  brands: zod.coerce.string().nullish(),
+});
+
 export const ListSubstitutionsResponseItem = zod.object({
   id: zod.number(),
   a_brand_sku: zod.string(),
@@ -1946,6 +1951,8 @@ export const GetCompetitorRankingsResponse = zod.object({
  */
 export const GetCompetitorLandscapeQueryParams = zod.object({
   shop_id: zod.coerce.number().nullish(),
+  hierarchy_node_ids: zod.coerce.string().nullish(),
+  brands: zod.coerce.string().nullish(),
 });
 
 export const GetCompetitorLandscapeResponse = zod.object({

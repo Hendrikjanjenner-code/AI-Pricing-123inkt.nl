@@ -125,7 +125,8 @@ def stage_rows(db: Session, job: models.ImportJob, rows: list[dict], mapping: di
 
 def validate_job(db: Session, job: models.ImportJob) -> dict:
     """
-    Valideer staging-rijen + match producten (DRS product-ID/SKU → EAN → OEM).
+    Valideer staging-rijen + match producten
+    (DRS product-ID/SKU → feed-id → EAN → OEM).
     Zet per rij status/message; retourneert het volledige rapport.
     """
     S = models.ProductHierarchyStagingRow
@@ -138,14 +139,21 @@ def validate_job(db: Session, job: models.ImportJob) -> dict:
     codes = {c for (c,) in db.query(S.product_code)
              .filter(S.job_id == job.id, S.product_code.isnot(None)).distinct()}
     sku_set: set[str] = set()
+    feed_id_map: dict[str, str] = {}
     ean_map: dict[str, str] = {}
     oem_map: dict[str, str] = {}
     CHUNK = 5000
     code_list = list(codes)
+    # Feed-product-id (raw_attributes.id) — hiërarchie-exports uit PriceShape
+    # gebruiken het feed-id als productcode, niet de sku_id/EAN.
+    feed_id_expr = P.raw_attributes["id"].as_string()
     for i in range(0, len(code_list), CHUNK):
         chunk = code_list[i:i + CHUNK]
         for (sku,) in db.query(P.sku_id).filter(P.sku_id.in_(chunk)):
             sku_set.add(sku)
+        for sku, fid in db.query(P.sku_id, feed_id_expr).filter(feed_id_expr.in_(chunk)):
+            if fid is not None:
+                feed_id_map[str(fid)] = sku
         for sku, ean in db.query(P.sku_id, P.ean).filter(P.ean.in_(chunk)):
             ean_map[ean] = sku
         for sku, oem in db.query(P.sku_id, P.oem_code).filter(P.oem_code.in_(chunk)):
@@ -197,10 +205,12 @@ def validate_job(db: Session, job: models.ImportJob) -> dict:
                 continue
             seen_opt[r.external_option_id] = tuple(path)
 
-        # productmatching: DRS product-ID / SKU → EAN → OEM
+        # productmatching: DRS product-ID / SKU → feed-id → EAN → OEM
         if r.product_code:
             if r.product_code in sku_set:
                 r.matched_sku_id, r.match_method = r.product_code, "drs_id"
+            elif r.product_code in feed_id_map:
+                r.matched_sku_id, r.match_method = feed_id_map[r.product_code], "feed_id"
             elif r.product_code in ean_map:
                 r.matched_sku_id, r.match_method = ean_map[r.product_code], "ean"
             elif r.product_code in oem_map:

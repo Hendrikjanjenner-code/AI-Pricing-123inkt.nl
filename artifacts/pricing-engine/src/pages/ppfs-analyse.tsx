@@ -3,6 +3,9 @@ import { RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, BarC
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const getToken = () => localStorage.getItem("auth_token") || "";
@@ -28,11 +31,15 @@ export default function PpfsAnalyse() {
   const [livePct, setLivePct] = useState("15");
   const [liveResult, setLiveResult] = useState<any>(null);
   const [liveLoading, setLiveLoading] = useState(false);
+  const filters = useGlobalFilters();
+  const fp = apiFilterParams(filters);
 
   useEffect(() => {
-    fetch(`${BASE}/api/ppfs`, { headers: { Authorization: `Bearer ${getToken()}` } })
+    setLoading(true);
+    const url = `${BASE}/api/ppfs`;
+    fetch(url + (fp !== "" ? (url.includes("?") ? "&" : "?") + fp : ""), { headers: { Authorization: `Bearer ${getToken()}` } })
       .then(r => r.json()).then(setData).catch(() => {}).finally(() => setLoading(false));
-  }, []);
+  }, [fp]);
 
   const berekenLive = async () => {
     setLiveLoading(true);
@@ -60,6 +67,7 @@ export default function PpfsAnalyse() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold tracking-tight">Price Pass-through Analyse (PPFS)</h1>
       <p className="text-sm text-muted-foreground">Hoe realistisch is het om een inkoopprijsstijging door te berekenen aan de klant?</p>
+      <GlobalFilterBar />
 
       {/* KPI's */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

@@ -188,8 +188,12 @@ def simulate_price_reduction(
     }
 
 
-def get_break_even_dashboard(db: Session) -> Dict[str, Any]:
-    """Overzicht van alle break-even analyses."""
+def get_break_even_dashboard(db: Session, sku_q=None) -> Dict[str, Any]:
+    """Overzicht van alle break-even analyses.
+
+    ``sku_q`` (optioneel): een 1-koloms SKU-query (uit sku_filter_query) om de
+    resultaten te beperken tot de globale filtercontext. None = geen filter.
+    """
     from models import FactBreakEvenAnalysisDaily
     from sqlalchemy import func
 
@@ -197,12 +201,13 @@ def get_break_even_dashboard(db: Session) -> Dict[str, Any]:
     if not latest:
         return {"datum": None, "totaal_skus": 0, "skus": []}
 
-    recs = (
+    recs_q = (
         db.query(FactBreakEvenAnalysisDaily)
         .filter(FactBreakEvenAnalysisDaily.date == latest)
-        .order_by(FactBreakEvenAnalysisDaily.break_even_difficulty_score.desc())
-        .all()
     )
+    if sku_q is not None:
+        recs_q = recs_q.filter(FactBreakEvenAnalysisDaily.sku_id.in_(sku_q.scalar_subquery()))
+    recs = recs_q.order_by(FactBreakEvenAnalysisDaily.break_even_difficulty_score.desc()).all()
 
     haalbaar = [r for r in recs if r.beds_label == "HAALBAAR"]
     onmogelijk = [r for r in recs if r.beds_label == "ONMOGELIJK"]

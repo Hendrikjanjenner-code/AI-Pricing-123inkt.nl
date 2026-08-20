@@ -167,8 +167,12 @@ def calculate_meds(
     }
 
 
-def get_meds_dashboard(db: Session) -> Dict[str, Any]:
-    """MEDS overzichtsdashboard."""
+def get_meds_dashboard(db: Session, sku_q=None) -> Dict[str, Any]:
+    """MEDS overzichtsdashboard.
+
+    ``sku_q`` (optioneel): een 1-koloms SKU-query (uit sku_filter_query) om de
+    resultaten te beperken tot de globale filtercontext. None = geen filter.
+    """
     from models import FactMarketingVsDiscountDaily
     from sqlalchemy import func
 
@@ -177,15 +181,17 @@ def get_meds_dashboard(db: Session) -> Dict[str, Any]:
         return {"datum": None, "totaal_skus": 0, "skus": []}
 
     # Neem één record per SKU (meest recente, PRICE_REDUCTION scenario als basis)
-    subq = (
+    subq_base = (
         db.query(
             FactMarketingVsDiscountDaily.sku_id,
             func.max(FactMarketingVsDiscountDaily.id).label("max_id")
         )
         .filter(FactMarketingVsDiscountDaily.date == latest)
-        .group_by(FactMarketingVsDiscountDaily.sku_id)
-        .subquery()
     )
+    if sku_q is not None:
+        subq_base = subq_base.filter(
+            FactMarketingVsDiscountDaily.sku_id.in_(sku_q.scalar_subquery()))
+    subq = subq_base.group_by(FactMarketingVsDiscountDaily.sku_id).subquery()
     recs = (
         db.query(FactMarketingVsDiscountDaily)
         .join(subq, FactMarketingVsDiscountDaily.id == subq.c.max_id)

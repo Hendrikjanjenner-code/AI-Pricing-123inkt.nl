@@ -55,12 +55,28 @@ def _cleanup(db):
 
 
 @pytest.fixture(scope="module")
-def db():
+def db(hierarchy_suite_lock):
     session = SessionLocal()
     _cleanup(session)
-    yield session
-    _cleanup(session)
-    session.close()
+    # Isolatie op de gedeelde dev-DB: een actieve geïmporteerde/handmatige
+    # boom is leidend en laat autobuild (terecht) skippen. Zet niet-auto
+    # nodes tijdelijk inactief en herstel ze na de module.
+    N = models.ProductHierarchyNode
+    foreign_ids = [nid for (nid,) in session.query(N.id).filter(
+        N.source != AUTO_SOURCE, N.is_active.is_(True))]
+    if foreign_ids:
+        session.query(N).filter(N.id.in_(foreign_ids)).update(
+            {"is_active": False}, synchronize_session=False)
+        session.commit()
+    try:
+        yield session
+    finally:
+        _cleanup(session)
+        if foreign_ids:
+            session.query(N).filter(N.id.in_(foreign_ids)).update(
+                {"is_active": True}, synchronize_session=False)
+            session.commit()
+        session.close()
 
 
 @pytest.fixture(scope="module")
@@ -94,6 +110,21 @@ def admin_headers(client):
                        json={"username": "dev_admin", "password": "admin123"})
     assert resp.status_code == 200, resp.text
     return {"Authorization": f"Bearer {resp.json()['token']}"}
+
+
+@pytest.fixture(autouse=True)
+def _foreign_boom_uit(db):
+    """Extra vangnet per test: een concurrente suite/proces kan de echte
+    import-boom tussendoor heractiveren; autobuild skipt dan terecht en de
+    testaannames kloppen niet meer. Zet vreemde actieve nodes opnieuw uit
+    (de module-fixture herstelt ze aan het einde)."""
+    N = models.ProductHierarchyNode
+    q = db.query(N).filter(N.source != AUTO_SOURCE, N.is_active.is_(True),
+                           ~N.name.like(f"{PFX.title()}%"))
+    if q.first() is not None:
+        q.update({"is_active": False}, synchronize_session=False)
+        db.commit()
+    yield
 
 
 def _node(db, name, parent_id=None):

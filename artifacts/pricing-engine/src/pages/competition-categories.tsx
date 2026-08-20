@@ -9,6 +9,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Search, Circle, ChevronRight } from "lucide-react";
 import { useShopId } from "@/hooks/use-shop-id";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 function apiFetch(path: string) {
   const token = localStorage.getItem("auth_token");
@@ -33,18 +36,22 @@ const SCORE_DEFS = [
 
 export default function CompetitionCategories() {
   const shopId = useShopId();
+  const filters = useGlobalFilters();
+  const fp = apiFilterParams(filters);
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [labelFilter, setLabelFilter] = useState("all");
   const [zoekterm, setZoekterm] = useState("");
 
   const { data, isLoading } = useQuery({
-    queryKey: ["competition-categories", categoryFilter, labelFilter, shopId],
+    queryKey: ["competition-categories", categoryFilter, labelFilter, shopId, fp],
     queryFn: () => {
       const params = new URLSearchParams({ page_size: "200" });
       if (categoryFilter !== "all") params.set("category", categoryFilter);
       if (labelFilter !== "all") params.set("relevance_label", labelFilter);
       if (shopId !== undefined) params.set("shop_id", String(shopId));
-      return apiFetch(`/api/competition/categories?${params}`);
+      let url = `/api/competition/categories?${params}`;
+      if (fp !== "") url += url.includes("?") ? `&${fp}` : `?${fp}`;
+      return apiFetch(url);
     },
   });
 
@@ -70,6 +77,8 @@ export default function CompetitionCategories() {
         <h1 className="text-2xl font-bold tracking-tight">Categorie Analyse</h1>
         <p className="text-muted-foreground mt-1">7 categoryscores per concurrent per DRS-categorie — Coverage, Relevantie, Gezag, Assortiment Gap, Prijs, Traffic en Opportunity.</p>
       </div>
+
+      <GlobalFilterBar />
 
       <div className="flex gap-3 flex-wrap">
         <div className="relative w-64">

@@ -7,6 +7,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ResponsiveContainer, ScatterChart, Scatter, XAxis, YAxis, ZAxis, Tooltip, CartesianGrid, ReferenceLine } from "recharts";
 import { useShopId } from "@/hooks/use-shop-id";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 function apiFetch(path: string) {
   const token = localStorage.getItem("auth_token");
@@ -25,11 +28,17 @@ const FALLBACK_COLORS = ["#2563eb", "#dc2626", "#059669", "#d97706", "#7c3aed", 
 
 export default function CompetitionLandscape() {
   const shopId = useShopId();
+  const filters = useGlobalFilters();
+  const fp = apiFilterParams(filters);
   const [axes, setAxes] = useState<"strength" | "threat">("strength");
 
   const { data, isLoading } = useQuery({
-    queryKey: ["competition-landscape", shopId],
-    queryFn: () => apiFetch(`/api/competition/landscape${shopId !== undefined ? `?shop_id=${shopId}` : ""}`),
+    queryKey: ["competition-landscape", shopId, fp],
+    queryFn: () => {
+      let url = `/api/competition/landscape${shopId !== undefined ? `?shop_id=${shopId}` : ""}`;
+      if (fp !== "") url += url.includes("?") ? `&${fp}` : `?${fp}`;
+      return apiFetch(url);
+    },
   });
 
   const items: any[] = data?.items || [];
@@ -79,6 +88,8 @@ export default function CompetitionLandscape() {
           </SelectContent>
         </Select>
       </div>
+
+      <GlobalFilterBar />
 
       <Card>
         <CardHeader className="pb-3">

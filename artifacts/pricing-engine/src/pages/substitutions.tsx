@@ -3,9 +3,19 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ArrowRightLeft, TrendingUp, DollarSign } from "lucide-react";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
 
 export default function Substitutiemonitor() {
-  const { data, isLoading } = useListSubstitutions();
+  // Globale filtercontext (hiërarchie + merk) — server-side subtree-expansie.
+  const filters = useGlobalFilters();
+  const { data, isLoading } = useListSubstitutions({
+    hierarchy_node_ids:
+      filters.hierarchy.length > 0
+        ? filters.hierarchy.map((n) => n.id).join(",")
+        : undefined,
+    brands: filters.brands.length > 0 ? filters.brands.join(",") : undefined,
+  });
 
   const fmtBedrag = (val: number | null | undefined) =>
     val != null ? new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(val) : '-';
@@ -19,6 +29,7 @@ export default function Substitutiemonitor() {
         <h1 className="text-2xl font-bold tracking-tight">Substitutieportfolio monitor</h1>
         <p className="text-muted-foreground mt-1">Beheer A-merk vs. huismerk prijskloven en margemogelijkheden.</p>
       </div>
+      <GlobalFilterBar />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
         <div className="border rounded-md p-4 bg-card">

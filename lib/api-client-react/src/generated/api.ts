@@ -68,6 +68,7 @@ import type {
   ListProductsParams,
   ListRecommendationsParams,
   ListSignalsParams,
+  ListSubstitutionsParams,
   ListUploadsParams,
   LoginRequest,
   MessageResponse,
@@ -3071,41 +3072,60 @@ export const useUploadPriceRules = <
 /**
  * @summary List A-brand/private-label substitution pairs
  */
-export const getListSubstitutionsUrl = () => {
-  return `/api/substitutions`;
+export const getListSubstitutionsUrl = (params?: ListSubstitutionsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/substitutions?${stringifiedParams}`
+    : `/api/substitutions`;
 };
 
 export const listSubstitutions = async (
+  params?: ListSubstitutionsParams,
   options?: RequestInit,
 ): Promise<SubstitutionPair[]> => {
-  return customFetch<SubstitutionPair[]>(getListSubstitutionsUrl(), {
+  return customFetch<SubstitutionPair[]>(getListSubstitutionsUrl(params), {
     ...options,
     method: "GET",
   });
 };
 
-export const getListSubstitutionsQueryKey = () => {
-  return [`/api/substitutions`] as const;
+export const getListSubstitutionsQueryKey = (
+  params?: ListSubstitutionsParams,
+) => {
+  return [`/api/substitutions`, ...(params ? [params] : [])] as const;
 };
 
 export const getListSubstitutionsQueryOptions = <
   TData = Awaited<ReturnType<typeof listSubstitutions>>,
   TError = ErrorType<unknown>,
->(options?: {
-  query?: UseQueryOptions<
-    Awaited<ReturnType<typeof listSubstitutions>>,
-    TError,
-    TData
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}) => {
+>(
+  params?: ListSubstitutionsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSubstitutions>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
   const { query: queryOptions, request: requestOptions } = options ?? {};
 
-  const queryKey = queryOptions?.queryKey ?? getListSubstitutionsQueryKey();
+  const queryKey =
+    queryOptions?.queryKey ?? getListSubstitutionsQueryKey(params);
 
   const queryFn: QueryFunction<
     Awaited<ReturnType<typeof listSubstitutions>>
-  > = ({ signal }) => listSubstitutions({ signal, ...requestOptions });
+  > = ({ signal }) => listSubstitutions(params, { signal, ...requestOptions });
 
   return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
     Awaited<ReturnType<typeof listSubstitutions>>,
@@ -3126,15 +3146,18 @@ export type ListSubstitutionsQueryError = ErrorType<unknown>;
 export function useListSubstitutions<
   TData = Awaited<ReturnType<typeof listSubstitutions>>,
   TError = ErrorType<unknown>,
->(options?: {
-  query?: UseQueryOptions<
-    Awaited<ReturnType<typeof listSubstitutions>>,
-    TError,
-    TData
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getListSubstitutionsQueryOptions(options);
+>(
+  params?: ListSubstitutionsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listSubstitutions>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListSubstitutionsQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

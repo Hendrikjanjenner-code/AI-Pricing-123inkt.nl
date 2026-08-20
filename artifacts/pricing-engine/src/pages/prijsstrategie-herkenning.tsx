@@ -7,12 +7,17 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { RefreshCw, AlertCircle, TrendingUp, TrendingDown, ShieldAlert, Tag, Zap } from "lucide-react";
 import { getAuthToken } from "@/lib/auth";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
-async function fetchStrategies() {
+async function fetchStrategies(fp: string) {
   const token = getAuthToken();
-  const res = await fetch(`${BASE}/api/competition/strategies`, {
+  let url = `${BASE}/api/competition/strategies`;
+  if (fp !== "") url += url.includes("?") ? `&${fp}` : `?${fp}`;
+  const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error("Ophalen mislukt");
@@ -40,6 +45,8 @@ const STRATEGIE_ICONEN: Record<string, React.ElementType> = {
 };
 
 export default function PrijsstrategieHerkenning() {
+  const filters = useGlobalFilters();
+  const fp = apiFilterParams(filters);
   const [data, setData] = useState<any>(null);
   const [laden, setLaden] = useState(true);
   const [fout, setFout] = useState<string | null>(null);
@@ -48,7 +55,7 @@ export default function PrijsstrategieHerkenning() {
     setLaden(true);
     setFout(null);
     try {
-      const d = await fetchStrategies();
+      const d = await fetchStrategies(fp);
       setData(d);
     } catch (e: any) {
       setFout(e.message);
@@ -57,7 +64,7 @@ export default function PrijsstrategieHerkenning() {
     }
   };
 
-  useEffect(() => { laad(); }, []);
+  useEffect(() => { laad(); }, [fp]);
 
   return (
     <div className="space-y-6 max-w-6xl">
@@ -73,6 +80,8 @@ export default function PrijsstrategieHerkenning() {
           Vernieuwen
         </Button>
       </div>
+
+      <GlobalFilterBar />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {Object.entries({

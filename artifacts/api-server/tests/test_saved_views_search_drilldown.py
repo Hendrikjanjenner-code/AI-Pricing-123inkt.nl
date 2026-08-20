@@ -236,7 +236,7 @@ def test_preferences_roundtrip_and_isolation(client, admin_headers, cleanup):
 # ── Global search ───────────────────────────────────────────────────────────
 
 @pytest.fixture(scope="module")
-def search_data(client, admin_headers, cleanup):
+def search_data(client, admin_headers, cleanup, hierarchy_suite_lock):
     from database import SessionLocal
     import models
     tag = uuid.uuid4().hex[:6]

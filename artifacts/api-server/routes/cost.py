@@ -1,9 +1,9 @@
 """Cost Intelligence routes — /api/kosten/*"""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from datetime import date
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from database import get_db
 from auth import get_current_user
@@ -188,16 +188,24 @@ def get_kosten_categorie(
 
 @router.get("/marketing")
 def get_marketing_overview(
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
 ) -> Any:
     """Marketing efficiency overzicht voor alle SKU's."""
     latest = db.query(func.max(FactMarketingCostDaily.date)).scalar() or date.today()
-    recs = (
+    recs_q = (
         db.query(FactMarketingCostDaily)
         .filter(FactMarketingCostDaily.date == latest)
-        .all()
     )
+    # Globale filtercontext (hiërarchie + merk); marketingkosten zijn per SKU
+    # (FactMarketingCostDaily.sku_id). Lege selectie ≠ geen filter.
+    from routes.global_filters import sku_filter_query
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if sku_q is not None:
+        recs_q = recs_q.filter(FactMarketingCostDaily.sku_id.in_(sku_q.scalar_subquery()))
+    recs = recs_q.all()
 
     def avg(attr):
         vals = [float(getattr(r, attr) or 0) for r in recs if getattr(r, attr) is not None]
@@ -233,17 +241,26 @@ def get_marketing_overview(
 
 @router.get("/operationeel")
 def get_operationele_complexiteit(
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
 ) -> Any:
     """Operationele complexiteitsscores (OCS/ABC) voor alle SKU's."""
     latest = db.query(func.max(FactOperationalComplexityDaily.date)).scalar() or date.today()
-    recs = (
+    recs_q = (
         db.query(FactOperationalComplexityDaily)
         .filter(FactOperationalComplexityDaily.date == latest)
-        .order_by(FactOperationalComplexityDaily.operational_complexity_score.desc())
-        .all()
     )
+    # Globale filtercontext (hiërarchie + merk); OCS-scores zijn per SKU
+    # (FactOperationalComplexityDaily.sku_id). Lege selectie ≠ geen filter.
+    from routes.global_filters import sku_filter_query
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if sku_q is not None:
+        recs_q = recs_q.filter(
+            FactOperationalComplexityDaily.sku_id.in_(sku_q.scalar_subquery()))
+    recs = recs_q.order_by(
+        FactOperationalComplexityDaily.operational_complexity_score.desc()).all()
 
     def avg(attr):
         vals = [float(getattr(r, attr) or 0) for r in recs]

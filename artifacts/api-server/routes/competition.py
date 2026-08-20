@@ -666,6 +666,8 @@ def list_category_scores(
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=500),
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -676,6 +678,23 @@ def list_category_scores(
         q = q.filter(models.CategoryCompetitorRelevance.category == category)
     if relevance_label:
         q = q.filter(models.CategoryCompetitorRelevance.relevance_label == relevance_label)
+    _sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if _sku_q is not None:
+        # Globale filtercontext (taak #263): houd een (categorie, concurrent)-rij
+        # alleen als de concurrent is waargenomen op een gefilterde SKU die zelf
+        # in die categorie valt (gecorreleerd EXISTS, zoals /dashboard).
+        from sqlalchemy import exists, and_
+        F = models.FactCompetitorPriceDaily
+        P = models.DimProduct
+        CCR = models.CategoryCompetitorRelevance
+        q = q.filter(exists().where(and_(
+            F.competitor_name == CCR.competitor_name,
+            F.shop_id == sid,
+            F.sku_id.in_(_sku_q.scalar_subquery()),
+            P.sku_id == F.sku_id,
+            P.shop_id == sid,
+            P.category == CCR.category,
+        )))
     total = q.count()
     items = (
         q.order_by(
@@ -856,6 +875,8 @@ def list_assortment_gaps(
     gap_type: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -864,6 +885,22 @@ def list_assortment_gaps(
         q = q.filter(models.AssortmentGap.category == category)
     if gap_type:
         q = q.filter(models.AssortmentGap.gap_type == gap_type)
+    _sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if _sku_q is not None:
+        # Globale filtercontext (taak #263): houd een gap-rij alleen als de
+        # concurrent is waargenomen op een gefilterde SKU die zelf in de
+        # gap-categorie valt (gecorreleerd EXISTS). AssortmentGap heeft geen
+        # shop_id; de scoping loopt via de gefilterde SKU-set en DimProduct.
+        from sqlalchemy import exists, and_
+        F = models.FactCompetitorPriceDaily
+        P = models.DimProduct
+        AG = models.AssortmentGap
+        q = q.filter(exists().where(and_(
+            F.competitor_name == AG.competitor_name,
+            F.sku_id.in_(_sku_q.scalar_subquery()),
+            P.sku_id == F.sku_id,
+            P.category == AG.category,
+        )))
     total = q.count()
     items = (
         q.order_by(models.AssortmentGap.opportunity_score.desc())
@@ -883,6 +920,8 @@ def list_assortment_gaps(
 def get_competitor_strategies(
     lookback_days: int = Query(30, ge=7, le=180),
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -895,11 +934,19 @@ def get_competitor_strategies(
     from engine.competitor_strategy_engine import analyseer_alle_concurrenten
     sid = _scope(db, shop_id)
     since = date.today() - timedelta(days=lookback_days)
-    rijen = (
+    rijen_q = (
         db.query(models.FactCompetitorPriceDaily)
         .filter(models.FactCompetitorPriceDaily.date >= since,
                 models.FactCompetitorPriceDaily.shop_id == sid)
-        .order_by(
+    )
+    # Globale filtercontext (taak #263): beperk de concurrentprijs-historie tot
+    # de gefilterde SKU-set — als SQL-subquery, nooit als IN-parameterlijst.
+    _sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if _sku_q is not None:
+        rijen_q = rijen_q.filter(
+            models.FactCompetitorPriceDaily.sku_id.in_(_sku_q.scalar_subquery()))
+    rijen = (
+        rijen_q.order_by(
             models.FactCompetitorPriceDaily.competitor_name,
             models.FactCompetitorPriceDaily.date,
         )
@@ -1747,6 +1794,8 @@ def get_price_index_trend(
     competitor: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -1769,11 +1818,21 @@ def get_price_index_trend(
              models.FactCompetitorPriceDaily.shop_id == sid)
     if competitor:
         q = q.filter(models.FactCompetitorPriceDaily.competitor_name == _canon(competitor))
+    # Globale filtercontext (taak #263): beperk zowel de concurrentprijs-feed
+    # als het eigen assortiment tot de gefilterde SKU-set — als SQL-subquery.
+    _sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if _sku_q is not None:
+        q = q.filter(models.FactCompetitorPriceDaily.sku_id.in_(
+            _sku_q.scalar_subquery()))
     rows = q.all()
 
-    prods = db.query(models.DimProduct.sku_id, models.DimProduct.current_price,
-                     models.DimProduct.category).filter(
-        models.DimProduct.shop_id == sid).all()
+    prods_q = db.query(models.DimProduct.sku_id, models.DimProduct.current_price,
+                       models.DimProduct.category).filter(
+        models.DimProduct.shop_id == sid)
+    if _sku_q is not None:
+        prods_q = prods_q.filter(
+            models.DimProduct.sku_id.in_(_sku_q.scalar_subquery()))
+    prods = prods_q.all()
     current_own = {p.sku_id: float(p.current_price) for p in prods if p.current_price}
     cats = {p.sku_id: p.category for p in prods}
     rejected = rejected_pairs(db)
@@ -1827,6 +1886,8 @@ def get_coverage_trend(
     competitor: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -1842,6 +1903,11 @@ def get_coverage_trend(
         q = q.filter(models.CompetitorCoverageResult.category == category)
     else:
         q = q.filter(models.CompetitorCoverageResult.category.is_(None))
+    # Globale filtercontext (taak #263): alleen concurrenten die zijn
+    # waargenomen op de gefilterde SKU-set — als SQL-subquery.
+    _gf_sq = _filtered_competitor_names_sq(db, sid, hierarchy_node_ids, brands)
+    if _gf_sq is not None:
+        q = q.filter(models.CompetitorCoverageResult.competitor_name.in_(_gf_sq))
     rows = q.order_by(models.CompetitorCoverageResult.run_date).all()
     out: dict[str, list] = {}
     for r in rows:
@@ -1857,6 +1923,8 @@ def get_coverage_trend(
 @router.get("/coverage")
 def get_coverage_latest(
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -1867,9 +1935,16 @@ def get_coverage_latest(
         models.CompetitorCoverageResult.run_date.desc()).first()
     if not last:
         return {"run_date": None, "items": []}
-    rows = db.query(models.CompetitorCoverageResult).filter(
+    rows_q = db.query(models.CompetitorCoverageResult).filter(
         models.CompetitorCoverageResult.run_date == last[0],
-        models.CompetitorCoverageResult.shop_id == sid).all()
+        models.CompetitorCoverageResult.shop_id == sid)
+    # Globale filtercontext (taak #263): alleen concurrenten die zijn
+    # waargenomen op de gefilterde SKU-set — als SQL-subquery.
+    _gf_sq = _filtered_competitor_names_sq(db, sid, hierarchy_node_ids, brands)
+    if _gf_sq is not None:
+        rows_q = rows_q.filter(
+            models.CompetitorCoverageResult.competitor_name.in_(_gf_sq))
+    rows = rows_q.all()
     items = [{
         "competitor_name": r.competitor_name,
         "category": r.category,
@@ -1889,6 +1964,8 @@ def list_price_events(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -1898,6 +1975,12 @@ def list_price_events(
     q = db.query(models.CompetitorPriceEvent).filter(
         models.CompetitorPriceEvent.event_date >= since,
         models.CompetitorPriceEvent.shop_id == sid)
+    # Globale filtercontext (taak #263): events zijn per SKU vastgelegd —
+    # beperk tot de gefilterde SKU-set als SQL-subquery.
+    _sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if _sku_q is not None:
+        q = q.filter(models.CompetitorPriceEvent.sku_id.in_(
+            _sku_q.scalar_subquery()))
     if event_type:
         q = q.filter(models.CompetitorPriceEvent.event_type == event_type)
     if competitor:
@@ -1932,6 +2015,8 @@ def get_availability_trend(
     days: int = Query(30, ge=1, le=365),
     competitor: Optional[str] = Query(None),
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -1943,6 +2028,11 @@ def get_availability_trend(
         models.CompetitorAvailabilityDaily.shop_id == sid)
     if competitor:
         q = q.filter(models.CompetitorAvailabilityDaily.competitor_name == _canon(competitor))
+    # Globale filtercontext (taak #263): alleen concurrenten die zijn
+    # waargenomen op de gefilterde SKU-set — als SQL-subquery.
+    _gf_sq = _filtered_competitor_names_sq(db, sid, hierarchy_node_ids, brands)
+    if _gf_sq is not None:
+        q = q.filter(models.CompetitorAvailabilityDaily.competitor_name.in_(_gf_sq))
     rows = q.order_by(models.CompetitorAvailabilityDaily.date).all()
     out: dict[str, list] = {}
     for r in rows:
@@ -2244,6 +2334,8 @@ def get_competitor_score_detail(
 @router.get("/landscape")
 def get_competitor_landscape(
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -2269,6 +2361,17 @@ def get_competitor_landscape(
                         models.CompetitorRanking.run_date == latest).all()}
     scores = latest_scores_by_competitor(db, sid)
     names = sorted(set(rankings) | set(scores))
+    # Globale filtercontext (taak #263): beperk tot concurrenten die zijn
+    # waargenomen op de gefilterde SKU-set. names is hier een Python-set, dus
+    # halen we de waargenomen namen op (feed gefilterd via een SQL-subquery op
+    # de SKU-set) voor de doorsnede.
+    _sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if _sku_q is not None:
+        F = models.FactCompetitorPriceDaily
+        observed = {n for (n,) in db.query(F.competitor_name).filter(
+            F.shop_id == sid,
+            F.sku_id.in_(_sku_q.scalar_subquery())).distinct().all()}
+        names = [n for n in names if n in observed]
     roles: dict = {}
     if names:
         for r in db.query(models.CompetitorMarketRole).filter(

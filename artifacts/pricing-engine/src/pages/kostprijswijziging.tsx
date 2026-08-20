@@ -2,6 +2,9 @@ import { useState, useEffect } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import { AlertTriangle, TrendingUp, TrendingDown, Shield, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const getToken = () => localStorage.getItem("auth_token") || "";
@@ -26,11 +29,15 @@ export default function KostprijswijzigingDashboard() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [geselecteerd, setGeselecteerd] = useState<any>(null);
+  const filters = useGlobalFilters();
+  const fp = apiFilterParams(filters);
 
   useEffect(() => {
-    fetch(`${BASE}/api/kostprijswijziging`, { headers: { Authorization: `Bearer ${getToken()}` } })
+    setLoading(true);
+    const url = `${BASE}/api/kostprijswijziging`;
+    fetch(url + (fp !== "" ? (url.includes("?") ? "&" : "?") + fp : ""), { headers: { Authorization: `Bearer ${getToken()}` } })
       .then(r => r.json()).then(setData).catch(() => {}).finally(() => setLoading(false));
-  }, []);
+  }, [fp]);
 
   if (loading) return <div className="flex items-center justify-center h-64 text-muted-foreground">Laden…</div>;
   if (!data?.skus?.length) return <div className="text-muted-foreground p-8">Geen kostprijswijzigingen beschikbaar.</div>;
@@ -50,6 +57,7 @@ export default function KostprijswijzigingDashboard() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold tracking-tight">Inkoopprijswijziging Analyse</h1>
+      <GlobalFilterBar />
 
       {/* KPI's */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
