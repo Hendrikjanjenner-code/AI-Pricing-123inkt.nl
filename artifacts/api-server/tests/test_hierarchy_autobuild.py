@@ -316,6 +316,34 @@ def test_verdwenen_categorie_en_inactief_product(db, producten, client, admin_he
     assert _active_assignment(db, SKU2) is not None
 
 
+def test_race_verdwenen_product_vergiftigt_sessie_niet(db, producten, monkeypatch):
+    """Regressie: verdwijnt een product tussen de select en de commit (feed-
+    apply race), dan mag de FK-fout de opbouw alleen terugrollen — de sessie
+    blijft bruikbaar en een volgende run slaagt gewoon."""
+    import services.hierarchy_autobuild as hab
+    real = hab._load_products
+
+    def met_ghost(session):
+        rows = list(real(session))
+        # bestaande categorie: alleen het product zelf is "verdwenen"
+        rows.append(("hatest-GHOST-SKU", CAT1, None))
+        return rows
+
+    monkeypatch.setattr(hab, "_load_products", met_ghost)
+    report = autobuild_hierarchy(db)
+    assert report["skipped"] is True
+    assert "teruggerold" in report["reason"]
+
+    # Sessie is niet vergiftigd: gewone query werkt direct weer.
+    assert db.query(models.DimProduct).count() >= 0
+
+    # Volgende run (zonder ghost) slaagt en bouwt/actualiseert de boom.
+    monkeypatch.setattr(hab, "_load_products", real)
+    report2 = autobuild_hierarchy(db)
+    assert report2["skipped"] is False
+    assert _active_assignment(db, SKU1) is not None
+
+
 def test_concurrency_lock_skipt_tweede_autobuild(db, producten):
     """Regressie: een tweede autobuild (of een import-apply, die dezelfde
     lock blokkerend neemt) kan nooit gelijktijdig muteren."""

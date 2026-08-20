@@ -45,13 +45,48 @@ def _clean(value) -> str | None:
     return s or None
 
 
+def _load_products(db: Session):
+    """
+    Producten voor de autobuild. Op Postgres met FOR SHARE-rijlock zodat een
+    gelijktijdige feed-apply de rijen niet kan verwijderen tussen deze select
+    en onze commit (anders FK-fout op de toewijzing-insert).
+    """
+    P = models.DimProduct
+    q = (db.query(P.sku_id, P.category, P.subcategory)
+         .filter(P.is_active.is_(True), P.category.isnot(None),
+                 P.category != ""))
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        q = q.with_for_update(read=True)
+    return q.all()
+
+
 def autobuild_hierarchy(db: Session) -> dict:
     """
     Bouw of ververs de automatische hiërarchie uit dim_product-categorieën.
 
     Retourneert een klein rapport-dict. Doet niets (skipped=True) zodra er
-    een handmatig/geïmporteerd beheerde boom bestaat.
+    een handmatig/geïmporteerd beheerde boom bestaat. Fail-safe: elke fout
+    (bijv. een FK-race met een gelijktijdige feed-apply die een net gelezen
+    product verwijdert) wordt teruggerold zodat de sessie bruikbaar blijft;
+    een volgende run herstelt vanzelf.
     """
+    try:
+        result = _autobuild_inner(db)
+        if result.get("skipped"):
+            # No-op-paden muteren niets maar hebben wél een transactie geopend
+            # (en mogelijk de advisory xact-lock genomen): expliciet afsluiten,
+            # anders blijft de lock hangen zolang de sessie leeft en worden
+            # álle volgende autobuilds ten onrechte als "bezig" geskipt.
+            db.rollback()
+        return result
+    except Exception:
+        logger.warning("Automatische hiërarchie-opbouw teruggerold na fout",
+                       exc_info=True)
+        db.rollback()
+        return {"skipped": True, "reason": "fout tijdens opbouw; teruggerold"}
+
+
+def _autobuild_inner(db: Session) -> dict:
     N = models.ProductHierarchyNode
     A = models.ProductHierarchyAssignment
     P = models.DimProduct
@@ -149,9 +184,7 @@ def autobuild_hierarchy(db: Session) -> dict:
     #    blijven onaangeroerd (die kunnen hier per definitie niet bestaan
     #    zolang er geen handmatige boom is, maar defensief filteren is
     #    goedkoop). Verplaatsingen: oude rij superseded, nieuwe actieve rij.
-    products = (db.query(P.sku_id, P.category, P.subcategory)
-                .filter(P.is_active.is_(True), P.category.isnot(None),
-                        P.category != "").all())
+    products = _load_products(db)
     active_auto = (db.query(A)
                    .filter(A.source == AUTO_SOURCE, A.status == "active").all())
     current: dict[str, models.ProductHierarchyAssignment] = {}
