@@ -957,8 +957,9 @@ def _reconcile_competitors(db: Session, today: date, comp_maps: list[dict],
                 if a not in merged:
                     merged.append(a)
             comp.aliases = merged
-        if n in written:
-            comp.last_seen_date = today
+        # Elke in de feed waargenomen concurrent geldt als "gezien vandaag",
+        # ook als (nog) geen enkele rij op een bekende SKU is geland.
+        comp.last_seen_date = today
     db.commit()
     return {
         "feed_unique": len(feed_canonical),

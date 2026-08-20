@@ -9,7 +9,7 @@ Alle endpoints koppelen aan de bestaande concurrent-identiteit per shop
 (CompetitorProfile / competitor_name); een concurrent van een andere shop
 geeft 404 (IDOR-veilig).
 """
-from typing import Optional
+from typing import Annotated, Optional
 from datetime import datetime, date
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -19,6 +19,17 @@ from sqlalchemy.orm import Session
 from database import get_db
 import models
 import auth as auth_utils
+
+
+def _canon_name(competitor_name: str) -> str:
+    """Canoniseer het pad-argument: 'WWW.X.nl' → 'x.nl' (zelfde concurrent)."""
+    from services.domain_normalize import normalize_domain
+    return normalize_domain(competitor_name) or competitor_name
+
+
+# Pad-parameter die altijd als canoniek domein binnenkomt: een verzoek met
+# een variant-schrijfwijze resolvet naar dezelfde concurrent (geen 404).
+CanonName = Annotated[str, Depends(_canon_name)]
 from services import competitor_profile as cp
 
 router = APIRouter(prefix="/api/competition/competitor-profile",
@@ -99,7 +110,7 @@ def _row_out(r, extra: list[str]) -> dict:
 
 @router.post("/{competitor_name}/evidence", status_code=201)
 def create_evidence(
-    competitor_name: str,
+    competitor_name: CanonName,
     payload: dict = Body(...),
     shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
@@ -133,7 +144,7 @@ def create_evidence(
 
 @router.get("/{competitor_name}/evidence")
 def list_evidence(
-    competitor_name: str,
+    competitor_name: CanonName,
     shop_id: Optional[int] = Query(None),
     status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
@@ -164,7 +175,7 @@ def _upsert_singleton(db, model, sid, name):
 
 @router.put("/{competitor_name}/business")
 def update_business_profile(
-    competitor_name: str,
+    competitor_name: CanonName,
     payload: dict = Body(...),
     shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
@@ -188,7 +199,7 @@ def update_business_profile(
 
 @router.put("/{competitor_name}/fulfilment")
 def update_fulfilment_profile(
-    competitor_name: str,
+    competitor_name: CanonName,
     payload: dict = Body(...),
     shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
@@ -214,7 +225,7 @@ def update_fulfilment_profile(
 
 @router.post("/{competitor_name}/financials", status_code=201)
 def add_financial_observation(
-    competitor_name: str,
+    competitor_name: CanonName,
     payload: dict = Body(...),
     shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
@@ -267,7 +278,7 @@ def add_financial_observation(
 
 @router.get("/{competitor_name}/financials")
 def list_financial_observations(
-    competitor_name: str,
+    competitor_name: CanonName,
     shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
@@ -289,7 +300,7 @@ def list_financial_observations(
 
 @router.post("/{competitor_name}/roles", status_code=201)
 def add_market_role(
-    competitor_name: str,
+    competitor_name: CanonName,
     payload: dict = Body(...),
     shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
@@ -331,7 +342,7 @@ def add_market_role(
 
 @router.delete("/{competitor_name}/roles/{role_id}")
 def end_market_role(
-    competitor_name: str,
+    competitor_name: CanonName,
     role_id: int,
     shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
@@ -357,7 +368,7 @@ def end_market_role(
 
 @router.get("/{competitor_name}/roles")
 def list_market_roles(
-    competitor_name: str,
+    competitor_name: CanonName,
     shop_id: Optional[int] = Query(None),
     active_only: bool = Query(False),
     db: Session = Depends(get_db),
@@ -380,7 +391,7 @@ def list_market_roles(
 
 @router.post("/{competitor_name}/geography", status_code=201)
 def add_geographic_presence(
-    competitor_name: str,
+    competitor_name: CanonName,
     payload: dict = Body(...),
     shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
@@ -420,7 +431,7 @@ def add_geographic_presence(
 
 @router.get("/{competitor_name}/geography")
 def list_geographic_presence(
-    competitor_name: str,
+    competitor_name: CanonName,
     shop_id: Optional[int] = Query(None),
     active_only: bool = Query(False),
     db: Session = Depends(get_db),
@@ -443,7 +454,7 @@ def list_geographic_presence(
 
 @router.post("/{competitor_name}/relations", status_code=201)
 def add_corporate_relation(
-    competitor_name: str,
+    competitor_name: CanonName,
     payload: dict = Body(...),
     shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
@@ -486,7 +497,7 @@ def add_corporate_relation(
 
 @router.get("/{competitor_name}/relations")
 def list_corporate_relations(
-    competitor_name: str,
+    competitor_name: CanonName,
     shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
@@ -514,7 +525,7 @@ SECTION_MODELS = {
 
 @router.post("/{competitor_name}/validate", status_code=201)
 def validate_field(
-    competitor_name: str,
+    competitor_name: CanonName,
     payload: dict = Body(...),
     shop_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
@@ -609,7 +620,7 @@ def validate_field(
 
 @router.get("/{competitor_name}/validations")
 def list_validations(
-    competitor_name: str,
+    competitor_name: CanonName,
     shop_id: Optional[int] = Query(None),
     section: Optional[str] = Query(None),
     db: Session = Depends(get_db),
@@ -635,7 +646,7 @@ def list_validations(
 
 @router.get("/{competitor_name}/timeline")
 def get_evolution_timeline(
-    competitor_name: str,
+    competitor_name: CanonName,
     shop_id: Optional[int] = Query(None),
     section: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
@@ -788,7 +799,7 @@ def _score_summary_out(r) -> dict:
 
 @router.get("/{competitor_name}")
 def get_full_profile(
-    competitor_name: str,
+    competitor_name: CanonName,
     shop_id: Optional[int] = Query(None),
     include_scores: bool = Query(False, description="Voeg de acht scorecards (incl. factoren/gewichten) en de relevantiescores toe"),
     include_timeline: bool = Query(False, description="Voeg de eerste pagina van de evolution-timeline toe"),

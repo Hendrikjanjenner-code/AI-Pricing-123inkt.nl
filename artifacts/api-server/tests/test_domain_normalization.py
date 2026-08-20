@@ -317,6 +317,81 @@ def test_priceshape_persist_normaliseert_en_bewaart_alias(shop):
         db.close()
 
 
+def test_opgeslagen_variant_uitsluiting_blijft_werken(shop):
+    """Een eerder opgeslagen uitsluiting als 'https://www.x.nl' moet ook de
+    genormaliseerde invoer 'x.nl' blijven uitsluiten — op de vergelijking,
+    bij het uitlezen én in het PriceShape-persistpad."""
+    import services.import_settings as imps
+    from routes.priceshape import persist_competitor_rows
+    dom = f"{PFX}-excl.nl"
+    # 1. Defensieve vergelijking: beide zijden genormaliseerd.
+    settings = {"disabled_competitors": [f"https://WWW.{dom}/"]}
+    assert imps.competitor_disabled(settings, dom) is True
+    assert imps.competitor_disabled({"disabled_competitors": [dom]},
+                                    f"HTTPS://www.{dom}") is True
+    db = SessionLocal()
+    try:
+        # 2. Opslaan + uitlezen canoniseert.
+        imps.save_settings(db, {}, [f"https://WWW.{dom}/"], "test")
+        stored = imps.get_settings(db)
+        assert dom in stored["disabled_competitors"]
+        # 3. PriceShape-persist: variant-uitsluiting blokkeert de rij echt.
+        if not db.query(models.DimProduct).filter_by(sku_id=SKU1).first():
+            db.add(models.DimProduct(sku_id=SKU1, product_name="Dntest P1",
+                                     shop_id=shop))
+            db.commit()
+        result = persist_competitor_rows(
+            db, [{"sku": SKU1, "competitor_name": f"www.{dom}",
+                  "competitor_price": "9.99",
+                  "timestamp": date.today().isoformat()}],
+            mode="append", username="dev_admin", filename="excl.csv")
+        db.commit()
+        assert result.get("skipped_by_settings", 0) >= 1
+        assert db.query(models.FactCompetitorPriceDaily).filter(
+            models.FactCompetitorPriceDaily.competitor_name == dom
+        ).count() == 0
+    finally:
+        db.rollback()
+        # Uitsluiting weer opruimen zodat andere tests er geen last van hebben.
+        try:
+            imps.save_settings(db, {}, [], "test")
+            db.commit()
+        except Exception:
+            db.rollback()
+        db.close()
+
+
+def test_rest_variant_lookup_resolvet_canoniek(client, admin_headers, shop):
+    """GET met variant-schrijfwijze in het pad resolvet dezelfde concurrent
+    als de canonieke naam (geen 404 door normalisatieverschil)."""
+    dom = f"{PFX}-restlookup.nl"
+    db = SessionLocal()
+    try:
+        db.add(models.CompetitorScoreResult(
+            shop_id=shop, competitor_name=dom, run_date=date.today()))
+        db.add(models.CompetitorProfile(shop_id=shop, competitor_name=dom,
+                                        assortment_size=3))
+        db.commit()
+        # (een volledige URL met '/' kan nooit als één padsegment binnenkomen)
+        for variant in (dom, f"WWW.{dom}", f"www.{dom}"):
+            r = client.get(f"/api/competition/competitor-scores/{variant}",
+                           params={"shop_id": shop}, headers=admin_headers)
+            assert r.status_code == 200, (variant, r.text)
+            r2 = client.get(f"/api/competition/competitors/{variant}",
+                            params={"shop_id": shop}, headers=admin_headers)
+            assert r2.status_code == 200, (variant, r2.text)
+    finally:
+        db.rollback()
+        db.query(models.CompetitorScoreResult).filter(
+            models.CompetitorScoreResult.competitor_name == dom).delete(
+            synchronize_session=False)
+        db.query(models.CompetitorProfile).filter(
+            models.CompetitorProfile.competitor_name == dom).delete(
+            synchronize_session=False)
+        db.commit()
+        db.close()
+
+
 # ── 3. Eenmalige merge van bestaande varianten ──────────────────────────────
 
 def test_merge_bestaande_varianten_niet_destructief(shop):

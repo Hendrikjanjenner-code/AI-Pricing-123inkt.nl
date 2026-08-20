@@ -18,7 +18,7 @@ import models
 
 ADMIN_LOGIN = {"username": "dev_admin", "password": "admin123"}
 
-PFX = f"RHTEST{uuid.uuid4().hex[:6]}"
+PFX = f"rhtest{uuid.uuid4().hex[:6]}"
 COMP_1 = f"{PFX}-alpha.nl"
 COMP_2 = f"{PFX}-beta.nl"
 

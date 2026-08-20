@@ -50,7 +50,11 @@ def get_settings(db: Session, connector_name: str = "priceshape") -> dict:
         if "max_delivery_days" in stored:
             raw = stored.get("max_delivery_days")
             mdd = int(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else None
-        disabled = [str(d).strip().lower() for d in (row.disabled_competitors or []) if str(d).strip()]
+        from services.domain_normalize import normalize_domain
+        # Canoniseer ook bij uitlezen: eerder opgeslagen varianten
+        # (https://www.x.nl) blijven werken als uitsluiting van x.nl.
+        disabled = [normalize_domain(d) or str(d).strip().lower()
+                    for d in (row.disabled_competitors or []) if str(d).strip()]
     return {
         "connector_name": connector_name,
         "components": components,
@@ -76,7 +80,10 @@ def save_settings(db: Session, components: dict, disabled_competitors: list[str]
                 or max_delivery_days < 1:
             raise ValueError("max_delivery_days moet een geheel getal ≥ 1 zijn (of null voor geen limiet)")
     clean_components = {k: bool(v) for k, v in (components or {}).items()}
-    clean_disabled = sorted({str(d).strip().lower() for d in (disabled_competitors or []) if str(d).strip()})
+    from services.domain_normalize import normalize_domain
+    clean_disabled = sorted({normalize_domain(d) or str(d).strip().lower()
+                             for d in (disabled_competitors or [])
+                             if str(d).strip()})
 
     row = db.query(models.FeedImportSetting).filter(
         models.FeedImportSetting.connector_name == connector_name
@@ -114,4 +121,15 @@ def delivery_excluded(settings: dict, delivery_days) -> bool:
 
 
 def competitor_disabled(settings: dict, domain: str) -> bool:
-    return (domain or "").strip().lower() in set(settings.get("disabled_competitors", []))
+    """True als deze concurrent is uitgevinkt in de importselectie.
+
+    Beide zijden worden domein-genormaliseerd (protocol/www/hoofdletters/
+    slash), zodat een eerder opgeslagen uitsluiting als
+    'https://www.example.nl' óók de canonieke invoer 'example.nl' blijft
+    uitsluiten na de domeinnormalisatie op de importpaden.
+    """
+    from services.domain_normalize import normalize_domain
+    stored = {normalize_domain(d) or str(d).strip().lower()
+              for d in settings.get("disabled_competitors", [])}
+    probe = normalize_domain(domain) or (domain or "").strip().lower()
+    return probe in stored

@@ -20,7 +20,8 @@ import models
 
 ADMIN_LOGIN = {"username": "dev_admin", "password": "admin123"}
 
-PFX = f"CPTEST{uuid.uuid4().hex[:6]}"
+# Kleine letters: concurrentnamen zijn canonieke (lowercase) domeinen.
+PFX = f"cptest{uuid.uuid4().hex[:6]}"
 COMP = f"{PFX}-concurrent.nl"
 COMP_B = f"{PFX}-andershop.nl"
 

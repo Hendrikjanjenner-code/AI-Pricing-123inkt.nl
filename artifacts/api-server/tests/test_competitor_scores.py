@@ -24,7 +24,7 @@ from engine import competitor_scores as engine_cs
 
 ADMIN_LOGIN = {"username": "dev_admin", "password": "admin123"}
 
-PFX = f"CSTEST{uuid.uuid4().hex[:6]}"
+PFX = f"cstest{uuid.uuid4().hex[:6]}"
 COMP_BIG = f"{PFX}-groot.nl"          # veel signalen, groei-historie
 COMP_DROP = f"{PFX}-dropship.nl"      # dropship, weinig financiële data
 COMP_EMPTY = f"{PFX}-leeg.nl"         # alleen legacy-profiel, alles unknown

@@ -101,3 +101,6 @@ externalPort = 5173
 OWNER_ADMIN_EMAIL = "hjenner@123inkt.nl"
 DISABLE_FEED_SYNC = "false"
 AI_COPILOT_MODEL = "gpt-5.6-terra"
+
+[userenv.development]
+FEED_SYNC_STARTUP_DELAY = "1800"

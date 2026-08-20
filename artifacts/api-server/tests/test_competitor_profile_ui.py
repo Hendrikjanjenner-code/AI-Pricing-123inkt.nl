@@ -19,7 +19,7 @@ import models
 
 ADMIN_LOGIN = {"username": "dev_admin", "password": "admin123"}
 
-PFX = f"CPUI{uuid.uuid4().hex[:6]}"
+PFX = f"cpui{uuid.uuid4().hex[:6]}"
 COMP_A = f"{PFX}-alfa.nl"
 COMP_B = f"{PFX}-beta.nl"
 COMP_C = f"{PFX}-gamma.nl"

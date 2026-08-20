@@ -604,6 +604,7 @@ def get_competitor_profile(
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     sid = _scope(db, shop_id)
+    competitor_name = _canon(competitor_name)
     profile = (
         db.query(models.CompetitorProfile)
         .filter(models.CompetitorProfile.competitor_name == competitor_name,
@@ -1423,7 +1424,7 @@ def get_competitor_ranking_history(
                 models.CompetitorRanking.run_date.in_(run_dates))
     )
     if competitor:
-        q = q.filter(models.CompetitorRanking.competitor_name == competitor)
+        q = q.filter(models.CompetitorRanking.competitor_name == _canon(competitor))
     _gf_sq = _filtered_competitor_names_sq(db, sid, hierarchy_node_ids, brands)
     if _gf_sq is not None:
         q = q.filter(models.CompetitorRanking.competitor_name.in_(_gf_sq))
@@ -1551,6 +1552,15 @@ def run_rankings(
 
 # ── NIEUW: Competition Intelligence — trends, events, dekking, kwaliteit ──────
 
+def _canon(name: str | None) -> str | None:
+    """Canoniseer een concurrentnaam uit een REST-parameter: een variant-
+    schrijfwijze ('WWW.X.nl') resolvet naar dezelfde concurrent ('x.nl')."""
+    if not name:
+        return name
+    from services.domain_normalize import normalize_domain
+    return normalize_domain(name) or name
+
+
 def _scope(db: Session, shop_id: Optional[int]) -> int:
     """Effectieve shop-scope voor competition-endpoints (default shop als geen
     shop_id is meegegeven; 404 bij onbekende shop)."""
@@ -1591,7 +1601,7 @@ def get_price_index_trend(
              models.FactCompetitorPriceDaily.price.isnot(None),
              models.FactCompetitorPriceDaily.shop_id == sid)
     if competitor:
-        q = q.filter(models.FactCompetitorPriceDaily.competitor_name == competitor)
+        q = q.filter(models.FactCompetitorPriceDaily.competitor_name == _canon(competitor))
     rows = q.all()
 
     prods = db.query(models.DimProduct.sku_id, models.DimProduct.current_price,
@@ -1660,7 +1670,7 @@ def get_coverage_trend(
         models.CompetitorCoverageResult.run_date >= since,
         models.CompetitorCoverageResult.shop_id == sid)
     if competitor:
-        q = q.filter(models.CompetitorCoverageResult.competitor_name == competitor)
+        q = q.filter(models.CompetitorCoverageResult.competitor_name == _canon(competitor))
     if category:
         q = q.filter(models.CompetitorCoverageResult.category == category)
     else:
@@ -1724,7 +1734,7 @@ def list_price_events(
     if event_type:
         q = q.filter(models.CompetitorPriceEvent.event_type == event_type)
     if competitor:
-        q = q.filter(models.CompetitorPriceEvent.competitor_name == competitor)
+        q = q.filter(models.CompetitorPriceEvent.competitor_name == _canon(competitor))
     if sku_id:
         q = q.filter(models.CompetitorPriceEvent.sku_id == sku_id)
     total = q.count()
@@ -1765,7 +1775,7 @@ def get_availability_trend(
         models.CompetitorAvailabilityDaily.date >= since,
         models.CompetitorAvailabilityDaily.shop_id == sid)
     if competitor:
-        q = q.filter(models.CompetitorAvailabilityDaily.competitor_name == competitor)
+        q = q.filter(models.CompetitorAvailabilityDaily.competitor_name == _canon(competitor))
     rows = q.order_by(models.CompetitorAvailabilityDaily.date).all()
     out: dict[str, list] = {}
     for r in rows:
@@ -2050,6 +2060,7 @@ def get_competitor_score_detail(
     """Volledige uitleg per concurrent: factoren, gewichten, bronnen,
     confidence per score + feature-dependency-gebruik. 404 buiten de shop."""
     sid = _scope(db, shop_id)
+    competitor_name = _canon(competitor_name)
     row = (db.query(models.CompetitorScoreResult)
            .filter(models.CompetitorScoreResult.shop_id == sid,
                    models.CompetitorScoreResult.competitor_name == competitor_name)
