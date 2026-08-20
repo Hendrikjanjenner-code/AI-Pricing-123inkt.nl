@@ -1,0 +1,579 @@
+KRITIEKE FIX – COMPETITION INTELLIGENCE DATA, PRODUCTHIERARCHIE EN PERSISTENTIE
+
+Analyseer en herstel de bestaande Competition Intelligence implementatie.
+
+De huidige applicatie vertoont aantoonbaar inconsistente states:
+
+1. Concurrent Discovery toont meerdere door admin goedgekeurde concurrenten.
+2. De pagina Concurrenten toont vervolgens “Geen concurrenten gevonden”.
+3. Het CI Dashboard bevat circa 1.070 concurrenten uit de PriceShape-context, maar Competition Relevance en Price Relevance zijn grotendeels 0.
+4. De huidige categorie-filtering gebruikt de centrale producthiërarchie niet correct.
+5. Het is niet mogelijk om betrouwbaar van hoofdgroep → categorie → subcategorie → verdere subcategorie → product te filteren.
+6. Data lijkt tussen discovery, approval, rankings en competitors niet consistent persistent te blijven.
+
+DIT MOET STRUCTUREEL WORDEN OPGELOST.
+
+==================================================
+A. BESCHRIJF EERST DE FUNCTIE VAN COMPETITION INTELLIGENCE
+==================================================
+
+Competition Intelligence is de centrale module die:
+
+- alle relevante concurrentdata uit PriceShape en andere toegestane bronnen verzamelt;
+- unieke concurrenten herkent;
+- concurrenten permanent opslaat;
+- discovery uitvoert;
+- menselijke goedkeuring beheert;
+- concurrentprofielen opbouwt;
+- competitor products opslaat;
+- competitor products koppelt aan interne producten;
+- iedere waarneming koppelt aan de canonical product hierarchy;
+- Competition Relevance berekent;
+- Price Relevance berekent;
+- Influence berekent;
+- rankings maakt;
+- analyses per producthiërarchie mogelijk maakt;
+- historie bewaart;
+- outputs levert aan Pricing, CatMan, Decision Engine en Copilot.
+
+Discovery is slechts een workflow binnen Competition Intelligence.
+
+Discovery is NIET de permanente opslagplaats van concurrenten.
+
+==================================================
+B. AUDIT DE HUIDIGE BUG
+==================================================
+
+Onderzoek exact:
+
+- welke database-table Concurrent Discovery gebruikt;
+- welke database-table Concurrenten gebruikt;
+- welke table CI Dashboard gebruikt;
+- waar PriceShape competitors worden opgeslagen;
+- waar approval status wordt opgeslagen;
+- welke API endpoints elk scherm gebruiken;
+- welke statuswaarden worden gebruikt;
+- welke shop/tenant filters actief zijn;
+- welke sync jobs data overschrijven;
+- welke backfills data opnieuw opbouwen.
+
+Documenteer de root cause voordat de fix wordt afgerond.
+
+==================================================
+C. MAAK ÉÉN CANONICAL COMPETITOR MASTER
+==================================================
+
+Gebruik één centrale competitors-entiteit.
+
+Minimaal:
+
+competitor_id
+canonical_name
+primary_domain
+source
+first_seen_at
+last_seen_at
+discovery_status
+approval_status
+approved_at
+approved_by
+active
+blocked
+created_at
+updated_at
+
+Gebruik domain normalization.
+
+Voorbeelden:
+
+https://www.example.nl
+www.example.nl
+example.nl
+
+moeten naar dezelfde canonical competitor kunnen verwijzen.
+
+Gebruik waar nodig competitor_aliases.
+
+==================================================
+D. HAAL ALLE CONCURRENTEN UIT PRICESHAPE
+==================================================
+
+Bij iedere PriceShape feed sync:
+
+1. Lees alle unieke competitor domains/sellers uit de beschikbare PriceShape feed.
+2. Normaliseer deze.
+3. UPSERT naar canonical competitors.
+4. Update last_seen_at.
+5. Maak geen duplicates.
+6. Verwijder geen bestaande concurrenten.
+7. Behoud approvals.
+8. Behoud menselijke correcties.
+9. Behoud historical scores.
+10. Log de sync.
+
+Maak een reconciliation report:
+
+PriceShape unique competitors
+Canonical competitors matched
+New competitors
+Existing competitors updated
+Unmatched records
+Errors
+Duplicates prevented.
+
+==================================================
+E. APPROVAL MOET PERMANENT WORDEN
+==================================================
+
+Wanneer admin in Discovery op Goedkeuren klikt:
+
+- update canonical competitor;
+- approval_status = APPROVED;
+- approved_at opslaan;
+- approved_by opslaan;
+- discovery record koppelen;
+- category mappings behouden;
+- evidence behouden.
+
+De pagina Concurrenten moet onmiddellijk dezelfde approved competitor tonen.
+
+Test dit end-to-end.
+
+Refresh browser.
+
+Restart application.
+
+Run nieuwe PriceShape sync.
+
+Run nieuwe discovery.
+
+De competitor moet goedgekeurd blijven.
+
+==================================================
+F. GEEN DESTRUCTIEVE SYNC
+==================================================
+
+Geen:
+
+TRUNCATE competitors
+
+Geen:
+
+DELETE competitors WHERE source = PriceShape
+
+Geen volledige delete/rebuild.
+
+Gebruik:
+
+UPSERT
+VERSIONING
+FIRST_SEEN
+LAST_SEEN.
+
+Als een competitor niet meer in de laatste feed voorkomt:
+
+markeer eventueel feed_status = NOT_RECENTLY_SEEN.
+
+Verwijder het record niet.
+
+==================================================
+G. CANONICAL PRODUCT HIERARCHY IS LEIDEND
+==================================================
+
+Gebruik de reeds ingeladen centrale producthiërarchie.
+
+Deze bevat alle huidige categorieën, subcategorieën en onderliggende niveaus.
+
+PriceShape-categories zijn NIET leidend.
+
+Iedere PriceShape observation moet waar mogelijk worden gekoppeld via:
+
+PriceShape competitor product
+→ product match
+→ internal product / SKU
+→ canonical product hierarchy assignment.
+
+Bewaar PriceShape category alleen als source metadata.
+
+==================================================
+H. HIERARCHISCHE FILTER
+==================================================
+
+Vervang de huidige simpele “Alle categorieën” filter door een echte hierarchical Product Hierarchy Filter.
+
+Ondersteun:
+
+Hoofdgroep
+→ categorie
+→ subcategorie
+→ sub-subcategorie
+→ verdere onderliggende niveaus
+→ product
+→ SKU.
+
+Gebruik dynamisch de daadwerkelijke hierarchy depth.
+
+Hardcode geen Office Food.
+
+Lees de nodes uit de database.
+
+==================================================
+I. DESCENDANT FILTERING
+==================================================
+
+Wanneer gebruiker Office Food kiest:
+
+selecteer uitsluitend producten waarvan de canonical hierarchy descendant is van Office Food.
+
+ALLE widgets op het scherm gebruiken exact dezelfde productset.
+
+Geen Office Writing.
+Geen Office Notes.
+Geen Markers tenzij zij werkelijk descendants zijn.
+
+Wanneer gebruiker selecteert:
+
+Office Food
+→ Drinks
+
+gebruik alleen descendants van Drinks.
+
+Wanneer:
+
+Office Food
+→ Drinks
+→ Coffee
+
+gebruik alleen Coffee descendants.
+
+Wanneer leaf/product wordt gekozen:
+
+gebruik uitsluitend dat product/SKU.
+
+==================================================
+J. FILTER OVER DE GEHELE TOOL
+==================================================
+
+Maak Product Hierarchy onderdeel van Global Filter Context.
+
+Dezelfde selection moet werken in:
+
+Competition
+Pricing
+CatMan
+Brand
+BCG
+Traffic
+SEO/SEA/GEO/AEO
+Supplier
+Supply Chain
+Promotion
+Basket
+Switching
+Loyalty
+Forecast
+Opportunity
+Management
+Decision Engine
+Copilot.
+
+Navigeren tussen modules mag de actieve hierarchy niet verliezen.
+
+==================================================
+K. AUTOMATISCHE HIERARCHY SYNCHRONISATIE
+==================================================
+
+Als DRS nieuwe:
+
+- products;
+- categories;
+- hierarchy nodes;
+- paths
+
+levert:
+
+detecteer deze automatisch tijdens sync.
+
+Gebruik:
+
+staging
+→ validation
+→ upsert.
+
+Nieuwe nodes moeten automatisch beschikbaar worden in filters.
+
+Geen handmatige frontend-aanpassing nodig.
+
+==================================================
+L. PRICESHAPE EN NIEUWE PRODUCTEN
+==================================================
+
+Wanneer PriceShape nieuwe producten of categoriegegevens bevat:
+
+1. sla source category op;
+2. match product aan internal SKU;
+3. gebruik vervolgens internal SKU hierarchy;
+4. indien internal mapping ontbreekt: markeer NEEDS_MAPPING;
+5. invent geen nieuwe canonical categorie zonder geldige interne mapping.
+
+==================================================
+M. REKEN RANKINGS PER HIERARCHY CONTEXT
+==================================================
+
+Competition Relevance moet categorie-/hierarchy-afhankelijk zijn.
+
+Voorbeeld:
+
+Concurrent A
+
+Office Food relevance = 87
+
+Office Writing relevance = 22
+
+Markers relevance = 5.
+
+Het algemene competitor business profile blijft hetzelfde.
+
+De category relevance verandert per node.
+
+==================================================
+N. PRICE RELEVANCE
+==================================================
+
+Bereken Price Relevance binnen de geselecteerde hierarchy.
+
+Gebruik alleen relevante competitor price observations.
+
+Controleer:
+
+- match quality;
+- pack size;
+- unit normalization;
+- VAT;
+- shipping;
+- stock;
+- freshness;
+- promotion;
+- seller type.
+
+==================================================
+O. INFLUENCE
+==================================================
+
+Bereken Influence binnen geselecteerde hierarchy.
+
+Geen algemene price-history score gebruiken alsof dit categoriespecifieke influence is.
+
+==================================================
+P. ONDERZOEK DE 8.356 PRIJSUITBIJTERS
+==================================================
+
+Het CI Dashboard toont momenteel een zeer groot aantal uitgesloten prijzen als “Prijsuitbijter”.
+
+Onderzoek root cause.
+
+Controleer minimaal:
+
+- verpakkingseenheden;
+- multiplier;
+- decimal separators;
+- currency;
+- VAT;
+- price per unit;
+- pack quantity;
+- mapping errors;
+- incorrect product matches;
+- extreme percentage threshold.
+
+Maak Data Quality report.
+
+Verwijder uitbijters niet stilzwijgend.
+
+Toon waarom zij uitgesloten zijn.
+
+==================================================
+Q. CI DASHBOARD NIEUWE FILTERSTRUCTUUR
+==================================================
+
+Boven CI Dashboard:
+
+Shop
+Producthiërarchie
+Periode
+Merk
+Competitor
+Status
+
+Producthierarchie moet cascading/tree selector zijn.
+
+Toon actieve context:
+
+Office Food
+> Drinks
+> Coffee.
+
+Alle KPI cards, rankings en tables gebruiken deze context.
+
+==================================================
+R. CONCURRENTEN PAGINA FIX
+==================================================
+
+Concurrenten toont canonical approved competitors.
+
+Niet discovery-records.
+
+Filters:
+
+- hierarchy;
+- domain/name;
+- Competition DNA;
+- status;
+- company size;
+- geography;
+- fulfilment;
+- financial health;
+- data confidence.
+
+Toon minimaal:
+
+Competitor
+Approval
+Competition Relevance
+Price Relevance
+Influence
+Business Strength
+Last Seen
+Source.
+
+==================================================
+S. DISCOVERY PAGINA
+==================================================
+
+Discovery toont kandidaten die review nodig hebben.
+
+Tabs:
+
+Needs Review
+Approved
+Rejected
+Blocked
+All Observed.
+
+Approved records blijven zichtbaar als historie maar hoeven niet opnieuw goedgekeurd te worden.
+
+==================================================
+T. COMPETITOR CATEGORY MAPPING
+==================================================
+
+Maak betrouwbare mappings:
+
+competitor_id
+hierarchy_node_id
+hierarchy_path_id
+products_observed
+matched_products
+price_observations
+first_seen_at
+last_seen_at
+competition_relevance
+price_relevance
+influence
+confidence.
+
+Hierdoor kan één concurrent verschillende scores hebben per categorie.
+
+==================================================
+U. DATA PERSISTENCE TEST
+==================================================
+
+Maak automatische test:
+
+1. PriceShape sync.
+2. Detect competitor.
+3. Approve competitor.
+4. Verify Concurrenten page.
+5. Restart app.
+6. Verify competitor still exists.
+7. Run PriceShape sync.
+8. Verify approval still exists.
+9. Run discovery again.
+10. Verify no duplicate.
+11. Change hierarchy filter.
+12. Verify correct competitor-category data.
+
+Deze test moet slagen.
+
+==================================================
+V. HIERARCHY FILTER END-TO-END TEST
+==================================================
+
+Selecteer Office Food.
+
+Verzamel de effectieve internal product IDs.
+
+Controleer dat ieder product descendant is van Office Food.
+
+Controleer dat geen Office Writing-product voorkomt.
+
+Herhaal voor een diepere node.
+
+Herhaal tot SKU-niveau.
+
+Test dezelfde context in:
+
+Competition
+Pricing
+Brand
+Basket
+Decision Engine
+Copilot.
+
+==================================================
+W. DATA RECONCILIATION DASHBOARD
+==================================================
+
+Maak onder Competition Data Quality een reconciliation sectie:
+
+PriceShape competitors
+Canonical competitors
+Approved competitors
+Needs review
+Competitors with products
+Competitors with internal matches
+Competitors with hierarchy mapping
+Competitors with valid prices
+Competitors with calculated relevance.
+
+Hiermee wordt onmiddellijk zichtbaar waar records verloren gaan.
+
+==================================================
+X. HARDE ACCEPTANCE CRITERIA
+==================================================
+
+De fix is pas klaar wanneer:
+
+- alle unieke PriceShape competitors permanent kunnen worden opgeslagen;
+- approved competitors zichtbaar zijn onder Concurrenten;
+- approvals refresh/restart/sync overleven;
+- geen duplicate competitors ontstaan;
+- Product Hierarchy daadwerkelijk vanuit centrale hierarchy komt;
+- Office Food filtering alleen Office Food descendants bevat;
+- drill-down tot product/SKU werkt;
+- nieuwe DRS hierarchy nodes automatisch worden opgenomen;
+- PriceShape observations via internal SKU naar hierarchy worden gekoppeld;
+- Competition Relevance per hierarchy werkt;
+- Price Relevance per hierarchy werkt;
+- Influence per hierarchy werkt;
+- CI Dashboard filtercontext overal wordt toegepast;
+- data niet destructief wordt verwijderd;
+- de 8.356 price outliers onderzocht en verklaard zijn;
+- Data Quality laat zien waar mappings ontbreken;
+- end-to-end persistence tests slagen.
+
+START MET ROOT-CAUSE ANALYSE.
+
+MAAK DAARNA DE DATASTRUCTUUR CORRECT.
+
+FIX PAS DAARNA DE UI.
+
+GEEN COSMETISCHE WORKAROUND VOOR EEN DATABASE-/INTEGRATIEPROBLEEM.
