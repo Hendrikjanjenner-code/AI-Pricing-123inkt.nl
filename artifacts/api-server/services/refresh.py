@@ -60,6 +60,23 @@ def run_model_refresh(db, model_version: str = "autosync-v1.0.0",
     )
     db.commit()
 
+    # Automatische hiërarchie uit feed-categorieën actueel houden (taak #274).
+    # In een EIGEN sessie ná de ModelRun-commit: een fout of rollback hier kan
+    # de zojuist vastgelegde modelrun-resultaten nooit meer raken, en de
+    # modelrun wordt niet ten onrechte als geslaagd geregistreerd terwijl zijn
+    # werk is teruggedraaid.
+    try:
+        from services.hierarchy_autobuild import autobuild_hierarchy
+        from database import SessionLocal
+        hdb = SessionLocal()
+        try:
+            autobuild_hierarchy(hdb)
+        finally:
+            hdb.close()
+    except Exception:
+        logger.exception("Automatische hiërarchie-opbouw na sync mislukt "
+                         "(modelrun zelf blijft geslaagd).")
+
     return processed, skipped
 
 

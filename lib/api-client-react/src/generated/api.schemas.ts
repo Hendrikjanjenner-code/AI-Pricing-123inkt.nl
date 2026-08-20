@@ -1040,6 +1040,14 @@ export type ListProductsParams = {
   /**
    * @nullable
    */
+  hierarchy_node_ids?: string | null;
+  /**
+   * @nullable
+   */
+  brands?: string | null;
+  /**
+   * @nullable
+   */
   page?: number | null;
   /**
    * @nullable

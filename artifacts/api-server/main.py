@@ -139,6 +139,21 @@ async def lifespan(app: FastAPI):
                 _mdb.close()
             logger.info("Startup: concurrent-domeinmerge gecontroleerd/uitgevoerd.")
 
+            # 3-quater. Automatische hiërarchie uit feed-categorieën als er
+            # nog helemaal geen hiërarchie bestaat (taak #274) — daarna houdt
+            # elke feed-sync hem actueel via run_model_refresh. Faalveilig.
+            try:
+                from services.hierarchy_autobuild import autobuild_hierarchy
+                _hdb = _SL()
+                try:
+                    if _hdb.query(models.ProductHierarchyNode.id).first() is None:
+                        autobuild_hierarchy(_hdb)
+                finally:
+                    _hdb.close()
+            except Exception as _hb_exc:
+                logger.warning("Startup: automatische hiërarchie-opbouw "
+                               "mislukt (niet kritiek): %s", _hb_exc)
+
             # 3a. Dev-only safety net: guarantee a recoverable admin login exists
             # locally without ever touching/deleting existing data (no-op in prod).
             from auth import create_default_admin_if_missing

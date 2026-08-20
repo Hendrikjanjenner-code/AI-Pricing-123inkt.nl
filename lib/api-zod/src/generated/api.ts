@@ -181,6 +181,8 @@ export const ListProductsQueryParams = zod.object({
   strategy_type: zod.coerce.string().nullish(),
   lifecycle_status: zod.coerce.string().nullish(),
   search: zod.coerce.string().nullish(),
+  hierarchy_node_ids: zod.coerce.string().nullish(),
+  brands: zod.coerce.string().nullish(),
   page: zod.coerce.number().nullish(),
   page_size: zod.coerce.number().nullish(),
 });

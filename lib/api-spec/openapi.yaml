@@ -216,6 +216,14 @@ paths:
           in: query
           schema:
             type: ["string", "null"]
+        - name: hierarchy_node_ids
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: brands
+          in: query
+          schema:
+            type: ["string", "null"]
         - name: page
           in: query
           schema:

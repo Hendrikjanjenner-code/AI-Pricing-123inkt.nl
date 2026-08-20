@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Search, ChevronRight } from "lucide-react";
 import SmartFilters, { SmartFilterValues, EMPTY_FILTERS } from "@/components/filters/SmartFilters";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
 
 const STRATEGIE_LABELS: Record<string, string> = {
   SUBSTITUTION_PORTFOLIO: "Substitutieportfolio",
@@ -91,6 +93,16 @@ function filtersFromUrl(): SmartFilterValues {
 export default function Producten() {
   const [page, setPage] = useState(1);
 
+  // Globale filtercontext (hiërarchie + merk) — zelfde context als de
+  // dashboards, zodat een categoriekeuze ook de productenlijst filtert.
+  const globalFilters = useGlobalFilters();
+  const hierarchyNodeIds =
+    globalFilters.hierarchy.length > 0
+      ? globalFilters.hierarchy.map((n) => n.id).join(",")
+      : undefined;
+  const globalBrands =
+    globalFilters.brands.length > 0 ? globalFilters.brands.join(",") : undefined;
+
   // Deep-link filters uit de URL (eenmalig bij mount gelezen)
   const [initialFilters] = useState<SmartFilterValues>(() => filtersFromUrl());
 
@@ -127,6 +139,8 @@ export default function Producten() {
   }, []);
 
   const { data, isLoading } = useListProducts({
+    hierarchy_node_ids: hierarchyNodeIds,
+    brands: globalBrands,
     page,
     page_size: 100,
     search: zoekterm || undefined,
@@ -200,6 +214,9 @@ export default function Producten() {
           {isLoading ? "…" : `${items.length} producten`}
         </div>
       </div>
+
+      {/* Globale filtercontext (hiërarchie + merk), gedeeld met de dashboards */}
+      <GlobalFilterBar />
 
       {/* Zoekbalk + Zoeken-knop + Wis alles */}
       <div className="flex items-center gap-3 bg-card p-3 border rounded-lg">

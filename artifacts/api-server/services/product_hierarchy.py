@@ -6,6 +6,7 @@ descendant-queries via het gematerialiseerde pad.
 """
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime
 
@@ -13,6 +14,8 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 import models
+
+logger = logging.getLogger("uvicorn.error")
 
 MAX_LEVELS = 8            # spec vraagt 2–6, we staan tot 8 toe (met warning >6)
 WARN_LEVELS = 6
@@ -241,8 +244,15 @@ def validate_job(db: Session, job: models.ImportJob) -> dict:
 # ── Impactanalyse ────────────────────────────────────────────────────────────
 
 def _existing_tree_index(db: Session):
-    """Index van bestaande nodes: op (parent_id, naam) en op external_option_id."""
-    nodes = db.query(models.ProductHierarchyNode).all()
+    """Index van bestaande nodes: op (parent_id, naam) en op external_option_id.
+
+    Automatisch afgeleide nodes (feed-categorieën) worden bewust uitgesloten:
+    een import mag een auto-node nooit hergebruiken/heractiveren, anders blijft
+    de boom deels 'auto' en verliest de import zijn leidende rol.
+    """
+    from services.hierarchy_autobuild import AUTO_SOURCE
+    nodes = (db.query(models.ProductHierarchyNode)
+             .filter(models.ProductHierarchyNode.source != AUTO_SOURCE).all())
     by_id = {n.id: n for n in nodes}
     by_parent_name = {(n.parent_id, n.name.lower()): n for n in nodes}
     by_opt = {n.external_option_id: n for n in nodes if n.external_option_id}
@@ -431,6 +441,26 @@ def apply_job(db: Session, job: models.ImportJob, username: str,
     if not claimed:
         raise ValueError("Import is al toegepast of wordt al toegepast")
     db.refresh(job)
+
+    # Serialiseer met de autobuild (zelfde advisory lock, blokkerend): een
+    # gelijktijdige autobuild die zijn "geen handmatige boom"-controle al
+    # deed mag niet meer committen nadat de import de auto-boom retireert.
+    # Transactie-gebonden: komt vrij bij de commit/rollback van deze apply.
+    from services.hierarchy_autobuild import (
+        retire_auto_hierarchy, _ADVISORY_LOCK_KEY,
+    )
+    from sqlalchemy import text as _sa_text
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(_sa_text("SELECT pg_advisory_xact_lock(:k)"),
+                   {"k": _ADVISORY_LOCK_KEY})
+
+    # Handmatige import is leidend: zet een eventueel automatisch afgeleide
+    # boom (feed-categorieën) buiten gebruik vóór de import wordt toegepast,
+    # zodat de auto-nodes niet als extra roots naast de import blijven staan.
+    retired = retire_auto_hierarchy(db, import_job_id=job.id)
+    if retired:
+        logger.info("Automatische hiërarchie buiten gebruik gesteld "
+                    "(%d nodes) — import wordt leidend.", retired)
 
     by_id, by_parent_name, by_opt = _existing_tree_index(db)
     now = datetime.utcnow()
