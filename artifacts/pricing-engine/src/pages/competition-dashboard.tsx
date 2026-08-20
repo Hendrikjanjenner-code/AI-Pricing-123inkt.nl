@@ -13,6 +13,9 @@ import { useState } from "react";
 import { useShopId, withShop } from "@/hooks/use-shop-id";
 import { useAuth } from "@/lib/auth";
 import { useEngineRun } from "@/lib/use-engine-run";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -81,23 +84,35 @@ export default function CompetitionDashboard() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const canRunRankings = user?.role === "admin" || user?.role === "pricing_manager";
-  const [categoryFilter, setCategoryFilter] = useState("all");
   const [zoekterm, setZoekterm] = useState("");
 
+  // Global Filter Context (taak #263): hiërarchie/merk gaan als queryparams
+  // mee; de server expandeert parent-selecties naar alle descendants.
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
+  const withFilters = (p: URLSearchParams) => {
+    new URLSearchParams(filterQs).forEach((v, k) => p.set(k, v));
+    return p;
+  };
+
   const { data: dashData, isLoading } = useQuery({
-    queryKey: ["competition-dashboard", categoryFilter, shopId],
+    queryKey: ["competition-dashboard", shopId, filterQs],
     queryFn: () => {
       const p = new URLSearchParams();
-      if (categoryFilter !== "all") p.set("category", categoryFilter);
       if (shopId !== undefined) p.set("shop_id", String(shopId));
-      const qs = p.toString();
+      const qs = withFilters(p).toString();
       return apiFetch(`/api/competition/dashboard${qs ? `?${qs}` : ""}`);
     },
   });
 
   const { data: summary } = useQuery({
-    queryKey: ["competition-summary", shopId],
-    queryFn: () => apiFetch(`/api/competition/summary${shopId !== undefined ? `?shop_id=${shopId}` : ""}`),
+    queryKey: ["competition-summary", shopId, filterQs],
+    queryFn: () => {
+      const p = new URLSearchParams();
+      if (shopId !== undefined) p.set("shop_id", String(shopId));
+      const qs = withFilters(p).toString();
+      return apiFetch(`/api/competition/summary${qs ? `?${qs}` : ""}`);
+    },
   });
 
   const [rankScope, setRankScope] = useState("overall");
@@ -110,12 +125,12 @@ export default function CompetitionDashboard() {
       return next;
     });
   const { data: rankData, isLoading: rankLoading } = useQuery({
-    queryKey: ["competition-rankings", rankScope, shopId, rankFilters],
+    queryKey: ["competition-rankings", rankScope, shopId, rankFilters, filterQs],
     queryFn: () => {
       const p = new URLSearchParams({ scope: rankScope });
       if (shopId !== undefined) p.set("shop_id", String(shopId));
       Object.entries(rankFilters).forEach(([k, v]) => p.set(k, v));
-      return apiFetch(`/api/competition/rankings?${p}`);
+      return apiFetch(`/api/competition/rankings?${withFilters(p)}`);
     },
   });
   const rankings = rankData?.rankings || [];
@@ -128,11 +143,11 @@ export default function CompetitionDashboard() {
   });
   const [openHistory, setOpenHistory] = useState<string | null>(null);
   const { data: histData } = useQuery({
-    queryKey: ["competition-rankings-history", rankScope, shopId],
+    queryKey: ["competition-rankings-history", rankScope, shopId, filterQs],
     queryFn: () => {
       const p = new URLSearchParams({ scope: rankScope });
       if (shopId !== undefined) p.set("shop_id", String(shopId));
-      return apiFetch(`/api/competition/rankings/history?${p}`);
+      return apiFetch(`/api/competition/rankings/history?${withFilters(p)}`);
     },
     enabled: rankings.length > 0,
   });
@@ -140,7 +155,6 @@ export default function CompetitionDashboard() {
   const rankScopes: string[] = rankData?.scopes?.length ? rankData.scopes : ["overall"];
 
   const categories = dashData?.categories || [];
-  const allCategories = Array.from(new Set(categories.map((c: any) => c.category))) as string[];
 
   const filteredCategories = categories.filter((cat: any) => {
     if (!zoekterm) return true;
@@ -155,6 +169,8 @@ export default function CompetitionDashboard() {
         <h1 className="text-2xl font-bold tracking-tight">Competition Intelligence Dashboard</h1>
         <p className="text-muted-foreground mt-1">Top concurrenten per categorie — verkeerslicht, 7 scores, strategie en prijsactiviteit.</p>
       </div>
+
+      <GlobalFilterBar />
 
       {/* KPI cards */}
       {summary && (
@@ -440,19 +456,12 @@ export default function CompetitionDashboard() {
         </CardContent>
       </Card>
 
-      {/* Filters */}
+      {/* Zoeken (categoriekeuze loopt via de globale hiërarchiefilter) */}
       <div className="flex gap-3 flex-wrap">
         <div className="relative w-64">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input placeholder="Zoek concurrent of categorie..." className="pl-9" value={zoekterm} onChange={e => setZoekterm(e.target.value)} />
         </div>
-        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-          <SelectTrigger className="w-52"><SelectValue placeholder="Alle categorieën" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Alle categorieën</SelectItem>
-            {allCategories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-          </SelectContent>
-        </Select>
       </div>
 
       {isLoading ? (

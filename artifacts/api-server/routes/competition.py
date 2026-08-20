@@ -15,7 +15,7 @@ from database import get_db
 import models
 import auth as auth_utils
 from engine import competition_intelligence
-from routes.global_filters import resolve_sku_filter
+from routes.global_filters import sku_filter_query
 
 router = APIRouter(prefix="/api/competition", tags=["competition"])
 
@@ -31,15 +31,18 @@ def get_competition_summary(
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     sid = _scope(db, shop_id)
-    shop_sku_ids = [r.sku_id for r in
-                    db.query(models.DimProduct.sku_id)
-                    .filter(models.DimProduct.shop_id == sid).all()]
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
-    if _gf is not None:
-        shop_sku_ids = [s for s in shop_sku_ids if s in _gf]
-    scores = db.query(models.SkuCompetitionScore).filter(
-        models.SkuCompetitionScore.sku_id.in_(shop_sku_ids)
-    ).all()
+    # Shop-SKU's en de globale filtercontext als SQL-subquery's — nooit als
+    # gematerialiseerde IN-lijst (parameterlimiet bij brede selecties).
+    shop_skus_sq = (db.query(models.DimProduct.sku_id)
+                    .filter(models.DimProduct.shop_id == sid)
+                    .scalar_subquery())
+    scores_q = db.query(models.SkuCompetitionScore).filter(
+        models.SkuCompetitionScore.sku_id.in_(shop_skus_sq))
+    _sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if _sku_q is not None:
+        scores_q = scores_q.filter(
+            models.SkuCompetitionScore.sku_id.in_(_sku_q.scalar_subquery()))
+    scores = scores_q.all()
     if not scores:
         return {
             "total_skus_scored": 0, "avg_pcis": 0,
@@ -105,27 +108,25 @@ def list_competition_skus(
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     sid = _scope(db, shop_id)
-    # Begrens tot SKU's van deze shop (en de globale filtercontext)
-    shop_sku_ids = [r.sku_id for r in
-                    db.query(models.DimProduct.sku_id)
-                    .filter(models.DimProduct.shop_id == sid).all()]
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
-    if _gf is not None:
-        shop_sku_ids = [s for s in shop_sku_ids if s in _gf]
+    # Begrens tot SKU's van deze shop en de globale filtercontext — als
+    # SQL-subquery's, nooit als gematerialiseerde IN-lijst.
+    shop_skus_sq = (db.query(models.DimProduct.sku_id)
+                    .filter(models.DimProduct.shop_id == sid)
+                    .scalar_subquery())
     q = db.query(models.SkuCompetitionScore).filter(
-        models.SkuCompetitionScore.sku_id.in_(shop_sku_ids)
-    )
+        models.SkuCompetitionScore.sku_id.in_(shop_skus_sq))
+    _sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if _sku_q is not None:
+        q = q.filter(
+            models.SkuCompetitionScore.sku_id.in_(_sku_q.scalar_subquery()))
     if competition_class:
         q = q.filter(models.SkuCompetitionScore.competition_class == competition_class)
     if category:
-        sku_ids = [
-            p.sku_id
-            for p in db.query(models.DimProduct).filter(
-                models.DimProduct.category == category,
-                models.DimProduct.shop_id == sid,
-            ).all()
-        ]
-        q = q.filter(models.SkuCompetitionScore.sku_id.in_(sku_ids))
+        cat_skus_sq = (db.query(models.DimProduct.sku_id)
+                       .filter(models.DimProduct.category == category,
+                               models.DimProduct.shop_id == sid)
+                       .scalar_subquery())
+        q = q.filter(models.SkuCompetitionScore.sku_id.in_(cat_skus_sq))
 
     total = q.count()
     col_map = {
@@ -253,23 +254,22 @@ def get_pcis_distribution(
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     sid = _scope(db, shop_id)
-    shop_sku_ids = [r.sku_id for r in
-                    db.query(models.DimProduct.sku_id)
-                    .filter(models.DimProduct.shop_id == sid).all()]
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
-    if _gf is not None:
-        shop_sku_ids = [s for s in shop_sku_ids if s in _gf]
+    shop_skus_sq = (db.query(models.DimProduct.sku_id)
+                    .filter(models.DimProduct.shop_id == sid)
+                    .scalar_subquery())
+    _sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
     classes = ["Critical", "Strong", "Influence", "Monitor", "Ignore"]
-    return [
-        {
-            "class": cls,
-            "count": db.query(models.SkuCompetitionScore).filter(
-                models.SkuCompetitionScore.competition_class == cls,
-                models.SkuCompetitionScore.sku_id.in_(shop_sku_ids),
-            ).count(),
-        }
-        for cls in classes
-    ]
+    out = []
+    for cls in classes:
+        q = db.query(models.SkuCompetitionScore).filter(
+            models.SkuCompetitionScore.competition_class == cls,
+            models.SkuCompetitionScore.sku_id.in_(shop_skus_sq),
+        )
+        if _sku_q is not None:
+            q = q.filter(models.SkuCompetitionScore.sku_id.in_(
+                _sku_q.scalar_subquery()))
+        out.append({"class": cls, "count": q.count()})
+    return out
 
 
 @router.get("/charts/price-index-by-category")
@@ -281,16 +281,18 @@ def get_price_index_by_category(
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     sid = _scope(db, shop_id)
-    shop_sku_ids = {r.sku_id for r in
-                   db.query(models.DimProduct.sku_id)
-                   .filter(models.DimProduct.shop_id == sid).all()}
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
-    if _gf is not None:
-        shop_sku_ids = shop_sku_ids & _gf
-    scores = db.query(models.SkuCompetitionScore).filter(
+    shop_skus_sq = (db.query(models.DimProduct.sku_id)
+                    .filter(models.DimProduct.shop_id == sid)
+                    .scalar_subquery())
+    scores_q = db.query(models.SkuCompetitionScore).filter(
         models.SkuCompetitionScore.price_index.isnot(None),
-        models.SkuCompetitionScore.sku_id.in_(shop_sku_ids),
-    ).all()
+        models.SkuCompetitionScore.sku_id.in_(shop_skus_sq),
+    )
+    _sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if _sku_q is not None:
+        scores_q = scores_q.filter(
+            models.SkuCompetitionScore.sku_id.in_(_sku_q.scalar_subquery()))
+    scores = scores_q.all()
     products = {
         p.sku_id: p
         for p in db.query(models.DimProduct).filter(
@@ -321,19 +323,21 @@ def get_sub_scores_by_class(
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     sid = _scope(db, shop_id)
-    shop_sku_ids = [r.sku_id for r in
-                    db.query(models.DimProduct.sku_id)
-                    .filter(models.DimProduct.shop_id == sid).all()]
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
-    if _gf is not None:
-        shop_sku_ids = [s for s in shop_sku_ids if s in _gf]
+    shop_skus_sq = (db.query(models.DimProduct.sku_id)
+                    .filter(models.DimProduct.shop_id == sid)
+                    .scalar_subquery())
+    _sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
     classes = ["Critical", "Strong", "Influence", "Monitor", "Ignore"]
     result = []
     for cls in classes:
-        rows = db.query(models.SkuCompetitionScore).filter(
+        rows_q = db.query(models.SkuCompetitionScore).filter(
             models.SkuCompetitionScore.competition_class == cls,
-            models.SkuCompetitionScore.sku_id.in_(shop_sku_ids),
-        ).all()
+            models.SkuCompetitionScore.sku_id.in_(shop_skus_sq),
+        )
+        if _sku_q is not None:
+            rows_q = rows_q.filter(models.SkuCompetitionScore.sku_id.in_(
+                _sku_q.scalar_subquery()))
+        rows = rows_q.all()
         if not rows:
             continue
         n = len(rows)
@@ -356,12 +360,18 @@ def get_sub_scores_by_class(
 def get_competition_dashboard(
     category: Optional[str] = Query(None),
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     """
     Top-10 concurrenten per categorie met alle 7 scores, verkeerslicht,
     strategie-label en laatste prijswijziging — shop-gefilterd.
+
+    Globale filtercontext (taak #263): bij een actieve hiërarchie-/merkselectie
+    worden alleen categorieën met producten in de gefilterde SKU-set getoond,
+    en alleen concurrenten die op die SKU's zijn waargenomen.
     """
     sid = _scope(db, shop_id)
     q = db.query(models.CategoryCompetitorRelevance).filter(
@@ -369,6 +379,25 @@ def get_competition_dashboard(
     )
     if category:
         q = q.filter(models.CategoryCompetitorRelevance.category == category)
+    _sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if _sku_q is not None:
+        # Gecorreleerd EXISTS: houd een (categorie, concurrent)-rij alleen als
+        # de concurrent is waargenomen op een gefilterde SKU die zelf in die
+        # categorie valt. Twee losse predicaten zouden een concurrent-rij voor
+        # categorie B kunnen behouden puur omdat hij in categorie A op een
+        # geselecteerde SKU is gezien.
+        from sqlalchemy import exists, and_
+        F = models.FactCompetitorPriceDaily
+        P = models.DimProduct
+        CCR = models.CategoryCompetitorRelevance
+        q = q.filter(exists().where(and_(
+            F.competitor_name == CCR.competitor_name,
+            F.shop_id == sid,
+            F.sku_id.in_(_sku_q.scalar_subquery()),
+            P.sku_id == F.sku_id,
+            P.shop_id == sid,
+            P.category == CCR.category,
+        )))
     rows = q.order_by(
         models.CategoryCompetitorRelevance.category,
         models.CategoryCompetitorRelevance.combined_score.desc(),
@@ -537,6 +566,8 @@ def list_competitors(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -546,6 +577,11 @@ def list_competitors(
     )
     if relevance_label:
         q = q.filter(models.CompetitorProfile.relevance_label == relevance_label)
+    # Globale filtercontext (taak #263): alleen concurrenten die zijn
+    # waargenomen op de gefilterde SKU-set — als SQL-subquery.
+    _gf_sq = _filtered_competitor_names_sq(db, sid, hierarchy_node_ids, brands)
+    if _gf_sq is not None:
+        q = q.filter(models.CompetitorProfile.competitor_name.in_(_gf_sq))
     total = q.count()
     items = (
         q.order_by(models.CompetitorProfile.functional_overlap_score.desc())
@@ -1213,6 +1249,8 @@ def get_competitor_rankings(
     min_business_strength: Optional[float] = Query(None, ge=0.0, le=100.0),
     min_procurement_power: Optional[float] = Query(None, ge=0.0, le=100.0),
     min_data_completeness: Optional[float] = Query(None, ge=0.0, le=100.0),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -1237,14 +1275,20 @@ def get_competitor_rankings(
                 "changed": False,
                 "scopes": _ranking_scopes(db, sid)}
 
-    rows = (
+    rows_q = (
         db.query(models.CompetitorRanking)
         .filter(models.CompetitorRanking.scope == scope,
                 models.CompetitorRanking.run_date == latest,
                 models.CompetitorRanking.shop_id == sid)
-        .order_by(models.CompetitorRanking.rank)
-        .all()
     )
+    # Globale filtercontext (taak #263): beperk tot concurrenten die zijn
+    # waargenomen op de gefilterde SKU-set (hiërarchie-descendants + merken)
+    # — toegepast in SQL vóór het laden van de rijen.
+    _gf_sq = _filtered_competitor_names_sq(db, sid, hierarchy_node_ids, brands)
+    if _gf_sq is not None:
+        rows_q = rows_q.filter(
+            models.CompetitorRanking.competitor_name.in_(_gf_sq))
+    rows = rows_q.order_by(models.CompetitorRanking.rank).all()
     filters_active = any(v is not None for v in (
         company_size, geographic_scale, country, customer_model, market_role,
         fulfilment_model, financial_health, min_business_strength,
@@ -1305,6 +1349,8 @@ def get_competitor_ranking_history(
     shop_id: Optional[int] = Query(None),
     competitor: Optional[str] = Query(None),
     limit_runs: int = Query(12, ge=1, le=60),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -1334,6 +1380,9 @@ def get_competitor_ranking_history(
     )
     if competitor:
         q = q.filter(models.CompetitorRanking.competitor_name == competitor)
+    _gf_sq = _filtered_competitor_names_sq(db, sid, hierarchy_node_ids, brands)
+    if _gf_sq is not None:
+        q = q.filter(models.CompetitorRanking.competitor_name.in_(_gf_sq))
     rows = q.order_by(models.CompetitorRanking.run_date.asc(),
                       models.CompetitorRanking.rank.asc()).all()
     history: dict = {}
@@ -1348,6 +1397,31 @@ def get_competitor_ranking_history(
         "run_dates": [str(d) for d in sorted(run_dates)],
         "history": history,
     }
+
+
+def _filtered_competitor_names_sq(
+    db: Session, sid: Optional[int],
+    hierarchy_node_ids: Optional[str] = None,
+    brands: Optional[str] = None,
+):
+    """Scalar-subquery met concurrentnamen die zijn waargenomen op de
+    gefilterde SKU-set (globale filtercontext, taak #263).
+
+    None = geen globale filter actief (alles tonen). Anders een subquery die
+    rechtstreeks in `competitor_name.in_(...)`-predicaten past. Alles blijft
+    SQL — geen gematerialiseerde SKU- of naamlijsten — zodat ook brede
+    hiërarchie-/merkselecties met duizenden SKU's nooit tegen
+    parameterlimieten aanlopen.
+    """
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    if sku_q is None:
+        return None
+    F = models.FactCompetitorPriceDaily
+    q = db.query(F.competitor_name).filter(
+        F.sku_id.in_(sku_q.scalar_subquery()))
+    if sid is not None:
+        q = q.filter(F.shop_id == sid)
+    return q.distinct().scalar_subquery()
 
 
 def _last_feed_sync_at(db: Session):

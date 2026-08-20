@@ -110,6 +110,45 @@ def filter_metadata(
     }
 
 
+def sku_filter_query(
+    db: Session,
+    hierarchy_node_ids: Optional[str] = None,
+    brands: Optional[str] = None,
+):
+    """Query-variant van resolve_sku_filter (taak #263): None = geen filter
+    actief; anders een SQLAlchemy-query met één kolom (sku_id) die als
+    subquery in `IN (...)`-predicaten past. Zo hoeft een grote SKU-selectie
+    nooit als parameterlijst door Python/SQL te gaan.
+
+    Semantiek identiek aan resolve_sku_filter: een selectie die niets matcht
+    levert een query op die geen rijen teruggeeft (lege selectie ≠ geen filter).
+    """
+    from sqlalchemy import false
+
+    node_ids = parse_csv_ints(hierarchy_node_ids)
+    brand_list = parse_csv(brands)
+    if not node_ids and not brand_list:
+        return None
+    P = models.DimProduct
+    q = db.query(P.sku_id)
+    if brand_list:
+        q = q.filter(P.brand.in_(brand_list))
+    if node_ids:
+        N = models.ProductHierarchyNode
+        A = models.ProductHierarchyAssignment
+        nodes = db.query(N).filter(N.id.in_(node_ids)).all()
+        conds = [N.path.like(n.path + "%") for n in nodes if n.path]
+        if not conds:
+            # Nodes bestaan niet (meer) → filter actief, niets matcht.
+            return q.filter(false())
+        node_sq = db.query(N.id).filter(or_(*conds)).scalar_subquery()
+        assign_sq = (db.query(A.sku_id)
+                     .filter(A.node_id.in_(node_sq), A.status == "active")
+                     .scalar_subquery())
+        q = q.filter(P.sku_id.in_(assign_sq))
+    return q
+
+
 def resolve_sku_filter(
     db: Session,
     hierarchy_node_ids: Optional[str] = None,

@@ -15,3 +15,4 @@ Rule: dashboards join the global filter context by (1) rendering GlobalFilterBar
 - Niet-SKU-signalen matchen alleen op node-selectie, nooit op merkfilter: "niet evalueerbaar" ≠ "binnen selectie".
 - Exports die naar externe systemen gaan (DRS-CSV) mogen géén extra datakolommen krijgen; filtermetadata hoort in een aparte XLSX-tab of commentaarregel vóór de header.
 - Hiërarchie-ancestors op niveau N resolven via het gematerialiseerde node-path (ids-lijst, index N-1); geen recursieve queries nodig.
+- Filterselecties nooit als gematerialiseerde `IN (lijst)`-parameters de SQL in sturen; houd SKU-, concurrent- en categoriebeperkingen als composable subquery's, anders breekt de filter precies op brede selecties (bindlimiet 65535). Categorie×concurrent-rijen gecorreleerd filteren (waarneming in díe categorie), niet met twee losse predicaten.

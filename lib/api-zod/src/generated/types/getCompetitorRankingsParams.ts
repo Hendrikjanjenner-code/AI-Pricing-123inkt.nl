@@ -58,4 +58,14 @@ export type GetCompetitorRankingsParams = {
    * @nullable
    */
   min_data_completeness?: number | null;
+  /**
+   * CSV van producthiërarchie-node-ids (descendants tellen server-side mee)
+   * @nullable
+   */
+  hierarchy_node_ids?: string | null;
+  /**
+   * CSV van merknamen
+   * @nullable
+   */
+  brands?: string | null;
 };

@@ -1458,6 +1458,14 @@ paths:
         - name: min_data_completeness
           in: query
           schema: { type: ["number", "null"], minimum: 0, maximum: 100 }
+        - name: hierarchy_node_ids
+          in: query
+          description: CSV van producthiërarchie-node-ids (descendants tellen server-side mee)
+          schema: { type: ["string", "null"] }
+        - name: brands
+          in: query
+          description: CSV van merknamen
+          schema: { type: ["string", "null"] }
       responses:
         "200":
           description: Gefilterde rankinglijst met correcte totalen

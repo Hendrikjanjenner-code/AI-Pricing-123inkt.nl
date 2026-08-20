@@ -9,6 +9,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Search, Circle, Building2, TrendingDown } from "lucide-react";
 import { useShopId } from "@/hooks/use-shop-id";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
+import { apiFilterParams } from "@/lib/global-filters";
 
 function apiFetch(path: string) {
   const token = localStorage.getItem("auth_token");
@@ -32,12 +35,17 @@ export default function CompetitionCompetitors() {
   const [labelFilter, setLabelFilter] = useState("all");
   const [zoekterm, setZoekterm] = useState("");
 
+  // Global Filter Context (taak #263): hiërarchie/merk gaan als queryparams mee.
+  const globalFilters = useGlobalFilters();
+  const filterQs = apiFilterParams(globalFilters);
+
   const { data, isLoading } = useQuery({
-    queryKey: ["competition-competitors", labelFilter, shopId],
+    queryKey: ["competition-competitors", labelFilter, shopId, filterQs],
     queryFn: () => {
       const p = new URLSearchParams({ page_size: "100" });
       if (labelFilter !== "all") p.set("relevance_label", labelFilter);
       if (shopId !== undefined) p.set("shop_id", String(shopId));
+      new URLSearchParams(filterQs).forEach((v, k) => p.set(k, v));
       return apiFetch(`/api/competition/competitors?${p}`);
     },
   });
@@ -54,6 +62,8 @@ export default function CompetitionCompetitors() {
         <h1 className="text-2xl font-bold tracking-tight">Concurrenten</h1>
         <p className="text-muted-foreground mt-1">Alle goedgekeurde concurrenten met automatisch opgebouwd profiel en verkeerslicht.</p>
       </div>
+
+      <GlobalFilterBar />
 
       <div className="flex gap-3 flex-wrap">
         <div className="relative w-64">

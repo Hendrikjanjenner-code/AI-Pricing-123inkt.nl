@@ -1865,6 +1865,13 @@ export const GetCompetitorRankingsQueryParams = zod.object({
     .min(getCompetitorRankingsQueryMinDataCompletenessMin)
     .max(getCompetitorRankingsQueryMinDataCompletenessMax)
     .nullish(),
+  hierarchy_node_ids: zod.coerce
+    .string()
+    .nullish()
+    .describe(
+      "CSV van producthiërarchie-node-ids (descendants tellen server-side mee)",
+    ),
+  brands: zod.coerce.string().nullish().describe("CSV van merknamen"),
 });
 
 export const GetCompetitorRankingsResponse = zod.object({
