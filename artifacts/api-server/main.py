@@ -2,6 +2,7 @@
 AI Pricing Decision Engine — FastAPI main entry point.
 Registers all API routers under the /api prefix.
 """
+import asyncio
 import os
 import logging
 import traceback
@@ -74,13 +75,63 @@ startup_state: dict = {
     "last_start_error": None,
     "ai_provider_reachable": None,   # True / False / None (nog niet getest)
     "ai_provider_error": None,       # foutmelding als probe mislukt
+    # Zware hiërarchie-seed draait op de achtergrond ná het openen van de
+    # poort (taak #296): pending → running → done/skipped/error.
+    "hierarchy_seed_status": "pending",
+    "hierarchy_seed_error": None,
 }
+
+
+def _seed_hierarchy_blocking() -> None:
+    """Zware, eenmalige hiërarchie-seeding (Excel-import + fallback
+    auto-opbouw). Draait in een thread op de achtergrond zodat de poort en
+    healthcheck niet worden geblokkeerd. Beide stappen zijn idempotent en
+    faalveilig; een reeds geseede omgeving slaat direct over."""
+    startup_state["hierarchy_seed_status"] = "running"
+    _excel_status = "error: onbekend"
+    try:
+        from seed import seed_hierarchy_from_excel
+        _excel_status = seed_hierarchy_from_excel() or "done"
+        if _excel_status.startswith("error"):
+            startup_state["hierarchy_seed_error"] = _excel_status
+    except Exception as _excel_exc:
+        logger.warning("Achtergrond: Excel-hiërarchie seeding mislukt "
+                       "(niet kritiek): %s", _excel_exc)
+        _excel_status = f"error: {_excel_exc}"
+        startup_state["hierarchy_seed_error"] = str(_excel_exc)
+
+    # Automatische hiërarchie uit feed-categorieën als er nog helemaal geen
+    # hiërarchie bestaat (taak #274) — daarna houdt elke feed-sync hem actueel
+    # via run_model_refresh. Overgeslagen als de Excel-import nodes maakte.
+    try:
+        from services.hierarchy_autobuild import autobuild_hierarchy
+        from database import SessionLocal as _HSL
+        _hdb = _HSL()
+        try:
+            if _hdb.query(models.ProductHierarchyNode.id).first() is None:
+                autobuild_hierarchy(_hdb)
+        finally:
+            _hdb.close()
+    except Exception as _hb_exc:
+        logger.warning("Achtergrond: automatische hiërarchie-opbouw "
+                       "mislukt (niet kritiek): %s", _hb_exc)
+        startup_state["hierarchy_seed_error"] = (
+            startup_state["hierarchy_seed_error"] or str(_hb_exc))
+
+    startup_state["hierarchy_seed_status"] = (
+        "error" if startup_state["hierarchy_seed_error"]
+        else ("skipped" if _excel_status in ("skipped_existing", "disabled",
+                                             "missing_file") else "done"))
+    logger.info("Achtergrond: hiërarchie-seeding afgerond (status=%s).",
+                startup_state["hierarchy_seed_status"])
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Startup: backend starting (version %s).", APP_VERSION)
     global _db_bootstrap_done
+    _schedule_hierarchy_seed = False
+    hierarchy_seed_task = None
     try:
         # De DDL/seed-stappen (1 t/m 4) zijn idempotent maar niet gratis:
         # elke run kost ~1-2s aan schema-introspectie. In productie start het
@@ -139,31 +190,14 @@ async def lifespan(app: FastAPI):
                 _mdb.close()
             logger.info("Startup: concurrent-domeinmerge gecontroleerd/uitgevoerd.")
 
-            # 3-quater-a. Excel-producthiërarchie: importeer idempotent als er
-            # nog geen handmatige boom aanwezig is (taak #281). Faalveilig —
-            # een fout hier crasht de startup niet.
-            try:
-                from seed import seed_hierarchy_from_excel
-                seed_hierarchy_from_excel()
-            except Exception as _excel_exc:
-                logger.warning("Startup: Excel-hiërarchie seeding mislukt "
-                               "(niet kritiek): %s", _excel_exc)
-
-            # 3-quater. Automatische hiërarchie uit feed-categorieën als er
-            # nog helemaal geen hiërarchie bestaat (taak #274) — daarna houdt
-            # elke feed-sync hem actueel via run_model_refresh. Faalveilig.
-            # Wordt overgeslagen als de Excel-hiërarchie al nodes heeft aangemaakt.
-            try:
-                from services.hierarchy_autobuild import autobuild_hierarchy
-                _hdb = _SL()
-                try:
-                    if _hdb.query(models.ProductHierarchyNode.id).first() is None:
-                        autobuild_hierarchy(_hdb)
-                finally:
-                    _hdb.close()
-            except Exception as _hb_exc:
-                logger.warning("Startup: automatische hiërarchie-opbouw "
-                               "mislukt (niet kritiek): %s", _hb_exc)
+            # 3-quater-a/b. Producthiërarchie-seeding (Excel-import + fallback
+            # auto-opbouw) is de enige zware startup-stap (115k+ rijen stagen
+            # en toepassen, ~60-90s). Dat mag het openen van de poort nooit
+            # blokkeren: het deployment-platform SIGKILLt het proces als de
+            # poort niet binnen de timeout opengaat (taak #296). De seed wordt
+            # daarom hieronder — ná de snelle bootstrap — als achtergrondtaak
+            # gestart; zie _seed_hierarchy_background().
+            _schedule_hierarchy_seed = True
 
             # 3a. Dev-only safety net: guarantee a recoverable admin login exists
             # locally without ever touching/deleting existing data (no-op in prod).
@@ -288,6 +322,22 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("Startup: AI-sleutel monitor disabled via DISABLE_AI_KEY_MONITOR.")
 
+        # 8. Zware hiërarchie-seeding op de achtergrond (taak #296): pas ná de
+        # snelle bootstrap, in een thread, zodat uvicorn de poort direct kan
+        # openen en de healthcheck op /api meteen 2xx geeft. De seed zelf is
+        # idempotent; een reeds geseede omgeving is vrijwel meteen klaar.
+        # In testomgevingen (conftest zet DISABLE_HIERARCHY_SEED) wordt er
+        # helemaal niets gepland: ook de autobuild-fallback mag de
+        # hiërarchietabellen dan niet muteren.
+        if os.environ.get("DISABLE_HIERARCHY_SEED", "false").lower() in ("1", "true", "yes"):
+            _schedule_hierarchy_seed = False
+        if _schedule_hierarchy_seed:
+            hierarchy_seed_task = asyncio.create_task(
+                asyncio.to_thread(_seed_hierarchy_blocking))
+            logger.info("Startup: hiërarchie-seeding als achtergrondtaak gestart.")
+        else:
+            startup_state["hierarchy_seed_status"] = "skipped"
+
         startup_state["backend_status"] = "running"
         startup_state["started_at"] = datetime.now(timezone.utc).isoformat()
         logger.info("Startup: backend started successfully.")
@@ -306,17 +356,26 @@ async def lifespan(app: FastAPI):
         ai_key_monitor_task = None
         dq_scan_task = None
         budget_cleanup_task = None
+        hierarchy_seed_task = None
         # Re-raise so the process doesn't silently pretend to be healthy —
         # but the error is now captured in startup_state for diagnostics.
         raise
     try:
         yield
     finally:
-        for _bg_task in (health_monitor_task, feed_sync_task, ai_key_monitor_task, dq_scan_task, budget_cleanup_task):
+        for _bg_task in (health_monitor_task, feed_sync_task, ai_key_monitor_task, dq_scan_task, budget_cleanup_task, hierarchy_seed_task):
             if _bg_task is not None:
                 _bg_task.cancel()
                 try:
                     await _bg_task
+                except asyncio.CancelledError:
+                    # CancelledError is een BaseException (geen Exception);
+                    # zonder expliciete vangst zou een shutdown tijdens de
+                    # seed de lifespan abrupt laten falen. NB: een
+                    # to_thread-taak stopt de draaiende thread niet — de
+                    # seed-stappen zijn idempotent, dus een volgende start
+                    # maakt het werk veilig af of slaat over.
+                    pass
                 except Exception:
                     pass
 
@@ -536,6 +595,10 @@ def _build_health_payload() -> dict:
         "app_version": APP_VERSION,
         "started_at": startup_state["started_at"],
         "last_start_error": startup_state["last_start_error"],
+        "hierarchy_seed": {
+            "status": startup_state["hierarchy_seed_status"],
+            "error": startup_state["hierarchy_seed_error"],
+        },
         "auth": auth_status,
         "optional_modules": optional_modules,
     }

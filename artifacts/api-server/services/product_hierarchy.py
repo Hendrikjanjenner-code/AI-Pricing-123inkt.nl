@@ -432,8 +432,16 @@ def _sync_leaf_paths(db: Session) -> None:
             db.delete(row)
 
 
+class ManualTreeExists(Exception):
+    """De apply is afgebroken omdat er — gecontroleerd ónder de
+    hiërarchie-advisory-lock — al een actieve handmatige boom bestaat.
+    Gebruikt door de startup-seed (taak #296) om nooit een tweede boom
+    over een intussen handmatig geïmporteerde boom heen te zetten."""
+
+
 def apply_job(db: Session, job: models.ImportJob, username: str,
-              deactivate_missing: bool = False) -> dict:
+              deactivate_missing: bool = False,
+              require_no_manual_tree: bool = False) -> dict:
     """
     Pas de gevalideerde staging toe. Niet-destructief:
     - nodes worden ge-upsert (nooit verwijderd);
@@ -463,6 +471,25 @@ def apply_job(db: Session, job: models.ImportJob, username: str,
     if db.bind is not None and db.bind.dialect.name == "postgresql":
         db.execute(_sa_text("SELECT pg_advisory_xact_lock(:k)"),
                    {"k": _ADVISORY_LOCK_KEY})
+
+    # Precondition-guard voor de startup-seed: pas NA het verkrijgen van de
+    # lock controleren of er intussen een actieve handmatige boom is
+    # toegepast. Alleen zo is de check atomisch met de apply — een check
+    # vóór de lock kan door een parallelle wizard-import worden ingehaald.
+    if require_no_manual_tree:
+        from services.hierarchy_autobuild import AUTO_SOURCE as _AUTO_SRC
+        _manual = (db.query(models.ProductHierarchyNode.id)
+                   .filter(models.ProductHierarchyNode.source != _AUTO_SRC,
+                           models.ProductHierarchyNode.is_active.is_(True))
+                   .first())
+        if _manual is not None:
+            # Job terug naar 'gevalideerd' zodat de afbraak zichtbaar en
+            # herhaalbaar is; de transactie-lock komt vrij bij de commit.
+            job.status = "gevalideerd"
+            db.commit()
+            raise ManualTreeExists(
+                "actieve handmatige hiërarchieboom aanwezig — apply "
+                "overgeslagen")
 
     # Handmatige import is leidend: zet een eventueel automatisch afgeleide
     # boom (feed-categorieën) buiten gebruik vóór de import wordt toegepast,

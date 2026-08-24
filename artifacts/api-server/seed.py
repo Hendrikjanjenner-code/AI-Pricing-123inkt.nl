@@ -666,9 +666,12 @@ def _excel_hierarchy_path() -> str:
     return os.path.join(base, "..", "..", "attached_assets", _EXCEL_HIERARCHY_FILENAME)
 
 
-def seed_hierarchy_from_excel() -> None:
+def seed_hierarchy_from_excel() -> str:
     """
     Importeer de Excel-producthiërarchie idempotent in de database.
+
+    Retourneert een statusstring voor de aanroeper (o.a. /api/healthz):
+    "done", "skipped_existing", "disabled", "missing_file" of "error: …".
 
     Controles:
     - Sla over als er al een niet-automatisch hiërarchinode actief is
@@ -692,7 +695,7 @@ def seed_hierarchy_from_excel() -> None:
     # TestClient(app)-startups de hiërarchietabellen niet muteren.
     if os.environ.get("DISABLE_HIERARCHY_SEED", "false").lower() in ("1", "true", "yes"):
         _log.debug("seed_hierarchy_from_excel: uitgeschakeld via DISABLE_HIERARCHY_SEED.")
-        return
+        return "disabled"
 
     excel_path = _excel_hierarchy_path()
     if not os.path.isfile(excel_path):
@@ -700,7 +703,7 @@ def seed_hierarchy_from_excel() -> None:
             "seed_hierarchy_from_excel: bestand niet gevonden op %s — overgeslagen.",
             excel_path,
         )
-        return
+        return "missing_file"
 
     db = SessionLocal()
     try:
@@ -719,7 +722,7 @@ def seed_hierarchy_from_excel() -> None:
                 "seed_hierarchy_from_excel: niet-automatische hiërarchieboom "
                 "al aanwezig — overgeslagen."
             )
-            return
+            return "skipped_existing"
 
         _log.info(
             "seed_hierarchy_from_excel: geen handmatige boom gevonden; "
@@ -734,7 +737,7 @@ def seed_hierarchy_from_excel() -> None:
         rows = file_to_rows(content, _EXCEL_HIERARCHY_FILENAME, warnings)
         if not rows:
             _log.error("seed_hierarchy_from_excel: geen datarijen in Excel-bestand.")
-            return
+            return "error: geen datarijen in Excel-bestand"
 
         mapping = svc.detect_mapping(list(rows[0].keys()))
         if not mapping.get("level_cols") and not mapping.get("path_col"):
@@ -743,7 +746,7 @@ def seed_hierarchy_from_excel() -> None:
                 "geen level- of path-kolom gevonden (kolommen: %s).",
                 list(rows[0].keys()),
             )
-            return
+            return "error: kolomdetectie mislukt"
 
         # Maak een ImportJob aan.
         job = models.ImportJob(
@@ -780,20 +783,34 @@ def seed_hierarchy_from_excel() -> None:
                 result["counts"].get("fouten", 0),
                 result["counts"].get("geldig", 0),
             )
-            return
+            return "error: validatie laat apply niet toe"
 
-        # Stap 3: apply.
-        apply_result = svc.apply_job(db, job, username="system", deactivate_missing=False)
+        # Stap 3: apply met precondition-guard. Staging/validatie duurt lang;
+        # de controle "geen handmatige boom" gebeurt daarom binnen apply_job
+        # zelf, ná het verkrijgen van de hiërarchie-advisory-lock — atomisch
+        # met de apply. Een intussen toegepaste wizard-import wint altijd.
+        try:
+            apply_result = svc.apply_job(db, job, username="system",
+                                         deactivate_missing=False,
+                                         require_no_manual_tree=True)
+        except svc.ManualTreeExists:
+            _log.info(
+                "seed_hierarchy_from_excel: handmatige boom verscheen tijdens "
+                "staging — apply overgeslagen."
+            )
+            return "skipped_existing"
         _log.info(
             "seed_hierarchy_from_excel: toegepast — %s.",
             apply_result.get("stats"),
         )
+        return "done"
 
-    except Exception:
+    except Exception as _exc:
         _log.exception("seed_hierarchy_from_excel: onverwachte fout (niet kritiek).")
         try:
             db.rollback()
         except Exception:
             pass
+        return f"error: {_exc}"
     finally:
         db.close()
