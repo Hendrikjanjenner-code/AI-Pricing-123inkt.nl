@@ -110,6 +110,11 @@ def _run_for_shop(db: Session, today: date, sid: int) -> int:
                 .filter(F.shop_id == sid)
                 .group_by(F.competitor_name, F.sku_id)
                 .all())
+    # Geblokkeerde concurrenten blijven buiten de node-scores (taak #288).
+    from services.competitor_master import blocked_competitor_names
+    _blocked = blocked_competitor_names(db)
+    if _blocked:
+        obs_rows = [r for r in obs_rows if r[0] not in _blocked]
 
     # CIS per (concurrent, sku): influence + prijsnabijheid. Neem per paar
     # deterministisch de MEEST RECENTE CIS-run (de node-score-run draait in

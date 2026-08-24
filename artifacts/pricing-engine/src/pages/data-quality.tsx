@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useShopId } from "@/hooks/use-shop-id";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -91,6 +92,19 @@ const CAUSE_LABELS: Record<string, string> = {
   EXTREME_DEVIATION: "Extreme afwijking (mogelijk verkeerde match)",
   ABOVE_THRESHOLD: "Boven drempel, geen herkenbaar patroon",
 };
+
+interface ReconStep {
+  key: string;
+  label: string;
+  count: number;
+  lost_vs_previous: number;
+}
+
+interface ReconReport {
+  steps: ReconStep[];
+  blocked_count: number;
+  unreviewed_count: number;
+}
 
 interface ScanRun {
   id: number;
@@ -234,11 +248,15 @@ function IssueRij({ issue, onUpdate }: { issue: QualityIssue; onUpdate: (id: num
 }
 
 export default function DataQuality() {
+  // Winkelwissel → alles opnieuw laden (fetch krijgt shop_id via de
+  // globale shop-scope-patch; deze hook maakt hem ook een laad-dependency).
+  const shopId = useShopId();
   const [report, setReport] = useState<QualityReport | null>(null);
   const [scans, setScans] = useState<ScanRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [fout, setFout] = useState<string | null>(null);
   const [outliers, setOutliers] = useState<OutlierReport | null>(null);
+  const [recon, setRecon] = useState<ReconReport | null>(null);
   const [openReason, setOpenReason] = useState<string | null>(null);
   const [severityFilter, setSeverityFilter] = useState("alle");
   const [bronFilter, setBronFilter] = useState("alle");
@@ -284,7 +302,17 @@ export default function DataQuality() {
     } catch {
       // stil: sectie toont dan een lege staat
     }
-  }, []);
+    // Concurrent-reconciliatietrechter apart laden: falen mag het rapport niet blokkeren.
+    try {
+      const resp = await fetch(`${BASE}/api/competition/reconciliation`, {
+        headers: getAuthHeaders(),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (resp.ok) setRecon(await resp.json());
+    } catch {
+      // stil: sectie toont dan een lege staat
+    }
+  }, [shopId]);
 
   useEffect(() => { laad(); }, [laad]);
 
@@ -533,6 +561,49 @@ export default function DataQuality() {
                 )}
               </div>
             </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card data-testid="card-competitor-reconciliation">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Concurrent-reconciliatie (feed → relevance)</CardTitle>
+          <CardDescription>
+            Trechter van unieke PriceShape-schrijfwijzen tot concurrenten met berekende relevance —
+            zo is direct zichtbaar op welke stap records verloren gaan.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {!recon || recon.steps.length === 0 || (recon.steps[0]?.count ?? 0) === 0 ? (
+            <p className="text-sm text-muted-foreground" data-testid="text-recon-empty">
+              Nog geen concurrentdata — draai eerst een feed-sync.
+            </p>
+          ) : (
+            <div className="space-y-1.5" data-testid="list-recon-steps">
+              {recon.steps.map((s, i) => {
+                const max = recon.steps[0]?.count || 1;
+                const pct = Math.max(2, Math.round((s.count / max) * 100));
+                return (
+                  <div key={s.key} className="flex items-center gap-3 text-sm" data-testid={`recon-step-${s.key}`}>
+                    <div className="w-64 shrink-0 text-muted-foreground">{s.label}</div>
+                    <div className="flex-1 h-5 bg-muted/40 rounded overflow-hidden">
+                      <div className="h-full bg-blue-500/70 rounded" style={{ width: `${pct}%` }} />
+                    </div>
+                    <div className="w-16 text-right font-semibold tabular-nums">{s.count.toLocaleString("nl-NL")}</div>
+                    <div className="w-24 text-right text-xs tabular-nums">
+                      {i > 0 && s.lost_vs_previous > 0
+                        ? <span className="text-red-600">−{s.lost_vs_previous.toLocaleString("nl-NL")}</span>
+                        : i > 0 ? <span className="text-muted-foreground">—</span> : null}
+                    </div>
+                  </div>
+                );
+              })}
+              <p className="text-xs text-muted-foreground pt-1" data-testid="text-recon-status-counts">
+                {recon.unreviewed_count > 0 && <>Nog niet beoordeeld: <span className="font-medium">{recon.unreviewed_count}</span>. </>}
+                {recon.blocked_count > 0 && <>Geblokkeerd: <span className="font-medium">{recon.blocked_count}</span>.</>}
+                {recon.unreviewed_count === 0 && recon.blocked_count === 0 && "Alle waargenomen concurrenten zijn beoordeeld."}
+              </p>
+            </div>
           )}
         </CardContent>
       </Card>

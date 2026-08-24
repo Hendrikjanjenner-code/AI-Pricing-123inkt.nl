@@ -205,9 +205,15 @@ def run_cis_engine(db, ref_date: date | None = None,
     if not price_rows:
         return 0
 
+    # Geblokkeerde concurrenten (canonieke master) doen nooit mee (taak #288).
+    from services.competitor_master import blocked_competitor_names
+    _blocked = blocked_competitor_names(db)
+
     # Groepeer: {(sku_id, competitor_name): [(date, price), ...]}
     pair_prices: dict[tuple[str, str], list[tuple]] = {}
     for sku, comp, d, p in price_rows:
+        if comp in _blocked:
+            continue
         pair_prices.setdefault((sku, comp), []).append((d, float(p)))
 
     # ── 2. Hulpdata ───────────────────────────────────────────────────────

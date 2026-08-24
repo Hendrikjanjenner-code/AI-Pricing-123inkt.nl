@@ -166,6 +166,22 @@ async def lifespan(app: FastAPI):
             ensure_owner_admin()
             logger.info("Startup: owner admin account ensured (if configured).")
 
+            # 3c. Eenmalige backfill (taak #288): bestaande discovery-
+            # goedkeuringen naar de canonieke competitor-master. Idempotent;
+            # overschrijft nooit een al gezette masterstatus.
+            try:
+                from services.competitor_master import backfill_master_approvals
+                from database import SessionLocal as _CMSL
+                _cmdb = _CMSL()
+                try:
+                    _n = backfill_master_approvals(_cmdb)
+                finally:
+                    _cmdb.close()
+                if _n:
+                    logger.info("Startup: %d competitor-goedkeuringen naar master gemigreerd.", _n)
+            except Exception as _cm_exc:
+                logger.warning("Startup: master-approval backfill mislukt (niet kritiek): %s", _cm_exc)
+
             # 4. Only seed demo product/price/sales data when explicitly requested
             if os.environ.get("SEED_DEMO_DATA", "false").lower() in ("1", "true", "yes"):
                 seed_database()

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CheckCircle2, XCircle, Play, Search, Globe, Tag } from "lucide-react";
+import { CheckCircle2, XCircle, Play, Search, Globe, Tag, Ban, ShieldOff } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useShopId } from "@/hooks/use-shop-id";
 
@@ -30,12 +30,14 @@ const STATUS_COLORS: Record<string, string> = {
   PROPOSED: "bg-blue-50 text-blue-700 border-blue-200",
   APPROVED: "bg-emerald-50 text-emerald-700 border-emerald-200",
   REJECTED: "bg-red-50 text-red-600 border-red-200",
+  BLOCKED: "bg-slate-100 text-slate-700 border-slate-300",
 };
 
 const STATUS_LABELS: Record<string, string> = {
   PROPOSED: "Voorgesteld",
   APPROVED: "Goedgekeurd",
   REJECTED: "Afgewezen",
+  BLOCKED: "Geblokkeerd",
 };
 
 export default function CompetitionDiscovery() {
@@ -63,6 +65,16 @@ export default function CompetitionDiscovery() {
   const rejectMutation = useMutation({
     mutationFn: (id: number) => apiFetch(`/api/competition/discovery/${id}/reject${shopId !== undefined ? `?shop_id=${shopId}` : ""}`, { method: "POST" }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["competition-discovery"] }); toast({ title: "Afgewezen" }); },
+  });
+
+  const blockMutation = useMutation({
+    mutationFn: (id: number) => apiFetch(`/api/competition/discovery/${id}/block${shopId !== undefined ? `?shop_id=${shopId}` : ""}`, { method: "POST" }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["competition-discovery"] }); toast({ title: "Geblokkeerd", description: "Deze concurrent telt niet meer mee in rankings en dashboards." }); },
+  });
+
+  const unblockMutation = useMutation({
+    mutationFn: (id: number) => apiFetch(`/api/competition/discovery/${id}/unblock${shopId !== undefined ? `?shop_id=${shopId}` : ""}`, { method: "POST" }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["competition-discovery"] }); toast({ title: "Blokkade opgeheven" }); },
   });
 
   const runMutation = useMutation({
@@ -105,6 +117,7 @@ export default function CompetitionDiscovery() {
             <SelectItem value="PROPOSED">Voorgesteld</SelectItem>
             <SelectItem value="APPROVED">Goedgekeurd</SelectItem>
             <SelectItem value="REJECTED">Afgewezen</SelectItem>
+            <SelectItem value="BLOCKED">Geblokkeerd</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -192,6 +205,23 @@ export default function CompetitionDiscovery() {
                           <XCircle className="h-3.5 w-3.5" />
                           Afgewezen door {item.approved_by}
                         </span>
+                      )}
+                      {item.status === "BLOCKED" ? (
+                        <Button size="sm" variant="outline"
+                          className="h-7 text-xs"
+                          data-testid={`button-unblock-${item.id}`}
+                          onClick={() => unblockMutation.mutate(item.id)}
+                          disabled={unblockMutation.isPending}>
+                          <ShieldOff className="h-3.5 w-3.5 mr-1" /> Deblokkeren
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="outline"
+                          className="h-7 text-xs border-slate-300 text-slate-600 hover:bg-slate-50"
+                          data-testid={`button-block-${item.id}`}
+                          onClick={() => blockMutation.mutate(item.id)}
+                          disabled={blockMutation.isPending}>
+                          <Ban className="h-3.5 w-3.5 mr-1" /> Blokkeren
+                        </Button>
                       )}
                     </div>
                   </div>

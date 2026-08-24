@@ -26,12 +26,19 @@ def get_sku_concurrentie(
     if not product:
         return {"error": "SKU niet gevonden"}
 
+    # Geblokkeerde concurrenten (canonieke master) worden ook uit bestaande
+    # snapshots gefilterd, zodat een blokkade direct effectief is (taak #288).
+    from services.competitor_master import blocked_competitor_names
+    _blocked = blocked_competitor_names(db)
+
     scores = (
         db.query(CompetitorInfluenceScore)
         .filter(CompetitorInfluenceScore.sku_id == sku_id)
         .order_by(desc(CompetitorInfluenceScore.run_date), desc(CompetitorInfluenceScore.cis_score))
         .all()
     )
+    if _blocked:
+        scores = [s for s in scores if s.competitor_name not in _blocked]
 
     # Meest recente run_date
     laatste_datum = scores[0].run_date if scores else None
@@ -179,6 +186,12 @@ def get_concurrentie_overzicht(
     _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     if _gf is not None:
         q = q.filter(CompetitorInfluenceScore.sku_id.in_(_gf))
+
+    # Geblokkeerde concurrenten (canonieke master) direct filteren (taak #288).
+    from services.competitor_master import blocked_competitor_names
+    _blocked = blocked_competitor_names(db)
+    if _blocked:
+        q = q.filter(CompetitorInfluenceScore.competitor_name.notin_(_blocked))
 
     scores = q.order_by(desc(CompetitorInfluenceScore.cis_score)).all()
 

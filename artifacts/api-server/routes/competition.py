@@ -389,6 +389,11 @@ def get_competition_dashboard(
     q = db.query(models.CategoryCompetitorRelevance).filter(
         models.CategoryCompetitorRelevance.shop_id == sid
     )
+    # Geblokkeerde concurrenten blijven buiten het dashboard (taak #288).
+    from services.competitor_master import blocked_competitor_names
+    _blocked = blocked_competitor_names(db)
+    if _blocked:
+        q = q.filter(models.CategoryCompetitorRelevance.competitor_name.notin_(_blocked))
     if category:
         q = q.filter(models.CategoryCompetitorRelevance.category == category)
     _sku_q = sku_filter_query(db, hierarchy_node_ids, brands, statuses, sku_query)
@@ -544,6 +549,9 @@ def approve_discovery_item(
     item.approved_by = current_user.username
     from datetime import datetime
     item.approved_at = datetime.utcnow()
+    # Masterstatus synchroon houden (taak #288).
+    from services.competitor_master import sync_master_approval
+    sync_master_approval(db, item.domain, "APPROVED", current_user.username)
     db.commit()
     return {"status": "approved", "id": item_id}
 
@@ -566,8 +574,148 @@ def reject_discovery_item(
     item.approved_by = current_user.username
     from datetime import datetime
     item.approved_at = datetime.utcnow()
+    # Masterstatus synchroon houden (taak #288).
+    from services.competitor_master import sync_master_approval
+    sync_master_approval(db, item.domain, "REJECTED", current_user.username)
     db.commit()
     return {"status": "rejected", "id": item_id}
+
+
+@router.post("/discovery/{item_id}/block")
+def block_discovery_item(
+    item_id: int,
+    shop_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
+):
+    """Blokkeer een concurrent: de kandidaat gaat naar BLOCKED en de canonieke
+    master wordt geblokkeerd, waardoor hij buiten rankings, dashboards en de
+    Concurrenten-lijst blijft. Het record wordt nooit verwijderd."""
+    sid = _scope(db, shop_id)
+    item = db.query(models.CompetitorDiscoveryQueue).filter(
+        models.CompetitorDiscoveryQueue.id == item_id,
+        _shop_or_legacy(models.CompetitorDiscoveryQueue.shop_id, sid, db),
+    ).first()
+    if not item:
+        raise HTTPException(404, "Discovery-item niet gevonden")
+    item.status = "BLOCKED"
+    item.approved_by = current_user.username
+    from datetime import datetime
+    item.approved_at = datetime.utcnow()
+    from services.competitor_master import set_master_blocked
+    set_master_blocked(db, item.domain, True, current_user.username)
+    db.commit()
+    return {"status": "blocked", "id": item_id}
+
+
+@router.post("/discovery/{item_id}/unblock")
+def unblock_discovery_item(
+    item_id: int,
+    shop_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
+):
+    """Hef een blokkade op: de kandidaat gaat terug naar PROPOSED (opnieuw te
+    beoordelen) en de masterblokkade wordt opgeheven."""
+    sid = _scope(db, shop_id)
+    item = db.query(models.CompetitorDiscoveryQueue).filter(
+        models.CompetitorDiscoveryQueue.id == item_id,
+        _shop_or_legacy(models.CompetitorDiscoveryQueue.shop_id, sid, db),
+    ).first()
+    if not item:
+        raise HTTPException(404, "Discovery-item niet gevonden")
+    item.status = "PROPOSED"
+    from services.competitor_master import set_master_blocked
+    set_master_blocked(db, item.domain, False, current_user.username)
+    db.commit()
+    return {"status": "unblocked", "id": item_id}
+
+
+@router.get("/reconciliation")
+def get_competitor_reconciliation(
+    shop_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """Reconciliatie-trechter (taak #288): waar gaan concurrentrecords
+    verloren tussen PriceShape-feed en berekende relevance-scores?
+
+    Elke stap is cumulatief (subset van de vorige), zodat het verschil tussen
+    twee opeenvolgende tellers direct het verlies op die stap laat zien."""
+    from services.competitor_master import blocked_competitor_names
+    sid = _scope(db, shop_id)
+    F = models.FactCompetitorPriceDaily
+    P = models.DimProduct
+
+    # Canonieke concurrenten die in de facts van deze shop voorkomen.
+    fact_names = {n for (n,) in db.query(F.competitor_name)
+                  .filter(F.shop_id == sid).distinct().all()}
+    masters = (db.query(models.DimCompetitor)
+               .filter(models.DimCompetitor.competitor_name.in_(fact_names))
+               .all()) if fact_names else []
+    by_name = {m.competitor_name: m for m in masters}
+
+    # Stap 1: unieke feed-schrijfwijzen — shop-gescoped: canonieke namen plus
+    # de afwijkende schrijfwijzen zoals ze in de factrijen van déze shop zijn
+    # bewaard (raw_attributes._domain_alias), niet de globale master-aliassen.
+    _alias_expr = F.raw_attributes.op("->>")("_domain_alias")
+    alias_rows = (db.query(F.competitor_name, _alias_expr)
+                  .filter(F.shop_id == sid, _alias_expr.isnot(None))
+                  .distinct().all())
+    shop_aliases = {(n, a) for n, a in alias_rows if a}
+    feed_unique = len(fact_names) + len(shop_aliases)
+    # Stap 2: canonieke concurrenten in het register (masterrij bestaat).
+    canonical = len(masters)
+    # Stap 3: goedgekeurd op de master (en niet geblokkeerd).
+    blocked_all = blocked_competitor_names(db)
+    approved = {n for n in fact_names
+                if (m := by_name.get(n)) is not None
+                and m.approval_status == "APPROVED" and not m.blocked}
+    # Stap 4: met producten (≥1 prijswaarneming — per definitie waar voor
+    # feed-concurrenten, maar houdt de trechter volledig).
+    with_products = approved  # fact_names is de bron; approved ⊆ fact_names
+    # Stap 5: met interne matches (waarneming op een bestaande eigen SKU).
+    matched = {n for (n,) in db.query(F.competitor_name)
+               .join(P, (P.sku_id == F.sku_id) & (P.shop_id == sid))
+               .filter(F.shop_id == sid).distinct().all()}
+    with_match = with_products & matched
+    # Stap 6: met hiërarchie-koppeling (waarneming op een SKU met actieve mapping).
+    A = models.ProductHierarchyAssignment
+    hier = {n for (n,) in db.query(F.competitor_name)
+            .join(A, (A.sku_id == F.sku_id) & (A.status == "active"))
+            .join(P, (P.sku_id == F.sku_id) & (P.shop_id == sid))
+            .filter(F.shop_id == sid).distinct().all()}
+    with_hierarchy = with_match & hier
+    # Stap 7: met geldige (niet-uitgesloten) prijzen.
+    valid = {n for (n,) in db.query(F.competitor_name)
+             .filter(F.shop_id == sid, F.price.isnot(None),
+                     F.excluded_reason.is_(None)).distinct().all()}
+    with_valid_prices = with_hierarchy & valid
+    # Stap 8: met berekende relevance (profiel/scores aanwezig).
+    prof = {n for (n,) in db.query(models.CompetitorProfile.competitor_name)
+            .filter(models.CompetitorProfile.shop_id == sid).distinct().all()}
+    with_relevance = with_valid_prices & prof
+
+    steps = [
+        {"key": "feed_unique", "label": "Unieke PriceShape-schrijfwijzen", "count": feed_unique},
+        {"key": "canonical", "label": "Canonieke concurrenten", "count": canonical},
+        {"key": "approved", "label": "Goedgekeurd (master)", "count": len(approved)},
+        {"key": "with_products", "label": "Met producten in de feed", "count": len(with_products)},
+        {"key": "with_internal_match", "label": "Met interne SKU-matches", "count": len(with_match)},
+        {"key": "with_hierarchy", "label": "Met hiërarchie-koppeling", "count": len(with_hierarchy)},
+        {"key": "with_valid_prices", "label": "Met geldige prijzen", "count": len(with_valid_prices)},
+        {"key": "with_relevance", "label": "Met berekende relevance", "count": len(with_relevance)},
+    ]
+    for i, s in enumerate(steps):
+        s["lost_vs_previous"] = (steps[i - 1]["count"] - s["count"]) if i else 0
+    return {
+        "shop_id": sid,
+        "steps": steps,
+        "blocked_count": len(fact_names & blocked_all),
+        "unreviewed_count": len([n for n in fact_names
+                                 if (m := by_name.get(n)) is None
+                                 or m.approval_status in (None, "UNREVIEWED")]),
+    }
 
 
 # ── NIEUW: Concurrenten (profielen) ──────────────────────────────────────────
@@ -589,6 +737,11 @@ def list_competitors(
     q = db.query(models.CompetitorProfile).filter(
         models.CompetitorProfile.shop_id == sid
     )
+    # Geblokkeerde concurrenten blijven buiten de Concurrenten-lijst (taak #288).
+    from services.competitor_master import blocked_competitor_names
+    _blocked = blocked_competitor_names(db)
+    if _blocked:
+        q = q.filter(models.CompetitorProfile.competitor_name.notin_(_blocked))
     if relevance_label:
         q = q.filter(models.CompetitorProfile.relevance_label == relevance_label)
     # Globale filtercontext (taak #263): alleen concurrenten die zijn
@@ -1413,6 +1566,13 @@ def get_competitor_rankings(
                 models.CompetitorRanking.run_date == latest,
                 models.CompetitorRanking.shop_id == sid)
     )
+    # Direct effectief blokkeren (taak #288): ook bestaande snapshots van
+    # vóór de blokkade tonen een geblokkeerde concurrent niet meer.
+    from services.competitor_master import blocked_competitor_names
+    _blocked = blocked_competitor_names(db)
+    if _blocked:
+        rows_q = rows_q.filter(
+            models.CompetitorRanking.competitor_name.notin_(_blocked))
     # Globale filtercontext (taak #263): beperk tot concurrenten die zijn
     # waargenomen op de gefilterde SKU-set (hiërarchie-descendants + merken)
     # — toegepast in SQL vóór het laden van de rijen.
@@ -1551,6 +1711,9 @@ def get_competitor_ranking_history(
                 models.CompetitorRanking.shop_id == sid,
                 models.CompetitorRanking.run_date.in_(run_dates))
     )
+    _blocked = _blocked_names(db)
+    if _blocked:
+        q = q.filter(models.CompetitorRanking.competitor_name.notin_(_blocked))
     if competitor:
         q = q.filter(models.CompetitorRanking.competitor_name == _canon(competitor))
     _gf_sq = _filtered_competitor_names_sq(db, sid, hierarchy_node_ids, brands, statuses, sku_query)
@@ -1652,6 +1815,12 @@ def _node_scores_for_selection(
     rows = db.query(S).filter(
         S.shop_id == sid, S.run_date == latest,
         S.node_id.in_(use_ids)).all()
+    # Direct effectief blokkeren (taak #288): snapshots van vóór de blokkade
+    # mogen een geblokkeerde concurrent niet meer tonen.
+    from services.competitor_master import blocked_competitor_names
+    _blocked = blocked_competitor_names(db)
+    if _blocked:
+        rows = [r for r in rows if r.competitor_name not in _blocked]
     if not rows:
         return None
 
@@ -1801,6 +1970,13 @@ def _canon(name: str | None) -> str | None:
     return normalize_domain(name) or name
 
 
+def _blocked_names(db: Session) -> set:
+    """Canonieke set geblokkeerde concurrentnamen (taak #288) — voor
+    read-time filtering van bestaande snapshots op alle leesroutes."""
+    from services.competitor_master import blocked_competitor_names
+    return blocked_competitor_names(db)
+
+
 def _scope(db: Session, shop_id: Optional[int]) -> int:
     """Effectieve shop-scope voor competition-endpoints (default shop als geen
     shop_id is meegegeven; 404 bij onbekende shop)."""
@@ -1864,6 +2040,7 @@ def get_price_index_trend(
     current_own = {p.sku_id: float(p.current_price) for p in prods if p.current_price}
     cats = {p.sku_id: p.category for p in prods}
     rejected = rejected_pairs(db)
+    _blocked = _blocked_names(db)
 
     # Historische eigen prijzen per (datum, sku)
     own_hist: dict[tuple, float] = {}
@@ -1877,7 +2054,7 @@ def get_price_index_trend(
 
     per_day: dict = {}
     for d, sku, comp, price in rows:
-        if (sku, comp) in rejected or float(price) <= 0:
+        if comp in _blocked or (sku, comp) in rejected or float(price) <= 0:
             continue
         if category and cats.get(sku) != category:
             continue
@@ -1927,6 +2104,9 @@ def get_coverage_trend(
     q = db.query(models.CompetitorCoverageResult).filter(
         models.CompetitorCoverageResult.run_date >= since,
         models.CompetitorCoverageResult.shop_id == sid)
+    _blocked = _blocked_names(db)
+    if _blocked:
+        q = q.filter(models.CompetitorCoverageResult.competitor_name.notin_(_blocked))
     if competitor:
         q = q.filter(models.CompetitorCoverageResult.competitor_name == _canon(competitor))
     if category:
@@ -1970,6 +2150,10 @@ def get_coverage_latest(
     rows_q = db.query(models.CompetitorCoverageResult).filter(
         models.CompetitorCoverageResult.run_date == last[0],
         models.CompetitorCoverageResult.shop_id == sid)
+    _blocked = _blocked_names(db)
+    if _blocked:
+        rows_q = rows_q.filter(
+            models.CompetitorCoverageResult.competitor_name.notin_(_blocked))
     # Globale filtercontext (taak #263): alleen concurrenten die zijn
     # waargenomen op de gefilterde SKU-set — als SQL-subquery.
     _gf_sq = _filtered_competitor_names_sq(db, sid, hierarchy_node_ids, brands, statuses, sku_query)
@@ -2009,6 +2193,10 @@ def list_price_events(
     q = db.query(models.CompetitorPriceEvent).filter(
         models.CompetitorPriceEvent.event_date >= since,
         models.CompetitorPriceEvent.shop_id == sid)
+    _blocked = _blocked_names(db)
+    if _blocked:
+        q = q.filter(
+            models.CompetitorPriceEvent.competitor_name.notin_(_blocked))
     # Globale filtercontext (taak #263): events zijn per SKU vastgelegd —
     # beperk tot de gefilterde SKU-set als SQL-subquery.
     _sku_q = sku_filter_query(db, hierarchy_node_ids, brands, statuses, sku_query)
@@ -2062,6 +2250,10 @@ def get_availability_trend(
     q = db.query(models.CompetitorAvailabilityDaily).filter(
         models.CompetitorAvailabilityDaily.date >= since,
         models.CompetitorAvailabilityDaily.shop_id == sid)
+    _blocked = _blocked_names(db)
+    if _blocked:
+        q = q.filter(
+            models.CompetitorAvailabilityDaily.competitor_name.notin_(_blocked))
     if competitor:
         q = q.filter(models.CompetitorAvailabilityDaily.competitor_name == _canon(competitor))
     # Globale filtercontext (taak #263): alleen concurrenten die zijn

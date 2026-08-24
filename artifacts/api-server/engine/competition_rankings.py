@@ -112,6 +112,9 @@ def _run_for_shop(db: Session, today: date, sid: int) -> int:
         cis_count_by_comp[r.competitor_name] = cis_count_by_comp.get(r.competitor_name, 0) + 1
 
     all_names = set(profiles) | set(cat_by_comp) | set(cis_by_comp)
+    # Geblokkeerde concurrenten blijven buiten de rankings (taak #288).
+    from services.competitor_master import blocked_competitor_names
+    all_names -= blocked_competitor_names(db)
 
     # Vorige rankings voor trendbepaling: het direct voorafgaande gepubliceerde
     # snapshot. Bij een herrun op dezelfde dag (bv. meerdere feed-syncs per dag)

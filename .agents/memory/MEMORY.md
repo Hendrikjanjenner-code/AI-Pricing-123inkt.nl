@@ -68,4 +68,5 @@
 - [Outlier exclusion marking](outlier-exclusion-marking.md) — excluded competitor prices are marked on fact rows (reason + suspected cause), never deleted; threshold via import settings.
 - [Cross-referenced id's shop-scopen](scoped-reference-ids.md) — elk client-geleverd referentie-id (evidence_id e.d.) centraal resolven op shop+entiteit vóór opslag; PK-only lookup faalt code review als tenant-lek.
 - [Hierarchy deactivate_missing is global](hierarchy-deactivate-missing.md) — import-apply met deactivate_missing wist de hele echte boom in shared-DB tests; snapshot/restore verplicht.
+- [Competitor master approval & blocked](competitor-master-approval.md) — status leeft globaal op dim_competitor; feed-upsert blijft eraf; blocked op leespaden filteren, niet alleen bij herberekening.
 - [Afgeleide tabellen: shop-FK CASCADE](derived-table-shop-fk.md) — nieuwe afgeleide (engine-output) tabellen met shop_id-FK moeten ON DELETE CASCADE krijgen, anders breken bestaande test-teardowns die de tabel niet kennen; dev-DB apart ALTERen (create_all wijzigt niets).

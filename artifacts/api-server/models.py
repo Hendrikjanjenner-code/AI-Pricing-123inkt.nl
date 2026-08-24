@@ -746,6 +746,17 @@ class DimCompetitor(Base):
     default_relevance_score = Column(Float, default=0.5)
     channel_relevance = Column(JSON)
     active = Column(Boolean, default=True)
+    # Goedkeuringsstatus op de master zelf (taak #288): synchroon met
+    # beslissingen in de discovery-wachtrij. UNREVIEWED / APPROVED / REJECTED.
+    # Feed-sync/upsert mag deze velden NOOIT overschrijven.
+    approval_status = Column(String(20), default="UNREVIEWED", index=True)
+    approved_by = Column(String(100))
+    approved_at = Column(DateTime)
+    # Geblokkeerde concurrenten blijven bewaard maar worden uitgesloten van
+    # rankings, dashboards en de Concurrenten-lijst.
+    blocked = Column(Boolean, default=False, index=True)
+    blocked_by = Column(String(100))
+    blocked_at = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 

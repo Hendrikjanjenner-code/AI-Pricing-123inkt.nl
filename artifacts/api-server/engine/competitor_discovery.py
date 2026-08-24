@@ -178,6 +178,12 @@ def run_discovery(
             if auto_approved:
                 item.approved_by = "auto-approve"
                 item.approved_at = datetime.utcnow()
+                # Master synchroon houden (taak #288): een automatische
+                # goedkeuring is een echte beslissing en moet in dezelfde
+                # transactie op de canonieke master landen.
+                from services.competitor_master import sync_master_approval
+                sync_master_approval(db, item.domain, "APPROVED",
+                                     "auto-approve")
             db.add(item)
             nieuw += 1
 

@@ -191,24 +191,193 @@ def test_sync_discovery_goedkeuring_geen_duplicaat(client, admin_headers, shop):
         assert [i.domain for i in items] == [DOM]
 
         # Goedkeuren via de API.
-        r = client.post(f"/api/competition/discovery/{items[0].id}/approve",
+        item_id = items[0].id
+        r = client.post(f"/api/competition/discovery/{item_id}/approve",
                         params={"shop_id": shop}, headers=admin_headers)
         assert r.status_code == 200, r.text
 
-        # Tweede sync met wéér een andere schrijfwijze + nieuwe discovery-run.
-        res2 = feed_ingest.ingest_feed(
-            db, content=_feed_content(f"WWW.{DOM}", f"http://{DOM}/x"),
-            shop_id=shop)
-        assert res2["competitor_reconciliation"]["matched"] == 1
-        assert res2["competitor_reconciliation"]["new"] == 0
+        # Goedkeuring staat óók op de canonieke master (taak #288).
+        db.expire_all()
+        comp = db.query(models.DimCompetitor).filter_by(
+            competitor_name=DOM).one()
+        assert comp.approval_status == "APPROVED"
+        assert comp.approved_by == "dev_admin"
+        assert comp.approved_at is not None
+
+        # Gesimuleerde herstart (taak #288): sessie sluiten en een nieuwe
+        # app-lifespan starten vóór de tweede sync — de goedkeuring moet
+        # louter uit de database komen, niet uit proces-/sessiestate.
+        db.close()
+        restart_client = TestClient(app)
+        restart_client.__enter__()
+        try:
+            db = SessionLocal()
+            comp = db.query(models.DimCompetitor).filter_by(
+                competitor_name=DOM).one()
+            assert comp.approval_status == "APPROVED", \
+                "goedkeuring op de master moet een herstart overleven"
+
+            # Tweede sync met wéér een andere schrijfwijze + nieuwe discovery-run.
+            res2 = feed_ingest.ingest_feed(
+                db, content=_feed_content(f"WWW.{DOM}", f"http://{DOM}/x"),
+                shop_id=shop)
+            assert res2["competitor_reconciliation"]["matched"] == 1
+            assert res2["competitor_reconciliation"]["new"] == 0
+            run_discovery(db, min_confidence=0.0, shop_id=shop)
+
+            db.expire_all()
+            items = db.query(models.CompetitorDiscoveryQueue).filter(
+                models.CompetitorDiscoveryQueue.shop_id == shop).all()
+            assert len(items) == 1, "variant mag nooit een duplicaat-kandidaat opleveren"
+            assert items[0].status == "APPROVED", "goedkeuring moet intact blijven"
+
+            # Masterstatus na herstart + tweede sync: nog steeds APPROVED —
+            # feed-upsert mag goedkeuringsvelden nooit overschrijven.
+            db.expire_all()
+            comp = db.query(models.DimCompetitor).filter_by(
+                competitor_name=DOM).one()
+            assert comp.approval_status == "APPROVED"
+            assert comp.approved_by == "dev_admin"
+        finally:
+            try:
+                restart_client.__exit__(None, None, None)
+            except Exception:
+                pass
+    finally:
+        db.close()
+
+
+def test_blokkeren_en_reconciliatietrechter(client, admin_headers, shop):
+    """Taak #288: blokkeren sluit een concurrent uit van lijsten/rankings en
+    de reconciliatietrechter toont de tellers shop-gescoped."""
+    from services.competitor_master import blocked_competitor_names
+    db = SessionLocal()
+    try:
+        item = db.query(models.CompetitorDiscoveryQueue).filter(
+            models.CompetitorDiscoveryQueue.shop_id == shop,
+            models.CompetitorDiscoveryQueue.domain == DOM).one()
+
+        # Trechter vóór blokkade: canoniek=1, goedgekeurd=1.
+        r = client.get("/api/competition/reconciliation",
+                       params={"shop_id": shop}, headers=admin_headers)
+        assert r.status_code == 200, r.text
+        steps = {s["key"]: s["count"] for s in r.json()["steps"]}
+        assert steps["canonical"] == 1
+        assert steps["approved"] == 1
+        assert steps["feed_unique"] >= steps["canonical"]
+        assert r.json()["blocked_count"] == 0
+
+        # CIS-snapshot vóór de blokkade: DOM krijgt een score-rij.
+        from engine.competitor_influence import run_cis_engine
+        run_cis_engine(db, sku_ids=[SKU1])
+        db.commit()
+        assert db.query(models.CompetitorInfluenceScore).filter(
+            models.CompetitorInfluenceScore.sku_id == SKU1,
+            models.CompetitorInfluenceScore.competitor_name == DOM
+        ).count() > 0
+
+        # Blokkeren via de API.
+        r = client.post(f"/api/competition/discovery/{item.id}/block",
+                        params={"shop_id": shop}, headers=admin_headers)
+        assert r.status_code == 200, r.text
+        db.expire_all()
+        comp = db.query(models.DimCompetitor).filter_by(
+            competitor_name=DOM).one()
+        assert comp.blocked is True and comp.blocked_by == "dev_admin"
+        assert DOM in blocked_competitor_names(db)
+        assert db.get(models.CompetitorDiscoveryQueue, item.id).status == "BLOCKED"
+
+        # Geblokkeerd: buiten de goedgekeurd-teller, wel zichtbaar als blocked.
+        r = client.get("/api/competition/reconciliation",
+                       params={"shop_id": shop}, headers=admin_headers)
+        steps = {s["key"]: s["count"] for s in r.json()["steps"]}
+        assert steps["approved"] == 0
+        assert r.json()["blocked_count"] == 1
+
+        # Concurrenten-lijst sluit geblokkeerde namen uit.
+        r = client.get("/api/competition/competitors",
+                       params={"shop_id": shop}, headers=admin_headers)
+        assert r.status_code == 200
+        assert DOM not in [i["competitor_name"] for i in r.json()["items"]]
+
+        # Historische leesroutes tonen geblokkeerde namen evenmin.
+        r = client.get("/api/competition/rankings/history",
+                       params={"shop_id": shop}, headers=admin_headers)
+        assert r.status_code == 200
+        assert DOM not in r.json().get("history", {})
+
+        # CIS/legacy-concurrentie: het vóór de blokkade berekende snapshot
+        # mag de geblokkeerde concurrent niet meer tonen of laten meewegen
+        # in de referentieprijs — en een herberekening evenmin.
+        r = client.get(f"/api/concurrentie/sku/{SKU1}", headers=admin_headers)
+        assert r.status_code == 200, r.text
+        namen = [c["concurrent"] for c in r.json().get("concurrenten", [])]
+        assert DOM not in namen, "geblokkeerde concurrent zichtbaar in CIS-snapshot"
+        run_cis_engine(db, sku_ids=[SKU1])
+        db.commit()
+        rows = db.query(models.CompetitorInfluenceScore).filter(
+            models.CompetitorInfluenceScore.sku_id == SKU1,
+            models.CompetitorInfluenceScore.competitor_name == DOM).count()
+        assert rows == 0, "herberekening schreef rijen voor geblokkeerde concurrent"
+
+        # Deblokkeren herstelt niets destructiefs: kandidaat terug naar
+        # PROPOSED, masterblokkade weg (eerdere goedkeuring blijft bewaard).
+        r = client.post(f"/api/competition/discovery/{item.id}/unblock",
+                        params={"shop_id": shop}, headers=admin_headers)
+        assert r.status_code == 200, r.text
+        db.expire_all()
+        comp = db.query(models.DimCompetitor).filter_by(
+            competitor_name=DOM).one()
+        assert comp.blocked is False
+        assert comp.approval_status == "APPROVED"
+    finally:
+        # CIS-rijen van de test-SKU opruimen (geen shop-FK, dus geen cascade).
+        db.query(models.CompetitorInfluenceScore).filter(
+            models.CompetitorInfluenceScore.sku_id == SKU1).delete()
+        db.commit()
+        db.close()
+
+
+def test_auto_approve_synct_master_zonder_herstart(shop):
+    """Taak #288: een automatische goedkeuring (boven de drempel) moet de
+    canonieke master direct bijwerken — niet pas na een herstart-backfill."""
+    import feed_ingest
+    from engine.competitor_discovery import run_discovery
+    from services import competition_settings as cs
+
+    dom2 = f"{PFX}-auto.nl"
+    db = SessionLocal()
+    try:
+        # Feed met een nieuwe concurrent (twee schrijfwijzen).
+        feed_ingest.ingest_feed(
+            db, content=json.dumps([{
+                "gtin": SKU1, "productTitle": "Dntest Product Een",
+                "priceInclVat": "10.0", "costPriceExclVat": "6.0",
+                "vendors": [{"domain": f"https://www.{dom2}/", "price": "9.50"}],
+            }]).encode(), shop_id=shop)
+
+        # Auto-approve alles voor deze testshop.
+        cs.upsert_settings(db, shop, {"auto_approve_threshold": 0.0}, "test")
         run_discovery(db, min_confidence=0.0, shop_id=shop)
 
         db.expire_all()
-        items = db.query(models.CompetitorDiscoveryQueue).filter(
-            models.CompetitorDiscoveryQueue.shop_id == shop).all()
-        assert len(items) == 1, "variant mag nooit een duplicaat-kandidaat opleveren"
-        assert items[0].status == "APPROVED", "goedkeuring moet intact blijven"
+        item = db.query(models.CompetitorDiscoveryQueue).filter(
+            models.CompetitorDiscoveryQueue.shop_id == shop,
+            models.CompetitorDiscoveryQueue.domain == dom2).one()
+        assert item.status == "APPROVED"
+        assert item.approved_by == "auto-approve"
+
+        # Master direct synchroon, zonder herstart/backfill.
+        comp = db.query(models.DimCompetitor).filter_by(
+            competitor_name=dom2).one()
+        assert comp.approval_status == "APPROVED"
+        assert comp.approved_by == "auto-approve"
+        assert comp.approved_at is not None
     finally:
+        # Settings-rij opruimen, anders faalt de shop-teardown op de FK.
+        db.query(models.CompetitionSetting).filter(
+            models.CompetitionSetting.shop_id == shop).delete()
+        db.commit()
         db.close()
 
 
