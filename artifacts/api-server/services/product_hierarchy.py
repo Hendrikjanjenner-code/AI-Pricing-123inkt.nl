@@ -817,6 +817,14 @@ def hierarchy_stats(db: Session) -> dict:
     max_depth = db.query(func.max(N.level)).scalar() or 0
     assigned = (db.query(func.count(func.distinct(A.sku_id)))
                 .filter(A.status == "active").scalar() or 0)
+    # Verdeling van gekoppelde producten per herkomst (import / auto_import / manual)
+    source_rows = (db.query(func.coalesce(A.source, "import"),
+                            func.count(func.distinct(A.sku_id)))
+                   .filter(A.status == "active")
+                   .group_by(func.coalesce(A.source, "import")).all())
+    per_source = {"import": 0, AUTO_ASSIGN_SOURCE: 0, "manual": 0}
+    for src, cnt in source_rows:
+        per_source[src] = per_source.get(src, 0) + int(cnt or 0)
     total_products = db.query(func.count(P.sku_id)).scalar() or 0
     last_import = (db.query(models.ImportJob)
                    .filter(models.ImportJob.upload_type == "product_hierarchy",
@@ -831,6 +839,7 @@ def hierarchy_stats(db: Session) -> dict:
         "producten_totaal": total_products,
         "producten_gekoppeld": assigned,
         "producten_ongekoppeld": max(0, total_products - assigned),
+        "gekoppeld_per_bron": per_source,
         "laatste_import": ({
             "job_id": last_import.id,
             "bestand": last_import.filename,

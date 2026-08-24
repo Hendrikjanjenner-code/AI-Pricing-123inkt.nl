@@ -386,3 +386,37 @@ def test_node_patch_rename_en_cycle_guard(client, admin_headers, ph_products):
     r = client.patch(f"/api/product-hierarchy/nodes/{root['id']}",
                      headers=admin_headers, json={"parent_id": sub["id"]})
     assert r.status_code == 400
+
+
+def test_stats_verdeling_per_bron(client, admin_headers, ph_products):
+    """Stats splitsen gekoppelde producten uit per herkomst (import/auto_import/manual)."""
+    from datetime import datetime
+    up = _upload(client, admin_headers, _csv([
+        f"{PFX}-B1,{ph_products[0]},{PFX}-Root > {PFX}-BronLeaf",
+    ]))
+    client.post(f"/api/product-hierarchy/import/{up['job_id']}/validate", headers=admin_headers)
+    client.post(f"/api/product-hierarchy/import/{up['job_id']}/apply", headers=admin_headers)
+
+    # tweede product handmatig via auto_import-bron koppelen (direct in DB)
+    db = SessionLocal()
+    try:
+        N = models.ProductHierarchyNode
+        leaf = db.query(N).filter(N.path_names.like(f"%{PFX}-BronLeaf%")).first()
+        assert leaf is not None
+        db.add(models.ProductHierarchyAssignment(
+            sku_id=ph_products[1], node_id=leaf.id, status="active",
+            valid_from=datetime.utcnow(), source="auto_import",
+            assigned_by="test"))
+        db.commit()
+    finally:
+        db.close()
+
+    r = client.get("/api/product-hierarchy/stats", headers=admin_headers)
+    assert r.status_code == 200
+    data = r.json()
+    verdeling = data.get("gekoppeld_per_bron")
+    assert verdeling is not None
+    for key in ("import", "auto_import", "manual"):
+        assert key in verdeling
+    assert verdeling["import"] >= 1
+    assert verdeling["auto_import"] >= 1

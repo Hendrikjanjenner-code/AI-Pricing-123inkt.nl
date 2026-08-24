@@ -194,8 +194,14 @@ def _detect_issues(db: Session, total_skus: int) -> list[dict]:  # noqa: C901
             "Vul merknamen aan in DRS of via product-CSV."))
 
     # ── Dekking concurrentie / voorraad ──────────────────────────────────
-    skus_with_comp = db.query(models.FactCompetitorPriceDaily.sku_id).distinct().count()
-    no_comp = max(0, total_skus - skus_with_comp)
+    # Tel producten zónder enige factrij direct (LEFT JOIN-semantiek):
+    # globale distinct-tellingen worden gemaskeerd door weesrijen
+    # (factdata van verwijderde SKU's) en missen dan echte gaten.
+    _FC = models.FactCompetitorPriceDaily
+    no_comp = (db.query(P.sku_id)
+               .filter(~db.query(_FC.sku_id)
+                       .filter(_FC.sku_id == P.sku_id).exists())
+               .count())
     if no_comp:
         issues.append(_issue(
             "MISSING_COMPETITOR_DATA", "warning", "Geen concurrentiedata",
@@ -204,8 +210,11 @@ def _detect_issues(db: Session, total_skus: int) -> list[dict]:  # noqa: C901
             "Zonder marktdata zijn prijsadviezen voor deze SKU's puur kosten-gebaseerd.",
             "Controleer de PriceShape-koppeling en matching (EAN/OEM) voor deze SKU's."))
 
-    skus_with_stock = db.query(models.FactInventoryDaily.sku_id).distinct().count()
-    no_stock = max(0, total_skus - skus_with_stock)
+    _FI = models.FactInventoryDaily
+    no_stock = (db.query(P.sku_id)
+                .filter(~db.query(_FI.sku_id)
+                        .filter(_FI.sku_id == P.sku_id).exists())
+                .count())
     if no_stock:
         issues.append(_issue(
             "MISSING_STOCK_DATA", "warning", "Geen voorraaddata",

@@ -24,6 +24,7 @@ type Node = {
 type Stats = {
   nodes_totaal: number; nodes_actief: number; max_diepte: number; paden: number;
   producten_totaal: number; producten_gekoppeld: number; producten_ongekoppeld: number;
+  gekoppeld_per_bron?: Record<string, number>;
   laatste_import: { job_id: number; bestand: string; voltooid_op: string | null; door: string | null } | null;
 };
 
@@ -209,6 +210,15 @@ export default function ProductHierarchie() {
     { label: "Ongekoppeld", value: nf.format(stats.producten_ongekoppeld) },
   ] : [];
 
+  const bronLabels: Record<string, string> = {
+    import: "Via Excel-import",
+    auto_import: "Automatisch (feed)",
+    manual: "Handmatig",
+  };
+  const perBron = stats?.gekoppeld_per_bron
+    ? Object.entries(stats.gekoppeld_per_bron).filter(([, v]) => v > 0)
+    : [];
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
@@ -238,6 +248,28 @@ export default function ProductHierarchie() {
           </CardContent></Card>
         ))}
       </div>
+
+      {perBron.length > 0 && (
+        <Card><CardContent className="p-4">
+          <div className="text-xs text-muted-foreground mb-2">Gekoppelde producten per herkomst</div>
+          <div className="flex flex-wrap gap-x-6 gap-y-2">
+            {perBron.map(([bron, aantal]) => (
+              <div key={bron} className="flex items-center gap-2" data-testid={`bron-${bron}`}>
+                <Badge variant={bron === "auto_import" ? "default" : "secondary"}>
+                  {bronLabels[bron] ?? bron}
+                </Badge>
+                <span className="font-semibold">{nf.format(aantal)}</span>
+              </div>
+            ))}
+          </div>
+          {(stats?.gekoppeld_per_bron?.auto_import ?? 0) > 0 && (
+            <p className="text-xs text-muted-foreground mt-2">
+              Automatisch toegewezen producten kregen hun categorie op basis van de laatst
+              toegepaste Excel-import. Een nieuwe Excel-import kan deze toewijzingen verfijnen.
+            </p>
+          )}
+        </CardContent></Card>
+      )}
 
       <Tabs defaultValue="beheer" onValueChange={(t) => { if (t === "historie" && historie === null) laadHistorie(); }}>
         <TabsList>

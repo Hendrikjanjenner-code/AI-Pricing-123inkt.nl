@@ -126,6 +126,11 @@ def seed(client):
         yield ids
     finally:
         db.rollback()
+        # Onder parallelle DB-belasting (validatieruns) kan de standaard
+        # statement-timeout (4s) de teardown-deletes annuleren; verruim die
+        # net als in bulk_seed.
+        from sqlalchemy import text as _text
+        db.execute(_text("SET statement_timeout = '120s'"))
         sid = ids.get("sid")
         if sid is not None:
             for M, col in [
