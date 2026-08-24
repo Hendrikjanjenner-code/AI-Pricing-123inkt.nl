@@ -384,6 +384,46 @@ class TestMissingStockData:
             db.close()
 
 
+class TestCoverageRobuustTegenWeesFactrijen:
+    """Regressie (taak: afgebroken bulk-testrun): weesfactrijen — factdata van
+    sku's zónder dim_product-rij, bv. residu van een gecrashte bulk-seed —
+    mogen de dekkingdetecties niet maskeren. De telling moet LEFT
+    JOIN-semantiek hebben (per product), geen globale distinct-vergelijking."""
+
+    def test_orphan_facts_maskeren_tellers_niet(self, client, auth):
+        db = SessionLocal()
+        sku = f"{PFX}-COVER-REAL"
+        orphan_sku = f"{PFX}-COVER-ORPHAN"
+        try:
+            # Echt product zonder enige fact-dekking …
+            _make_product(db, sku)
+            # … plus weesfactrijen voor een niet-bestaand sku.
+            db.add(models.FactCompetitorPriceDaily(
+                date=date.today(), sku_id=orphan_sku,
+                competitor_name="orphan.nl", price=9.99))
+            db.add(models.FactInventoryDaily(
+                date=date.today(), sku_id=orphan_sku, stock_quantity=5))
+            db.commit()
+
+            result = _scan(client, auth)
+            for code in ("MISSING_COMPETITOR_DATA", "MISSING_STOCK_DATA"):
+                issue = _find_issue(result, code)
+                assert issue is not None, \
+                    f"{code} moet blijven triggeren ondanks weesfactrijen"
+                assert issue["affected_count"] >= 1
+        finally:
+            db.rollback()
+            db.query(models.FactCompetitorPriceDaily).filter(
+                models.FactCompetitorPriceDaily.sku_id == orphan_sku
+            ).delete(synchronize_session=False)
+            db.query(models.FactInventoryDaily).filter(
+                models.FactInventoryDaily.sku_id == orphan_sku
+            ).delete(synchronize_session=False)
+            db.commit()
+            _delete_products(db, sku)
+            db.close()
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # STALE DATA DETECTIES
 # Aanpak: voeg een fact-rij met datum=vandaag toe, patch _date.today() +5 dagen

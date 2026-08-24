@@ -249,6 +249,34 @@ def bulk_seed(client):
         # Bulk-inserts kunnen onder belasting de standaard statement-timeout
         # overschrijden; verruim die voor deze sessie.
         db.execute(text("SET statement_timeout = '120s'"))
+        # Residu van eerdere afgebroken runs (timeout/kill vóór de teardown)
+        # eerst opruimen: elke run gebruikt een eigen random CHFxxxxxx-prefix,
+        # maar het '-B-'/'-bulk'-patroon is herkenbaar. Zonder deze opschoning
+        # blijven 70k weesrijen staan en maskeren die o.a. de
+        # MISSING_*_DATA-dekkingdetecties permanent.
+        _has_residue = db.execute(text(
+            "SELECT 1 WHERE EXISTS (SELECT 1 FROM dim_product WHERE sku_id LIKE 'CHF%-B-%')"
+            "   OR EXISTS (SELECT 1 FROM dim_shop WHERE shop_code LIKE 'CHF%-bulk')"
+        )).first() is not None
+        _residue_cleanup = [] if not _has_residue else [
+            ("""DELETE FROM competitor_rankings WHERE shop_id IN
+                 (SELECT id FROM dim_shop WHERE shop_code LIKE 'CHF%-bulk')""", {}),
+            ("""DELETE FROM competitor_profile WHERE shop_id IN
+                 (SELECT id FROM dim_shop WHERE shop_code LIKE 'CHF%-bulk')""", {}),
+            ("""DELETE FROM category_competitor_relevance WHERE shop_id IN
+                 (SELECT id FROM dim_shop WHERE shop_code LIKE 'CHF%-bulk')""", {}),
+            ("DELETE FROM fact_competitor_price_daily WHERE sku_id LIKE 'CHF%-B-%'", {}),
+            ("DELETE FROM product_hierarchy_assignments WHERE sku_id LIKE 'CHF%-B-%'", {}),
+            ("DELETE FROM product_hierarchy_nodes WHERE name LIKE 'CHF%-BulkNode'", {}),
+            ("DELETE FROM dim_product WHERE sku_id LIKE 'CHF%-B-%'", {}),
+            ("""DELETE FROM cost_usage_records WHERE shop_id IN
+                 (SELECT id FROM dim_shop WHERE shop_code LIKE 'CHF%-bulk')""", {}),
+            ("DELETE FROM dim_shop WHERE shop_code LIKE 'CHF%-bulk'", {}),
+        ]
+        for stmt, params in _residue_cleanup:
+            db.execute(text(stmt), params)
+        db.commit()
+        db.execute(text("SET statement_timeout = '120s'"))
         shop = models.DimShop(shop_code=f"{PFX}-bulk", name=f"{PFX} Bulk", active=True)
         db.add(shop); db.flush()
         sid = shop.id
@@ -283,6 +311,13 @@ def bulk_seed(client):
         db.add(models.CategoryCompetitorRelevance(
             shop_id=sid, competitor_name=comp, category=f"{PFX}-BulkCat",
             combined_score=50.0, relevance_label="HIGH", traffic_light="green"))
+        db.commit()
+        # Verse statistieken na de bulk-insert: zonder ANALYZE kan de planner
+        # onder full-suite belasting een traag plan kiezen en loopt de
+        # rankings-query tegen de request-statement-timeout aan.
+        db.execute(text(
+            "ANALYZE dim_product, product_hierarchy_assignments, "
+            "fact_competitor_price_daily"))
         db.commit()
         ids = {"sid": sid, "node": node.id, "comp": comp}
         yield ids
