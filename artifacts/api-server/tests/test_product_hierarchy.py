@@ -420,3 +420,58 @@ def test_stats_verdeling_per_bron(client, admin_headers, ph_products):
         assert key in verdeling
     assert verdeling["import"] >= 1
     assert verdeling["auto_import"] >= 1
+
+
+def test_tree_telt_subtree_producten(client, admin_headers, ph_products):
+    """/tree en /children tellen producten inclusief onderliggende nodes."""
+    from datetime import datetime as _dt
+    db = SessionLocal()
+    N = models.ProductHierarchyNode
+    A = models.ProductHierarchyAssignment
+    try:
+        root = N(name=f"{PFX}-SubRoot", level=1,
+                 path_names=f"{PFX}-SubRoot", is_active=True)
+        db.add(root); db.flush()
+        root.path = f"/{root.id}/"
+        mid = N(name=f"{PFX}-SubMid", parent_id=root.id, level=2,
+                path_names=f"{PFX}-SubRoot > {PFX}-SubMid", is_active=True)
+        db.add(mid); db.flush()
+        mid.path = f"{root.path}{mid.id}/"
+        leaf = N(name=f"{PFX}-SubLeaf", parent_id=mid.id, level=3,
+                 path_names=f"{PFX}-SubRoot > {PFX}-SubMid > {PFX}-SubLeaf",
+                 is_active=True)
+        db.add(leaf); db.flush()
+        leaf.path = f"{mid.path}{leaf.id}/"
+        # 1 product direct op mid, 1 op de leaf; root heeft géén directe
+        db.add(A(sku_id=ph_products[0], node_id=mid.id, status="active",
+                 valid_from=_dt.utcnow(), source="manual", assigned_by="test"))
+        db.add(A(sku_id=ph_products[1], node_id=leaf.id, status="active",
+                 valid_from=_dt.utcnow(), source="manual", assigned_by="test"))
+        db.commit()
+        root_id, mid_id, leaf_id = root.id, mid.id, leaf.id
+    finally:
+        db.close()
+
+    # /tree: root krijgt de subtree-som (2), mid 2 (eigen + leaf), leaf 1
+    r = client.get(f"/api/product-hierarchy/tree?root_id={root_id}&depth=8",
+                   headers=admin_headers)
+    assert r.status_code == 200, r.text
+    tree = r.json()
+    assert tree["sku_count"] == 2
+    mid_node = tree["children"][0]
+    assert mid_node["id"] == mid_id and mid_node["sku_count"] == 2
+    leaf_node = mid_node["children"][0]
+    assert leaf_node["id"] == leaf_id and leaf_node["sku_count"] == 1
+
+    # roots-lijst (depth=1, zoals de HierarchyFilter) toont ook de subtree-som
+    r = client.get("/api/product-hierarchy/tree?depth=1", headers=admin_headers)
+    assert r.status_code == 200
+    by_id = {n["id"]: n for n in r.json()["roots"]}
+    assert by_id[root_id]["sku_count"] == 2
+
+    # /children (lazy load) telt eveneens inclusief descendants
+    r = client.get(f"/api/product-hierarchy/nodes/{root_id}/children",
+                   headers=admin_headers)
+    assert r.status_code == 200
+    kids = {n["id"]: n for n in r.json()}
+    assert kids[mid_id]["sku_count"] == 2

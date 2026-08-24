@@ -227,6 +227,25 @@ def list_imports(
 
 # ── Leesqueries ──────────────────────────────────────────────────────────────
 
+def _subtree_sku_counts(db: Session, nodes) -> dict[int, int]:
+    """Aantal actieve producttoewijzingen per node, inclusief alle
+    onderliggende nodes (subtree-som via het gematerialiseerde pad)."""
+    N = models.ProductHierarchyNode
+    A = models.ProductHierarchyAssignment
+    count_rows = (db.query(N.path, func.count(A.id))
+                  .join(A, A.node_id == N.id)
+                  .filter(A.status == "active")
+                  .group_by(N.path).all())
+    result: dict[int, int] = {}
+    for n in nodes:
+        if not n.path:
+            result[n.id] = 0
+            continue
+        result[n.id] = sum(c for p, c in count_rows
+                           if p and p.startswith(n.path))
+    return result
+
+
 @router.get("/stats")
 def stats(db: Session = Depends(get_db),
           current_user: models.User = Depends(auth_utils.get_current_user)):
@@ -243,7 +262,6 @@ def tree(
 ):
     """Boom vanaf root (of een node), beperkt tot `depth` niveaus (lazy load)."""
     N = models.ProductHierarchyNode
-    A = models.ProductHierarchyAssignment
     if root_id is not None:
         root = _get_node(db, root_id)
         base_level = root.level or 1
@@ -255,8 +273,7 @@ def tree(
         q = q.filter(N.is_active == True)  # noqa: E712
     nodes = q.order_by(N.level, N.name).all()
 
-    counts = dict(db.query(A.node_id, func.count(A.id))
-                  .filter(A.status == "active").group_by(A.node_id).all())
+    counts = _subtree_sku_counts(db, nodes)
     # parent-ids over de hele tabel, zodat has_children ook klopt voor de
     # diepste geladen laag (lazy load in de UI)
     all_parent_ids = {pid for (pid,) in db.query(N.parent_id)
@@ -300,13 +317,9 @@ def node_children(node_id: int, db: Session = Depends(get_db),
                   current_user: models.User = Depends(auth_utils.get_current_user)):
     node = _get_node(db, node_id)
     N = models.ProductHierarchyNode
-    A = models.ProductHierarchyAssignment
     children = (db.query(N).filter(N.parent_id == node.id)
                 .order_by(N.name).all())
-    counts = dict(db.query(A.node_id, func.count(A.id))
-                  .filter(A.status == "active",
-                          A.node_id.in_([c.id for c in children] or [0]))
-                  .group_by(A.node_id).all())
+    counts = _subtree_sku_counts(db, children)
     return [_node_dict(c, sku_count=counts.get(c.id, 0)) for c in children]
 
 
