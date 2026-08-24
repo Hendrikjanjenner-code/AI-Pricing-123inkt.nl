@@ -77,7 +77,32 @@ def run_model_refresh(db, model_version: str = "autosync-v1.0.0",
         logger.exception("Automatische hiërarchie-opbouw na sync mislukt "
                          "(modelrun zelf blijft geslaagd).")
 
+    # Nieuwe feed-producten automatisch in de Excel-categorieboom laten
+    # vallen (taak #282). Zelfde isolatie: eigen sessie, fout-tolerant.
+    run_hierarchy_auto_assign()
+
     return processed, skipped
+
+
+def run_hierarchy_auto_assign() -> dict | None:
+    """
+    Wijs producten zonder hiërarchie-toewijzing automatisch toe op basis van
+    de laatst toegepaste Excel-import (services/product_hierarchy.
+    auto_assign_new_products). Eigen sessie en fout-tolerant: een mislukking
+    wordt gelogd maar laat de sync/modelrun nooit falen.
+    """
+    try:
+        from services.product_hierarchy import auto_assign_new_products
+        from database import SessionLocal
+        adb = SessionLocal()
+        try:
+            return auto_assign_new_products(adb)
+        finally:
+            adb.close()
+    except Exception:
+        logger.exception("Automatische hiërarchie-toewijzing na sync mislukt "
+                         "(sync zelf blijft geslaagd).")
+        return None
 
 
 def run_rankings_refresh(db, shop_id: int | None = None,

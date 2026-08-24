@@ -604,8 +604,12 @@ def sync_connector(
             # Fout-tolerant: een mislukking wordt zichtbaar gelogd (EngineRun)
             # maar laat de sync-respons niet falen.
             if name == "priceshape":
-                from services.refresh import run_rankings_refresh
+                from services.refresh import (run_rankings_refresh,
+                                              run_hierarchy_auto_assign)
                 run_rankings_refresh(sync_db, trigger="handmatige sync")
+                # Nieuwe feed-producten meteen in de Excel-categorieboom
+                # laten vallen (fout-tolerant, eigen sessie).
+                run_hierarchy_auto_assign()
     finally:
         sync_db.close()
 

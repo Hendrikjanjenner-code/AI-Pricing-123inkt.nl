@@ -621,6 +621,175 @@ def apply_job(db: Session, job: models.ImportJob, username: str,
     return {"job_id": job.id, "stats": stats, "wijzigingen_gelogd": len(log)}
 
 
+# ── Automatische toewijzing van nieuwe feed-producten ───────────────────────
+
+AUTO_ASSIGN_SOURCE = "auto_import"
+
+
+def last_applied_import(db: Session) -> models.ImportJob | None:
+    """Laatst toegepaste hiërarchie-import (of None)."""
+    return (db.query(models.ImportJob)
+            .filter(models.ImportJob.upload_type == "product_hierarchy",
+                    models.ImportJob.status == "geimporteerd")
+            .order_by(models.ImportJob.completed_at.desc()).first())
+
+
+def auto_assign_new_products(db: Session, sku_ids: list[str] | None = None) -> dict:
+    """
+    Wijs producten zonder actieve hiërarchie-toewijzing automatisch toe op
+    basis van de staging-rijen van de laatst toegepaste Excel-import.
+
+    Bedoeld als post-hook na een feed-sync: de Excel dekt het volledige
+    assortiment, dus nieuw binnengekomen feed-producten staan er vrijwel
+    altijd al in. Matching volgt dezelfde volgorde als validate_job:
+    DRS product-ID/SKU → feed-id (raw_attributes->>'id') → EAN → OEM.
+
+    Niet-destructief: producten met een bestaande actieve toewijzing (hoe dan
+    ook ontstaan, dus óók handmatig verplaatste) worden nooit aangeraakt —
+    alleen producten ZONDER actieve toewijzing komen in aanmerking.
+    Idempotent: een tweede aanroep doet niets meer.
+    """
+    # Serialiseer met apply/autobuild (zelfde advisory lock, transactie-
+    # gebonden) zodat we nooit toewijzen terwijl een import de boom herbouwt.
+    # Belangrijk: het lock komt VÓÓR het bepalen van de "laatst toegepaste"
+    # import — een apply die intussen bezig was is dan gecommit en wordt hier
+    # dus gezien, in plaats van dat we op een verouderde job doorwerken.
+    from services.hierarchy_autobuild import _ADVISORY_LOCK_KEY
+    from sqlalchemy import text as _sa_text
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        db.execute(_sa_text("SELECT pg_advisory_xact_lock(:k)"),
+                   {"k": _ADVISORY_LOCK_KEY})
+
+    # Racevenster van apply_job afdekken: de apply claimt de job eerst met een
+    # commit naar status 'bezig' en neemt pas daarna het lock. Wie in dat
+    # venster start, verkrijgt het lock vóór de apply en zou de VORIGE import
+    # als "laatste" zien. Zolang er een apply onderweg is ('bezig'), slaan we
+    # deze run daarom over — de volgende sync probeert het gewoon opnieuw.
+    busy = (db.query(models.ImportJob)
+            .filter(models.ImportJob.upload_type == "product_hierarchy",
+                    models.ImportJob.status == "bezig").first())
+    if busy is not None:
+        return {"skipped": True,
+                "reason": "hiërarchie-import wordt toegepast (job "
+                          f"{busy.id}); volgende sync probeert opnieuw"}
+
+    job = last_applied_import(db)
+    if job is None:
+        return {"skipped": True, "reason": "geen toegepaste hiërarchie-import"}
+
+    P = models.DimProduct
+    A = models.ProductHierarchyAssignment
+    S = models.ProductHierarchyStagingRow
+
+    # Producten die in aanmerking komen: zonder actieve toewijzing.
+    active_sub = (db.query(A.sku_id)
+                  .filter(A.status == "active", A.sku_id == P.sku_id))
+    q = db.query(P.sku_id).filter(~active_sub.exists())
+    if sku_ids is not None:
+        if not sku_ids:
+            return {"skipped": True, "reason": "geen kandidaat-producten"}
+        q = q.filter(P.sku_id.in_(sku_ids))
+    unassigned = {s for (s,) in q.all()}
+    if not unassigned:
+        return {"toegewezen": 0, "kandidaten": 0, "job_id": job.id}
+
+    # Staging-rij-centrisch, exact zoals validate_job: bouw per productcode
+    # lookup-maps over ÁLLE producten (niet alleen ongekoppelde), zodat de
+    # matchvolgorde DRS SKU → feed-id → EAN → OEM per rij identiek uitpakt.
+    # Een code die de SKU van (al gekoppeld) product A én de EAN van
+    # (ongekoppeld) product B is, resolvet dus naar A — en levert géén
+    # toewijzing voor B op.
+    codes = {c for (c,) in db.query(S.product_code)
+             .filter(S.job_id == job.id, S.status == "geldig",
+                     S.product_code.isnot(None)).distinct()}
+    if not codes:
+        return {"toegewezen": 0, "kandidaten": len(unassigned), "job_id": job.id}
+    sku_set: set[str] = set()
+    feed_id_map: dict[str, str] = {}
+    ean_map: dict[str, str] = {}
+    oem_map: dict[str, str] = {}
+    feed_id_expr = P.raw_attributes["id"].as_string()
+    code_list = list(codes)
+    CHUNK = 5000
+    for i in range(0, len(code_list), CHUNK):
+        chunk = code_list[i:i + CHUNK]
+        for (sku,) in db.query(P.sku_id).filter(P.sku_id.in_(chunk)):
+            sku_set.add(sku)
+        for sku, fid in db.query(P.sku_id, feed_id_expr).filter(feed_id_expr.in_(chunk)):
+            if fid is not None:
+                feed_id_map[str(fid)] = sku
+        for sku, ean in db.query(P.sku_id, P.ean).filter(P.ean.in_(chunk)):
+            ean_map[ean] = sku
+        for sku, oem in db.query(P.sku_id, P.oem_code).filter(P.oem_code.in_(chunk)):
+            oem_map[oem] = sku
+
+    # Resolve elke geldige staging-rij één keer (rijvolgorde = bestandsvolgorde)
+    # en verzamel per product het doelpad. Net als bij validate_job wint de
+    # éérste rij die naar een product resolvet; een latere rij met een ander
+    # pad zou daar 'fout' opleveren en telt hier dus niet mee.
+    sku_row: dict[str, tuple[tuple, str | None, str]] = {}  # sku → (pad, opt, methode)
+    rows = (db.query(S.product_code, S.path_names, S.external_option_id)
+            .filter(S.job_id == job.id, S.status == "geldig",
+                    S.product_code.isnot(None), S.path_names.isnot(None))
+            .order_by(S.row_number).yield_per(2000))
+    for code, names, opt in rows:
+        if not names:
+            continue
+        if code in sku_set:
+            sku, method = code, "drs_id"
+        elif code in feed_id_map:
+            sku, method = feed_id_map[code], "feed_id"
+        elif code in ean_map:
+            sku, method = ean_map[code], "ean"
+        elif code in oem_map:
+            sku, method = oem_map[code], "oem"
+        else:
+            continue
+        if sku not in unassigned or sku in sku_row:
+            continue
+        sku_row[sku] = (tuple(names), opt, method)
+
+    if not sku_row:
+        return {"toegewezen": 0, "kandidaten": len(unassigned), "job_id": job.id}
+
+    by_id, by_parent_name, by_opt = _existing_tree_index(db)
+
+    def resolve_leaf(names: tuple, opt: str | None):
+        node = by_opt.get(opt) if opt else None
+        if node is None:
+            parent = None
+            for name in names:
+                parent = by_parent_name.get(
+                    ((parent.id if parent else None), name.lower()))
+                if parent is None:
+                    return None
+            node = parent
+        return node if (node is not None and node.is_active) else None
+
+    now = datetime.utcnow()
+    assigned = 0
+    for sku, (names, opt, method) in sku_row.items():
+        target = resolve_leaf(names, opt)
+        if target is None:
+            continue
+        db.add(A(sku_id=sku, node_id=target.id, status="active",
+                 valid_from=now, source=AUTO_ASSIGN_SOURCE,
+                 assigned_by="feed-sync", import_job_id=job.id))
+        db.add(models.ProductHierarchyChangeLog(
+            import_job_id=job.id, sku_id=sku,
+            change_type="assignment_created",
+            new_value={"node_id": target.id, "path": target.path_names,
+                       "match_method": method},
+            source=AUTO_ASSIGN_SOURCE, performed_by="feed-sync"))
+        assigned += 1
+    db.commit()
+    if assigned:
+        logger.info("Automatische hiërarchie-toewijzing: %d nieuwe producten "
+                    "gekoppeld o.b.v. import-job %d.", assigned, job.id)
+    return {"toegewezen": assigned, "kandidaten": len(unassigned),
+            "job_id": job.id}
+
+
 # ── Leesqueries ──────────────────────────────────────────────────────────────
 
 def descendant_ids(db: Session, node: models.ProductHierarchyNode) -> list[int]:
