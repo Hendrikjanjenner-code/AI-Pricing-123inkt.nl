@@ -21,7 +21,7 @@ import logging
 from datetime import date
 from statistics import mean, pstdev
 
-from sqlalchemy import func
+from sqlalchemy import func, or_ as sa_or
 from sqlalchemy.orm import Session
 
 import models
@@ -1041,7 +1041,8 @@ def score_competition(db: Session, shop_id: int = 1) -> int:
 
     products = {
         p.sku_id: p for p in db.query(
-            models.DimProduct.sku_id, models.DimProduct.current_price, models.DimProduct.category
+            models.DimProduct.sku_id, models.DimProduct.current_price,
+            models.DimProduct.category, models.DimProduct.sheets_per_pack,
         ).filter(models.DimProduct.shop_id == shop_id).all()
     }
 
@@ -1146,14 +1147,31 @@ def score_competition(db: Session, shop_id: int = 1) -> int:
         prod = products.get(sku_id)
         if prod is None or not prices:
             continue
-        ref_price, used, excluded, reasons, outlier_details = ce.calculate_reference_price(
-            prices, outlier_threshold=outlier_threshold)
+        # Prijs-per-eenheid-normalisatie (taak #269): alleen als de eigen
+        # pakgrootte geldig bekend is (sheets_per_pack > 0) mag een vrijwel
+        # exact n-voud/1-op-n van de mediaan genormaliseerd meetellen.
+        # 0/negatief is elders een datakwaliteitsfout en telt niet als bekend.
+        _spp = getattr(prod, "sheets_per_pack", None)
+        pack_size_known = _spp is not None and _spp > 0
+        ref_price, used, excluded, reasons, outlier_details, normalized_details = \
+            ce.calculate_reference_price(
+                prices, outlier_threshold=outlier_threshold,
+                pack_size_known=pack_size_known)
         fact_ids = fact_ids_by_sku.get(sku_id, [])
         for det in outlier_details:
             idx = det.pop("index")
             if idx < len(fact_ids):
                 fact_marks.append({"id": fact_ids[idx],
                                    "excluded_reason": ce.EXCLUSION_OUTLIER,
+                                   "exclusion_detail": det})
+        # Genormaliseerde observaties tellen mee (geen uitsluitingsreden),
+        # maar krijgen een zichtbare markering op de fact-rij.
+        for det in normalized_details:
+            idx = det.pop("index")
+            if idx < len(fact_ids):
+                det["normalized"] = True
+                fact_marks.append({"id": fact_ids[idx],
+                                   "excluded_reason": None,
                                    "exclusion_detail": det})
         excluded, reasons = _merge_stock_delivery(sku_id, excluded, reasons)
         if ref_price is None or used == 0:
@@ -1218,7 +1236,10 @@ def score_competition(db: Session, shop_id: int = 1) -> int:
     db.query(models.FactCompetitorPriceDaily).filter(
         models.FactCompetitorPriceDaily.date == today,
         models.FactCompetitorPriceDaily.shop_id == shop_id,
-        models.FactCompetitorPriceDaily.excluded_reason.isnot(None),
+        sa_or(
+            models.FactCompetitorPriceDaily.excluded_reason.isnot(None),
+            models.FactCompetitorPriceDaily.exclusion_detail.isnot(None),
+        ),
     ).update({"excluded_reason": None, "exclusion_detail": None}, synchronize_session=False)
     for chunk in _chunks(fact_marks):
         db.bulk_update_mappings(models.FactCompetitorPriceDaily, chunk)

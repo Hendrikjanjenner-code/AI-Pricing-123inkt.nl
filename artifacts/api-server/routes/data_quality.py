@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, date as _date
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -868,7 +868,11 @@ def get_outlier_reconciliation(
     else:
         shop_scope = set(allowed) if allowed is not None else None
 
-    scoped = db.query(func.max(F.date)).filter(F.excluded_reason.isnot(None))
+    # Run-datum: de meest recente dag met een markering — uitgesloten óf
+    # genormaliseerd (taak #269: genormaliseerde rijen hebben excluded_reason
+    # NULL maar wél een exclusion_detail met "normalized": true).
+    scoped = db.query(func.max(F.date)).filter(or_(
+        F.excluded_reason.isnot(None), F.exclusion_detail.isnot(None)))
     if shop_scope is not None:
         scoped = scoped.filter(F.shop_id.in_(shop_scope))
     run_date = scoped.scalar()
@@ -878,6 +882,7 @@ def get_outlier_reconciliation(
         "outlier_threshold": settings.get("outlier_threshold"),
         "by_reason": {}, "by_suspected_cause": {},
         "top_competitors": [], "top_categories": [], "examples": {},
+        "normalized": {"count": 0, "by_factor": {}, "examples": []},
     }
     if run_date is None:
         return empty
@@ -931,6 +936,28 @@ def get_outlier_reconciliation(
             "detail": r.exclusion_detail,
         } for r in rows]
 
+    # Genormaliseerde observaties (taak #269): meegeteld in de referentieprijs
+    # met een zichtbare markering "genormaliseerd (n×)" — geen uitsluiting.
+    normalized_rows = _base(db.query(F).filter(
+        F.excluded_reason.is_(None), F.exclusion_detail.isnot(None))).order_by(F.id).all()
+    norm_by_factor: dict[str, int] = {}
+    norm_examples: list[dict] = []
+    norm_count = 0
+    for r in normalized_rows:
+        det = r.exclusion_detail or {}
+        if not det.get("normalized"):
+            continue
+        norm_count += 1
+        label = det.get("label") or "genormaliseerd"
+        norm_by_factor[label] = norm_by_factor.get(label, 0) + 1
+        if len(norm_examples) < 5:
+            norm_examples.append({
+                "sku_id": r.sku_id,
+                "competitor_name": r.competitor_name,
+                "price": float(r.price) if r.price is not None else None,
+                "detail": det,
+            })
+
     return {
         "run_date": run_date.isoformat(),
         "total_observations": total_observations,
@@ -941,6 +968,11 @@ def get_outlier_reconciliation(
         "top_competitors": top_competitors,
         "top_categories": top_categories,
         "examples": examples,
+        "normalized": {
+            "count": norm_count,
+            "by_factor": norm_by_factor,
+            "examples": norm_examples,
+        },
     }
 
 

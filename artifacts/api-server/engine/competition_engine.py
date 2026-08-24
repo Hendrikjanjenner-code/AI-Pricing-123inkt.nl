@@ -141,6 +141,31 @@ DEFAULT_OUTLIER_THRESHOLD = 0.30
 
 _PACK_MULTIPLES = (2, 3, 4, 5, 6, 8, 10, 12, 20, 24)
 
+# Prijs-per-eenheid-normalisatie (taak #269): alleen bij hoge zekerheid.
+# Een concurrentprijs die vrijwel exact (±2% van n× de mediaan) een geheel
+# n-voud of 1/n van de mediaan is, wordt — mits de eigen pakgrootte bekend is —
+# genormaliseerd meegeteld (prijs/n resp. prijs×n) in plaats van uitgesloten.
+# Ruimere afwijkingen (tot de 10%-band van classify_outlier_cause) blijven
+# twijfelgevallen en dus gemarkeerd uitgesloten.
+PACK_NORMALIZE_TOLERANCE = 0.02
+
+
+def detect_pack_factor(price: float, median: float) -> Optional[tuple[int, str]]:
+    """Detecteer met hoge zekerheid een verpakkingsfactor t.o.v. de mediaan.
+
+    Retourneert ``(n, "multiple")`` als prijs ≈ n× mediaan, ``(n, "fraction")``
+    als prijs ≈ mediaan/n (binnen ``PACK_NORMALIZE_TOLERANCE``), anders None.
+    """
+    if median is None or median <= 0 or price is None or price <= 0:
+        return None
+    r = price / median
+    for m in _PACK_MULTIPLES:
+        if abs(r - m) <= PACK_NORMALIZE_TOLERANCE * m:
+            return m, "multiple"
+        if abs(r - 1.0 / m) <= PACK_NORMALIZE_TOLERANCE / m:
+            return m, "fraction"
+    return None
+
 
 def classify_outlier_cause(price: float, median: float) -> str:
     """Vermoedelijke oorzaak van een uitbijter op basis van prijs/mediaan.
@@ -198,26 +223,60 @@ def weighted_median(prices: list[float], weights: Optional[list[float]] = None) 
 def calculate_reference_price(
     raw_prices: list[float],
     outlier_threshold: float = DEFAULT_OUTLIER_THRESHOLD,
-) -> tuple[Optional[float], int, int, dict, list[dict]]:
+    pack_size_known: bool = False,
+) -> tuple[Optional[float], int, int, dict, list[dict], list[dict]]:
     """
     Filter outliers from competitor prices and return the weighted median
     reference price plus exclusion statistics.
 
-    Returns ``(ref_price, used, excluded, excluded_reasons, excluded_details)``.
+    Returns ``(ref_price, used, excluded, excluded_reasons, excluded_details,
+    normalized_details)``.
     ``excluded_details`` bevat per uitgesloten prijs een dict met de index in
     ``raw_prices``, de prijs, mediaan, afwijking, ratio en vermoedelijke
     oorzaak — zodat de aanroeper de uitsluiting per observatie kan vastleggen
     (nooit stilzwijgend verwijderen, alleen markeren).
+
+    ``pack_size_known=True`` (taak #269) activeert prijs-per-eenheid-
+    normalisatie: een prijs die vrijwel exact (±PACK_NORMALIZE_TOLERANCE)
+    een n-voud of 1/n van de mediaan is, wordt genormaliseerd (prijs/n resp.
+    prijs×n) meegeteld in de referentieprijs in plaats van uitgesloten.
+    ``normalized_details`` bevat per genormaliseerde prijs index, originele en
+    genormaliseerde prijs, factor en label ("genormaliseerd (n×)").
+    Twijfelgevallen (buiten de strakke tolerantie) blijven uitgesloten.
     """
     if not raw_prices:
-        return None, 0, 0, {}, []
+        return None, 0, 0, {}, [], []
 
     excluded_reasons: dict[str, int] = {}
     excluded_details: list[dict] = []
+    normalized_details: list[dict] = []
     median_raw = float(np.median(raw_prices))
     included: list[float] = []
 
     for idx, price in enumerate(raw_prices):
+        # Normalisatie staat lós van de (configureerbare) uitbijterdrempel:
+        # een vrijwel exact n-voud/1-op-n van de mediaan is bij bekende
+        # pakgrootte per definitie een verpakkingsverschil en moet per eenheid
+        # meetellen — ook als een ruime drempel de prijs anders rauw zou
+        # includeren (dat zou de referentieprijs stil vervuilen).
+        if pack_size_known:
+            factor = detect_pack_factor(price, median_raw)
+            if factor is not None:
+                n, kind = factor
+                normalized = price / n if kind == "multiple" else price * n
+                label = f"genormaliseerd ({n}\u00d7)" if kind == "multiple" \
+                    else f"genormaliseerd (1/{n}\u00d7)"
+                included.append(float(normalized))
+                normalized_details.append({
+                    "index": idx,
+                    "price": round(float(price), 4),
+                    "normalized_price": round(float(normalized), 4),
+                    "median": round(median_raw, 4),
+                    "pack_factor": n,
+                    "pack_kind": kind,
+                    "label": label,
+                })
+                continue
         deviation = abs(price - median_raw) / (median_raw + 0.001)
         if deviation > outlier_threshold:
             excluded_reasons[EXCLUSION_OUTLIER] = excluded_reasons.get(EXCLUSION_OUTLIER, 0) + 1
@@ -234,4 +293,5 @@ def calculate_reference_price(
             included.append(price)
 
     ref_price = weighted_median(included)
-    return ref_price, len(included), len(raw_prices) - len(included), excluded_reasons, excluded_details
+    return (ref_price, len(included), len(raw_prices) - len(included),
+            excluded_reasons, excluded_details, normalized_details)
