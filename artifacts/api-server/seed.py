@@ -649,3 +649,151 @@ def seed_database():
         print(f"Seeding failed: {e}")
     finally:
         db.close()
+
+
+# ── Excel-hiërarchie seeding ─────────────────────────────────────────────────
+
+_EXCEL_HIERARCHY_FILENAME = (
+    "0_202608141341_0_Product_hierarchieen_met_ids_1787230273122.xlsx"
+)
+
+
+def _excel_hierarchy_path() -> str:
+    """Absoluut pad naar het Excel-hiërarchibestand (workspace-root/attached_assets/)."""
+    import os
+    # seed.py ligt in artifacts/api-server/; ga twee niveaus omhoog naar de workspace-root.
+    base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, "..", "..", "attached_assets", _EXCEL_HIERARCHY_FILENAME)
+
+
+def seed_hierarchy_from_excel() -> None:
+    """
+    Importeer de Excel-producthiërarchie idempotent in de database.
+
+    Controles:
+    - Sla over als er al een niet-automatisch hiërarchinode actief is
+      (source != 'auto_categorie'). Dit geldt voor zowel dev als productie.
+    - Sla over als het Excel-bestand niet gevonden wordt.
+    - Elke fout wordt gelogd maar crasht de startup NIET.
+
+    Stroom: upload → stage_rows → validate_job → apply_job
+    (identiek aan wat de importwizard in de UI doet).
+    """
+    import logging
+    import os
+    from datetime import datetime
+    from engine.import_engine import file_to_rows, new_batch_id
+    from services import product_hierarchy as svc
+    from services.hierarchy_autobuild import AUTO_SOURCE
+
+    _log = logging.getLogger("uvicorn.error")
+
+    # Schakelaar voor test-omgevingen: tests/conftest.py zet deze vlag zodat
+    # TestClient(app)-startups de hiërarchietabellen niet muteren.
+    if os.environ.get("DISABLE_HIERARCHY_SEED", "false").lower() in ("1", "true", "yes"):
+        _log.debug("seed_hierarchy_from_excel: uitgeschakeld via DISABLE_HIERARCHY_SEED.")
+        return
+
+    excel_path = _excel_hierarchy_path()
+    if not os.path.isfile(excel_path):
+        _log.warning(
+            "seed_hierarchy_from_excel: bestand niet gevonden op %s — overgeslagen.",
+            excel_path,
+        )
+        return
+
+    db = SessionLocal()
+    try:
+        # Idempotentiecontrole: zijn er al niet-automatisch geïmporteerde
+        # actieve nodes aanwezig? Dan is de boom al ingevoerd, sla over.
+        existing = (
+            db.query(models.ProductHierarchyNode.id)
+            .filter(
+                models.ProductHierarchyNode.source != AUTO_SOURCE,
+                models.ProductHierarchyNode.is_active.is_(True),
+            )
+            .first()
+        )
+        if existing is not None:
+            _log.info(
+                "seed_hierarchy_from_excel: niet-automatische hiërarchieboom "
+                "al aanwezig — overgeslagen."
+            )
+            return
+
+        _log.info(
+            "seed_hierarchy_from_excel: geen handmatige boom gevonden; "
+            "importeer %s …", _EXCEL_HIERARCHY_FILENAME
+        )
+
+        # Lees het Excel-bestand en detecteer kolomindeling.
+        with open(excel_path, "rb") as fh:
+            content = fh.read()
+
+        warnings: list = []
+        rows = file_to_rows(content, _EXCEL_HIERARCHY_FILENAME, warnings)
+        if not rows:
+            _log.error("seed_hierarchy_from_excel: geen datarijen in Excel-bestand.")
+            return
+
+        mapping = svc.detect_mapping(list(rows[0].keys()))
+        if not mapping.get("level_cols") and not mapping.get("path_col"):
+            _log.error(
+                "seed_hierarchy_from_excel: kolomdetectie mislukt — "
+                "geen level- of path-kolom gevonden (kolommen: %s).",
+                list(rows[0].keys()),
+            )
+            return
+
+        # Maak een ImportJob aan.
+        job = models.ImportJob(
+            upload_type="product_hierarchy",
+            filename=_EXCEL_HIERARCHY_FILENAME,
+            status="nieuw",
+            uploaded_by="system",
+            source="Handmatig",
+            file_type="xlsx",
+            batch_id=new_batch_id(),
+            created_at=datetime.utcnow(),
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+
+        # Stap 1: staging.
+        svc.stage_rows(db, job, rows, mapping)
+        _log.info(
+            "seed_hierarchy_from_excel: %d rijen gestaged (job #%d).",
+            len(rows), job.id,
+        )
+
+        # Stap 2: valideer.
+        result = svc.validate_job(db, job)
+        _log.info(
+            "seed_hierarchy_from_excel: validatie klaar — %s.",
+            result.get("counts"),
+        )
+        if not result.get("kan_toepassen") and not result.get("kan_gedeeltelijk_toepassen"):
+            _log.error(
+                "seed_hierarchy_from_excel: validatie laat apply niet toe "
+                "(fouten: %d, geldig: %d) — import afgebroken.",
+                result["counts"].get("fouten", 0),
+                result["counts"].get("geldig", 0),
+            )
+            return
+
+        # Stap 3: apply.
+        apply_result = svc.apply_job(db, job, username="system", deactivate_missing=False)
+        _log.info(
+            "seed_hierarchy_from_excel: toegepast — %s.",
+            apply_result.get("stats"),
+        )
+
+    except Exception:
+        _log.exception("seed_hierarchy_from_excel: onverwachte fout (niet kritiek).")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    finally:
+        db.close()

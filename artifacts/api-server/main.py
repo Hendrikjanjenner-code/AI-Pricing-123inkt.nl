@@ -139,9 +139,20 @@ async def lifespan(app: FastAPI):
                 _mdb.close()
             logger.info("Startup: concurrent-domeinmerge gecontroleerd/uitgevoerd.")
 
+            # 3-quater-a. Excel-producthiërarchie: importeer idempotent als er
+            # nog geen handmatige boom aanwezig is (taak #281). Faalveilig —
+            # een fout hier crasht de startup niet.
+            try:
+                from seed import seed_hierarchy_from_excel
+                seed_hierarchy_from_excel()
+            except Exception as _excel_exc:
+                logger.warning("Startup: Excel-hiërarchie seeding mislukt "
+                               "(niet kritiek): %s", _excel_exc)
+
             # 3-quater. Automatische hiërarchie uit feed-categorieën als er
             # nog helemaal geen hiërarchie bestaat (taak #274) — daarna houdt
             # elke feed-sync hem actueel via run_model_refresh. Faalveilig.
+            # Wordt overgeslagen als de Excel-hiërarchie al nodes heeft aangemaakt.
             try:
                 from services.hierarchy_autobuild import autobuild_hierarchy
                 _hdb = _SL()

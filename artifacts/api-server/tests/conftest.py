@@ -18,6 +18,11 @@ os.environ.setdefault("DISABLE_DATA_QUALITY_SCAN", "true")
 os.environ.setdefault("DISABLE_AI_BUDGET_CLEANUP", "true")
 os.environ.setdefault("DISABLE_AI_KEY_MONITOR", "true")
 os.environ.setdefault("DISABLE_SCRAPE_SCHEDULER", "true")
+# Voorkom dat seed_hierarchy_from_excel() tijdens TestClient(app)-startups
+# de hiërarchietabellen muteert. Hiërarchieboom-tests (bijv. test_hierarchy_
+# autobuild.py) deactiveren tijdelijk handmatige nodes; een startup-import
+# in die toestand zou de boomtoestand vernielen die de test vereist.
+os.environ.setdefault("DISABLE_HIERARCHY_SEED", "true")
 
 
 # ── Cross-run serialisatie van hiërarchie-mutatie-modules ────────────────────
