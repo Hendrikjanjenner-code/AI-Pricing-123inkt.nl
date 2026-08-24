@@ -123,6 +123,8 @@ def list_decisions(
     shop_id: Optional[int] = Query(None),
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -132,7 +134,7 @@ def list_decisions(
     # categorie-beslissingen blijven zichtbaar als de categorie producten in
     # de selectie bevat (lege set = niets matcht, None = geen filter).
     from routes.global_filters import resolve_sku_filter
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     if _gf is not None:
         cats = {
             r[0] for r in db.query(models.DimProduct.category)

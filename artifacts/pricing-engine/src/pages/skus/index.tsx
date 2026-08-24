@@ -93,8 +93,9 @@ function filtersFromUrl(): SmartFilterValues {
 export default function Producten() {
   const [page, setPage] = useState(1);
 
-  // Globale filtercontext (hiërarchie + merk) — zelfde context als de
-  // dashboards, zodat een categoriekeuze ook de productenlijst filtert.
+  // Globale filtercontext (hiërarchie + merk + status + zoekterm) — zelfde
+  // context als de dashboards, zodat een categoriekeuze ook de productenlijst
+  // filtert.
   const globalFilters = useGlobalFilters();
   const hierarchyNodeIds =
     globalFilters.hierarchy.length > 0
@@ -102,6 +103,10 @@ export default function Producten() {
       : undefined;
   const globalBrands =
     globalFilters.brands.length > 0 ? globalFilters.brands.join(",") : undefined;
+  const globalStatuses =
+    globalFilters.statuses.length > 0 ? globalFilters.statuses.join(",") : undefined;
+  const globalSkuQuery =
+    globalFilters.skuQuery.trim() !== "" ? globalFilters.skuQuery.trim() : undefined;
 
   // Deep-link filters uit de URL (eenmalig bij mount gelezen)
   const [initialFilters] = useState<SmartFilterValues>(() => filtersFromUrl());
@@ -141,6 +146,8 @@ export default function Producten() {
   const { data, isLoading } = useListProducts({
     hierarchy_node_ids: hierarchyNodeIds,
     brands: globalBrands,
+    statuses: globalStatuses,
+    sku_query: globalSkuQuery,
     page,
     page_size: 100,
     search: zoekterm || undefined,

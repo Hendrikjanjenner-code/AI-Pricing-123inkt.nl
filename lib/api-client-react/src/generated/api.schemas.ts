@@ -1048,6 +1048,14 @@ export type ListProductsParams = {
   /**
    * @nullable
    */
+  statuses?: string | null;
+  /**
+   * @nullable
+   */
+  sku_query?: string | null;
+  /**
+   * @nullable
+   */
   page?: number | null;
   /**
    * @nullable
@@ -1130,6 +1138,14 @@ export type ListSubstitutionsParams = {
    * @nullable
    */
   brands?: string | null;
+  /**
+   * @nullable
+   */
+  statuses?: string | null;
+  /**
+   * @nullable
+   */
+  sku_query?: string | null;
 };
 
 export type ExportRecommendationsParams = {
@@ -1137,6 +1153,22 @@ export type ExportRecommendationsParams = {
    * @nullable
    */
   date?: string | null;
+  /**
+   * @nullable
+   */
+  hierarchy_node_ids?: string | null;
+  /**
+   * @nullable
+   */
+  brands?: string | null;
+  /**
+   * @nullable
+   */
+  statuses?: string | null;
+  /**
+   * @nullable
+   */
+  sku_query?: string | null;
 };
 
 export type PushRecommendationsToDrsParams = {
@@ -1304,6 +1336,14 @@ export type GetCompetitorRankingsParams = {
    * @nullable
    */
   brands?: string | null;
+  /**
+   * @nullable
+   */
+  statuses?: string | null;
+  /**
+   * @nullable
+   */
+  sku_query?: string | null;
 };
 
 export type GetCompetitorRankings200NodesUsedItem = { [key: string]: unknown };
@@ -1340,6 +1380,14 @@ export type GetCompetitorLandscapeParams = {
    * @nullable
    */
   brands?: string | null;
+  /**
+   * @nullable
+   */
+  statuses?: string | null;
+  /**
+   * @nullable
+   */
+  sku_query?: string | null;
 };
 
 export type GetCompetitorLandscape200ItemsItem = { [key: string]: unknown };

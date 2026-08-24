@@ -104,6 +104,8 @@ def get_huismerk_overzicht(
     page_size: int = Query(50, ge=1, le=200),
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -118,7 +120,7 @@ def get_huismerk_overzicht(
         q = q.filter(InternalCompetitionScore.isv >= min_isv)
     # Globale filtercontext: neem een paar mee als het A-merk (sku_id) in de set
     # zit — het A-merk is het ankerproduct. None = geen filter; lege set = niets.
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     if _gf is not None:
         q = q.filter(InternalCompetitionScore.sku_id.in_(_gf))
 

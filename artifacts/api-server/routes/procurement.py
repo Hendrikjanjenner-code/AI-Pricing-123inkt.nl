@@ -17,6 +17,8 @@ router = APIRouter(prefix="/api/procurement", tags=["procurement"])
 def get_procurement_overview(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
 ) -> Any:
@@ -27,7 +29,7 @@ def get_procurement_overview(
         .filter(FactProcurementForecastDaily.date == latest)
     )
     # Globale filtercontext: None = geen filter; een lege set matcht niets.
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     if _gf is not None:
         q = q.filter(FactProcurementForecastDaily.sku_id.in_(_gf))
     recs = q.order_by(
@@ -130,6 +132,8 @@ def get_procurement_sku(
 def get_procurement_risico(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
 ) -> Any:
@@ -140,7 +144,7 @@ def get_procurement_risico(
         .filter(FactProcurementForecastDaily.date == latest)
     )
     # Globale filtercontext: None = geen filter; een lege set matcht niets.
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     if _gf is not None:
         q = q.filter(FactProcurementForecastDaily.sku_id.in_(_gf))
     recs = q.order_by(

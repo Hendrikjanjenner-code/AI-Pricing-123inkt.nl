@@ -116,12 +116,14 @@ def _latest_cat_records(db: Session) -> list[models.FactBcgClassificationDaily]:
 def get_bcg_dashboard(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(auth_utils.get_current_user),
 ):
     sku_rows = _latest_sku_records(db)
     # Globale filtercontext: beperk SKU-rijen tot de geselecteerde universe.
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     if _gf is not None:
         sku_rows = [r for r in sku_rows if r.entity_id in _gf]
 
@@ -230,12 +232,14 @@ def get_sku_matrix(
     type: str = "internal",
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(auth_utils.get_current_user),
 ):
     rows = _latest_sku_records(db)
     # Globale filtercontext: beperk SKU-rijen en productmap tot de selectie.
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     if _gf is not None:
         rows = [r for r in rows if r.entity_id in _gf]
     products = {p.sku_id: p for p in db.query(models.DimProduct).all()
@@ -385,6 +389,8 @@ def get_sku_bcg_detail(
 def get_categorie_matrix(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(auth_utils.get_current_user),
 ):
@@ -392,7 +398,7 @@ def get_categorie_matrix(
     # Globale filtercontext (taak #217): een categorierij telt mee wanneer de
     # categorie producten uit de geselecteerde SKU-set bevat. None = geen
     # filter; een lege set matcht niets.
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     if _gf is not None:
         cats = {
             c[0] for c in db.query(models.DimProduct.category)
@@ -429,12 +435,14 @@ def get_categorie_matrix(
 def get_hybrid_matrix(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(auth_utils.get_current_user),
 ):
     rows = _latest_sku_records(db)
     # Globale filtercontext: beperk SKU-rijen en productmap tot de selectie.
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     if _gf is not None:
         rows = [r for r in rows if r.entity_id in _gf]
     products = {p.sku_id: p for p in db.query(models.DimProduct).all()
@@ -485,11 +493,13 @@ def get_hybrid_matrix(
 def get_huismerk_intelligence(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(auth_utils.get_current_user),
 ):
     # Globale filtercontext: beperk huismerk-SKU's tot de selectie.
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     pl_q = db.query(models.FactPrivateLabelIntelligence).order_by(
         models.FactPrivateLabelIntelligence.run_date.desc(),
         models.FactPrivateLabelIntelligence.private_label_value_score.desc(),
@@ -546,12 +556,14 @@ def get_huismerk_intelligence(
 def get_pricing_power(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(auth_utils.get_current_user),
 ):
     rows = _latest_sku_records(db)
     # Globale filtercontext: beperk SKU-rijen en productmap tot de selectie.
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     if _gf is not None:
         rows = [r for r in rows if r.entity_id in _gf]
     products = {p.sku_id: p for p in db.query(models.DimProduct).all()

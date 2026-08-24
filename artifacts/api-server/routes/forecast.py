@@ -19,13 +19,15 @@ def forecast_dashboard(
     shop_id: Optional[int] = Query(None),
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _: models.User = Depends(get_current_user),
 ) -> Any:
     if horizon not in (30, 90):
         horizon = 30
     # Globale filtercontext: None = geen filter; een lege set matcht niets.
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     return get_forecast_dashboard(db, horizon=horizon, shop_id=shop_id, sku_filter=_gf)
 
 

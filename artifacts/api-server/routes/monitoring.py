@@ -22,6 +22,8 @@ def get_monitoring_alerts(
     dagen: int = Query(30),
     hierarchy_node_ids: str = Query(None),
     brands: str = Query(None),
+    statuses: str = Query(None),
+    sku_query: str = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -34,7 +36,7 @@ def get_monitoring_alerts(
     # Globale filtercontext (hiërarchie + merk): beperk tot alerts op de
     # gefilterde SKU-set (own_sku_id). Lege selectie ≠ geen filter.
     from routes.global_filters import sku_filter_query
-    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands, statuses, sku_query)
     if sku_q is not None:
         q = q.filter(FactMonitoringAlert.own_sku_id.in_(sku_q.scalar_subquery()))
 

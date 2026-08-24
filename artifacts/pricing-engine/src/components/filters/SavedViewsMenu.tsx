@@ -60,6 +60,7 @@ function applyView(view: SavedView) {
     ...emptyFilters(),
     hierarchy: Array.isArray(f.hierarchy) ? f.hierarchy : [],
     brands: Array.isArray(f.brands) ? f.brands : [],
+    statuses: Array.isArray(f.statuses) ? f.statuses : [],
     periodDays: typeof f.periodDays === "number" ? f.periodDays : null,
     skuQuery: typeof f.skuQuery === "string" ? f.skuQuery : "",
   });

@@ -33,12 +33,14 @@ router = APIRouter(prefix="/api", tags=["break-even"])
 def get_kostprijswijziging_dashboard(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ) -> Any:
     """Kostprijswijziging dashboard: alle SKU's met cost-change scores."""
     from routes.global_filters import sku_filter_query
-    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands, statuses, sku_query)
     return get_cost_change_dashboard(db, sku_q=sku_q)
 
 
@@ -94,12 +96,14 @@ def get_kostprijswijziging_sku(
 def get_ppfs_overzicht(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ) -> Any:
     """Price Pass-through Feasibility Score dashboard voor alle SKU's."""
     from routes.global_filters import sku_filter_query
-    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands, statuses, sku_query)
     return get_ppfs_dashboard(db, sku_q=sku_q)
 
 
@@ -126,12 +130,14 @@ def get_ppfs_sku(
 def get_break_even_overzicht(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ) -> Any:
     """Break-even dashboard voor alle SKU's."""
     from routes.global_filters import sku_filter_query
-    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands, statuses, sku_query)
     return get_break_even_dashboard(db, sku_q=sku_q)
 
 
@@ -197,12 +203,14 @@ def simuleer_prijsverlaging(
 def get_meds_overzicht(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ) -> Any:
     """MEDS dashboard: marketing vs korting vergelijking voor alle SKU's."""
     from routes.global_filters import sku_filter_query
-    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands, statuses, sku_query)
     return get_meds_dashboard(db, sku_q=sku_q)
 
 
@@ -288,6 +296,8 @@ def simuleer_marketing_vs_korting(
 def get_margebescherming(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(get_current_user),
 ) -> Any:
@@ -302,7 +312,7 @@ def get_margebescherming(
     )
     # Globale filtercontext (hiërarchie + merk). Lege selectie ≠ geen filter.
     from routes.global_filters import sku_filter_query
-    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands, statuses, sku_query)
     if sku_q is not None:
         recs_q = recs_q.filter(FactCostChangeDaily.sku_id.in_(sku_q.scalar_subquery()))
     recs = recs_q.order_by(FactCostChangeDaily.mps_score.asc()).all()

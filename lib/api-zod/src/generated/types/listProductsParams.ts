@@ -42,6 +42,14 @@ export type ListProductsParams = {
   /**
    * @nullable
    */
+  statuses?: string | null;
+  /**
+   * @nullable
+   */
+  sku_query?: string | null;
+  /**
+   * @nullable
+   */
   page?: number | null;
   /**
    * @nullable

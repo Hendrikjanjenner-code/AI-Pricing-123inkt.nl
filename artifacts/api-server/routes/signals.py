@@ -61,6 +61,8 @@ def list_signals(
     shop_id: Optional[int] = Query(None),
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -72,8 +74,8 @@ def list_signals(
         models.IntelligenceSignal.shop_id == sid
     )
     # Globale filtercontext (taak #217)
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
-    cond = signal_filter_conditions(db, _gf, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
+    cond = signal_filter_conditions(db, _gf, hierarchy_node_ids, brands, statuses, sku_query)
     if cond is not None:
         q = q.filter(cond)
     if status and status != "all":
@@ -114,6 +116,8 @@ def aggregate_signals(
     shop_id: Optional[int] = Query(None),
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
@@ -131,8 +135,8 @@ def aggregate_signals(
         q = q.filter(models.IntelligenceSignal.status == status)
     if engine:
         q = q.filter(models.IntelligenceSignal.engine == engine)
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
-    cond = signal_filter_conditions(db, _gf, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
+    cond = signal_filter_conditions(db, _gf, hierarchy_node_ids, brands, statuses, sku_query)
     if cond is not None:
         q = q.filter(cond)
     rows = q.all()

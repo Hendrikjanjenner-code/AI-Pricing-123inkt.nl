@@ -49,6 +49,7 @@
 - [Slow-run monitoring](slow-run-monitoring.md) — per-shop scheduled runs are the production path: publish shop-scoped engine_slow_run, never exempt scoped runs; round timings to µs or mocked tests can never trigger.
 - [Test-shop teardown FK](test-suite-conventions.md) — request middleware writes cost-usage rows per shop; any teardown that deletes a shop must delete those rows first or FK-fails only in full-suite runs.
 - [Keyset pagination & NULL watermarks](keyset-pagination-nulls.md) — row-tuple keyset compare drops NULL-watermark rows; coalesce both sides to a fixed minimum.
+- [Excel-hiërarchie re-import](excel-hierarchy-import.md) — na dev-DB-reset boom opnieuw importeren via de wizard-API; nooit apply draaien terwijl de testsuite loopt.
 - [Canonieke producthiërarchie](product-hierarchy.md) — staged niet-destructieve import; padtabel-sync verplicht bij elke boommutatie; apply claimt job atomisch.
 - [Global Filter Context](global-filter-context.md) — hierarchy/brand filter: server expands descendants via resolve_sku_filter (None≠empty set); store+sessionStorage survives wouter dropping f_-URL-params.
 - [Shared-DB test isolation](shared-db-test-isolation.md) — future-dated max(date) seeds, purge residue for most-recent semantics, always set shop_id explicitly.

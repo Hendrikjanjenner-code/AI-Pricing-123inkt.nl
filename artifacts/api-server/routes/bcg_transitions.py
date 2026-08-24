@@ -19,6 +19,8 @@ def list_bcg_transities(
     to_class: Optional[str] = Query(None),
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
 ) -> Any:
@@ -30,7 +32,7 @@ def list_bcg_transities(
     # niet SKU-gekoppeld en vallen bij een actief filter weg. Lege selectie ≠
     # geen filter.
     from routes.global_filters import resolve_sku_filter
-    sku_set = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    sku_set = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     if sku_set is not None:
         data["transities"] = [
             t for t in data["transities"]
@@ -95,6 +97,8 @@ def get_bcg_transities_sku(
 def get_bcg_alerts(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
 ) -> Any:
@@ -108,7 +112,7 @@ def get_bcg_alerts(
     # Globale filtercontext: SKU-transities beperken tot de gefilterde SKU-set
     # (entity_id == sku_id, alleen entity_type SKU). Lege selectie ≠ geen filter.
     from routes.global_filters import sku_filter_query
-    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands, statuses, sku_query)
     if sku_q is not None:
         q = q.filter(
             FactBcgTransition.entity_type == "SKU",

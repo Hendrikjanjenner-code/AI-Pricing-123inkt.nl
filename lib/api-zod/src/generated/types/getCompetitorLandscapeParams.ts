@@ -19,4 +19,12 @@ export type GetCompetitorLandscapeParams = {
    * @nullable
    */
   brands?: string | null;
+  /**
+   * @nullable
+   */
+  statuses?: string | null;
+  /**
+   * @nullable
+   */
+  sku_query?: string | null;
 };

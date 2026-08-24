@@ -18,12 +18,14 @@ def promotion_dashboard(
     shop_id: Optional[int] = Query(None),
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _: models.User = Depends(get_current_user),
 ) -> Any:
     """Historische promo-analyse: uplift, incrementaliteit, break-even, cannibalisatie/halo."""
     # Globale filtercontext: None = geen filter; een lege set matcht niets.
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     return get_promotion_dashboard(db, shop_id=shop_id, sku_filter=_gf)
 
 
@@ -32,6 +34,8 @@ def list_promotions(
     shop_id: Optional[int] = Query(None),
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _: models.User = Depends(get_current_user),
 ) -> Any:
@@ -44,7 +48,7 @@ def list_promotions(
         .filter(models.DimProduct.shop_id == sid)
     )
     # Globale filtercontext: filter promoties op hun SKU. Lege set matcht niets.
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     if _gf is not None:
         q = q.filter(models.Promotion.sku_id.in_(_gf))
     promos = (

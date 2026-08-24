@@ -155,6 +155,8 @@ def get_concurrentie_overzicht(
     page_size: int = Query(50, ge=1, le=200),
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -174,7 +176,7 @@ def get_concurrentie_overzicht(
     if status:
         q = q.filter(CompetitorInfluenceScore.status == status)
     # Globale filtercontext: doorsnede met categorie-filter. Lege set = niets.
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     if _gf is not None:
         q = q.filter(CompetitorInfluenceScore.sku_id.in_(_gf))
 

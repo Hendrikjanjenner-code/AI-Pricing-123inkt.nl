@@ -1,5 +1,6 @@
 """Tests voor de globale filtercontext (taak #216): server-side
-descendant-expansie en merkfilter (routes/global_filters.py)."""
+descendant-expansie en merkfilter (routes/global_filters.py).
+Taak #280 breidt de context uit met lifecycle-status en productzoekterm."""
 import uuid
 
 import pytest
@@ -24,9 +25,12 @@ def hierarchy_data(db):
     """Parent → child hiërarchie met elk één actief toegewezen product."""
     skus = [f"{PFX}-A", f"{PFX}-B", f"{PFX}-C"]
     db.add_all([
-        models.DimProduct(sku_id=skus[0], product_name="GF parent prod", brand=f"{PFX}-MerkX"),
-        models.DimProduct(sku_id=skus[1], product_name="GF child prod", brand=f"{PFX}-MerkY"),
-        models.DimProduct(sku_id=skus[2], product_name="GF los prod", brand=f"{PFX}-MerkY"),
+        models.DimProduct(sku_id=skus[0], product_name=f"{PFX} parent prod",
+                          brand=f"{PFX}-MerkX", lifecycle_status="active"),
+        models.DimProduct(sku_id=skus[1], product_name=f"{PFX} child prod",
+                          brand=f"{PFX}-MerkY", lifecycle_status="end_of_life"),
+        models.DimProduct(sku_id=skus[2], product_name=f"{PFX} los prod",
+                          brand=f"{PFX}-MerkY", lifecycle_status="active"),
     ])
     db.flush()
     parent = models.ProductHierarchyNode(name=f"{PFX}-Parent", level=1, path_names=f"{PFX}-Parent")
@@ -90,3 +94,39 @@ def test_merkfilter_en_combinatie(db, hierarchy_data):
 
 def test_onbekende_node_matcht_niets(db):
     assert resolve_sku_filter(db, "-12345", None) == set()
+
+
+def test_statusfilter(db, hierarchy_data):
+    d = hierarchy_data
+    result = resolve_sku_filter(db, None, None, statuses="end_of_life")
+    assert result is not None
+    assert set(d["skus"]) & result == {d["skus"][1]}
+    # Combinatie met hiërarchie: doorsnede.
+    combi = resolve_sku_filter(db, str(d["parent"]), None, statuses="active")
+    assert combi == {d["skus"][0]}
+
+
+def test_sku_query_filter(db, hierarchy_data):
+    d = hierarchy_data
+    # Substring-match op productnaam, case-insensitive.
+    result = resolve_sku_filter(db, None, None, sku_query=f"{PFX.lower()} child")
+    assert result == {d["skus"][1]}
+    # Match op sku_id.
+    result = resolve_sku_filter(db, None, None, sku_query=d["skus"][2])
+    assert result == {d["skus"][2]}
+    # Combinatie status + zoekterm: doorsnede.
+    combi = resolve_sku_filter(db, None, None,
+                               statuses="end_of_life", sku_query=PFX.lower())
+    assert set(d["skus"]) & (combi or set()) == {d["skus"][1]}
+
+
+def test_sku_filter_query_status_en_zoekterm(db, hierarchy_data):
+    from routes.global_filters import sku_filter_query
+    d = hierarchy_data
+    q = sku_filter_query(db, None, None, statuses="active,end_of_life",
+                         sku_query=PFX.lower())
+    assert q is not None
+    assert {r[0] for r in q.all()} == set(d["skus"])
+    q2 = sku_filter_query(db, None, None, statuses="discontinued",
+                          sku_query=PFX.lower())
+    assert {r[0] for r in q2.all()} == set()

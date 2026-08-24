@@ -42,6 +42,8 @@ def command_center_summary(
     shop_id: Optional[int] = Query(None),
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ) -> Any:
@@ -59,7 +61,7 @@ def command_center_summary(
 
     # Globale filtercontext: beperk het SKU-universum. None = geen filter;
     # een lege set matcht niets. We snijden de shop_skus-subquery hierop bij.
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     shop_sku_q = db.query(P.sku_id).filter(P.shop_id == sid)
     if _gf is not None:
         shop_sku_q = shop_sku_q.filter(P.sku_id.in_(_gf))
@@ -307,6 +309,8 @@ def command_center_drilldown(
     shop_id: Optional[int] = Query(None),
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ) -> Any:
@@ -320,7 +324,7 @@ def command_center_drilldown(
     since = date.today() - timedelta(days=days)
     P = models.DimProduct
     # Globale filtercontext: doorsnede met category/brand-scope. Lege set = niets.
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
 
     if level == "category":
         group_col = P.category

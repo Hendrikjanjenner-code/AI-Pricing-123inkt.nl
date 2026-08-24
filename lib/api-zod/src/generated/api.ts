@@ -183,6 +183,8 @@ export const ListProductsQueryParams = zod.object({
   search: zod.coerce.string().nullish(),
   hierarchy_node_ids: zod.coerce.string().nullish(),
   brands: zod.coerce.string().nullish(),
+  statuses: zod.coerce.string().nullish(),
+  sku_query: zod.coerce.string().nullish(),
   page: zod.coerce.number().nullish(),
   page_size: zod.coerce.number().nullish(),
 });
@@ -1005,6 +1007,8 @@ export const UploadPriceRulesResponse = zod.object({
 export const ListSubstitutionsQueryParams = zod.object({
   hierarchy_node_ids: zod.coerce.string().nullish(),
   brands: zod.coerce.string().nullish(),
+  statuses: zod.coerce.string().nullish(),
+  sku_query: zod.coerce.string().nullish(),
 });
 
 export const ListSubstitutionsResponseItem = zod.object({
@@ -1115,6 +1119,10 @@ export const GetSkuHistoryResponse = zod.object({
  */
 export const ExportRecommendationsQueryParams = zod.object({
   date: zod.coerce.string().nullish(),
+  hierarchy_node_ids: zod.coerce.string().nullish(),
+  brands: zod.coerce.string().nullish(),
+  statuses: zod.coerce.string().nullish(),
+  sku_query: zod.coerce.string().nullish(),
 });
 
 export const ExportRecommendationsResponse = zod.object({
@@ -1924,6 +1932,8 @@ export const GetCompetitorRankingsQueryParams = zod.object({
       "CSV van producthiërarchie-node-ids (descendants tellen server-side mee)",
     ),
   brands: zod.coerce.string().nullish().describe("CSV van merknamen"),
+  statuses: zod.coerce.string().nullish(),
+  sku_query: zod.coerce.string().nullish(),
 });
 
 export const GetCompetitorRankingsResponse = zod.object({
@@ -1953,6 +1963,8 @@ export const GetCompetitorLandscapeQueryParams = zod.object({
   shop_id: zod.coerce.number().nullish(),
   hierarchy_node_ids: zod.coerce.string().nullish(),
   brands: zod.coerce.string().nullish(),
+  statuses: zod.coerce.string().nullish(),
+  sku_query: zod.coerce.string().nullish(),
 });
 
 export const GetCompetitorLandscapeResponse = zod.object({

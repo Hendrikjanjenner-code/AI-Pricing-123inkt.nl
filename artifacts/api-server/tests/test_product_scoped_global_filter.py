@@ -78,10 +78,12 @@ def seed(client):
         db.add_all([
             models.DimProduct(sku_id=SKU_A, product_name="Product A", brand=BRAND_A,
                               category=CAT_A, shop_id=sid,
-                              current_price=10.0, cost_price=6.0),
+                              current_price=10.0, cost_price=6.0,
+                              lifecycle_status="active"),
             models.DimProduct(sku_id=SKU_B, product_name="Product B", brand=BRAND_B,
                               category=CAT_B, shop_id=sid,
-                              current_price=8.0, cost_price=5.0),
+                              current_price=8.0, cost_price=5.0,
+                              lifecycle_status="end_of_life"),
         ])
         db.flush()
 
@@ -567,3 +569,97 @@ def test_pim_overview_gefilterd_vs_ongefilterd(client, admin_headers, seed):
     assert r_sub.json()["skus_scored"] >= 1
     assert r_none.json()["skus_scored"] == 0
     assert r_none.json()["total_skus"] == 0
+
+
+# ── Statusfilter + productzoekterm (taak #280) ───────────────────────────────
+
+def test_products_statusfilter(client, admin_headers, seed):
+    r = client.get("/api/products",
+                   params={"hierarchy_node_ids": str(seed["root"]),
+                           "statuses": "end_of_life"},
+                   headers=admin_headers)
+    assert r.status_code == 200
+    skus = {p["sku_id"] for p in r.json()["items"]}
+    assert SKU_B in skus and SKU_A not in skus
+
+
+def test_products_sku_query(client, admin_headers, seed):
+    r = client.get("/api/products",
+                   params={"sku_query": SKU_A.lower()},
+                   headers=admin_headers)
+    assert r.status_code == 200
+    skus = {p["sku_id"] for p in r.json()["items"]}
+    assert skus == {SKU_A}
+
+
+def test_products_status_en_zoekterm_combinatie(client, admin_headers, seed):
+    r = client.get("/api/products",
+                   params={"sku_query": PFX.lower(), "statuses": "active"},
+                   headers=admin_headers)
+    assert r.status_code == 200
+    skus = {p["sku_id"] for p in r.json()["items"]}
+    assert skus == {SKU_A}
+
+
+def test_substitutions_statusfilter_leeg(client, admin_headers, seed):
+    # Geen van onze producten is 'discontinued' → substituties leeg gefilterd.
+    r = client.get("/api/substitutions",
+                   params={"hierarchy_node_ids": str(seed["root"]),
+                           "statuses": "discontinued"},
+                   headers=admin_headers)
+    assert r.status_code == 200
+    skus = {s.get("a_brand_sku") for s in r.json()} | {s.get("pl_sku") for s in r.json()}
+    assert SKU_A not in skus and SKU_B not in skus
+
+
+# ── Export: status- en zoekfilter beïnvloeden aantal én gedownloade rijen ────
+
+@pytest.fixture()
+def export_recs(seed):
+    """Twee goedgekeurde, niet-geëxporteerde adviezen (A=active, B=end_of_life)."""
+    db = SessionLocal()
+    today = date.today()
+    rec_ids: list[int] = []
+    try:
+        rows = []
+        for sku in (SKU_A, SKU_B):
+            r = models.FactPricingRecommendationDaily(
+                date=today, sku_id=sku, shop_id=seed["sid"],
+                current_price=10, recommended_price=11,
+                approval_status="approved", exported=False,
+            )
+            db.add(r)
+            rows.append(r)
+        db.commit()
+        rec_ids = [r.id for r in rows]
+        yield today.isoformat()
+    finally:
+        db.query(models.FactPricingRecommendationDaily).filter(
+            models.FactPricingRecommendationDaily.id.in_(rec_ids)
+        ).delete(synchronize_session=False)
+        db.commit()
+        db.close()
+
+
+def test_export_statusfilter_en_download(client, admin_headers, seed, export_recs):
+    d = export_recs
+    # Ongefilterd: beide adviezen (via sku_query op onze unieke prefix om
+    # residu van andere tests buiten beeld te houden).
+    r = client.get(f"/api/exports/recommendations?date={d}&sku_query={PFX}", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["exported_count"] == 2
+
+    # Statusfilter: alleen product A (active).
+    r = client.get(f"/api/exports/recommendations?date={d}&sku_query={PFX}&statuses=active",
+                   headers=admin_headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["exported_count"] == 1
+    assert "statuses=active" in body["download_url"]
+
+    # De download via de teruggegeven URL bevat exact de gefilterde rij.
+    dl = client.get(body["download_url"].replace("/api", "/api", 1), headers=admin_headers)
+    assert dl.status_code == 200, dl.text
+    text = dl.text
+    assert SKU_A in text
+    assert SKU_B not in text

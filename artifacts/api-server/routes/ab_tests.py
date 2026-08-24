@@ -20,6 +20,8 @@ router = APIRouter(prefix="/api/ab-tests", tags=["ab-tests"])
 def list_ab_tests(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -28,7 +30,7 @@ def list_ab_tests(
     # ten minste één resultaat op een gefilterde SKU hebben. Lege selectie ≠
     # geen filter (dan blijven er simpelweg geen tests over).
     from routes.global_filters import sku_filter_query
-    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands, statuses, sku_query)
     if sku_q is not None:
         test_ids_sq = (
             db.query(models.AbTestResult.test_id)
@@ -45,6 +47,8 @@ def get_ab_test_detail(
     test_id: int,
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -58,7 +62,7 @@ def get_ab_test_detail(
     # (summary, categorie-breakdown, per-SKU) tot de gefilterde SKU-set.
     # Lege selectie ≠ geen filter (dan blijven er geen resultaten over).
     from routes.global_filters import sku_filter_query
-    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands, statuses, sku_query)
     if sku_q is not None:
         results_q = results_q.filter(
             models.AbTestResult.sku_id.in_(sku_q.scalar_subquery()))

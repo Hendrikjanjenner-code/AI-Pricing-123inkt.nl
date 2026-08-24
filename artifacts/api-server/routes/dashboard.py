@@ -28,12 +28,14 @@ def _apply_sku_filter(q, col, sku_filter: Optional[set]):
 def get_dashboard_summary(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     logger.info("dashboard API started: /summary user_id=%s", current_user.id)
     R = models.FactPricingRecommendationDaily
-    sku_filter = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    sku_filter = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
 
     recs = _apply_sku_filter(db.query(R), R.sku_id, sku_filter)
 
@@ -86,11 +88,13 @@ def get_dashboard_summary(
 def get_margin_by_category(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     R = models.FactPricingRecommendationDaily
-    sku_filter = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    sku_filter = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     q = (
         db.query(
             models.DimProduct.category,
@@ -119,11 +123,13 @@ def get_margin_by_category(
 def get_recs_by_strategy(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     R = models.FactPricingRecommendationDaily
-    sku_filter = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    sku_filter = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     q = db.query(
         R.strategy_type,
         func.count(R.id).label("count"),
@@ -145,11 +151,13 @@ def get_recs_by_strategy(
 def get_confidence_distribution(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     R = models.FactPricingRecommendationDaily
-    sku_filter = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    sku_filter = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     buckets = [
         ("0-20%", 0, 0.2),
         ("20-40%", 0.2, 0.4),
@@ -172,11 +180,13 @@ def get_confidence_distribution(
 def get_price_change_distribution(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     R = models.FactPricingRecommendationDaily
-    sku_filter = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    sku_filter = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     buckets = [
         ("<-5%", None, -5),
         ("-5% to -2%", -5, -2),

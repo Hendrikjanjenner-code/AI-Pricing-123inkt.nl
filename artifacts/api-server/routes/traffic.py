@@ -86,12 +86,14 @@ def _signal_dict(r: models.FactTrafficIntelligenceDaily) -> dict:
 def get_traffic_dashboard(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(auth_utils.get_current_user),
 ):
     sku_rows = _latest_intel(db, "SKU")
     # Globale filtercontext: beperk SKU-rijen tot de geselecteerde universe.
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     if _gf is not None:
         sku_rows = [r for r in sku_rows if r.entity_id in _gf]
 
@@ -424,12 +426,14 @@ def import_traffic(_=Depends(auth_utils.get_current_user)):
 def get_conversie_signalen(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _=Depends(auth_utils.get_current_user),
 ):
     sku_rows = _latest_intel(db, "SKU")
     # Globale filtercontext: beperk SKU-rijen tot de geselecteerde universe.
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     if _gf is not None:
         sku_rows = [r for r in sku_rows if r.entity_id in _gf]
     products = {p.sku_id: p for p in db.query(models.DimProduct).all()}

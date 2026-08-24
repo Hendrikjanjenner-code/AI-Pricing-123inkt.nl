@@ -11,4 +11,20 @@ export type ExportRecommendationsParams = {
    * @nullable
    */
   date?: string | null;
+  /**
+   * @nullable
+   */
+  hierarchy_node_ids?: string | null;
+  /**
+   * @nullable
+   */
+  brands?: string | null;
+  /**
+   * @nullable
+   */
+  statuses?: string | null;
+  /**
+   * @nullable
+   */
+  sku_query?: string | null;
 };

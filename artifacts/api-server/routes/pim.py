@@ -28,13 +28,15 @@ EDIT_ROLES = ("admin", "pricing_manager", "analyst")
 def pim_overview(
     hierarchy_node_ids: str | None = Query(None),
     brands: str | None = Query(None),
+    statuses: str | None = Query(None),
+    sku_query: str | None = Query(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     # Globale filtercontext (hiërarchie + merk): overview-aggregaten beperken
     # tot de gefilterde SKU-set. Lege selectie ≠ geen filter.
     from routes.global_filters import sku_filter_query
-    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands, statuses, sku_query)
 
     total_q = db.query(models.DimProduct)
     if sku_q is not None:
@@ -97,6 +99,8 @@ def list_completeness(
     search: str | None = Query(None),
     hierarchy_node_ids: str | None = Query(None),
     brands: str | None = Query(None),
+    statuses: str | None = Query(None),
+    sku_query: str | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -107,7 +111,7 @@ def list_completeness(
         models.DimProduct, models.DimProduct.sku_id == S.sku_id)
     # Globale filtercontext (hiërarchie + merk). Lege selectie ≠ geen filter.
     from routes.global_filters import sku_filter_query
-    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands, statuses, sku_query)
     if sku_q is not None:
         q = q.filter(models.DimProduct.sku_id.in_(sku_q.scalar_subquery()))
     q = q.filter(S.channel_code == channel) if channel else q.filter(S.channel_code.is_(None))
@@ -783,6 +787,8 @@ def list_suggestions(
     sku_id: str | None = Query(None),
     hierarchy_node_ids: str | None = Query(None),
     brands: str | None = Query(None),
+    statuses: str | None = Query(None),
+    sku_query: str | None = Query(None),
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
@@ -790,7 +796,7 @@ def list_suggestions(
     q = db.query(models.PimAiSuggestion)
     # Globale filtercontext (hiërarchie + merk). Lege selectie ≠ geen filter.
     from routes.global_filters import sku_filter_query
-    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands, statuses, sku_query)
     if sku_q is not None:
         q = q.filter(models.PimAiSuggestion.sku_id.in_(sku_q.scalar_subquery()))
     if status:

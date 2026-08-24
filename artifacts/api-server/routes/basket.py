@@ -23,6 +23,8 @@ def basket_associations(
     shop_id: Optional[int] = Query(None),
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _: models.User = Depends(get_current_user),
 ) -> Any:
@@ -31,7 +33,7 @@ def basket_associations(
     Globale filtercontext: we nemen een associatie-paar alleen mee wanneer het
     anker (antecedent_sku / sku_id_a) in de filterset zit — het ankerproduct
     bepaalt de selectie. None = geen filter; een lege set matcht niets."""
-    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands)
+    _gf = resolve_sku_filter(db, hierarchy_node_ids, brands, statuses, sku_query)
     return get_basket_association_dashboard(db, shop_id=shop_id, sku_filter=_gf)
 
 

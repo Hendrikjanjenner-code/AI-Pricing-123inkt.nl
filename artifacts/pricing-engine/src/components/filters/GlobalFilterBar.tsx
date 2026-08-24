@@ -98,6 +98,48 @@ function BrandFilter({ filters }: { filters: GlobalFilters }) {
   );
 }
 
+export const STATUS_OPTIONS = [
+  { value: "active", label: "Actief" },
+  { value: "new", label: "Nieuw" },
+  { value: "end_of_life", label: "Einde levensduur" },
+  { value: "discontinued", label: "Stopgezet" },
+] as const;
+
+export function statusLabel(value: string): string {
+  return STATUS_OPTIONS.find((o) => o.value === value)?.label ?? value;
+}
+
+function StatusFilter({ filters }: { filters: GlobalFilters }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="gap-2" data-testid="status-filter-trigger">
+          Status
+          {filters.statuses.length > 0 && (
+            <Badge variant="secondary" className="px-1.5">{filters.statuses.length}</Badge>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-56 p-2" align="start">
+        {STATUS_OPTIONS.map((o) => (
+          <label key={o.value}
+            className="flex items-center gap-2 py-1.5 px-1 text-sm rounded hover:bg-accent/50 cursor-pointer">
+            <Checkbox
+              checked={filters.statuses.includes(o.value)}
+              onCheckedChange={(c) => setGlobalFilters({
+                statuses: c
+                  ? [...filters.statuses, o.value]
+                  : filters.statuses.filter((s) => s !== o.value),
+              })}
+            />
+            <span>{o.label}</span>
+          </label>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function FilterControls({ filters }: { filters: GlobalFilters }) {
   return (
     <>
@@ -106,6 +148,7 @@ function FilterControls({ filters }: { filters: GlobalFilters }) {
         onChange={(hierarchy) => setGlobalFilters({ hierarchy })}
       />
       <BrandFilter filters={filters} />
+      <StatusFilter filters={filters} />
       <Select
         value={filters.periodDays !== null ? String(filters.periodDays) : "standaard"}
         onValueChange={(v) =>
@@ -139,6 +182,9 @@ export function activeContextSummary(filters: GlobalFilters): string | null {
     parts.push(filters.hierarchy.map((h) => h.name).join(", "));
   }
   if (filters.brands.length > 0) parts.push(filters.brands.join(", "));
+  if (filters.statuses.length > 0) {
+    parts.push(filters.statuses.map(statusLabel).join(", "));
+  }
   if (filters.periodDays !== null) parts.push(`${filters.periodDays} dagen`);
   if (filters.skuQuery.trim()) parts.push(`"${filters.skuQuery.trim()}"`);
   return parts.length > 0 ? parts.join(" · ") : null;
@@ -168,6 +214,15 @@ function ActiveContextBlock({ filters }: { filters: GlobalFilters }) {
           {b}
           <button type="button" aria-label={`Verwijder merk ${b}`}
             onClick={() => setGlobalFilters({ brands: filters.brands.filter((x) => x !== b) })}>
+            <X className="w-3 h-3" />
+          </button>
+        </Badge>
+      ))}
+      {filters.statuses.map((s) => (
+        <Badge key={`s-${s}`} variant="secondary" className="gap-1">
+          {statusLabel(s)}
+          <button type="button" aria-label={`Verwijder status ${statusLabel(s)}`}
+            onClick={() => setGlobalFilters({ statuses: filters.statuses.filter((x) => x !== s) })}>
             <X className="w-3 h-3" />
           </button>
         </Badge>

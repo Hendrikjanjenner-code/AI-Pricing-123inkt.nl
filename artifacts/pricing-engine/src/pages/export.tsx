@@ -14,13 +14,22 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { Download, Send, CheckCircle, AlertTriangle } from "lucide-react";
+import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
+import { useGlobalFilters } from "@/hooks/use-global-filters";
 
 export default function Prijsexport() {
   const [datum, setDatum] = useState(format(new Date(), "yyyy-MM-dd"));
   const { toast } = useToast();
+  const gf = useGlobalFilters();
+  const filterParams = {
+    hierarchy_node_ids: gf.hierarchy.length > 0 ? gf.hierarchy.map((n) => n.id).join(",") : undefined,
+    brands: gf.brands.length > 0 ? gf.brands.join(",") : undefined,
+    statuses: gf.statuses.length > 0 ? gf.statuses.join(",") : undefined,
+    sku_query: gf.skuQuery.trim() !== "" ? gf.skuQuery.trim() : undefined,
+  };
   const exportQuery = useExportRecommendations(
-    { date: datum },
-    { query: { enabled: false, queryKey: getExportRecommendationsQueryKey({ date: datum }) } },
+    { date: datum, ...filterParams },
+    { query: { enabled: false, queryKey: getExportRecommendationsQueryKey({ date: datum, ...filterParams }) } },
   );
   const pushMut = usePushRecommendationsToDrs();
   const { data: history, refetch: refetchHistory } = useGetExportHistory({ limit: 20 });
@@ -54,8 +63,13 @@ export default function Prijsexport() {
 
   const baseUrl = import.meta.env.BASE_URL;
   const downloadHref = (fmt: "csv" | "xlsx" | "xls") => {
+    // CSV: gebruik de door de API teruggegeven URL — die bevat de exacte
+    // filtercontext waarmee de export is voorbereid.
+    if (fmt === "csv" && resultaat?.url) return `${baseUrl}${resultaat.url.replace(/^\//, "")}`;
+    const p = new URLSearchParams({ date: datum });
+    for (const [k, v] of Object.entries(filterParams)) if (v) p.set(k, v);
     const path = fmt === "csv" ? "download" : `download/${fmt}`;
-    return `${baseUrl}api/exports/recommendations/${path}?date=${datum}`;
+    return `${baseUrl}api/exports/recommendations/${path}?${p.toString()}`;
   };
 
   return (
@@ -64,6 +78,8 @@ export default function Prijsexport() {
         <h1 className="text-2xl font-bold tracking-tight">Prijsexport</h1>
         <p className="text-muted-foreground mt-1">Stuur goedgekeurde prijsadviezen naar DRS: via API-push of als bestand.</p>
       </div>
+
+      <GlobalFilterBar />
 
       <Card>
         <CardHeader>

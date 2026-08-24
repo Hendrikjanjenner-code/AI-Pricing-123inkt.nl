@@ -26,22 +26,24 @@ export interface HierarchyNodeSelection {
 export interface GlobalFilters {
   hierarchy: HierarchyNodeSelection[];
   brands: string[];
+  /** Lifecycle-statussen (bv. active, new, end_of_life, discontinued). */
+  statuses: string[];
   /** Periode in dagen (null = standaardperiode van het scherm). */
   periodDays: number | null;
   skuQuery: string;
 }
 
-export const FILTER_PARAM_KEYS = ["f_hn", "f_brand", "f_days", "f_sku"] as const;
+export const FILTER_PARAM_KEYS = ["f_hn", "f_brand", "f_status", "f_days", "f_sku"] as const;
 const STORAGE_KEY = "global_filter_context_v1";
 const EVENT = "global-filters-changed";
 
 export function emptyFilters(): GlobalFilters {
-  return { hierarchy: [], brands: [], periodDays: null, skuQuery: "" };
+  return { hierarchy: [], brands: [], statuses: [], periodDays: null, skuQuery: "" };
 }
 
 export function hasActiveFilters(f: GlobalFilters): boolean {
   return f.hierarchy.length > 0 || f.brands.length > 0 ||
-    f.periodDays !== null || f.skuQuery.trim() !== "";
+    f.statuses.length > 0 || f.periodDays !== null || f.skuQuery.trim() !== "";
 }
 
 /** Is `node` een descendant van `maybeAncestor` (o.b.v. gematerialiseerd pad)? */
@@ -99,6 +101,7 @@ export function writeFiltersToParams(f: GlobalFilters, params: URLSearchParams):
         .join("~")
     );
   }
+  if (f.statuses.length > 0) params.set("f_status", f.statuses.join(","));
   if (f.periodDays !== null) params.set("f_days", String(f.periodDays));
   if (f.skuQuery.trim() !== "") params.set("f_sku", f.skuQuery.trim());
 }
@@ -126,10 +129,14 @@ export function readFiltersFromParams(
     .split("~")
     .map((s) => decodeURIComponent(s))
     .filter((s) => s !== "");
+  const statuses = (params.get("f_status") || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s !== "");
   const rawDays = params.get("f_days");
   const periodDays = rawDays && /^\d+$/.test(rawDays) ? parseInt(rawDays, 10) : null;
   const skuQuery = params.get("f_sku") || "";
-  return { hierarchy, brands, periodDays, skuQuery };
+  return { hierarchy, brands, statuses, periodDays, skuQuery };
 }
 
 /** Querystring-fragment voor API-aanroepen (server-side descendant-expansie). */
@@ -139,6 +146,8 @@ export function apiFilterParams(f: GlobalFilters): string {
     p.set("hierarchy_node_ids", f.hierarchy.map((n) => n.id).join(","));
   }
   if (f.brands.length > 0) p.set("brands", f.brands.join(","));
+  if (f.statuses.length > 0) p.set("statuses", f.statuses.join(","));
+  if (f.skuQuery.trim() !== "") p.set("sku_query", f.skuQuery.trim());
   return p.toString();
 }
 
@@ -153,6 +162,7 @@ function loadStored(): GlobalFilters | null {
     return {
       hierarchy: Array.isArray(parsed.hierarchy) ? parsed.hierarchy : [],
       brands: Array.isArray(parsed.brands) ? parsed.brands : [],
+      statuses: Array.isArray(parsed.statuses) ? parsed.statuses : [],
       periodDays: typeof parsed.periodDays === "number" ? parsed.periodDays : null,
       skuQuery: typeof parsed.skuQuery === "string" ? parsed.skuQuery : "",
     };

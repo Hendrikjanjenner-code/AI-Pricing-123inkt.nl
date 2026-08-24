@@ -224,6 +224,14 @@ paths:
           in: query
           schema:
             type: ["string", "null"]
+        - name: statuses
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: sku_query
+          in: query
+          schema:
+            type: ["string", "null"]
         - name: page
           in: query
           schema:
@@ -790,6 +798,14 @@ paths:
           in: query
           schema:
             type: ["string", "null"]
+        - name: statuses
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: sku_query
+          in: query
+          schema:
+            type: ["string", "null"]
       responses:
         "200":
           description: Substitution pairs
@@ -826,6 +842,22 @@ paths:
       summary: Export approved recommendations as CSV (prijsexport)
       parameters:
         - name: date
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: hierarchy_node_ids
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: brands
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: statuses
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: sku_query
           in: query
           schema:
             type: ["string", "null"]
@@ -1503,6 +1535,12 @@ paths:
           in: query
           description: CSV van merknamen
           schema: { type: ["string", "null"] }
+        - name: statuses
+          in: query
+          schema: { type: ["string", "null"] }
+        - name: sku_query
+          in: query
+          schema: { type: ["string", "null"] }
       responses:
         "200":
           description: Gefilterde rankinglijst met correcte totalen
@@ -1547,6 +1585,12 @@ paths:
           in: query
           schema: { type: ["string", "null"] }
         - name: brands
+          in: query
+          schema: { type: ["string", "null"] }
+        - name: statuses
+          in: query
+          schema: { type: ["string", "null"] }
+        - name: sku_query
           in: query
           schema: { type: ["string", "null"] }
       responses:

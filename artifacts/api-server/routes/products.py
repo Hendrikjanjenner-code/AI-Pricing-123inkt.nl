@@ -53,6 +53,8 @@ def list_products(
     search: Optional[str] = Query(None),
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
@@ -62,7 +64,7 @@ def list_products(
     # Globale filtercontext (hiërarchie + merk) — zelfde semantiek als de
     # dashboards: subtree-expansie server-side, lege selectie ≠ geen filter.
     from routes.global_filters import sku_filter_query
-    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands, statuses, sku_query)
     if sku_q is not None:
         q = q.filter(models.DimProduct.sku_id.in_(sku_q.scalar_subquery()))
     if category:

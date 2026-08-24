@@ -190,6 +190,8 @@ def get_kosten_categorie(
 def get_marketing_overview(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
 ) -> Any:
@@ -202,7 +204,7 @@ def get_marketing_overview(
     # Globale filtercontext (hiërarchie + merk); marketingkosten zijn per SKU
     # (FactMarketingCostDaily.sku_id). Lege selectie ≠ geen filter.
     from routes.global_filters import sku_filter_query
-    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands, statuses, sku_query)
     if sku_q is not None:
         recs_q = recs_q.filter(FactMarketingCostDaily.sku_id.in_(sku_q.scalar_subquery()))
     recs = recs_q.all()
@@ -243,6 +245,8 @@ def get_marketing_overview(
 def get_operationele_complexiteit(
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _user=Depends(get_current_user),
 ) -> Any:
@@ -255,7 +259,7 @@ def get_operationele_complexiteit(
     # Globale filtercontext (hiërarchie + merk); OCS-scores zijn per SKU
     # (FactOperationalComplexityDaily.sku_id). Lege selectie ≠ geen filter.
     from routes.global_filters import sku_filter_query
-    sku_q = sku_filter_query(db, hierarchy_node_ids, brands)
+    sku_q = sku_filter_query(db, hierarchy_node_ids, brands, statuses, sku_query)
     if sku_q is not None:
         recs_q = recs_q.filter(
             FactOperationalComplexityDaily.sku_id.in_(sku_q.scalar_subquery()))
