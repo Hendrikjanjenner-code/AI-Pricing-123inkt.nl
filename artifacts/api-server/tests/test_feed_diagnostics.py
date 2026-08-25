@@ -140,8 +140,6 @@ def test_failed_sync_persists_importjob_and_connector_status(monkeypatch, db):
     import feed_ingest
     import routes.connectors as rc
 
-    # Expliciete bron: zonder configuratie weigert _run_sync tegenwoordig de
-    # sync (onbevestigde standaard-feed) vóórdat ingest_feed wordt aangeroepen.
     monkeypatch.setenv("PRICESHAPE_FEED_URL", "https://example.com/feed.json")
 
     def boom(*args, **kwargs):

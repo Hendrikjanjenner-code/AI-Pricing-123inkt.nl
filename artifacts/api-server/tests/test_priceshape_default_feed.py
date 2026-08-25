@@ -313,69 +313,17 @@ def test_rest_env_still_takes_precedence_over_default(monkeypatch, db):
     assert pc.is_default_feed_active(db=db) is False
 
 
-# ── Expliciete-bron-vereiste (taak 299) ─────────────────────────────────────
+# ── Blijvende verbinding (taak #314): sync draait altijd ────────────────────
 
-def test_sync_refuses_unconfirmed_default_feed(monkeypatch, db):
-    """Zonder expliciete bron (geen DB-config, geen env) weigert de sync met
-    een duidelijke melding, mét fout-ImportJob — en zonder ook maar iets in
-    te lezen (ingest_feed mag niet aangeroepen worden)."""
+def test_sync_runs_on_unconfirmed_default_feed(monkeypatch, db):
+    """Zonder expliciete bron (geen DB-config, geen env) draait de sync gewoon
+    op de ingebouwde standaard-feed — geen bevestigingsblokkade meer. De
+    actieve bron is zichtbaar in de sync-melding."""
     from types import SimpleNamespace
-    import feed_ingest
     import routes.connectors as rc
 
     _clear_env(monkeypatch)
     _del_db_config(db)
-
-    called = {"n": 0}
-
-    def boom(*a, **k):
-        called["n"] += 1
-        raise AssertionError("ingest_feed mag niet draaien bij onbevestigde standaard-feed")
-
-    monkeypatch.setattr(feed_ingest, "ingest_feed", boom)
-    user = SimpleNamespace(username="test-default-refusal")
-    try:
-        result = rc._run_sync("priceshape", db, user)
-        assert result["status"] == "error"
-        assert "geen expliciete bron" in result["message"]
-        assert "standaard-feed" in result["message"]
-        # Geen stille 'not_configured'-maskering: het is een echte fout.
-        assert called["n"] == 0
-
-        job = db.query(models.ImportJob).filter(
-            models.ImportJob.uploaded_by == "test-default-refusal",
-            models.ImportJob.upload_type == "api_sync_priceshape",
-        ).order_by(models.ImportJob.created_at.desc()).first()
-        assert job is not None and job.status == "fout"
-        assert "geen expliciete bron" in (job.error_message or "")
-    finally:
-        db.query(models.ImportJob).filter(
-            models.ImportJob.uploaded_by == "test-default-refusal").delete()
-        cfg = db.query(models.ConnectorConfig).filter(
-            models.ConnectorConfig.connector_name == "priceshape").first()
-        if cfg is not None and not cfg.encrypted_credentials:
-            db.delete(cfg)
-        db.commit()
-
-
-def test_sync_runs_after_default_feed_confirmed_via_save(monkeypatch, db):
-    """Bevestiging = opslaan van de feed-config (het save-endpoint persisteert
-    bij een leeg feed-URL-veld expliciet DEFAULT_FEED_URL als DB-config).
-    Daarna draait de sync gewoon, met de bron zichtbaar in de melding."""
-    from types import SimpleNamespace
-    import feed_ingest
-    import routes.connectors as rc
-
-    _clear_env(monkeypatch)
-    _del_db_config(db)
-    # Zoals het save-endpoint doet bij een leeg feed_url-veld:
-    db.add(models.ConnectorConfig(
-        connector_name="priceshape",
-        encrypted_credentials=encrypt_credentials(
-            {"mode": "feed", "feed_url": pc.DEFAULT_FEED_URL}),
-        fields_configured=["mode", "feed_url"],
-    ))
-    db.commit()
 
     monkeypatch.setattr(rc, "_ingest_feed_with_retry", lambda *a, **k: {
         "products_new": 1, "products_updated": 0, "products_total": 1,
@@ -383,17 +331,143 @@ def test_sync_runs_after_default_feed_confirmed_via_save(monkeypatch, db):
         "skipped_by_settings": 0, "warnings": [],
         "competitor_reconciliation": None,
     })
-    user = SimpleNamespace(username="test-default-confirm")
+    user = SimpleNamespace(username="test-default-runs")
     try:
         result = rc._run_sync("priceshape", db, user)
         assert result["status"] == "ok", result["message"]
+        assert "geweigerd" not in result["message"]
         # Effectieve bron zichtbaar in de sync-melding (geredigeerd).
         assert "Bron:" in result["message"]
-        assert "eigen configuratie" in result["message"]
+        assert "standaard-feed" in result["message"]
     finally:
         db.query(models.ImportJob).filter(
-            models.ImportJob.uploaded_by == "test-default-confirm").delete()
+            models.ImportJob.uploaded_by == "test-default-runs").delete()
+        cfg = db.query(models.ConnectorConfig).filter(
+            models.ConnectorConfig.connector_name == "priceshape").first()
+        if cfg is not None and not cfg.encrypted_credentials:
+            db.delete(cfg)
+        db.commit()
+
+
+def test_broken_feed_keeps_data_and_reports_visibly(monkeypatch, db):
+    """Een kapotte feed (onbereikbaar/leeg) verwijdert nooit bestaande data:
+    de sync faalt zichtbaar (fout-ImportJob + connectorstatus), maar er wordt
+    niets gewist — last-known-good blijft staan."""
+    from types import SimpleNamespace
+    import feed_ingest
+    import routes.connectors as rc
+
+    _clear_env(monkeypatch)
+    _del_db_config(db)
+    # Geen retry-backoff (standaard 3×5 min) in de test: één poging volstaat.
+    monkeypatch.setenv("FEED_INGEST_MAX_RETRIES", "0")
+
+    before_products = db.query(models.DimProduct).count()
+    before_prices = db.query(models.FactCompetitorPriceDaily).count()
+
+    def boom(*a, **k):
+        raise pc.ConnectorError("PriceShape feed niet bereikbaar: verbinding geweigerd")
+
+    monkeypatch.setattr(feed_ingest, "ingest_feed", boom)
+    user = SimpleNamespace(username="test-broken-feed")
+    try:
+        result = rc._run_sync("priceshape", db, user)
+        assert result["status"] == "error"
+        assert "niet bereikbaar" in result["message"]
+
+        job = db.query(models.ImportJob).filter(
+            models.ImportJob.uploaded_by == "test-broken-feed",
+            models.ImportJob.upload_type == "api_sync_priceshape",
+        ).order_by(models.ImportJob.created_at.desc()).first()
+        assert job is not None and job.status == "fout"
+
+        # Last-known-good: niets verwijderd.
+        assert db.query(models.DimProduct).count() == before_products
+        assert db.query(models.FactCompetitorPriceDaily).count() == before_prices
+    finally:
+        db.rollback()
+        db.query(models.ImportJob).filter(
+            models.ImportJob.uploaded_by == "test-broken-feed").delete()
+        cfg = db.query(models.ConnectorConfig).filter(
+            models.ConnectorConfig.connector_name == "priceshape").first()
+        if cfg is not None and not cfg.encrypted_credentials:
+            db.delete(cfg)
+        db.commit()
+
+
+def test_unusable_db_config_falls_back_to_default(monkeypatch, db):
+    """Een kapotte opgeslagen config (feed-modus zonder feed_url) mag de sync
+    nooit blokkeren: de resolutie valt door naar de standaard-feed."""
+    _clear_env(monkeypatch)
+    _del_db_config(db)
+    db.add(models.ConnectorConfig(
+        connector_name="priceshape",
+        encrypted_credentials=encrypt_credentials({"mode": "feed", "feed_url": ""}),
+        fields_configured=["mode"],
+    ))
+    db.commit()
+    try:
+        cfg = pc._get_feed_config(db=db)
+        assert cfg["feed_url"] == pc.DEFAULT_FEED_URL
+        assert pc.is_default_feed_active(db=db) is True
+    finally:
         _del_db_config(db)
+
+
+def test_unusable_rest_db_config_falls_back_to_default(monkeypatch, db):
+    """REST-config zonder api_key is onbruikbaar → standaard-feed actief."""
+    _clear_env(monkeypatch)
+    _del_db_config(db)
+    db.add(models.ConnectorConfig(
+        connector_name="priceshape",
+        encrypted_credentials=encrypt_credentials(
+            {"mode": "rest", "api_url": "https://api.priceshape.com/v1"}),
+        fields_configured=["mode", "api_url"],
+    ))
+    db.commit()
+    try:
+        raw = pc._get_raw_config(db=db)
+        assert raw.get("is_default") is True
+        assert pc._get_mode(raw) == "feed"
+    finally:
+        _del_db_config(db)
+
+
+def test_real_ingest_broken_feed_keeps_data(monkeypatch, db):
+    """End-to-end door de ECHTE ingest_feed: een onbereikbare feed breekt de
+    sync zichtbaar af zonder ook maar iets te verwijderen (last-known-good)."""
+    from types import SimpleNamespace
+    import feed_ingest
+    import routes.connectors as rc
+
+    _clear_env(monkeypatch)
+    _del_db_config(db)
+    monkeypatch.setenv("FEED_INGEST_MAX_RETRIES", "0")
+
+    before_products = db.query(models.DimProduct).count()
+    before_prices = db.query(models.FactCompetitorPriceDaily).count()
+
+    def broken_read(*a, **k):
+        raise pc.ConnectorError("PriceShape feed niet bereikbaar: time-out")
+
+    # Alleen het feed-LEZEN faalt; de rest van ingest_feed draait echt.
+    monkeypatch.setattr(feed_ingest, "_read_feed", broken_read)
+    user = SimpleNamespace(username="test-real-broken")
+    try:
+        result = rc._run_sync("priceshape", db, user)
+        assert result["status"] == "error"
+        assert "niet bereikbaar" in result["message"]
+        assert db.query(models.DimProduct).count() == before_products
+        assert db.query(models.FactCompetitorPriceDaily).count() == before_prices
+    finally:
+        db.rollback()
+        db.query(models.ImportJob).filter(
+            models.ImportJob.uploaded_by == "test-real-broken").delete()
+        cfg = db.query(models.ConnectorConfig).filter(
+            models.ConnectorConfig.connector_name == "priceshape").first()
+        if cfg is not None and not cfg.encrypted_credentials:
+            db.delete(cfg)
+        db.commit()
 
 
 def test_redact_url_strips_userinfo_query_and_short_path_tokens():
@@ -429,6 +503,7 @@ def test_summary_exposes_redacted_effective_feed_source(monkeypatch, db):
     assert src is not None
     assert src["origin"] == "default"
     assert src["mode"] == "feed"
-    assert "onbevestigd" in src["label"]
+    assert "standaard-feed" in src["label"]
+    assert "onbevestigd" not in src["label"]
     # Geredigeerd: geen token/querystring (gedekt door de leaktest hierboven).
     assert "?" not in (src["url"] or "")

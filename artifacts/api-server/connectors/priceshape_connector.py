@@ -46,6 +46,15 @@ DEFAULT_FEED_URL = (
 )
 
 
+def _is_usable_config(creds: dict) -> bool:
+    """True als een config-dict daadwerkelijk bruikbaar is om te syncen:
+    feed-modus vereist een feed_url, REST-modus vereist api_url + api_key."""
+    mode = _get_mode(creds)
+    if mode == "feed":
+        return bool((creds.get("feed_url") or "").strip())
+    return bool((creds.get("api_url") or "").strip() and creds.get("api_key"))
+
+
 def _get_raw_config(db=None) -> dict:
     """
     Lees de volledige PriceShape-connectorconfig (inclusief `mode`): DB-config
@@ -65,8 +74,17 @@ def _get_raw_config(db=None) -> dict:
             ).first()
             if cfg and cfg.encrypted_credentials:
                 creds = decrypt_credentials(cfg.encrypted_credentials)
-                if creds:
+                # Alleen een BRUIKBARE DB-config wint (taak #314, blijvende
+                # verbinding): een kapotte/incomplete opgeslagen config
+                # (feed-modus zonder feed_url, REST zonder api_url+api_key)
+                # mag de sync nooit blokkeren — dan valt de resolutie door
+                # naar env-vars en uiteindelijk de ingebouwde standaard-feed.
+                if creds and _is_usable_config(creds):
                     return {**creds, "config_source": "db"}
+                if creds:
+                    logger.warning(
+                        "PriceShape: opgeslagen connector-config is onbruikbaar "
+                        "(incompleet) — val terug op env-vars/standaard-feed.")
         except Exception:
             pass
 
@@ -143,7 +161,7 @@ def describe_feed_source(db=None) -> dict:
         origin_txt = {
             "db": "eigen configuratie (Connectoren-pagina)",
             "env": "omgevingsvariabele PRICESHAPE_FEED_URL",
-            "default": "ingebouwde standaard-feed (onbevestigd)",
+            "default": "ingebouwde standaard-feed",
         }.get(origin, origin)
         label = f"feed {url} — bron: {origin_txt}"
     else:

@@ -760,23 +760,11 @@ def _run_sync(name: str, db: Session, current_user, force_full: bool = False) ->
             if name == "priceshape":
                 from connectors import priceshape_connector
                 raw = priceshape_connector._get_raw_config(db=db)
-                # Expliciete bron verplicht (taak: geen stille default): zonder
-                # opgeslagen configuratie of omgevingsvariabele valt de
-                # connector terug op de ingebouwde standaard-feed. Die mag
-                # nooit stilzwijgend gebruikt worden — de sync faalt dan met
-                # een duidelijke melding. Eenmalige bevestiging: sla op de
-                # Connectoren-pagina de feed-config op met een leeg URL-veld
-                # (= bewust de standaard-feed) of stel een eigen URL in.
-                if raw.get("is_default"):
-                    raise ValueError(
-                        "PriceShape-sync geweigerd: er is geen expliciete bron "
-                        "ingesteld en de ingebouwde standaard-feed is nog niet "
-                        "bevestigd. Bevestig eenmalig de standaard-feed via de "
-                        "Connectoren-pagina (Wijzigen → opslaan met leeg "
-                        "feed-URL-veld) of stel een eigen feed-URL / "
-                        "PRICESHAPE_FEED_URL in. Er is niets gesynchroniseerd; "
-                        "bestaande data blijft ongewijzigd."
-                    )
+                # Blijvende verbinding (taak #314): de ingebouwde standaard-feed
+                # is een volwaardige bron. Er bestaat GEEN toestand waarin de
+                # sync geweigerd of gepauzeerd wordt om configuratieredenen —
+                # welke bron actief is (eigen config, env-var of standaard-feed)
+                # wordt zichtbaar gelogd in de sync-melding en op de kaart.
                 source_info = priceshape_connector.describe_feed_source(db=db)
                 source_note = f" Bron: {source_info['label']}."
                 if priceshape_connector._get_mode(raw) == "feed":

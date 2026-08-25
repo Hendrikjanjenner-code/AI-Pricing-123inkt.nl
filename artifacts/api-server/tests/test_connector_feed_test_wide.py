@@ -1,8 +1,7 @@
 """
 Verbindingstest van de PriceShape-feed moet het brede exportformaat
 (vendor_N-kolommen) herkennen — het standaard exportformaat dat de ingest
-zelf volledig ondersteunt (taak #310: bevestiging standaard-feed was
-geblokkeerd na de database-reset).
+zelf volledig ondersteunt.
 """
 from unittest.mock import patch
 

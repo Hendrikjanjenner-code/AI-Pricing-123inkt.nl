@@ -249,9 +249,17 @@ async def lifespan(app: FastAPI):
 
         # 5a. Start de PriceShape feed-sync scheduler zodat de app onafgebroken
         # verse concurrentdata inleest (met retries + bescherming van laatst-goede
-        # data). Uit te schakelen via DISABLE_FEED_SYNC.
+        # data). DISABLE_FEED_SYNC is een dev/test-vlag en wordt in productie
+        # (deployment) GENEGEERD: de feedverbinding mag daar nooit stilletjes
+        # uitgeschakeld worden (taak #314, blijvende verbinding).
         feed_sync_task = None
-        if os.environ.get("DISABLE_FEED_SYNC", "false").lower() not in ("1", "true", "yes"):
+        _feed_sync_off = os.environ.get("DISABLE_FEED_SYNC", "false").lower() in ("1", "true", "yes")
+        if _feed_sync_off and os.environ.get("REPLIT_DEPLOYMENT"):
+            logger.warning(
+                "Startup: DISABLE_FEED_SYNC genegeerd in productie — de "
+                "feed-sync scheduler start altijd (blijvende verbinding).")
+            _feed_sync_off = False
+        if not _feed_sync_off:
             from services.feed_sync_scheduler import start_feed_sync_scheduler
             feed_sync_task = start_feed_sync_scheduler()
             logger.info("Startup: PriceShape feed-sync scheduler started.")

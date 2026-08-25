@@ -637,16 +637,6 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
           </div>
         )}
 
-        {connector.name === "priceshape" && connector.source === "default" && (
-          <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
-            <span className="font-medium">Standaard-feed nog niet bevestigd — synchronisatie geblokkeerd.</span>{" "}
-            Er is geen expliciete feed-bron ingesteld. Syncs worden geweigerd totdat je de bron
-            bevestigt: klik op &ldquo;Wijzigen / Vervangen&rdquo; en sla op met een leeg
-            feed-URL-veld (= bewust de ingebouwde standaard-feed gebruiken), of vul een eigen
-            feed-URL in. Bestaande data blijft intact.
-          </div>
-        )}
-
         {connector.name === "priceshape" && connector.effective_feed_source && (
           <div className="text-xs text-muted-foreground">
             <span className="font-medium">Feed-bron:</span>{" "}
