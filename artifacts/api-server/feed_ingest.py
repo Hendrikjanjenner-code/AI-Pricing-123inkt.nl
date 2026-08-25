@@ -73,9 +73,84 @@ def _brand_from_title(title: str) -> str | None:
     return first if first[:1].isalpha() else None
 
 
-def _chunks(seq: list, size: int = _CHUNK):
+def _chunks(seq: list, size: int | None = None):
+    size = size or _CHUNK
     for i in range(0, len(seq), size):
         yield seq[i:i + size]
+
+
+def _batches(it, size: int | None = None):
+    """Verdeel een willekeurige iterator in lijst-batches van max `size` rijen,
+    zodat de pipeline nooit meer dan één batch tegelijk in RAM houdt."""
+    size = size or _CHUNK
+    buf: list = []
+    for x in it:
+        buf.append(x)
+        if len(buf) >= size:
+            yield buf
+            buf = []
+    if buf:
+        yield buf
+
+
+# ── schijf-spool: begrensd RAM voor grote feeds ─────────────────────────────
+def _spool_encode(obj):
+    """JSON-encoder voor spool-rijen: datetimes verliesvrij als markering."""
+    from datetime import datetime as _dt
+    if isinstance(obj, _dt):
+        return {"__dt__": obj.isoformat()}
+    return pc._stringify(obj)
+
+
+def _spool_decode(d: dict):
+    if "__dt__" in d and len(d) == 1:
+        parsed = _parse_dt(d["__dt__"])
+        return parsed if parsed is not None else d["__dt__"]
+    return d
+
+
+class _RowSpool:
+    """
+    Schijf-gebufferde rijenverzameling (JSON Lines in een tempbestand).
+
+    Gedraagt zich als een her-itereerbare lijst van dicts (len + meerdere
+    sequentiële iteraties), maar houdt nooit meer dan één rij tegelijk in
+    het geheugen. Hiermee blijft het piekgeheugen van de feed-ingest begrensd,
+    ongeacht hoe groot de feed wordt. Niet bedoeld voor gelijktijdige
+    iteraties (de ingest-passes zijn strikt sequentieel).
+    """
+
+    def __init__(self):
+        import tempfile
+        self._f = tempfile.TemporaryFile(
+            mode="w+", encoding="utf-8", prefix="feed-spool-")
+        self._n = 0
+
+    def append(self, row: dict) -> None:
+        self._f.write(json.dumps(row, default=_spool_encode) + "\n")
+        self._n += 1
+
+    def __len__(self) -> int:
+        return self._n
+
+    def __iter__(self):
+        self._f.flush()
+        self._f.seek(0)
+        for line in self._f:
+            if line.strip():
+                yield json.loads(line, object_hook=_spool_decode)
+
+    def close(self) -> None:
+        try:
+            self._f.close()
+        except Exception:
+            pass
+
+
+def _close_rows(*row_sources) -> None:
+    for src in row_sources:
+        if isinstance(src, _RowSpool):
+            src.close()
 
 
 # Veldnamen die al naar echte kolommen worden gemapt — alles daarbuiten gaat
@@ -176,10 +251,14 @@ def _raw_leftovers(rec: dict, mapped: set[str], exclude_values: tuple = ()) -> d
 
 
 # ── feed → genormaliseerde catalogus + concurrentrijen ──────────────────────
-def _normalize(records) -> tuple[list[dict], list[dict]]:
-    """Zet ruwe JSON-productrecords (lijst of iterator) om naar (catalogus, concurrentrijen)."""
-    catalog: dict[str, dict] = {}
-    comp_rows: list[dict] = []
+def _normalize_stream(records, catalog_sink, comp_sink) -> None:
+    """
+    Zet ruwe JSON-productrecords (lijst of iterator) om naar catalogus- en
+    concurrentrijen en schrijf ze direct naar de sinks (lijst of _RowSpool).
+    Semantiek identiek aan de klassieke lijst-normalisatie: eerste voorkomen
+    van een gtin wint; vendors per record gededupliceerd op domein.
+    """
+    seen_gtins: set[str] = set()
 
     for rec in records:
         if not isinstance(rec, dict):
@@ -188,10 +267,11 @@ def _normalize(records) -> tuple[list[dict], list[dict]]:
         if not gtin:
             continue
 
-        if gtin not in catalog:
+        if gtin not in seen_gtins:
+            seen_gtins.add(gtin)
             title = _s(rec.get("productTitle")) or gtin
             top, leaf = _split_category(rec.get("PPC_ProductType"))
-            catalog[gtin] = {
+            catalog_sink.append({
                 "sku_id": gtin,
                 "ean": gtin,
                 "product_name": title[:500],
@@ -217,7 +297,7 @@ def _normalize(records) -> tuple[list[dict], list[dict]]:
                     ),
                     {"_productTitle_full": (title, 500)},
                 ),
-            }
+            })
 
         vendors = pc._find_vendor_list(rec) or []
         seen_domains: set[str] = set()
@@ -230,7 +310,7 @@ def _normalize(records) -> tuple[list[dict], list[dict]]:
             if not domain or price is None or domain in seen_domains:
                 continue
             seen_domains.add(domain)
-            comp_rows.append({
+            comp_sink.append({
                 "sku_id": gtin,
                 "competitor_name": domain[:255],
                 "competitor_alias": domain_raw if domain_raw != domain else None,
@@ -255,7 +335,100 @@ def _normalize(records) -> tuple[list[dict], list[dict]]:
                 ),
             })
 
-    return list(catalog.values()), comp_rows
+
+def _normalize(records) -> tuple[list[dict], list[dict]]:
+    """Klassieke lijst-variant van de normalisatie (kleine feeds, tests)."""
+    catalog: list[dict] = []
+    comp_rows: list[dict] = []
+    _normalize_stream(records, catalog, comp_rows)
+    return catalog, comp_rows
+
+
+def _iter_csv_rows(path: str):
+    """
+    Itereer rij-dicts (kleingeschreven sleutels, string-waarden) uit een op
+    schijf staand CSV-bestand ZONDER het volledige bestand in RAM te laden.
+    UTF-8(-BOM) wordt streamend gelezen; alleen bij een legacy-encoding
+    (cp1252/mac-roman/latin-1, in de praktijk kleine handmatige exports) valt
+    dit terug op de gebufferde decoder van de import-engine.
+    """
+    import csv
+
+    # Delimiter-sniff op de kop van het bestand (zelfde aanpak als de
+    # gebufferde parser in de connector).
+    with open(path, "rb") as fb:
+        head = fb.read(4096)
+    delimiter = ","
+    try:
+        sample = head.decode("utf-8-sig", "replace").replace("\r\n", "\n").replace("\r", "\n")
+        delimiter = csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
+    except csv.Error:
+        pass
+
+    def _rows_from(fh):
+        reader = csv.DictReader(fh, delimiter=delimiter)
+        for row in reader:
+            yield {(k or "").strip().lower(): (v or "") for k, v in row.items()}
+
+    # Encoding-keuze in een APARTE pre-pass (chunkgewijs, incrementele decoder,
+    # niets in RAM gehouden) VOORDAT er ook maar één rij wordt ge-yield: een
+    # decodeerfout halverwege mag nooit tot een tweede parse-pass leiden die
+    # eerder ge-yielde rijen dupliceert.
+    import codecs
+    is_utf8 = True
+    dec = codecs.getincrementaldecoder("utf-8")()
+    with open(path, "rb") as fb:
+        while chunk := fb.read(1 << 20):
+            try:
+                dec.decode(chunk)
+            except UnicodeDecodeError:
+                is_utf8 = False
+                break
+        if is_utf8:
+            try:
+                dec.decode(b"", final=True)
+            except UnicodeDecodeError:
+                is_utf8 = False
+
+    if is_utf8:
+        with open(path, "r", encoding="utf-8-sig", newline="") as fh:
+            yield from _rows_from(fh)
+        return
+
+    # Legacy-encoding (cp1252/mac-roman/latin-1): gebufferd decoderen,
+    # identiek aan het oude pad — in de praktijk kleine handmatige exports.
+    logger.info("Feed-CSV is geen UTF-8 — gebufferde decodering (legacy-encoding).")
+    import io
+    from engine.import_engine import decode_csv_bytes
+    with open(path, "rb") as fb:
+        text = decode_csv_bytes(fb.read()).replace("\r\n", "\n").replace("\r", "\n")
+    yield from _rows_from(io.StringIO(text))
+
+
+def _spool_csv_file(path: str) -> tuple["_RowSpool", "_RowSpool"]:
+    """
+    Normaliseer een CSV-feedbestand streamend naar schijf-spools. Kiest op de
+    eerste rij tussen het brede exportformaat (vendor_N-kolommen — de standaard
+    PriceShape-feed) en de platte alias-normalisatie, identiek aan de
+    lijstgebaseerde `_normalize_flat`.
+    """
+    import itertools
+
+    cat_spool, comp_spool = _RowSpool(), _RowSpool()
+    try:
+        rows = _iter_csv_rows(path)
+        first = next(rows, None)
+        if first is None:
+            return cat_spool, comp_spool
+        chained = itertools.chain([first], rows)
+        if any(_WIDE_VENDOR_RE.match(k) for k in first.keys()):
+            _normalize_wide_csv_stream(chained, cat_spool, comp_spool)
+        else:
+            _normalize_flat_stream(chained, cat_spool, comp_spool)
+        return cat_spool, comp_spool
+    except Exception:
+        _close_rows(cat_spool, comp_spool)
+        raise
 
 
 def _parse_content(content: bytes, content_type: str, fmt: str) -> tuple[list[dict], list[dict]]:
@@ -294,19 +467,46 @@ def _read_feed(db: Session, content: bytes | None = None,
     # probeert de cyclus later opnieuw (retry/backoff) en de bestaande data
     # blijft intact (empty-feed-guard in ingest_feed).
     if (cfg.get("feed_format") or "auto") in ("auto", "json"):
+        # Batchgewijs: normaliseer de gestreamde records rechtstreeks naar
+        # schijf-spools (JSON Lines) i.p.v. volledige lijsten in RAM — de
+        # ingest-pipeline verwerkt de spools daarna in begrensde batches.
+        cat_spool, comp_spool = _RowSpool(), _RowSpool()
         try:
-            logger.info("Feed-parse: streaming JSON (ijson).")
-            return _normalize(pc.stream_json_records(cfg["feed_url"]))
+            logger.info("Feed-parse: streaming JSON (ijson) → schijf-spool.")
+            _normalize_stream(pc.stream_json_records(cfg["feed_url"]),
+                              cat_spool, comp_spool)
+            return cat_spool, comp_spool
         except pc.NotStreamable:
+            _close_rows(cat_spool, comp_spool)
             logger.info(
                 "Feed is geen top-level JSON-array — val terug op gebufferd lezen."
             )
+        except Exception:
+            _close_rows(cat_spool, comp_spool)
+            raise
 
-    # Fallback: volledige download + gebufferde parse (CSV/XML of object-wrapper).
-    logger.info("Feed-parse: gebufferd lezen (niet-streambaar formaat).")
-    content, content_type = pc._fetch_feed(cfg["feed_url"])
-    fmt = pc._detect_feed_format(content, content_type, cfg["feed_format"])
-    return _parse_content(content, content_type, fmt)
+    # Fallback: download STREAMEND naar schijf (nooit de volledige body in
+    # RAM) en parse vanaf het bestand. CSV — het formaat van de standaard
+    # PriceShape-exportfeed — wordt rij-voor-rij naar schijf-spools
+    # genormaliseerd; alleen de zeldzame XML/object-wrapper-JSON-varianten
+    # worden nog gebufferd geparsed (vanaf schijf, dus zonder dubbele
+    # bytes-kopie in RAM).
+    logger.info("Feed-parse: streaming download naar schijf (niet-streambaar JSON).")
+    path, content_type = pc.fetch_feed_to_file(cfg["feed_url"])
+    try:
+        with open(path, "rb") as fb:
+            head = fb.read(4096)
+        fmt = pc._detect_feed_format(head, content_type, cfg["feed_format"])
+        if fmt == "csv":
+            logger.info("Feed-parse: CSV rij-voor-rij vanaf schijf → schijf-spool.")
+            return _spool_csv_file(path)
+        # XML / object-wrapper JSON: gebufferd parsen vanaf schijf.
+        logger.info("Feed-parse: gebufferd lezen vanaf schijf (formaat=%s).", fmt)
+        with open(path, "rb") as fb:
+            content = fb.read()
+        return _parse_content(content, content_type, fmt)
+    finally:
+        pc._cleanup_file(path)
 
 
 import re as _re
@@ -324,15 +524,28 @@ _WIDE_VENDOR_MAPPED = {"domain", "price", "producturl", "stockstatus"}
 
 
 def _normalize_wide_csv(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Klassieke lijst-variant van de brede-CSV-normalisatie (kleine feeds, tests)."""
+    catalog: list[dict] = []
+    comp_rows: list[dict] = []
+    _normalize_wide_csv_stream(rows, catalog, comp_rows)
+    return catalog, comp_rows
+
+
+def _normalize_wide_csv_stream(rows, catalog_sink, comp_sink) -> None:
     """
     Normaliseer het BREDE PriceShape CSV-exportformaat: één product per rij,
     concurrenten in kolomgroepen `vendor_N <veld>` (domain, price, stockStatus,
     productUrl, priceWithShipping, …). Dit is het formaat dat de standaard
     export-feed (public.app.priceshape.io …/export/…) daadwerkelijk levert:
     geen gtin-kolom — `itemGroupId` is de productsleutel.
+
+    Streamvariant: `rows` mag een generator zijn; product- en concurrentrijen
+    worden per rij naar de sinks geschreven (lijst of `_RowSpool`), zodat de
+    volledige feed nooit als lijst in RAM staat. Semantiek is identiek aan de
+    oude lijstvariant: eerste voorkomen van een sku wint (`seen_skus`), en
+    offers worden feedbreed gededupliceerd op (sku, domein).
     """
-    catalog: dict[str, dict] = {}
-    comp_rows: list[dict] = []
+    seen_skus: set[str] = set()
     # Dedupliceer offers over de HELE feed op (sku, domein): dubbele
     # productrijen of herhaalde vendor-kolommen mogen geen dubbele
     # dagobservaties opleveren (eerste voorkomen wint — zelfde semantiek als
@@ -353,12 +566,13 @@ def _normalize_wide_csv(rows: list[dict]) -> tuple[list[dict], list[dict]]:
             else:
                 base[k] = v
 
-        if sku not in catalog:
+        if sku not in seen_skus:
+            seen_skus.add(sku)
             title = _s(base.get("name") or base.get("producttitle")) or sku
             top, leaf = _split_category(base.get("ppc_producttype") or base.get("category"))
             raw = {k: v for k, v in base.items()
                    if _s(v) and k not in _WIDE_PRODUCT_MAPPED}
-            catalog[sku] = {
+            catalog_sink.append({
                 "sku_id": sku, "ean": gtin or None, "product_name": title[:500],
                 "brand": _brand_from_title(title)[:255] if _brand_from_title(title) else None,
                 "category": top, "subcategory": leaf,
@@ -370,7 +584,7 @@ def _normalize_wide_csv(rows: list[dict]) -> tuple[list[dict], list[dict]]:
                 "is_active": True, "import_source": SOURCE_NAME, "data_quality_score": 1.0,
                 "raw_attributes": _with_overflow(
                     raw or None, {"_productTitle_full": (title, 500)}),
-            }
+            })
 
         for idx in sorted(vendors):
             v = vendors[idx]
@@ -386,7 +600,7 @@ def _normalize_wide_csv(rows: list[dict]) -> tuple[list[dict], list[dict]]:
                     if _s(val) and k not in _WIDE_VENDOR_MAPPED}
             if domain_raw != domain:
                 vraw["_domain_alias"] = domain_raw
-            comp_rows.append({
+            comp_sink.append({
                 "sku_id": sku, "competitor_name": domain[:255], "price": price,
                 "competitor_alias": domain_raw if domain_raw != domain else None,
                 "url": _s(v.get("producturl")) or None,
@@ -399,7 +613,6 @@ def _normalize_wide_csv(rows: list[dict]) -> tuple[list[dict], list[dict]]:
                 "raw_attributes": _with_overflow(
                     vraw or None, {"_domain_full": (domain_raw, 255)}),
             })
-    return list(catalog.values()), comp_rows
 
 
 def _normalize_flat(rows: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -407,16 +620,28 @@ def _normalize_flat(rows: list[dict]) -> tuple[list[dict], list[dict]]:
     # Breed exportformaat (vendor_N-kolommen)? Dan de speciale wide-normalisatie.
     if rows and any(_WIDE_VENDOR_RE.match(k) for k in rows[0].keys()):
         return _normalize_wide_csv(rows)
-    catalog: dict[str, dict] = {}
+    catalog: list[dict] = []
     comp_rows: list[dict] = []
+    _normalize_flat_stream(rows, catalog, comp_rows)
+    return catalog, comp_rows
+
+
+def _normalize_flat_stream(rows, catalog_sink, comp_sink) -> None:
+    """
+    Streamvariant van de platte normalisatie: `rows` mag een generator zijn;
+    rijen gaan direct naar de sinks (lijst of `_RowSpool`). Semantiek identiek
+    aan de oude lijstvariant (eerste gtin wint).
+    """
+    seen_gtins: set[str] = set()
     for r in rows:
         gtin = _s(r.get("gtin") or r.get("ean") or r.get("barcode"))
         if not gtin:
             continue
-        if gtin not in catalog:
+        if gtin not in seen_gtins:
+            seen_gtins.add(gtin)
             title = _s(r.get("producttitle") or r.get("product_name") or r.get("title")) or gtin
             top, leaf = _split_category(r.get("ppc_producttype") or r.get("category"))
-            catalog[gtin] = {
+            catalog_sink.append({
                 "sku_id": gtin, "ean": gtin, "product_name": title[:500],
                 "brand": _brand_from_title(title)[:255], "category": top, "subcategory": leaf,
                 "product_group": _s(r.get("itemgroupid")) or None,
@@ -432,12 +657,12 @@ def _normalize_flat(rows: list[dict]) -> tuple[list[dict], list[dict]]:
                     }),
                     {"_productTitle_full": (title, 500)},
                 ),
-            }
+            })
         domain_raw = _s(r.get("domain") or r.get("competitor") or r.get("retailer"))
         domain = normalize_domain(domain_raw)
         price = _f(r.get("price") or r.get("competitor_price"))
         if domain and price is not None:
-            comp_rows.append({
+            comp_sink.append({
                 "sku_id": gtin, "competitor_name": domain[:255], "price": price,
                 "competitor_alias": domain_raw if domain_raw != domain else None,
                 "url": _s(r.get("producturl") or r.get("url")) or None,
@@ -460,7 +685,6 @@ def _normalize_flat(rows: list[dict]) -> tuple[list[dict], list[dict]]:
                     },
                 ),
             })
-    return list(catalog.values()), comp_rows
 
 
 # ── persisteren ─────────────────────────────────────────────────────────────
@@ -498,16 +722,44 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
     # catalogus-import laat crashen op "value too long for varchar(N)".
     clamp_warnings: list[str] = []
 
-    # Identiteit (sku_id, primary key) mag NOOIT afgekapt worden: twee
+    try:
+        return _ingest_rows(db, source, catalog, comp_rows, today, settings,
+                            shop_id, clamp_warnings)
+    finally:
+        # Schijf-spools (streaming pad) altijd opruimen.
+        _close_rows(catalog, comp_rows)
+
+
+def _ingest_rows(db: Session, source: str, catalog, comp_rows, today,
+                 settings, shop_id: int, clamp_warnings: list[str]) -> dict:
+    """
+    Batchgewijze persistentie van genormaliseerde catalogus- + concurrentrijen.
+
+    `catalog` en `comp_rows` zijn her-itereerbare rijenbronnen (lijsten voor
+    kleine/gebufferde feeds, `_RowSpool` voor het streaming pad). De pipeline
+    verwerkt ze in meerdere sequentiële passes met batches van max `_CHUNK`
+    rijen, zodat het piekgeheugen begrensd blijft — met exact dezelfde
+    replace-snapshot-semantiek en veiligheidskleppen als de klassieke
+    lijst-implementatie (empty-feed-guard vóór elke delete, shop-scoping,
+    sku-quarantaine, importinstellingen als no-op).
+    """
+    from services import import_settings as imps
+
+    # Pass 0 (alleen lezen): sku-inventarisatie + quarantaine van te lange
+    # sku's. Identiteit (sku_id, primary key) mag NOOIT afgekapt worden: twee
     # verschillende te lange sku's zouden na truncatie op elkaar (of op een
     # bestaand product) kunnen mappen en zo andermans rijen overschrijven of
-    # de replace-deletes corrumperen. Te lange sku's worden daarom in
-    # quarantaine gezet (overgeslagen) met een zichtbare waarschuwing.
+    # de replace-deletes corrumperen.
     _sku_limit = _string_limits(models.DimProduct)["sku_id"]
-    oversized = {p["sku_id"] for p in catalog if len(p["sku_id"]) > _sku_limit}
+    catalog_skus: set[str] = set()
+    oversized: set[str] = set()
+    for p in catalog:
+        sku = p["sku_id"]
+        if len(sku) > _sku_limit:
+            oversized.add(sku)
+        else:
+            catalog_skus.add(sku)
     if oversized:
-        catalog = [p for p in catalog if p["sku_id"] not in oversized]
-        comp_rows = [r for r in comp_rows if r["sku_id"] not in oversized]
         example = next(iter(oversized))
         clamp_warnings.append(
             f"{len(oversized)} product(en) overgeslagen: sku/gtin langer dan "
@@ -517,58 +769,109 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
         logger.warning("Feed-ingest: %s", clamp_warnings[-1])
 
     _identity = frozenset({"sku_id"})
-    clamp_rows_to_model(models.DimProduct, catalog, clamp_warnings,
-                        skip_fields=_identity)
-    clamp_rows_to_model(models.FactCompetitorPriceDaily, comp_rows, clamp_warnings,
-                        skip_fields=_identity)
+    prod_hits: dict[str, dict] = {}
+    comp_hits: dict[str, dict] = {}
 
-    # Importselectie (aan/uitvinken): uitgevinkte concurrenten overslaan.
-    # Bestaande data wordt hierdoor NIET gewist (zie last-known-good hieronder):
-    # de delete is beperkt tot rijen die vervangen worden.
-    skipped_competitor_rows = 0
-    if settings["disabled_competitors"]:
-        kept = [r for r in comp_rows
-                if not imps.competitor_disabled(settings, r["competitor_name"])]
-        skipped_competitor_rows = len(comp_rows) - len(kept)
-        comp_rows = kept
-    if not imps.component_enabled(settings, "competitor_prices"):
-        skipped_competitor_rows += len(comp_rows)
-        comp_rows = []
+    # Bestaand/vreemd (alleen lezen — er is nog niets gewijzigd):
+    # producten van andere winkels mogen nooit door deze sync geraakt worden.
+    existing_ids = {row[0] for row in db.query(models.DimProduct.sku_id).filter(
+        models.DimProduct.shop_id == shop_id).all()}
+    foreign_ids: set[str] = set()
+    _sku_list = sorted(catalog_skus)
+    for i in range(0, len(_sku_list), 10_000):
+        foreign_ids.update(row[0] for row in db.query(models.DimProduct.sku_id).filter(
+            models.DimProduct.sku_id.in_(_sku_list[i:i + 10_000]),
+            models.DimProduct.shop_id != shop_id).all())
+    if foreign_ids:
+        logger.warning(
+            "Feed-sync (shop %s): %d sku's overgeslagen omdat ze al bij een "
+            "andere winkel horen.", shop_id, len(foreign_ids))
+    known = (catalog_skus - foreign_ids) | existing_ids
 
-    # Reconciliatie-basis: ná de importselectie (uitgevinkte concurrenten en
-    # componenten tellen niet mee) — unieke concurrenten zoals de feed ze
-    # aanleverde (ruwe schrijfwijzen) versus na domeinnormalisatie (canoniek).
-    # Het verschil is het aantal voorkomen duplicaat-identiteiten.
-    feed_variants = {(r.get("competitor_alias") or r["competitor_name"]).lower()
-                     for r in comp_rows}
-    feed_canonical = {r["competitor_name"] for r in comp_rows}
-    alias_by_canon: dict[str, set[str]] = {}
-    for r in comp_rows:
-        if r.get("competitor_alias"):
-            alias_by_canon.setdefault(r["competitor_name"], set()).add(
-                r["competitor_alias"])
     # Uitgevinkte onderdelen zijn een echte no-op: de betreffende kolommen
     # worden niet geschreven, zodat bestaande waarden behouden blijven.
     own_on = imps.component_enabled(settings, "own_prices")
     cost_on = imps.component_enabled(settings, "cost_prices")
     attrs_on = imps.component_enabled(settings, "extra_attributes")
     avail_on = imps.component_enabled(settings, "availability")
-    if not own_on:
-        for p in catalog:
-            p["current_price"] = None  # alleen gebruikt bij NIEUWE producten (insert)
-            p["price_incl_vat"] = None
-    if not cost_on:
-        for p in catalog:
-            p["cost_price"] = None  # idem: alleen inserts; updates laten de kolom ongemoeid
-    if not attrs_on:
-        for p in catalog:
-            p["raw_attributes"] = None
+    comp_on = imps.component_enabled(settings, "competitor_prices")
+
+    # Pass 1 (alleen lezen/filteren, GEEN databasewrites): concurrentrijen
+    # batchgewijs clampen + importselectie toepassen en de te schrijven rijen
+    # naar een gefilterde spool wegschrijven. Zo zijn alle aantallen bekend
+    # vóórdat ook maar één delete plaatsvindt (empty-feed-guard hieronder).
+    skipped_competitor_rows = 0
+    comp_after_settings = 0  # na importselectie, vóór known/foreign-filter
+    feed_variants: set[str] = set()
+    feed_canonical: set[str] = set()
+    alias_by_canon: dict[str, set[str]] = {}
+    written_names: set[str] = set()
+    offer_sku_ids: set[str] = set()
+    offer_names: set[str] = set()
+    comp_kept = _RowSpool()
+    try:
+        for batch in _batches(r for r in comp_rows
+                              if r["sku_id"] not in oversized):
+            _clamp_batch(models.FactCompetitorPriceDaily, batch, comp_hits,
+                         skip_fields=_identity)
+            for r in batch:
+                if settings["disabled_competitors"] and imps.competitor_disabled(
+                        settings, r["competitor_name"]):
+                    skipped_competitor_rows += 1
+                    continue
+                if not comp_on:
+                    skipped_competitor_rows += 1
+                    continue
+                comp_after_settings += 1
+                # Reconciliatie-basis: ná de importselectie — unieke ruwe
+                # schrijfwijzen versus canonieke domeinen.
+                feed_variants.add(
+                    (r.get("competitor_alias") or r["competitor_name"]).lower())
+                feed_canonical.add(r["competitor_name"])
+                if r.get("competitor_alias"):
+                    alias_by_canon.setdefault(r["competitor_name"], set()).add(
+                        r["competitor_alias"])
+                if r["sku_id"] not in known:
+                    continue
+                written_names.add(r["competitor_name"])
+                if r.get("in_stock") is not None or r.get("delivery_days") is not None:
+                    offer_sku_ids.add(r["sku_id"])
+                    offer_names.add(r["competitor_name"])
+                comp_kept.append(r)
+
+        return _ingest_write(
+            db, source, catalog, today, settings, shop_id, clamp_warnings,
+            catalog_skus=catalog_skus, oversized=oversized,
+            existing_ids=existing_ids, foreign_ids=foreign_ids,
+            prod_hits=prod_hits, comp_hits=comp_hits, _identity=_identity,
+            own_on=own_on, cost_on=cost_on, attrs_on=attrs_on, avail_on=avail_on,
+            skipped_competitor_rows=skipped_competitor_rows,
+            comp_after_settings=comp_after_settings,
+            feed_variants=feed_variants, feed_canonical=feed_canonical,
+            alias_by_canon=alias_by_canon, written_names=written_names,
+            offer_sku_ids=offer_sku_ids, offer_names=offer_names,
+            comp_kept=comp_kept,
+        )
+    finally:
+        comp_kept.close()
+
+
+def _ingest_write(db: Session, source: str, catalog, today, settings,
+                  shop_id: int, clamp_warnings: list[str], *,
+                  catalog_skus, oversized, existing_ids, foreign_ids,
+                  prod_hits, comp_hits, _identity,
+                  own_on, cost_on, attrs_on, avail_on,
+                  skipped_competitor_rows, comp_after_settings,
+                  feed_variants, feed_canonical, alias_by_canon,
+                  written_names, offer_sku_ids, offer_names,
+                  comp_kept) -> dict:
+    from services import import_settings as imps
 
     # Veiligheidsklep: een lege feed (netwerkhik, verlopen token, kapotte export)
     # mag NOOIT de bestaande dagdata wissen. Zonder producten én zonder
     # concurrentprijzen breken we af vóór welke delete dan ook, zodat de app
     # blijft draaien op de laatst-goede data ("never break").
-    if not catalog and not comp_rows:
+    if not catalog_skus and not comp_after_settings:
         # Neem de responsmetadata (HTTP-status, content-type, bytes, eerste
         # ~200 tekens) op in log én fout, zodat de echte oorzaak (lege export,
         # HTML-foutpagina met HTTP 200, rate limiting) vaststelbaar is.
@@ -585,54 +888,68 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
             f"blijft staan). Ontvangen respons: {response_info}"
         )
 
-    # 1. Producten: splits in nieuw vs bestaand — ALLEEN binnen deze winkel.
-    # Producten van andere winkels tellen niet mee als "bestaand": die mogen
-    # nooit door deze sync geüpdatet worden.
-    existing_ids = {row[0] for row in db.query(models.DimProduct.sku_id).filter(
-        models.DimProduct.shop_id == shop_id).all()}
-    # Sku's die al bij een ANDERE winkel horen volledig overslaan: de sku_id is
+    # 1. Producten: batchgewijs clampen, onderdelen-toggles toepassen en
+    # splitsen in nieuw vs bestaand — ALLEEN binnen deze winkel. Sku's die al
+    # bij een ANDERE winkel horen worden volledig overgeslagen: de sku_id is
     # de primary key, dus een insert zou crashen en een update zou de rij van
     # die andere winkel overschrijven.
-    foreign_ids = {row[0] for row in db.query(models.DimProduct.sku_id).filter(
-        models.DimProduct.sku_id.in_([p["sku_id"] for p in catalog]),
-        models.DimProduct.shop_id != shop_id).all()}
-    if foreign_ids:
-        logger.warning(
-            "Feed-sync (shop %s): %d sku's overgeslagen omdat ze al bij een "
-            "andere winkel horen.", shop_id, len(foreign_ids))
-        catalog = [p for p in catalog if p["sku_id"] not in foreign_ids]
-        comp_rows = [r for r in comp_rows if r["sku_id"] not in foreign_ids]
-    for p in catalog:
-        p["shop_id"] = shop_id
-    to_insert = [p for p in catalog if p["sku_id"] not in existing_ids]
-    to_update = [p for p in catalog if p["sku_id"] in existing_ids]
+    def _upd_map(p: dict) -> dict:
+        m = {
+            "sku_id": p["sku_id"], "product_name": p["product_name"], "brand": p["brand"],
+            "category": p["category"], "subcategory": p["subcategory"],
+            "product_group": p["product_group"],
+            "lifecycle_status": "active", "is_active": True, "import_source": source,
+        }
+        # Uitgevinkte onderdelen: kolom niet meesturen → bestaande waarde blijft.
+        if own_on:
+            m["current_price"] = p["current_price"]
+            m["price_incl_vat"] = p["price_incl_vat"]
+        if cost_on:
+            m["cost_price"] = p["cost_price"]
+        if attrs_on:
+            m["raw_attributes"] = p.get("raw_attributes")
+        return m
 
-    for chunk in _chunks(to_insert):
-        db.bulk_insert_mappings(models.DimProduct, chunk)
-    if to_update:
-        def _upd_map(p: dict) -> dict:
-            m = {
-                "sku_id": p["sku_id"], "product_name": p["product_name"], "brand": p["brand"],
-                "category": p["category"], "subcategory": p["subcategory"],
-                "product_group": p["product_group"],
-                "lifecycle_status": "active", "is_active": True, "import_source": source,
-            }
-            # Uitgevinkte onderdelen: kolom niet meesturen → bestaande waarde blijft.
-            if own_on:
-                m["current_price"] = p["current_price"]
-                m["price_incl_vat"] = p["price_incl_vat"]
-            if cost_on:
-                m["cost_price"] = p["cost_price"]
-            if attrs_on:
-                m["raw_attributes"] = p.get("raw_attributes")
-            return m
-        upd = [_upd_map(p) for p in to_update]
-        for chunk in _chunks(upd):
-            db.bulk_update_mappings(models.DimProduct, chunk)
+    def _prepared_products():
+        """Eén logische pass over de catalogus: quarantaine/vreemde sku's
+        overslaan, clampen (geaggregeerde hits) en toggles toepassen."""
+        for batch in _batches(p for p in catalog
+                              if p["sku_id"] not in oversized
+                              and p["sku_id"] not in foreign_ids):
+            _clamp_batch(models.DimProduct, batch, prod_hits,
+                         skip_fields=_identity)
+            for p in batch:
+                if not own_on:
+                    p["current_price"] = None  # alleen gebruikt bij NIEUWE producten (insert)
+                    p["price_incl_vat"] = None
+                if not cost_on:
+                    p["cost_price"] = None  # idem: updates laten de kolom ongemoeid
+                if not attrs_on:
+                    p["raw_attributes"] = None
+                p["shop_id"] = shop_id
+            yield batch
+
+    products_new = products_updated = products_total = 0
+    own_price_count = 0
+    cats: set[tuple] = set()
+    for batch in _prepared_products():
+        products_total += len(batch)
+        ins = [p for p in batch if p["sku_id"] not in existing_ids]
+        upd = [_upd_map(p) for p in batch if p["sku_id"] in existing_ids]
+        products_new += len(ins)
+        products_updated += len(upd)
+        for p in batch:
+            if p["category"]:
+                cats.add((p["category"], p["subcategory"]))
+            if own_on and p["current_price"] is not None:
+                own_price_count += 1
+        if ins:
+            db.bulk_insert_mappings(models.DimProduct, ins)
+        if upd:
+            db.bulk_update_mappings(models.DimProduct, upd)
     db.commit()
 
     # 2. Categorieën + strategie-mapping (idempotent).
-    cats = {(p["category"], p["subcategory"]) for p in catalog if p["category"]}
     existing_cat = {c[0] for c in db.query(models.DimCategory.name).all()}
     existing_map = {c[0] for c in db.query(models.CategoryStrategyMapping.category).all()}
     for top in {c[0] for c in cats}:
@@ -646,31 +963,38 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
     # 3. Eigen dagprijs (fact_price_daily) — vervang die van vandaag.
     # Alleen wissen als er vervangende prijzen zijn: een lege set mag de
     # bestaande dagprijzen niet weggooien (laatst-goede data blijft staan).
-    price_maps = [{
-        "date": today, "sku_id": p["sku_id"], "price": p["current_price"],
-        "cost_price": p["cost_price"], "shop_id": shop_id,
-    } for p in catalog if p["current_price"] is not None]
-    if not imps.component_enabled(settings, "own_prices"):
+    # Batchgewijs: het aantal vervangende prijzen (`own_price_count`) is in de
+    # productenpass geteld, dus de delete-guard beslist vóór de eerste insert.
+    own_prices_written = 0
+    if not own_on:
         logger.info("Feed-sync: eigen prijzen uitgevinkt in importinstellingen — overgeslagen.")
-        price_maps = []
-    elif not cost_on and price_maps:
-        # Kostprijzen uitgevinkt: bestaande kostprijs van vandaag behouden in
-        # de vervangende dagprijsrijen (replace mag niets wissen).
-        existing_costs = dict(db.query(
-            models.FactPriceDaily.sku_id, models.FactPriceDaily.cost_price,
-        ).filter(models.FactPriceDaily.date == today,
-                 models.FactPriceDaily.shop_id == shop_id).all())
-        for m in price_maps:
-            m["cost_price"] = existing_costs.get(m["sku_id"])
-    if price_maps:
+    elif own_price_count:
+        existing_costs: dict = {}
+        if not cost_on:
+            # Kostprijzen uitgevinkt: bestaande kostprijs van vandaag behouden in
+            # de vervangende dagprijsrijen (replace mag niets wissen).
+            existing_costs = dict(db.query(
+                models.FactPriceDaily.sku_id, models.FactPriceDaily.cost_price,
+            ).filter(models.FactPriceDaily.date == today,
+                     models.FactPriceDaily.shop_id == shop_id).all())
         # Replace-delete strikt tot DEZE winkel beperkt: dagprijzen van andere
         # winkels blijven altijd staan.
         db.query(models.FactPriceDaily).filter(
             models.FactPriceDaily.date == today,
             models.FactPriceDaily.shop_id == shop_id,
         ).delete(synchronize_session=False)
-        for chunk in _chunks(price_maps):
-            db.bulk_insert_mappings(models.FactPriceDaily, chunk)
+        for batch in _batches(p for p in catalog
+                              if p["sku_id"] not in oversized
+                              and p["sku_id"] not in foreign_ids
+                              and p["current_price"] is not None):
+            maps = [{
+                "date": today, "sku_id": p["sku_id"], "price": p["current_price"],
+                "cost_price": (p["cost_price"] if cost_on
+                               else existing_costs.get(p["sku_id"])),
+                "shop_id": shop_id,
+            } for p in batch]
+            db.bulk_insert_mappings(models.FactPriceDaily, maps)
+            own_prices_written += len(maps)
         db.commit()
     else:
         logger.warning(
@@ -681,17 +1005,11 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
     # 4. Concurrentprijzen — vervang die van deze bron voor vandaag.
     # Zelfde bescherming: zonder vervangende concurrentprijzen NIET wissen, zodat
     # een gedeeltelijke feed-uitval (wel producten, geen concurrenten) de
-    # bestaande concurrent-snapshot van vandaag niet vernietigt.
-    known = {p["sku_id"] for p in catalog} | existing_ids
-    comp_maps = [{
-        "date": today, "sku_id": r["sku_id"], "competitor_name": r["competitor_name"],
-        "price": r["price"], "url": r["url"], "source": source, "shop_id": shop_id,
-        "in_stock": r.get("in_stock"), "delivery_days": r.get("delivery_days"),
-        "currency": r.get("currency"), "vendor_name": r.get("vendor_name"),
-        "observed_at": r.get("observed_at"), "raw_attributes": r.get("raw_attributes"),
-    } for r in comp_rows if r["sku_id"] in known]
-
-    if comp_maps and (not avail_on or not attrs_on):
+    # bestaande concurrent-snapshot van vandaag niet vernietigt. De gefilterde
+    # spool (`comp_kept`, zonder DB-writes opgebouwd in pass 1) levert het
+    # aantal vervangende rijen vóór de delete.
+    existing_today: dict = {}
+    if len(comp_kept) and (not avail_on or not attrs_on):
         # Uitgevinkt onderdeel = no-op: neem de bestaande waarden van vandaag
         # over in de vervangende rijen, zodat de replace niets wist.
         existing_today = {
@@ -702,14 +1020,26 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
                 models.FactCompetitorPriceDaily.shop_id == shop_id,
             ).all()
         }
-        for m in comp_maps:
+
+    def _to_comp_map(r: dict) -> dict:
+        m = {
+            "date": today, "sku_id": r["sku_id"], "competitor_name": r["competitor_name"],
+            "price": r["price"], "url": r["url"], "source": source, "shop_id": shop_id,
+            "in_stock": r.get("in_stock"), "delivery_days": r.get("delivery_days"),
+            "currency": r.get("currency"), "vendor_name": r.get("vendor_name"),
+            "observed_at": r.get("observed_at"), "raw_attributes": r.get("raw_attributes"),
+        }
+        if not avail_on or not attrs_on:
             prev = existing_today.get((m["sku_id"], m["competitor_name"]))
             if not avail_on:
                 m["in_stock"] = prev.in_stock if prev else None
                 m["delivery_days"] = prev.delivery_days if prev else None
             if not attrs_on:
                 m["raw_attributes"] = prev.raw_attributes if prev else None
-    if comp_maps:
+        return m
+
+    competitor_rows_written = 0
+    if len(comp_kept):
         # Volledige vervanging van de snapshot van vandaag (normale pad), maar
         # uitgevinkte concurrenten behouden hun bestaande data (worden nooit
         # gewist door een sync waarin ze niet meegenomen worden).
@@ -726,8 +1056,10 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
                 ~func.lower(models.FactCompetitorPriceDaily.competitor_name).in_(disabled)
             )
         delete_q.delete(synchronize_session=False)
-        for chunk in _chunks(comp_maps):
-            db.bulk_insert_mappings(models.FactCompetitorPriceDaily, chunk)
+        for batch in _batches(comp_kept):
+            db.bulk_insert_mappings(
+                models.FactCompetitorPriceDaily, [_to_comp_map(r) for r in batch])
+            competitor_rows_written += len(batch)
         db.commit()
     else:
         logger.warning(
@@ -739,7 +1071,7 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
     # wanneer het onderdeel aan staat én de feed daadwerkelijk voorraaddata levert.
     # Snapshot vóór _persist_offers: die upsert vult het register alvast,
     # waardoor 'nieuw' anders ten onrechte als 'gematcht' zou tellen.
-    _recon_names = sorted(feed_canonical | {m["competitor_name"] for m in comp_maps})
+    _recon_names = sorted(feed_canonical | written_names)
     pre_existing: set[str] = set()
     for _chunk in (_recon_names[i:i + 1000]
                    for i in range(0, len(_recon_names), 1000)):
@@ -748,13 +1080,15 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
             .filter(models.DimCompetitor.competitor_name.in_(_chunk)).all())
 
     offers_written = 0
-    if imps.component_enabled(settings, "availability"):
-        offers_written = _persist_offers(db, today, comp_maps)
+    if avail_on:
+        offers_written = _persist_offers(
+            db, today, (_to_comp_map(r) for r in comp_kept),
+            offer_names=offer_names, offer_sku_ids=offer_sku_ids)
 
     # 6. Concurrentenregister + reconciliatie-samenvatting.
     reconciliation = _reconcile_competitors(
-        db, today, comp_maps, feed_variants, feed_canonical, alias_by_canon,
-        pre_existing)
+        db, today, written_names, competitor_rows_written,
+        feed_variants, feed_canonical, alias_by_canon, pre_existing)
     if reconciliation:
         clamp_warnings.insert(0, (
             "Concurrent-reconciliatie: "
@@ -765,13 +1099,19 @@ def ingest_feed(db: Session, source: str = SOURCE_NAME,
             f"{reconciliation['duplicates_prevented']} duplicaatvarianten voorkomen."
         ))
 
+    # Geaggregeerde clamp-waarschuwingen (één per kolom, over alle batches).
+    _emit_clamp_warnings(models.DimProduct, prod_hits, clamp_warnings,
+                         skip_fields=_identity)
+    _emit_clamp_warnings(models.FactCompetitorPriceDaily, comp_hits,
+                         clamp_warnings, skip_fields=_identity)
+
     return {
         "competitor_reconciliation": reconciliation,
-        "products_new": len(to_insert),
-        "products_updated": len(to_update),
-        "products_total": len(catalog),
-        "own_prices": len(price_maps),
-        "competitor_rows": len(comp_maps),
+        "products_new": products_new,
+        "products_updated": products_updated,
+        "products_total": products_total,
+        "own_prices": own_prices_written,
+        "competitor_rows": competitor_rows_written,
         "offer_rows": offers_written,
         "skipped_by_settings": skipped_competitor_rows,
         "warnings": clamp_warnings,
@@ -865,20 +1205,32 @@ def cleanup_vanished_competitors(db: Session, source: str = SOURCE_NAME,
     return {"removed_rows": removed, "removed_competitors": names}
 
 
-def _persist_offers(db: Session, today: date, comp_maps: list[dict]) -> int:
+def _persist_offers(db: Session, today: date, comp_maps,
+                    offer_names: set[str] | None = None,
+                    offer_sku_ids: set[str] | None = None) -> int:
     """
     Schrijf vendor-voorraaddata door naar fact_competitor_offer_daily, zodat het
     bestaande beschikbaarheidsmodel (update_availability) er direct mee kan werken.
     Alleen rijen met een echte voorraad-/levertijdwaarneming worden geschreven;
     zonder zulke data wordt er niets gewist (last-known-good).
+
+    `comp_maps` mag elke (eenmalig te doorlopen) iterator van map-dicts zijn;
+    de rijen worden batchgewijs geschreven zodat het geheugen begrensd blijft.
+    `offer_names`/`offer_sku_ids` zijn optioneel vooraf berekende sets van
+    concurrentnamen en sku's van rijen mét voorraaddata; zonder deze sets wordt
+    `comp_maps` gematerialiseerd (klassieke lijst-aanroep).
     """
-    with_stock = [m for m in comp_maps
-                  if m.get("in_stock") is not None or m.get("delivery_days") is not None]
-    if not with_stock:
+    if offer_names is None or offer_sku_ids is None:
+        comp_maps = [m for m in comp_maps
+                     if m.get("in_stock") is not None
+                     or m.get("delivery_days") is not None]
+        offer_names = {m["competitor_name"] for m in comp_maps}
+        offer_sku_ids = {m["sku_id"] for m in comp_maps}
+    if not offer_names:
         return 0
 
     # Concurrentregister bijwerken: domein → competitor_id (idempotent).
-    names = {m["competitor_name"] for m in with_stock}
+    names = offer_names
     existing = {c.competitor_name: c.competitor_id
                 for c in db.query(models.DimCompetitor).filter(
                     models.DimCompetitor.competitor_name.in_(names)).all()}
@@ -889,35 +1241,41 @@ def _persist_offers(db: Session, today: date, comp_maps: list[dict]) -> int:
            for c in db.query(models.DimCompetitor).filter(
                models.DimCompetitor.competitor_name.in_(names)).all()}
 
-    offer_maps = [{
-        "date": today,
-        "own_sku_id": m["sku_id"],
-        "competitor_id": ids[m["competitor_name"]],
-        "product_url": m.get("url"),
-        "competitor_price_inc_vat": m.get("price"),
-        "in_stock": m.get("in_stock"),
-        "delivery_days": int(m["delivery_days"]) if m.get("delivery_days") is not None else None,
-        "match_type": "Exact",
-        "source": "priceshape",
-    } for m in with_stock]
-
     # Alleen de eigen (priceshape) rijen van vandaag vervangen voor precies de
     # (SKU, concurrent)-combinaties die opnieuw aangeleverd worden — offers van
     # scrapers, andere shops én uitgevinkte/afwezige concurrenten blijven staan.
     db.query(models.FactCompetitorOfferDaily).filter(
         models.FactCompetitorOfferDaily.date == today,
         models.FactCompetitorOfferDaily.source == "priceshape",
-        models.FactCompetitorOfferDaily.own_sku_id.in_({m["sku_id"] for m in with_stock}),
-        models.FactCompetitorOfferDaily.competitor_id.in_(
-            {m["competitor_id"] for m in offer_maps}),
+        models.FactCompetitorOfferDaily.own_sku_id.in_(offer_sku_ids),
+        models.FactCompetitorOfferDaily.competitor_id.in_(set(ids.values())),
     ).delete(synchronize_session=False)
-    for chunk in _chunks(offer_maps):
-        db.bulk_insert_mappings(models.FactCompetitorOfferDaily, chunk)
+
+    written = 0
+    def _with_stock():
+        for m in comp_maps:
+            if m.get("in_stock") is None and m.get("delivery_days") is None:
+                continue
+            yield {
+                "date": today,
+                "own_sku_id": m["sku_id"],
+                "competitor_id": ids[m["competitor_name"]],
+                "product_url": m.get("url"),
+                "competitor_price_inc_vat": m.get("price"),
+                "in_stock": m.get("in_stock"),
+                "delivery_days": int(m["delivery_days"]) if m.get("delivery_days") is not None else None,
+                "match_type": "Exact",
+                "source": "priceshape",
+            }
+    for batch in _batches(_with_stock()):
+        db.bulk_insert_mappings(models.FactCompetitorOfferDaily, batch)
+        written += len(batch)
     db.commit()
-    return len(offer_maps)
+    return written
 
 
-def _reconcile_competitors(db: Session, today: date, comp_maps: list[dict],
+def _reconcile_competitors(db: Session, today: date, written: set[str],
+                           rows_written: int,
                            feed_variants: set[str], feed_canonical: set[str],
                            alias_by_canon: dict[str, set[str]],
                            pre_existing: set[str]) -> dict | None:
@@ -931,7 +1289,6 @@ def _reconcile_competitors(db: Session, today: date, comp_maps: list[dict],
       concurrent die uit de feed verdwijnt wordt nooit verwijderd, alleen
       herkenbaar als "recent niet gezien").
     """
-    written = {m["competitor_name"] for m in comp_maps}
     if not feed_canonical and not written:
         return None
     names = sorted(feed_canonical | written)
@@ -965,7 +1322,7 @@ def _reconcile_competitors(db: Session, today: date, comp_maps: list[dict],
         "feed_unique": len(feed_canonical),
         "matched": matched,
         "new": new,
-        "rows_written": len(comp_maps),
+        "rows_written": rows_written,
         "duplicates_prevented": max(0, len(feed_variants) - len(feed_canonical)),
     }
 
@@ -997,10 +1354,20 @@ def clamp_rows_to_model(model, rows: list[dict],
     """
     if warnings is None:
         warnings = []
+    hits: dict[str, dict] = {}
+    _clamp_batch(model, rows, hits, skip_fields=skip_fields)
+    _emit_clamp_warnings(model, hits, warnings, skip_fields=skip_fields)
+    return warnings
+
+
+def _clamp_batch(model, rows: list[dict], hits: dict[str, dict],
+                 skip_fields: frozenset[str] = frozenset()) -> None:
+    """Batch-variant van clamp_rows_to_model: kap de rijen af en aggregeer de
+    treffers in `hits` (over meerdere batches heen), zodat er per kolom
+    uiteindelijk maar één waarschuwing komt — hoe veel batches er ook zijn."""
     limits = {k: v for k, v in _string_limits(model).items()
               if k not in skip_fields}
     has_raw = "raw_attributes" in {c.name for c in model.__table__.columns}
-    hits: dict[str, dict] = {}
     for row in rows:
         for field, limit in limits.items():
             val = row.get(field)
@@ -1015,6 +1382,11 @@ def clamp_rows_to_model(model, rows: list[dict],
             if h["example"] is None:
                 ident = row.get("sku_id") or row.get("competitor_name") or "?"
                 h["example"] = f"{ident}: {val[:80]}…" if len(val) > 80 else f"{ident}: {val}"
+
+
+def _emit_clamp_warnings(model, hits: dict[str, dict], warnings: list[str],
+                         skip_fields: frozenset[str] = frozenset()) -> None:
+    limits = _string_limits(model)
     for field, h in sorted(hits.items()):
         limit = limits[field]
         warnings.append(
@@ -1023,7 +1395,6 @@ def clamp_rows_to_model(model, rows: list[dict],
             f"Voorbeeld — {h['example']}"
         )
         logger.warning("Feed-ingest: %s", warnings[-1])
-    return warnings
 
 
 def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:

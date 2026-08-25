@@ -73,4 +73,5 @@
 - [Bulk-seed residue](bulk-seed-residue.md) — afgebroken testrun laat 70k bulk-rijen achter; coverage-detecties (MISSING_*_DATA) triggeren dan nooit meer; opruimen als fixture-teardown.
 - [Pack-normalisatie](pack-normalization.md) — n×-normalisatie lós van de uitbijterdrempel en alleen bij sheets_per_pack > 0; genormaliseerde rijen hebben detail zonder excluded_reason (cleanup op beide filteren).
 - [Afgeleide tabellen: shop-FK CASCADE](derived-table-shop-fk.md) — nieuwe afgeleide (engine-output) tabellen met shop_id-FK moeten ON DELETE CASCADE krijgen, anders breken bestaande test-teardowns die de tabel niet kennen; dev-DB apart ALTERen (create_all wijzigt niets).
+- [Batch feed-ingest & expliciete bron](feed-batch-ingest.md) — spool-passes, guard vóór elke delete, toggles per her-iteratie; weigering mag nooit "niet geconfigureerd" bevatten.
 - [Validatie vs eigen apitests-run](parallel-suite-runs.md) — completion-validatie draait de volledige suite op de gedeelde dev-DB; nooit tegelijk zelf de apitests-workflow starten of DQ/hiërarchie-tests flaken ('bezig'-status, autobuild-residu).

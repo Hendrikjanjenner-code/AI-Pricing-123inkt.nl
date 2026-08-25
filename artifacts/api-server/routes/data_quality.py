@@ -743,13 +743,19 @@ def get_data_quality(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    from services.data_quality_scan import run_quality_scan, last_scan_info
+    from services.data_quality_scan import (
+        run_quality_scan, last_scan_info, _scan_run_dict)
+    last_scan = None
     if current_user.role in REGISTRY_WRITE_ROLES:
         # Volledige scan: registry-sync + signalen + scan-run audit.
         scan = run_quality_scan(db, triggered_by="dashboard")
         total_skus = scan["total_skus"]
         detected = scan["detected"]
         registry = scan["registry"]
+        # Rapporteer de zójuist uitgevoerde scan — niet blind de nieuwste rij:
+        # een concurrent proces (scheduler/andere sessie) kan intussen een
+        # 'bezig'-rij hebben ingevoegd en dat is niet de scan van dit rapport.
+        last_scan = _scan_run_dict(scan["scan_run"])
     else:
         # Read-only scan (viewers): detecteer wel, maar schrijf niets —
         # verrijk met bestaande registry-rijen.
@@ -782,7 +788,7 @@ def get_data_quality(
         models.DimCategoryHierarchy.active == True).count()  # noqa: E712
 
     return {
-        "last_scan": last_scan_info(db),
+        "last_scan": last_scan if last_scan is not None else last_scan_info(db),
         "overall_score": round(score * 100, 1),
         "total_skus": total_skus,
         "issues": issues,

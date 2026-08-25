@@ -311,3 +311,124 @@ def test_rest_env_still_takes_precedence_over_default(monkeypatch, db):
     raw = pc._get_raw_config(db=db)
     assert raw["mode"] == "rest"
     assert pc.is_default_feed_active(db=db) is False
+
+
+# ── Expliciete-bron-vereiste (taak 299) ─────────────────────────────────────
+
+def test_sync_refuses_unconfirmed_default_feed(monkeypatch, db):
+    """Zonder expliciete bron (geen DB-config, geen env) weigert de sync met
+    een duidelijke melding, mét fout-ImportJob — en zonder ook maar iets in
+    te lezen (ingest_feed mag niet aangeroepen worden)."""
+    from types import SimpleNamespace
+    import feed_ingest
+    import routes.connectors as rc
+
+    _clear_env(monkeypatch)
+    _del_db_config(db)
+
+    called = {"n": 0}
+
+    def boom(*a, **k):
+        called["n"] += 1
+        raise AssertionError("ingest_feed mag niet draaien bij onbevestigde standaard-feed")
+
+    monkeypatch.setattr(feed_ingest, "ingest_feed", boom)
+    user = SimpleNamespace(username="test-default-refusal")
+    try:
+        result = rc._run_sync("priceshape", db, user)
+        assert result["status"] == "error"
+        assert "geen expliciete bron" in result["message"]
+        assert "standaard-feed" in result["message"]
+        # Geen stille 'not_configured'-maskering: het is een echte fout.
+        assert called["n"] == 0
+
+        job = db.query(models.ImportJob).filter(
+            models.ImportJob.uploaded_by == "test-default-refusal",
+            models.ImportJob.upload_type == "api_sync_priceshape",
+        ).order_by(models.ImportJob.created_at.desc()).first()
+        assert job is not None and job.status == "fout"
+        assert "geen expliciete bron" in (job.error_message or "")
+    finally:
+        db.query(models.ImportJob).filter(
+            models.ImportJob.uploaded_by == "test-default-refusal").delete()
+        cfg = db.query(models.ConnectorConfig).filter(
+            models.ConnectorConfig.connector_name == "priceshape").first()
+        if cfg is not None and not cfg.encrypted_credentials:
+            db.delete(cfg)
+        db.commit()
+
+
+def test_sync_runs_after_default_feed_confirmed_via_save(monkeypatch, db):
+    """Bevestiging = opslaan van de feed-config (het save-endpoint persisteert
+    bij een leeg feed-URL-veld expliciet DEFAULT_FEED_URL als DB-config).
+    Daarna draait de sync gewoon, met de bron zichtbaar in de melding."""
+    from types import SimpleNamespace
+    import feed_ingest
+    import routes.connectors as rc
+
+    _clear_env(monkeypatch)
+    _del_db_config(db)
+    # Zoals het save-endpoint doet bij een leeg feed_url-veld:
+    db.add(models.ConnectorConfig(
+        connector_name="priceshape",
+        encrypted_credentials=encrypt_credentials(
+            {"mode": "feed", "feed_url": pc.DEFAULT_FEED_URL}),
+        fields_configured=["mode", "feed_url"],
+    ))
+    db.commit()
+
+    monkeypatch.setattr(rc, "_ingest_feed_with_retry", lambda *a, **k: {
+        "products_new": 1, "products_updated": 0, "products_total": 1,
+        "own_prices": 1, "competitor_rows": 2, "offer_rows": 0,
+        "skipped_by_settings": 0, "warnings": [],
+        "competitor_reconciliation": None,
+    })
+    user = SimpleNamespace(username="test-default-confirm")
+    try:
+        result = rc._run_sync("priceshape", db, user)
+        assert result["status"] == "ok", result["message"]
+        # Effectieve bron zichtbaar in de sync-melding (geredigeerd).
+        assert "Bron:" in result["message"]
+        assert "eigen configuratie" in result["message"]
+    finally:
+        db.query(models.ImportJob).filter(
+            models.ImportJob.uploaded_by == "test-default-confirm").delete()
+        _del_db_config(db)
+
+
+def test_redact_url_strips_userinfo_query_and_short_path_tokens():
+    """Redactie mag nooit afhangen van tokenlengte: basic-auth-userinfo,
+    korte pad-tokens, query en fragment verdwijnen allemaal."""
+    assert pc.redact_url("https://user:geheim@host.example/export/abc123?...token=x#f") == \
+        "https://host.example/[…]"
+    assert "geheim" not in pc.redact_url("https://user:geheim@host.example/feed")
+    assert pc.redact_url("https://host.example/x7?k=v") == "https://host.example/[…]"
+    assert pc.redact_url("https://host.example:8443/") == "https://host.example:8443/"
+    assert pc.redact_url("") == ""
+
+
+def test_effective_source_label_never_leaks_credentials(monkeypatch, db):
+    """Ook via describe_feed_source (summary + sync-melding) lekt een
+    basic-auth-feed-URL geen credentials of korte tokens."""
+    _del_db_config(db)
+    monkeypatch.setenv("PRICESHAPE_FEED_URL",
+                       "https://user:geheim@feeds.example/exp/ab12?sig=kort")
+    src = pc.describe_feed_source(db)
+    blob = f"{src['label']} {src['url']}"
+    for verboden in ("geheim", "user:", "sig=", "ab12"):
+        assert verboden not in blob, verboden
+    assert "feeds.example" in src["url"]
+
+
+def test_summary_exposes_redacted_effective_feed_source(monkeypatch, db):
+    from routes import connectors as rc
+    _clear_env(monkeypatch)
+    _del_db_config(db)
+    summary = rc._connector_summary(db, "priceshape")
+    src = summary["effective_feed_source"]
+    assert src is not None
+    assert src["origin"] == "default"
+    assert src["mode"] == "feed"
+    assert "onbevestigd" in src["label"]
+    # Geredigeerd: geen token/querystring (gedekt door de leaktest hierboven).
+    assert "?" not in (src["url"] or "")

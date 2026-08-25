@@ -313,10 +313,18 @@ def _connector_summary(db: Session, name: str) -> dict:
     # feed-URL dus nooit — ook niet na "Ontkoppelen".
     # NB: de standaard-feed-URL zelf blijft server-side — hij bevat een
     # opaque export-token en mag nooit richting de UI/API lekken.
+    effective_feed_source = None
     if name == "priceshape":
         if not configured:
             configured = True
             source = "default"
+        # Effectieve bron (geredigeerd: geen tokens/querystrings) — altijd
+        # zichtbaar bij de sync-status, ook voor de standaard-feed.
+        try:
+            from connectors import priceshape_connector
+            effective_feed_source = priceshape_connector.describe_feed_source(db=db)
+        except Exception:
+            effective_feed_source = None
 
     # PriceShape: bij een mislukte laatste feed-sync tonen we hoe lang de
     # feed al niet meer bereikt is (op basis van de laatste geslaagde
@@ -355,6 +363,7 @@ def _connector_summary(db: Session, name: str) -> dict:
         "label": CONNECTOR_LABELS[name],
         "configured": configured,
         "source": source,
+        "effective_feed_source": effective_feed_source,
         "fields": fields_def,
         "fields_filled": (cfg.fields_configured if cfg else None) or [],
         "masked_values": _mask_fields((cfg.fields_configured if cfg else None) or []),
@@ -751,6 +760,25 @@ def _run_sync(name: str, db: Session, current_user, force_full: bool = False) ->
             if name == "priceshape":
                 from connectors import priceshape_connector
                 raw = priceshape_connector._get_raw_config(db=db)
+                # Expliciete bron verplicht (taak: geen stille default): zonder
+                # opgeslagen configuratie of omgevingsvariabele valt de
+                # connector terug op de ingebouwde standaard-feed. Die mag
+                # nooit stilzwijgend gebruikt worden — de sync faalt dan met
+                # een duidelijke melding. Eenmalige bevestiging: sla op de
+                # Connectoren-pagina de feed-config op met een leeg URL-veld
+                # (= bewust de standaard-feed) of stel een eigen URL in.
+                if raw.get("is_default"):
+                    raise ValueError(
+                        "PriceShape-sync geweigerd: er is geen expliciete bron "
+                        "ingesteld en de ingebouwde standaard-feed is nog niet "
+                        "bevestigd. Bevestig eenmalig de standaard-feed via de "
+                        "Connectoren-pagina (Wijzigen → opslaan met leeg "
+                        "feed-URL-veld) of stel een eigen feed-URL / "
+                        "PRICESHAPE_FEED_URL in. Er is niets gesynchroniseerd; "
+                        "bestaande data blijft ongewijzigd."
+                    )
+                source_info = priceshape_connector.describe_feed_source(db=db)
+                source_note = f" Bron: {source_info['label']}."
                 if priceshape_connector._get_mode(raw) == "feed":
                     # Retries bij tijdelijke verbindingsfout: pas de laatste
                     # mislukking persisteert hieronder als ImportJob 'fout'.
@@ -811,7 +839,7 @@ def _run_sync(name: str, db: Session, current_user, force_full: bool = False) ->
                         f"PriceShape feed-sync voltooid: {res['products_total']} producten "
                         f"({res['products_new']} nieuw, {res['products_updated']} bijgewerkt), "
                         f"{res['competitor_rows']} concurrentprijzen ingelezen."
-                        + skipped_note + cleanup_note +
+                        + source_note + skipped_note + cleanup_note +
                         " Draai een modelrun om aanbevelingen en concurrentie-scores te vernieuwen."
                     )
                 else:
@@ -902,7 +930,7 @@ def _run_sync(name: str, db: Session, current_user, force_full: bool = False) ->
                         f"{sync_kind}: {len(prices)} prijzen opgehaald, "
                         f"{res['created']} nieuw opgeslagen, {res['updated']} bijgewerkt, "
                         f"{res['skipped'] + rejected} overgeslagen."
-                        + rejected_note + skipped_note
+                        + source_note + rejected_note + skipped_note
                     )
 
             elif name == "drs":

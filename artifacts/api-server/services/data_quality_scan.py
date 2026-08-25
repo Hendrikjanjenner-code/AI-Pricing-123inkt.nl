@@ -111,6 +111,18 @@ def run_quality_scan(db: Session, triggered_by: str = "scheduler") -> dict:
     # tests services.data_quality_scan_scheduler._notify_issue kunnen patchen.
     import services.data_quality_scan_scheduler as dq_alerts
 
+    # Serialiseer schrijvende scans cross-proces (dashboard, scheduler,
+    # parallelle testruns op de gedeelde dev-DB): registry-sync/auto-resolve
+    # van twee gelijktijdige scans geeft anders race-resultaten. Advisory
+    # lock op een eigen verbinding (session-locks overleven geen commits van
+    # de request-sessie omdat die de pool-verbinding teruggeeft).
+    lock_conn = None
+    bind = db.get_bind()
+    if bind.dialect.name == "postgresql":
+        lock_conn = bind.engine.connect()
+        lock_conn.exec_driver_sql(
+            "SELECT pg_advisory_lock(hashtext('dq_scan_registry'))")
+
     run = models.DataQualityScanRun(
         started_at=datetime.utcnow(), triggered_by=triggered_by, status="bezig")
     db.add(run)
@@ -171,6 +183,13 @@ def run_quality_scan(db: Session, triggered_by: str = "scheduler") -> dict:
         except Exception:  # noqa: BLE001
             db.rollback()
         raise
+    finally:
+        if lock_conn is not None:
+            try:
+                lock_conn.exec_driver_sql(
+                    "SELECT pg_advisory_unlock(hashtext('dq_scan_registry'))")
+            finally:
+                lock_conn.close()
 
 
 def _scan_run_dict(run: "models.DataQualityScanRun") -> dict:

@@ -140,6 +140,10 @@ def test_failed_sync_persists_importjob_and_connector_status(monkeypatch, db):
     import feed_ingest
     import routes.connectors as rc
 
+    # Expliciete bron: zonder configuratie weigert _run_sync tegenwoordig de
+    # sync (onbevestigde standaard-feed) vóórdat ingest_feed wordt aangeroepen.
+    monkeypatch.setenv("PRICESHAPE_FEED_URL", "https://example.com/feed.json")
+
     def boom(*args, **kwargs):
         raise ValueError("PriceShape feed leverde 0 producten op — testdiagnostiek "
                          "(HTTP 200, text/html, 512 bytes)")
@@ -216,6 +220,7 @@ def test_ingest_retry_succeeds_after_transient_error(monkeypatch, db):
     delays = _patch_sleep(monkeypatch)
     monkeypatch.setenv("FEED_INGEST_MAX_RETRIES", "3")
     monkeypatch.setenv("FEED_INGEST_RETRY_BACKOFF", "300")
+    monkeypatch.setenv("PRICESHAPE_FEED_URL", "https://example.com/feed.json")
 
     calls = {"n": 0}
 
@@ -240,6 +245,7 @@ def test_ingest_retry_gives_up_after_max_retries(monkeypatch, db):
     delays = _patch_sleep(monkeypatch)
     monkeypatch.setenv("FEED_INGEST_MAX_RETRIES", "3")
     monkeypatch.setenv("FEED_INGEST_RETRY_BACKOFF", "300")
+    monkeypatch.setenv("PRICESHAPE_FEED_URL", "https://example.com/feed.json")
 
     calls = {"n": 0}
 
@@ -293,6 +299,7 @@ def test_run_sync_succeeds_after_retry_writes_ok_importjob(monkeypatch, db):
 
     _patch_sleep(monkeypatch)
     monkeypatch.setenv("FEED_INGEST_RETRY_BACKOFF", "0")
+    monkeypatch.setenv("PRICESHAPE_FEED_URL", "https://example.com/feed.json")
 
     calls = {"n": 0}
 
@@ -346,6 +353,7 @@ def test_scheduler_does_not_stack_retries_on_top_of_ingest_retries(monkeypatch, 
     delays = _patch_sleep(monkeypatch)
     monkeypatch.setenv("FEED_INGEST_MAX_RETRIES", "3")
     monkeypatch.setenv("FEED_INGEST_RETRY_BACKOFF", "300")
+    monkeypatch.setenv("PRICESHAPE_FEED_URL", "https://example.com/feed.json")
 
     calls = {"n": 0}
 

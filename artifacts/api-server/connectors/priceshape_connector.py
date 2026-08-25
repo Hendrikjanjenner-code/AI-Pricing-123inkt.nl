@@ -66,7 +66,7 @@ def _get_raw_config(db=None) -> dict:
             if cfg and cfg.encrypted_credentials:
                 creds = decrypt_credentials(cfg.encrypted_credentials)
                 if creds:
-                    return creds
+                    return {**creds, "config_source": "db"}
         except Exception:
             pass
 
@@ -76,6 +76,7 @@ def _get_raw_config(db=None) -> dict:
         env["mode"] = "feed"
         env["feed_url"] = feed_url
         env["feed_format"] = os.environ.get("PRICESHAPE_FEED_FORMAT", "auto")
+        env["config_source"] = "env"
         return env
 
     base_url = os.environ.get("PRICESHAPE_API_URL", "").strip()
@@ -85,6 +86,7 @@ def _get_raw_config(db=None) -> dict:
         env["api_url"] = base_url
         env["api_key"] = api_key
         env["account_id"] = os.environ.get("PRICESHAPE_ACCOUNT_ID", "")
+        env["config_source"] = "env"
         return env
 
     # Niets geconfigureerd: val terug op de ingebouwde standaard-feed zodat de
@@ -94,12 +96,62 @@ def _get_raw_config(db=None) -> dict:
         "feed_url": DEFAULT_FEED_URL,
         "feed_format": "auto",
         "is_default": True,
+        "config_source": "default",
     }
 
 
 def is_default_feed_active(db=None) -> bool:
     """True als de ingebouwde standaard-feed-URL actief is (geen DB/env-config)."""
     return bool(_get_raw_config(db=db).get("is_default"))
+
+
+def redact_url(url: str) -> str:
+    """Geredigeerde weergave van een feed-/API-URL voor UI, ImportJobs en
+    connectorstatus. Parseert de URL en toont uitsluitend schema + host(:poort);
+    userinfo (user:wachtwoord@), pad-tokens, querystring en fragment worden
+    ALTIJD vervangen door […] — ongeacht tokenlengte of -vorm."""
+    u = (url or "").strip()
+    if not u:
+        return ""
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit(u)
+    except ValueError:
+        return "[…]"
+    if not parts.scheme or not parts.hostname:
+        # Geen parseerbare URL: val terug op de agressieve tekst-redactie.
+        return _redact(u)
+    port = f":{parts.port}" if parts.port else ""
+    suffix = "/[…]" if (parts.path.strip("/") or parts.query or parts.fragment) else "/"
+    return f"{parts.scheme}://{parts.hostname}{port}{suffix}"
+
+
+def describe_feed_source(db=None) -> dict:
+    """Beschrijf de effectieve PriceShape-bron voor sync-status en UI.
+
+    Retourneert altijd een dict met:
+      - origin: "db" | "env" | "default" (feed) of "db" | "env" (rest)
+      - mode:   "feed" | "rest"
+      - url:    geredigeerde effectieve URL (nooit tokens/querystrings)
+      - label:  leesbare Nederlandse omschrijving (geredigeerd)
+    """
+    raw = _get_raw_config(db=db)
+    mode = _get_mode(raw)
+    origin = raw.get("config_source") or ("default" if raw.get("is_default") else "db")
+    if mode == "feed":
+        url = redact_url((raw.get("feed_url") or "").strip())
+        origin_txt = {
+            "db": "eigen configuratie (Connectoren-pagina)",
+            "env": "omgevingsvariabele PRICESHAPE_FEED_URL",
+            "default": "ingebouwde standaard-feed (onbevestigd)",
+        }.get(origin, origin)
+        label = f"feed {url} — bron: {origin_txt}"
+    else:
+        url = redact_url((raw.get("api_url") or "").strip())
+        origin_txt = ("eigen configuratie (Connectoren-pagina)"
+                      if origin == "db" else "omgevingsvariabelen")
+        label = f"REST-API {url} — bron: {origin_txt}"
+    return {"origin": origin, "mode": mode, "url": url, "label": label}
 
 
 def _get_mode(creds: dict) -> str:
@@ -285,6 +337,65 @@ def _fetch_feed(feed_url: str) -> tuple[bytes, str]:
         ) from exc
     except httpx.RequestError as exc:
         raise ConnectorError(f"PriceShape feed niet bereikbaar: {exc}") from exc
+
+
+def fetch_feed_to_file(feed_url: str) -> tuple[str, str]:
+    """
+    Download de feed STREAMEND naar een tempbestand op schijf (chunks, nooit de
+    volledige body in RAM) en geef (bestandspad, content-type) terug. Dit is de
+    geheugenzuinige tegenhanger van `_fetch_feed` voor niet-streambaar-JSON
+    formaten (m.n. het brede CSV-exportformaat van de standaard-feed).
+    Responsmetadata + sanity-checks (HTML-foutpagina, te kleine body) zijn
+    identiek aan `_fetch_feed`. De aanroeper is verantwoordelijk voor opruimen
+    van het bestand. Gooit ConnectorError bij fouten.
+    """
+    import os
+    import tempfile
+    from connectors.net import safe_stream, UnsafeURLError
+
+    fd, path = tempfile.mkstemp(prefix="priceshape-feed-", suffix=".body")
+    total = 0
+    head = b""
+    try:
+        with os.fdopen(fd, "wb") as out:
+            with safe_stream(feed_url, timeout=_FEED_TIMEOUT) as resp:
+                if resp.status_code in (401, 403):
+                    raise ConnectorError(
+                        f"PriceShape feed weigerde toegang (HTTP {resp.status_code}). "
+                        "Controleer of de feed-URL (met token) nog geldig is."
+                    )
+                resp.raise_for_status()
+                content_type = resp.headers.get("content-type", "")
+                for chunk in resp.iter_bytes(chunk_size=1 << 20):
+                    if len(head) < 2048:
+                        head += chunk[:2048 - len(head)]
+                    out.write(chunk)
+                    total += len(chunk)
+        meta = _record_feed_response(resp.status_code, content_type, total, head)
+        _ensure_feed_looks_like_data(meta, at_eof=True)
+        return path, content_type
+    except UnsafeURLError as exc:
+        _cleanup_file(path)
+        raise ConnectorError(str(exc)) from exc
+    except httpx.HTTPStatusError as exc:
+        _cleanup_file(path)
+        raise ConnectorError(
+            f"PriceShape feed ophalen mislukt: HTTP {exc.response.status_code}"
+        ) from exc
+    except httpx.RequestError as exc:
+        _cleanup_file(path)
+        raise ConnectorError(f"PriceShape feed niet bereikbaar: {exc}") from exc
+    except Exception:
+        _cleanup_file(path)
+        raise
+
+
+def _cleanup_file(path: str) -> None:
+    import os
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 _FEED_SAMPLE_MAX_BYTES = 5_000_000  # ~5 MB is ruim genoeg om formaat + kolommen te valideren

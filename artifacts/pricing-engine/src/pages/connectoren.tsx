@@ -47,6 +47,12 @@ interface ConnectorSummary {
   label: string;
   configured: boolean;
   source: "db" | "env" | "default" | null;
+  effective_feed_source?: {
+    origin: "db" | "env" | "default";
+    mode: string;
+    url: string | null;
+    label: string;
+  } | null;
   fields: FieldDef[];
   fields_filled: string[];
   masked_values: Record<string, string>;
@@ -632,11 +638,27 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
         )}
 
         {connector.name === "priceshape" && connector.source === "default" && (
-          <div className="rounded-md bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-800">
-            <span className="font-medium">Standaard-feed actief.</span>{" "}
-            De connector gebruikt automatisch de ingebouwde PriceShape-exportfeed.
-            Je hoeft niets in te vullen; een eigen URL opslaan overschrijft de standaard,
-            ontkoppelen valt hierop terug.
+          <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+            <span className="font-medium">Standaard-feed nog niet bevestigd — synchronisatie geblokkeerd.</span>{" "}
+            Er is geen expliciete feed-bron ingesteld. Syncs worden geweigerd totdat je de bron
+            bevestigt: klik op &ldquo;Wijzigen / Vervangen&rdquo; en sla op met een leeg
+            feed-URL-veld (= bewust de ingebouwde standaard-feed gebruiken), of vul een eigen
+            feed-URL in. Bestaande data blijft intact.
+          </div>
+        )}
+
+        {connector.name === "priceshape" && connector.effective_feed_source && (
+          <div className="text-xs text-muted-foreground">
+            <span className="font-medium">Feed-bron:</span>{" "}
+            {connector.effective_feed_source.label}
+            {connector.effective_feed_source.url && (
+              <>
+                {" "}
+                <span className="font-mono bg-muted px-1 rounded break-all">
+                  {connector.effective_feed_source.url}
+                </span>
+              </>
+            )}
           </div>
         )}
 

@@ -70,10 +70,12 @@ def _int_env(name: str, default: int) -> int:
 
 def _is_priceshape_configured(db) -> bool:
     """
-    True als PriceShape is ingesteld. Dat is tegenwoordig ALTIJD het geval:
-    zonder DB-credentials of omgevingsvariabelen valt de connector terug op de
-    ingebouwde standaard-feed-URL (DEFAULT_FEED_URL) — de geplande sync mag die
-    dus nooit overslaan.
+    True als PriceShape is ingesteld — altijd: de cyclus draait ook wanneer
+    alleen de (onbevestigde) ingebouwde standaard-feed actief is. In dat geval
+    weigert `_run_sync` de sync met een duidelijke melding en persisteert een
+    fout-ImportJob, zodat het ontbreken van een expliciete bron ZICHTBAAR
+    faalt in de importgeschiedenis en op de connector-kaart, in plaats van
+    stilzwijgend op de standaard-feed te draaien (expliciete-bron-vereiste).
     """
     return True
 

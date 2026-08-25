@@ -1408,6 +1408,14 @@ class TestViewerReadOnlyScan:
         niet overschrijven (geen upsert/auto-resolve)."""
         db = SessionLocal()
         code = f"{PFX}-VIEWER-RO"
+        # Houd de scan-advisory-lock vast tijdens het racevenster
+        # (insert → eerste assert): een schrijvende scan uit een parallel
+        # proces (bv. een tweede testrun op de gedeelde dev-DB) zou de
+        # synthetische rij anders tussentijds auto-resolven.
+        lock_conn = db.get_bind().engine.connect()
+        lock_conn.exec_driver_sql(
+            "SELECT pg_advisory_lock(hashtext('dq_scan_registry'))")
+        locked = True
         try:
             # Zet een kunstmatige registry-rij op 'in_behandeling' die niet
             # meer gedetecteerd wordt — een schrijvende scan zou hem
@@ -1435,6 +1443,12 @@ class TestViewerReadOnlyScan:
                 f"status werd {after.status!r}"
             )
 
+            # Lock vrijgeven vóór de admin-scan, anders deadlockt de
+            # dashboard-scan (die dezelfde lock neemt) op onszelf.
+            lock_conn.exec_driver_sql(
+                "SELECT pg_advisory_unlock(hashtext('dq_scan_registry'))")
+            locked = False
+
             # Een admin-scan mag de rij wél auto-resolven
             resp = client.get("/api/data-quality", headers=auth)
             assert resp.status_code == 200
@@ -1445,6 +1459,12 @@ class TestViewerReadOnlyScan:
                 "Admin-scan hoort verdwenen detecties te auto-resolven"
             )
         finally:
+            try:
+                if locked:
+                    lock_conn.exec_driver_sql(
+                        "SELECT pg_advisory_unlock(hashtext('dq_scan_registry'))")
+            finally:
+                lock_conn.close()
             db.query(models.DataQualityIssue).filter(
                 models.DataQualityIssue.issue_code == code
             ).delete(synchronize_session=False)

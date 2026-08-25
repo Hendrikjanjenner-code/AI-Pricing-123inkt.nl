@@ -12,3 +12,5 @@ Rule: in tests that drive `_sync_issue_registry` or `run_scan_once`, never repla
 - To simulate "resolved", update only the test row's status directly — never `_sync_issue_registry(db, [])`.
 - Clean up ImportJobs by exact id, after verifying by content (unique code in warnings_json / unique error message) that the job was created by the test.
 - Note: notifier rows are detached after the scheduler session closes — capture attributes at call time in the mock, not from stored row objects.
+
+- Schrijvende scans zijn cross-proces geserialiseerd via een Postgres advisory lock (sleutel hashtext('dq_scan_registry')) op een eigen verbinding; tests die een synthetisch registry-racevenster hebben houden dezelfde lock vast tijdens dat venster en geven hem vrij vóór een eigen schrijvende scan (anders self-deadlock). **Waarom:** completion-validatie en de code-reviewer draaien tegelijk tests op de gedeelde dev-DB; een parallelle scan auto-resolvet synthetische rijen midden in een test.
