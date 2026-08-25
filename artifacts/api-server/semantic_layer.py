@@ -1010,13 +1010,14 @@ def get_portfolio_price_position(db: Session, user: models.User,
     sku_scope, hierarchy_scope = _hierarchy_scope(db, hierarchy_node_ids)
 
     S = models.SkuCompetitionScore
-    latest = db.query(func.max(S.run_date)).scalar()
+    latest = (db.query(func.max(S.run_date))
+              .filter(S.shop_id == sid).scalar())
     if not latest:
-        return {"shop_id": sid, "shop_scope_applied": False,
+        return {"shop_id": sid, "shop_scope_applied": True,
                 "data_available": False, "records": 0,
                 "hierarchy_scope": hierarchy_scope}
 
-    base = db.query(S).filter(S.run_date == latest)
+    base = db.query(S).filter(S.run_date == latest, S.shop_id == sid)
     if sku_scope is not None:
         base = base.filter(S.sku_id.in_(sku_scope))
 
@@ -1024,7 +1025,7 @@ def get_portfolio_price_position(db: Session, user: models.User,
     total_scored = base.count()
     with_index = idx.count()
     if with_index == 0:
-        return {"shop_id": sid, "shop_scope_applied": False,
+        return {"shop_id": sid, "shop_scope_applied": True,
                 "run_date": str(latest), "data_available": False,
                 "records": total_scored, "skus_scored": total_scored,
                 "skus_with_price_index": 0,
@@ -1043,8 +1044,7 @@ def get_portfolio_price_position(db: Session, user: models.User,
 
     return {
         "shop_id": sid,
-        # sku_competition_score is organisatie-breed gescoord.
-        "shop_scope_applied": False,
+        "shop_scope_applied": True,
         "run_date": str(latest),
         "data_available": True,
         "records": with_index,

@@ -80,11 +80,18 @@ class PortfolioDataBase(unittest.TestCase):
                 category="CatA" if i < 3 else "CatB",
                 lifecycle_status="active", current_price=10 + i,
                 is_private_label=(i == 0), shop_id=cls.shop.id))
-        # Concurrentprijzen op de laatste dag voor 3 van de 5 SKU's
+        # Concurrentaanbod (feed-offers) op de laatste dag voor 3 van de 5
+        # SKU's — dit is de echte bron van concurrentprijsdekking.
+        cls.competitor = models.DimCompetitor(
+            competitor_name=f"{cls.pfx}-conc.nl")
+        cls.db.add(cls.competitor)
+        cls.db.flush()
         for sku in skus[:3]:
-            cls.db.add(models.FactCompetitorPriceDaily(
-                date=date(2026, 8, 24), sku_id=sku, shop_id=cls.shop.id,
-                competitor_name="conc.nl", price=9.99))
+            cls.db.add(models.FactCompetitorOfferDaily(
+                date=date(2026, 8, 24), own_sku_id=sku,
+                competitor_id=cls.competitor.competitor_id,
+                competitor_price_inc_vat=9.99,
+                total_price_inc_vat=9.99))
         # Product in andere shop (scoping)
         cls.db.add(models.DimProduct(
             sku_id=f"{cls.pfx}-B-SKU", product_name=f"{cls.pfx} B-product",
@@ -96,6 +103,12 @@ class PortfolioDataBase(unittest.TestCase):
                 shop_id=cls.shop.id, sku_id=sku, run_date=run,
                 pcis_score=0.5 + i * 0.05, price_index=pidx,
                 competition_class="Monitor" if i < 3 else "Strong"))
+        # Score in shop B met een NIEUWERE run-datum: mag shop A's
+        # laatste-run-keuze en aggregaties niet beinvloeden (shop-isolatie).
+        cls.db.add(models.SkuCompetitionScore(
+            shop_id=cls.shop_b.id, sku_id=f"{cls.pfx}-B-SKU",
+            run_date=date(2026, 8, 25), pcis_score=0.99,
+            price_index=5.0, competition_class="Strong"))
         cls.db.commit()
         cls.skus = skus
 
@@ -105,14 +118,18 @@ class PortfolioDataBase(unittest.TestCase):
         db.query(models.SkuCompetitionScore).filter(
             models.SkuCompetitionScore.sku_id.like(f"{cls.pfx}%")).delete(
             synchronize_session=False)
-        db.query(models.FactCompetitorPriceDaily).filter(
-            models.FactCompetitorPriceDaily.sku_id.like(f"{cls.pfx}%")).delete(
+        db.query(models.FactCompetitorOfferDaily).filter(
+            models.FactCompetitorOfferDaily.own_sku_id.like(f"{cls.pfx}%")).delete(
             synchronize_session=False)
+        db.query(models.DimCompetitor).filter(
+            models.DimCompetitor.competitor_id == cls.competitor.competitor_id
+        ).delete(synchronize_session=False)
         db.query(models.DimProduct).filter(
             models.DimProduct.sku_id.like(f"{cls.pfx}%")).delete(
             synchronize_session=False)
         db.query(models.CostUsageRecord).filter(
-            models.CostUsageRecord.username == "test_user").delete(
+            models.CostUsageRecord.shop_id.in_(
+                [cls.shop.id, cls.shop_b.id])).delete(
             synchronize_session=False)
         for shop in (cls.shop, cls.shop_b):
             db.query(models.DimShop).filter(
@@ -149,7 +166,8 @@ class TestAssortmentOverview(PortfolioDataBase):
 
 class TestPortfolioPricePosition(PortfolioDataBase):
     def test_summary_over_scored_skus(self):
-        out = sl.get_portfolio_price_position(self.db, _user())
+        out = sl.get_portfolio_price_position(
+            self.db, _user(), shop_id=self.shop.id)
         self.assertTrue(out["data_available"])
         self.assertGreater(out["records"], 0)
         self.assertGreaterEqual(out["skus_scored"], out["skus_with_price_index"])
@@ -160,10 +178,27 @@ class TestPortfolioPricePosition(PortfolioDataBase):
         self.assertIn("goedkoper", out["price_index_explanation"])
 
     def test_counts_partition(self):
-        out = sl.get_portfolio_price_position(self.db, _user())
+        out = sl.get_portfolio_price_position(
+            self.db, _user(), shop_id=self.shop.id)
         self.assertEqual(
             out["cheaper_count"] + out["at_par_count"] + out["more_expensive_count"],
             out["skus_with_price_index"])
+
+    def test_shop_scoped(self):
+        """Shop A's cijfers negeren shop B's nieuwere run; shop B ziet
+        alleen zijn eigen score (tenant-isolatie)."""
+        out_a = sl.get_portfolio_price_position(
+            self.db, _user(), shop_id=self.shop.id)
+        self.assertTrue(out_a["shop_scope_applied"])
+        self.assertEqual(out_a["run_date"], "2026-08-24")
+        self.assertEqual(out_a["skus_scored"], 5)
+        # Shop B's price_index=5.0 mag het gemiddelde niet raken
+        self.assertLess(out_a["avg_price_index"], 2.0)
+        out_b = sl.get_portfolio_price_position(
+            self.db, _user(), shop_id=self.shop_b.id)
+        self.assertEqual(out_b["run_date"], "2026-08-25")
+        self.assertEqual(out_b["skus_scored"], 1)
+        self.assertEqual(out_b["more_expensive_count"], 1)
 
 
 class TestBudgetCalibration(unittest.TestCase):

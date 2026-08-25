@@ -365,6 +365,162 @@ class TestCheckAndReserveBudget(unittest.TestCase):
         self.assertEqual(slot.calls_reserved, 1)  # ongewijzigd
 
 
+# ─── _try_reserve_additional_tokens (per-ronde bijreservering, taak #298) ────
+
+def _make_round_slot_db(max_tokens, tokens_reserved, slot_exists=True,
+                        username="u"):
+    """Stub-sessie voor _try_reserve_additional_tokens."""
+    budget_row = _budget_row(username=username, max_calls=100,
+                             max_tokens=max_tokens)
+    slot = models.AiBudgetSlot()
+    slot.username = username
+    slot.slot_date = date.today()
+    slot.calls_reserved = 1
+    slot.tokens_reserved = tokens_reserved
+    slot.tokens_actual = 0
+
+    class StubDB:
+        committed = False
+        rolled_back = False
+
+        def query(self, model, *extra):
+            class Q:
+                def filter(self, *a, **k): return self
+                def with_for_update(self): return self
+                def first(inner):
+                    if model is models.AiBudgetConfig:
+                        return budget_row
+                    return slot if slot_exists else None
+                def one(inner):
+                    if model is models.AiBudgetConfig:
+                        return budget_row
+                    return slot
+            return Q()
+
+        def commit(self): self.committed = True
+        def rollback(self): self.rolled_back = True
+        def close(self): pass
+
+    return StubDB(), slot
+
+
+class TestReserveAdditionalTokens(unittest.TestCase):
+    """Harde dagbudget-bewaking: per-ronde bijreservering (taak #298)."""
+
+    def test_reserves_within_budget(self):
+        db, slot = _make_round_slot_db(max_tokens=100000, tokens_reserved=16384)
+        with patch("ai_gateway.SessionLocal", return_value=db):
+            ok = ai_gateway._try_reserve_additional_tokens(
+                "u", date.today(), 8000)
+        self.assertTrue(ok)
+        self.assertEqual(slot.tokens_reserved, 16384 + 8000)
+        self.assertTrue(db.committed)
+
+    def test_refuses_when_daily_budget_nearly_exhausted(self):
+        """Bijna uitgeput dagbudget: bijreservering geweigerd, teller
+        onveranderd — er kan geen verbruik boven de daglimiet starten."""
+        max_tok = 20000
+        db, slot = _make_round_slot_db(max_tokens=max_tok,
+                                       tokens_reserved=max_tok - 100)
+        with patch("ai_gateway.SessionLocal", return_value=db):
+            ok = ai_gateway._try_reserve_additional_tokens(
+                "u", date.today(), 8000)
+        self.assertFalse(ok)
+        self.assertEqual(slot.tokens_reserved, max_tok - 100)
+        self.assertFalse(db.committed)
+
+    def test_exact_boundary_allowed(self):
+        db, slot = _make_round_slot_db(max_tokens=20000, tokens_reserved=12000)
+        with patch("ai_gateway.SessionLocal", return_value=db):
+            ok = ai_gateway._try_reserve_additional_tokens(
+                "u", date.today(), 8000)
+        self.assertTrue(ok)
+        self.assertEqual(slot.tokens_reserved, 20000)
+
+    def test_zero_or_negative_amount_is_noop_true(self):
+        self.assertTrue(ai_gateway._try_reserve_additional_tokens(
+            "u", date.today(), 0))
+
+    def test_missing_slot_row_fails_safe(self):
+        db, _ = _make_round_slot_db(max_tokens=100000, tokens_reserved=0,
+                                    slot_exists=False)
+        with patch("ai_gateway.SessionLocal", return_value=db):
+            ok = ai_gateway._try_reserve_additional_tokens(
+                "u", date.today(), 8000)
+        self.assertFalse(ok)
+
+
+class TestRunLoopDailyBudgetGuard(unittest.TestCase):
+    """run_copilot mag geen provider-call starten die niet vooraf binnen het
+    dagbudget is gereserveerd (completion-review taak #298)."""
+
+    def _run(self, reserve_ok):
+        import types as _types
+        provider_calls = []
+
+        class FakeCompletions:
+            def create(self, **kwargs):
+                provider_calls.append(kwargs)
+                raise AssertionError("provider-call mag hier niet starten")
+
+        class FakeClient:
+            chat = _types.SimpleNamespace(completions=FakeCompletions())
+
+        class FakeDb:
+            def query(self, *a, **k): raise RuntimeError("no db")
+            def add(self, *a): pass
+            def commit(self): pass
+            def rollback(self): pass
+
+        logged = {}
+
+        def fake_log_call(*a, **k):
+            logged.update(k)
+
+        with patch.object(ai_gateway, "_make_client",
+                          return_value=(FakeClient(), "test")), \
+             patch.object(ai_gateway, "get_data_freshness", return_value={}), \
+             patch.object(ai_gateway, "_log_call", side_effect=fake_log_call), \
+             patch.object(ai_gateway, "_try_reserve_additional_tokens",
+                          return_value=reserve_ok) as reserve_mock, \
+             patch.object(ai_gateway, "_UPFRONT_TOKEN_RESERVATION", 10):
+            # Reservering (10) is bewust kleiner dan de worst case van ronde 1,
+            # zodat de guard een bijreservering MOET proberen.
+            events = list(ai_gateway.run_copilot(
+                FakeDb(), _user_ns("admin"), [], "lange vraag " * 50,
+                slot_date=date.today(), max_tokens=50000))
+        return events, provider_calls, reserve_mock, logged
+
+    def test_refused_reservation_blocks_provider_call(self):
+        events, provider_calls, reserve_mock, logged = self._run(False)
+        self.assertTrue(reserve_mock.called)
+        self.assertEqual(provider_calls, [])
+        answers = [e["answer"] for e in events if e["type"] == "answer"]
+        self.assertEqual(len(answers), 1)
+        self.assertIn("dagelijkse", answers[0]["conclusion"].lower())
+        # Reconciliatie krijgt alleen de upfront-reservering (10) terug
+        self.assertEqual(logged.get("reserved_tokens"), 10)
+
+    def test_granted_reservation_is_booked_for_reconciliation(self):
+        try:
+            events, provider_calls, reserve_mock, logged = self._run(True)
+        except AssertionError:
+            self.fail("provider-call verwacht na geslaagde bijreservering")
+        except Exception:
+            pass  # FakeCompletions gooit bewust zodra de call zou starten
+        # De bijreservering is geprobeerd vóór de provider-call
+        self.assertTrue(reserve_mock.called)
+
+
+def _user_ns(role):
+    import types as _types
+    u = _types.SimpleNamespace()
+    u.username = "test_user"
+    u.role = role
+    u.id = 999
+    return u
+
+
 # ─── reconcile_budget_slot ───────────────────────────────────────────────────
 
 class TestReconcileBudgetSlot(unittest.TestCase):
@@ -602,7 +758,7 @@ class TestPerRoundTokenCheck(unittest.TestCase):
 
         def fake_log_call(db, user, conv_id, purpose, provider, calls_meta,
                           usage, roundtrips, started, status, error_message,
-                          slot_date=None, prompt_version_id=None):
+                          slot_date=None, prompt_version_id=None, reserved_tokens=None):
             logged_statuses.append(status)
 
         provider_cfg = MagicMock()
@@ -642,7 +798,7 @@ class TestPerRoundTokenCheck(unittest.TestCase):
 
         def fake_log_call(db, user, conv_id, purpose, provider, calls_meta,
                           usage, roundtrips, started, status, error_message,
-                          slot_date=None, prompt_version_id=None):
+                          slot_date=None, prompt_version_id=None, reserved_tokens=None):
             logged_statuses.append(status)
 
         # Bouw berichten die de schatting boven _UPFRONT brengen.

@@ -1155,6 +1155,11 @@ def run_copilot(
     status = "success"
     error_message = None
     answer = None
+    # Al gereserveerde tokenruimte voor dit verzoek (§34): start met de
+    # upfront-reservering; per ronde wordt zonodig bijgereserveerd zodat
+    # het werkelijke verbruik nooit boven het dagbudget kan starten.
+    reserved_for_request = (_UPFRONT_TOKEN_RESERVATION
+                            if slot_date is not None else 0)
 
     # Prompt-lifecycle (§48): systeemprompt uit PromptVersion-governance
     system_prompt, prompt_version_id, prompt_version = get_active_prompt(db)
@@ -1226,8 +1231,9 @@ def run_copilot(
                 # invoertokens mee te tellen vóór de call in plaats van alleen erna.
                 if max_tokens is not None:
                     est_prompt = len(json.dumps(messages, default=str)) // 4
-                    if (usage["total_tokens"] + est_prompt + _MAX_COMPLETION_PER_CALL
-                            > _PER_REQUEST_TOKEN_CAP):
+                    round_worst_case = (usage["total_tokens"] + est_prompt
+                                        + _MAX_COMPLETION_PER_CALL)
+                    if round_worst_case > _PER_REQUEST_TOKEN_CAP:
                         answer = _default_answer(
                             "De beschikbare tokenruimte voor dit verzoek is bijna op. "
                             "Stel een kortere of specifiekere vraag om binnen het "
@@ -1240,6 +1246,29 @@ def run_copilot(
                         )
                         status = "budget_exceeded"
                         break
+                    # Harde dagbudget-bewaking (§34): reserveer vóór de call de
+                    # worst case van deze ronde bij. Lukt dat niet (dagbudget
+                    # op), dan stopt het verzoek hier — er start geen verbruik
+                    # dat niet vooraf binnen de daglimiet is gereserveerd.
+                    if (slot_date is not None
+                            and round_worst_case > reserved_for_request):
+                        extra = round_worst_case - reserved_for_request
+                        if _try_reserve_additional_tokens(
+                                user.username, slot_date, extra):
+                            reserved_for_request += extra
+                        else:
+                            answer = _default_answer(
+                                "Je dagelijkse AI-tokenbudget laat deze "
+                                "(vervolg)stap niet meer toe. Stel morgen een "
+                                "nieuwe vraag of vraag een beheerder om een "
+                                "hogere limiet.",
+                                [f"Bijreservering van {extra:,} tokens "
+                                 "geweigerd: dagelijkse tokenlimiet zou "
+                                 "overschreden worden."],
+                                freshness,
+                            )
+                            status = "budget_exceeded"
+                            break
 
                 resp = _chat_completion_with_tools(
                     client,
@@ -1365,7 +1394,8 @@ def run_copilot(
         # slot_date wordt doorgegeven zodat reconciliatie de juiste dag bijwerkt.
         _log_call(db, user, conversation_id, purpose, provider or "none", calls_meta,
                   usage, roundtrips, started, status, error_message,
-                  prompt_version_id=prompt_version_id, slot_date=slot_date)
+                  prompt_version_id=prompt_version_id, slot_date=slot_date,
+                  reserved_tokens=reserved_for_request)
 
 
 def _parse_answer(raw: str) -> dict:
@@ -1578,6 +1608,57 @@ def check_and_reserve_budget(
         logger.error("check_and_reserve_budget fout: %s", exc)
         db.rollback()
         raise
+    finally:
+        db.close()
+
+
+def _try_reserve_additional_tokens(
+    username: str, slot_date: date, amount: int
+) -> bool:
+    """
+    Reserveer atomisch extra tokens bovenop een bestaande reservering (§34).
+
+    Wordt per LLM-ronde aangeroepen door run_copilot zodra de worst case van
+    de volgende ronde boven de al gereserveerde ruimte uitkomt. Controleert
+    onder SELECT FOR UPDATE of het dagbudget de bijreservering toelaat; zo
+    niet, dan geeft dit False terug en breekt run_copilot het verzoek netjes
+    af vóór de provider-call. Daarmee is de daglimiet hard: er wordt nooit
+    LLM-verbruik gestart dat niet vooraf binnen het dagbudget is gereserveerd.
+    """
+    if amount <= 0:
+        return True
+    db = SessionLocal()
+    try:
+        _max_calls, max_tokens = _get_budget_config(db, username)
+        if max_tokens is None:
+            return True
+        slot = db.query(models.AiBudgetSlot).filter(
+            models.AiBudgetSlot.username == username,
+            models.AiBudgetSlot.slot_date == slot_date,
+        ).with_for_update().first()
+        if slot is None:
+            # Geen slot-rij (hoort niet voor te komen na check_and_reserve_budget)
+            # → fail-safe weigeren, zodat verbruik nooit ongeboekt kan starten.
+            db.rollback()
+            return False
+        if slot.tokens_reserved + amount > max_tokens:
+            db.rollback()
+            logger.warning(
+                "AI-dagbudget: bijreservering geweigerd voor '%s' "
+                "(%s gereserveerd + %s nodig > %s limiet)",
+                username, f"{slot.tokens_reserved:,}", f"{amount:,}",
+                f"{max_tokens:,}")
+            return False
+        slot.tokens_reserved += amount
+        db.commit()
+        return True
+    except Exception as exc:
+        logger.error("_try_reserve_additional_tokens fout: %s", exc)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return False
     finally:
         db.close()
 
