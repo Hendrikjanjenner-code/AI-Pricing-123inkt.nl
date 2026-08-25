@@ -66,7 +66,10 @@ describe("descendant-selectie", () => {
 describe("URL-(de)serialisatie", () => {
   it("round-tript alle filterdimensies", () => {
     const f = {
+      ...emptyFilters(),
       hierarchy: [tuin, keuken],
+      categoryPath: [tuin, keuken],
+      product: { skuId: "123456", label: "SKU 123456 – Boormachine" },
       brands: ["Bosch", "Merk~met/teken"],
       periodDays: 30,
       skuQuery: "boormachine",
@@ -78,6 +81,8 @@ describe("URL-(de)serialisatie", () => {
 
     const terug = readFiltersFromParams(params, [tuin, keuken]);
     expect(terug.hierarchy).toEqual([tuin, keuken]);
+    expect(terug.categoryPath).toEqual([tuin, keuken]);
+    expect(terug.product).toEqual({ skuId: "123456", label: "SKU 123456 – Boormachine" });
     expect(terug.brands).toEqual(["Bosch", "Merk~met/teken"]);
     expect(terug.periodDays).toBe(30);
     expect(terug.skuQuery).toBe("boormachine");
@@ -97,6 +102,7 @@ describe("URL-(de)serialisatie", () => {
 
   it("apiFilterParams stuurt alleen server-side filters mee", () => {
     const qs = apiFilterParams({
+      ...emptyFilters(),
       hierarchy: [tuin, keuken], brands: ["Bosch"], periodDays: 30, skuQuery: "x",
     });
     const p = new URLSearchParams(qs);

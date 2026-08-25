@@ -750,9 +750,19 @@ export default function CopilotPage() {
         // de server past de hiërarchie-selectie toe op de tooldata.
         body: JSON.stringify({
           content: q,
-          context: {
-            hierarchy_node_ids: getGlobalFilters().hierarchy.map((n) => n.id),
-          },
+          context: (() => {
+            const f = getGlobalFilters();
+            // Hiërarchie-scope: legacy multi-select + diepste cascade-niveau.
+            const ids = f.hierarchy.map((n) => n.id);
+            if (f.categoryPath.length > 0) {
+              const deepest = f.categoryPath[f.categoryPath.length - 1].id;
+              if (!ids.includes(deepest)) ids.push(deepest);
+            }
+            return {
+              hierarchy_node_ids: ids,
+              ...(f.product ? { product: { sku_id: f.product.skuId } } : {}),
+            };
+          })(),
         }),
         signal: AbortSignal.timeout(180_000),
       });

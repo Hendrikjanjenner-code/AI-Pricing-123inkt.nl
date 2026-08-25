@@ -1017,7 +1017,8 @@ def _execute_tool(db: Session, user: models.User, name: str, arguments: dict,
                   shop_id: Optional[int] = None,
                   allowed_functions: Optional[set] = None,
                   default_hierarchy_node_ids: Optional[list] = None,
-                  department: Optional[str] = None) -> tuple[dict, dict]:
+                  department: Optional[str] = None,
+                  product_scope: Optional[dict] = None) -> tuple[dict, dict]:
     """Voer één approved semantische functie uit. Returns (result, callmeta).
 
     Argument-allowlisting: alleen parameters uit het gepubliceerde tool-schema
@@ -1081,6 +1082,23 @@ def _execute_tool(db: Session, user: models.User, name: str, arguments: dict,
         if name == "get_active_signals" and department:
             arguments["department"] = department
 
+    # Productscope (taak #301): een actief Product-filter is een server-side
+    # constraint, geen suggestie. Tools met een sku_id-parameter worden op de
+    # gescopeerde SKU vastgezet — ook als het model een andere SKU meegaf.
+    if product_scope and product_scope.get("sku_id"):
+        tool_props = (_TOOL_PARAMETERS.get(name) or {}).get("properties") or {}
+        if "sku_id" in tool_props:
+            arguments["sku_id"] = product_scope["sku_id"]
+            meta["product_scope"] = {"sku_id": product_scope["sku_id"],
+                                     "source": "global_filter"}
+        elif "entity_id" in tool_props:
+            # SKU-entity tools (traffic, signalen): ook hier is de scope een
+            # server-side constraint — nooit categoriebreed of een andere
+            # entiteit als de gebruiker expliciet één product koos.
+            arguments["entity_id"] = product_scope["sku_id"]
+            meta["product_scope"] = {"sku_id": product_scope["sku_id"],
+                                     "source": "global_filter"}
+
     t0 = time.time()
     try:
         result = sem.fn(db, user, shop_id=shop_id, **arguments)
@@ -1139,6 +1157,7 @@ def run_copilot(
     max_tokens: Optional[int] = None,
     budget_warning: Optional[str] = None,
     hierarchy_node_ids: Optional[list] = None,
+    product_scope: Optional[dict] = None,
 ) -> Generator[dict, None, None]:
     """
     Voer de volledige gateway-pipeline uit en yield events:
@@ -1218,6 +1237,15 @@ def run_copilot(
                 + ("; ".join(paths) if paths else str(list(hierarchy_node_ids)))
                 + ". Deze scope wordt standaard op de tooldata toegepast; "
                   "benoem de gebruikte scope in je antwoord.")
+        if product_scope and product_scope.get("label"):
+            # Cascaderend Product-filter (taak #301): expliciete productscope.
+            context_lines.append(
+                "Actief productfilter (Global Filter Context): "
+                f"{product_scope['label']}. Tools met een sku_id-parameter "
+                "worden server-side op dit product vastgezet; gebruik bij "
+                "voorkeur zulke producttools en benoem de productscope "
+                "expliciet in je antwoord. Meld het als een tool alleen "
+                "categorie- of assortimentsniveau ondersteunt.")
         if context_lines:
             messages.insert(1, {"role": "system",
                                 "content": pii_scrub(" ".join(context_lines))})
@@ -1320,7 +1348,8 @@ def run_copilot(
                             shop_id=shop_id,
                             allowed_functions=allowed_functions,
                             default_hierarchy_node_ids=hierarchy_node_ids,
-                            department=department)
+                            department=department,
+                            product_scope=product_scope)
                         calls_meta.append(meta)
                         yield {"type": "tool", "name": tc.function.name,
                                "records": meta.get("records"), "data_source": meta.get("data_source")}
@@ -1368,6 +1397,7 @@ def run_copilot(
             (m["hierarchy"] for m in calls_meta
              if m.get("hierarchy") and m["hierarchy"].get("resolved")), None)
         answer["hierarchy_context"] = used_hierarchy or hierarchy_context
+        answer["product_scope"] = product_scope or None
         answer["department"] = department
         answer["data_freshness"] = freshness
         answer["records"] = sum(int(m.get("records") or 0) for m in calls_meta)

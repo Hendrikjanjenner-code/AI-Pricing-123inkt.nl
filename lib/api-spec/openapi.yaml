@@ -1678,8 +1678,208 @@ paths:
         "404":
           description: Concurrent niet gevonden voor deze winkel
 
+  /product-filters/main-categories:
+    get:
+      operationId: getProductFilterMainCategories
+      tags: [product-filters]
+      summary: Hoofdcategorieën voor het cascaderende productfilter
+      responses:
+        "200":
+          description: Hoofdcategorieën
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductFilterNodeList"
+
+  /product-filters/subcategories:
+    get:
+      operationId: getProductFilterSubcategories
+      tags: [product-filters]
+      summary: Subcategorieën (children van de gekozen hoofdcategorie)
+      parameters:
+        - name: main_category_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Subcategorieën
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductFilterNodeList"
+
+  /product-filters/sub-subcategories:
+    get:
+      operationId: getProductFilterSubSubcategories
+      tags: [product-filters]
+      summary: Sub-Subcategorieën (children van de gekozen subcategorie)
+      parameters:
+        - name: subcategory_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Sub-Subcategorieën
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductFilterNodeList"
+
+  /product-filters/sub-sub-subcategories:
+    get:
+      operationId: getProductFilterSubSubSubcategories
+      tags: [product-filters]
+      summary: Sub-Sub-Subcategorieën (children van de gekozen sub-subcategorie)
+      parameters:
+        - name: sub_subcategory_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Sub-Sub-Subcategorieën
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductFilterNodeList"
+
+  /product-filters/products:
+    get:
+      operationId: getProductFilterProducts
+      tags: [product-filters]
+      summary: Doorzoekbare productlijst binnen de gekozen categorieketen
+      parameters:
+        - name: main_category_id
+          in: query
+          schema:
+            type: ["integer", "null"]
+        - name: subcategory_id
+          in: query
+          schema:
+            type: ["integer", "null"]
+        - name: sub_subcategory_id
+          in: query
+          schema:
+            type: ["integer", "null"]
+        - name: sub_sub_subcategory_id
+          in: query
+          schema:
+            type: ["integer", "null"]
+        - name: search
+          in: query
+          schema:
+            type: ["string", "null"]
+      responses:
+        "200":
+          description: Producten (server-side gefilterd en gelimiteerd)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductFilterProductList"
+
+  /product-filters/resolve-scope:
+    post:
+      operationId: resolveProductFilterScope
+      tags: [product-filters]
+      summary: Valideer de filtercombinatie en geef de effectieve scope terug
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductFilterResolveScopeRequest"
+      responses:
+        "200":
+          description: Gevalideerde scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProductFilterResolveScopeResponse"
+
 components:
   schemas:
+    ProductFilterNode:
+      type: object
+      required: [id, name, level]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        level:
+          type: integer
+        path:
+          type: ["string", "null"]
+        path_names:
+          type: ["string", "null"]
+
+    ProductFilterNodeList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductFilterNode"
+
+    ProductFilterProduct:
+      type: object
+      required: [sku_id, name, label]
+      properties:
+        sku_id:
+          type: string
+        name:
+          type: string
+        label:
+          type: string
+
+    ProductFilterProductList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductFilterProduct"
+
+    ProductFilterResolveScopeRequest:
+      type: object
+      properties:
+        main_category_id:
+          type: ["integer", "null"]
+        subcategory_id:
+          type: ["integer", "null"]
+        sub_subcategory_id:
+          type: ["integer", "null"]
+        sub_sub_subcategory_id:
+          type: ["integer", "null"]
+        sku_id:
+          type: ["string", "null"]
+
+    ProductFilterResolveScopeResponse:
+      type: object
+      required: [valid, levels]
+      properties:
+        valid:
+          type: boolean
+        levels:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProductFilterNode"
+        product:
+          oneOf:
+            - $ref: "#/components/schemas/ProductFilterProduct"
+            - type: "null"
+        deepest_node_id:
+          type: ["integer", "null"]
+        breadcrumb:
+          type: ["string", "null"]
+
     CompetitorScoreSummary:
       type: object
       required: [competitor_name, run_date]

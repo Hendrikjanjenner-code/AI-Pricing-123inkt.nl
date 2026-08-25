@@ -15,8 +15,10 @@ from sqlalchemy.orm import Session
 
 import ai_gateway
 import auth as auth_utils
+import authz
 import models
 from database import get_db
+from services import product_scope as product_scope_service
 
 router = APIRouter(prefix="/api/copilot", tags=["copilot"])
 
@@ -180,12 +182,28 @@ def send_message(
     # (de semantic layer filtert enkel op actieve assignments).
     ctx = payload.get("context") or {}
     hierarchy_node_ids: list[int] = []
+    product_scope: Optional[dict] = None
     if isinstance(ctx, dict):
         raw_ids = ctx.get("hierarchy_node_ids") or []
         if isinstance(raw_ids, list):
             hierarchy_node_ids = [int(v) for v in raw_ids[:50]
                                   if isinstance(v, (int, str))
                                   and str(v).lstrip("-").isdigit()]
+        # Cascaderend Product-filter (taak #301): expliciete productscope.
+        # Alleen sku_id + label worden geaccepteerd; het label wordt server-side
+        # opnieuw opgezocht zodat de modelcontext nooit client-gestuurd is.
+        raw_prod = ctx.get("product")
+        if isinstance(raw_prod, dict) and isinstance(raw_prod.get("sku_id"), str):
+            sku = raw_prod["sku_id"][:100]
+            # Shop-autorisatie: een SKU buiten de toegestane winkels van de
+            # gebruiker wordt genegeerd (geen productnamen van andere shops
+            # in de modelcontext).
+            p = product_scope_service.get_scoped_product(
+                db, sku, authz.user_allowed_shop_ids(db, current_user))
+            if p is not None:
+                product_scope = {"sku_id": p.sku_id,
+                                 "label": f"SKU {p.sku_id} – {p.product_name}",
+                                 "source": "global_filter"}
 
     # Atomische budgetreservering vóór de SSE-stream (§34): gooit 429 als het
     # dagbudget op is. Hier (vóór StreamingResponse) zodat de client een echte
@@ -251,6 +269,7 @@ def send_message(
                 max_tokens=max_tokens,
                 budget_warning=budget_warning,
                 hierarchy_node_ids=hierarchy_node_ids or None,
+                product_scope=product_scope,
             ):
                 if event.get("type") == "answer":
                     final_answer = event["answer"]

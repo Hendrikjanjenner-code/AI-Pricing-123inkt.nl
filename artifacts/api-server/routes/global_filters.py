@@ -79,9 +79,14 @@ def _direct_product_conditions(statuses: Optional[str] = None,
         conds.append(P.lifecycle_status.in_(status_list))
     term = (sku_query or "").strip()
     if term:
-        like = f"%{term}%"
-        conds.append(or_(P.sku_id.ilike(like), P.ean.ilike(like),
-                         P.oem_code.ilike(like), P.product_name.ilike(like)))
+        if term.lower().startswith("sku:"):
+            # Exacte productselectie (taak #301, cascaderend Product-filter):
+            # "sku:<id>" matcht precies één SKU, geen substring-verbreding.
+            conds.append(P.sku_id == term[4:].strip())
+        else:
+            like = f"%{term}%"
+            conds.append(or_(P.sku_id.ilike(like), P.ean.ilike(like),
+                             P.oem_code.ilike(like), P.product_name.ilike(like)))
     return conds
 
 

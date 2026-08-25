@@ -59,6 +59,10 @@ import type {
   GetCompetitorScoreRankingsParams,
   GetDataQualityOutliersParams,
   GetExportHistoryParams,
+  GetProductFilterProductsParams,
+  GetProductFilterSubSubSubcategoriesParams,
+  GetProductFilterSubSubcategoriesParams,
+  GetProductFilterSubcategoriesParams,
   HealthStatus,
   ImportJob,
   IntelligenceSignal,
@@ -78,6 +82,10 @@ import type {
   OverrideRequest,
   PriceChangeBucket,
   Product,
+  ProductFilterNodeList,
+  ProductFilterProductList,
+  ProductFilterResolveScopeRequest,
+  ProductFilterResolveScopeResponse,
   ProductListResponse,
   PushRecommendationsToDrsParams,
   Recommendation,
@@ -6495,3 +6503,608 @@ export function useGetCompetitorFullProfile<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary Hoofdcategorieën voor het cascaderende productfilter
+ */
+export const getGetProductFilterMainCategoriesUrl = () => {
+  return `/api/product-filters/main-categories`;
+};
+
+export const getProductFilterMainCategories = async (
+  options?: RequestInit,
+): Promise<ProductFilterNodeList> => {
+  return customFetch<ProductFilterNodeList>(
+    getGetProductFilterMainCategoriesUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetProductFilterMainCategoriesQueryKey = () => {
+  return [`/api/product-filters/main-categories`] as const;
+};
+
+export const getGetProductFilterMainCategoriesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getProductFilterMainCategories>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getProductFilterMainCategories>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetProductFilterMainCategoriesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getProductFilterMainCategories>>
+  > = ({ signal }) =>
+    getProductFilterMainCategories({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getProductFilterMainCategories>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetProductFilterMainCategoriesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getProductFilterMainCategories>>
+>;
+export type GetProductFilterMainCategoriesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Hoofdcategorieën voor het cascaderende productfilter
+ */
+
+export function useGetProductFilterMainCategories<
+  TData = Awaited<ReturnType<typeof getProductFilterMainCategories>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getProductFilterMainCategories>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetProductFilterMainCategoriesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Subcategorieën (children van de gekozen hoofdcategorie)
+ */
+export const getGetProductFilterSubcategoriesUrl = (
+  params: GetProductFilterSubcategoriesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/product-filters/subcategories?${stringifiedParams}`
+    : `/api/product-filters/subcategories`;
+};
+
+export const getProductFilterSubcategories = async (
+  params: GetProductFilterSubcategoriesParams,
+  options?: RequestInit,
+): Promise<ProductFilterNodeList> => {
+  return customFetch<ProductFilterNodeList>(
+    getGetProductFilterSubcategoriesUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetProductFilterSubcategoriesQueryKey = (
+  params?: GetProductFilterSubcategoriesParams,
+) => {
+  return [
+    `/api/product-filters/subcategories`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetProductFilterSubcategoriesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getProductFilterSubcategories>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetProductFilterSubcategoriesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getProductFilterSubcategories>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetProductFilterSubcategoriesQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getProductFilterSubcategories>>
+  > = ({ signal }) =>
+    getProductFilterSubcategories(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getProductFilterSubcategories>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetProductFilterSubcategoriesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getProductFilterSubcategories>>
+>;
+export type GetProductFilterSubcategoriesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Subcategorieën (children van de gekozen hoofdcategorie)
+ */
+
+export function useGetProductFilterSubcategories<
+  TData = Awaited<ReturnType<typeof getProductFilterSubcategories>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetProductFilterSubcategoriesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getProductFilterSubcategories>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetProductFilterSubcategoriesQueryOptions(
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Sub-Subcategorieën (children van de gekozen subcategorie)
+ */
+export const getGetProductFilterSubSubcategoriesUrl = (
+  params: GetProductFilterSubSubcategoriesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/product-filters/sub-subcategories?${stringifiedParams}`
+    : `/api/product-filters/sub-subcategories`;
+};
+
+export const getProductFilterSubSubcategories = async (
+  params: GetProductFilterSubSubcategoriesParams,
+  options?: RequestInit,
+): Promise<ProductFilterNodeList> => {
+  return customFetch<ProductFilterNodeList>(
+    getGetProductFilterSubSubcategoriesUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetProductFilterSubSubcategoriesQueryKey = (
+  params?: GetProductFilterSubSubcategoriesParams,
+) => {
+  return [
+    `/api/product-filters/sub-subcategories`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetProductFilterSubSubcategoriesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getProductFilterSubSubcategories>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetProductFilterSubSubcategoriesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getProductFilterSubSubcategories>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetProductFilterSubSubcategoriesQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getProductFilterSubSubcategories>>
+  > = ({ signal }) =>
+    getProductFilterSubSubcategories(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getProductFilterSubSubcategories>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetProductFilterSubSubcategoriesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getProductFilterSubSubcategories>>
+>;
+export type GetProductFilterSubSubcategoriesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Sub-Subcategorieën (children van de gekozen subcategorie)
+ */
+
+export function useGetProductFilterSubSubcategories<
+  TData = Awaited<ReturnType<typeof getProductFilterSubSubcategories>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetProductFilterSubSubcategoriesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getProductFilterSubSubcategories>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetProductFilterSubSubcategoriesQueryOptions(
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Sub-Sub-Subcategorieën (children van de gekozen sub-subcategorie)
+ */
+export const getGetProductFilterSubSubSubcategoriesUrl = (
+  params: GetProductFilterSubSubSubcategoriesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/product-filters/sub-sub-subcategories?${stringifiedParams}`
+    : `/api/product-filters/sub-sub-subcategories`;
+};
+
+export const getProductFilterSubSubSubcategories = async (
+  params: GetProductFilterSubSubSubcategoriesParams,
+  options?: RequestInit,
+): Promise<ProductFilterNodeList> => {
+  return customFetch<ProductFilterNodeList>(
+    getGetProductFilterSubSubSubcategoriesUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetProductFilterSubSubSubcategoriesQueryKey = (
+  params?: GetProductFilterSubSubSubcategoriesParams,
+) => {
+  return [
+    `/api/product-filters/sub-sub-subcategories`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetProductFilterSubSubSubcategoriesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getProductFilterSubSubSubcategories>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetProductFilterSubSubSubcategoriesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getProductFilterSubSubSubcategories>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetProductFilterSubSubSubcategoriesQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getProductFilterSubSubSubcategories>>
+  > = ({ signal }) =>
+    getProductFilterSubSubSubcategories(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getProductFilterSubSubSubcategories>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetProductFilterSubSubSubcategoriesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getProductFilterSubSubSubcategories>>
+>;
+export type GetProductFilterSubSubSubcategoriesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Sub-Sub-Subcategorieën (children van de gekozen sub-subcategorie)
+ */
+
+export function useGetProductFilterSubSubSubcategories<
+  TData = Awaited<ReturnType<typeof getProductFilterSubSubSubcategories>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetProductFilterSubSubSubcategoriesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getProductFilterSubSubSubcategories>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetProductFilterSubSubSubcategoriesQueryOptions(
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Doorzoekbare productlijst binnen de gekozen categorieketen
+ */
+export const getGetProductFilterProductsUrl = (
+  params?: GetProductFilterProductsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/product-filters/products?${stringifiedParams}`
+    : `/api/product-filters/products`;
+};
+
+export const getProductFilterProducts = async (
+  params?: GetProductFilterProductsParams,
+  options?: RequestInit,
+): Promise<ProductFilterProductList> => {
+  return customFetch<ProductFilterProductList>(
+    getGetProductFilterProductsUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetProductFilterProductsQueryKey = (
+  params?: GetProductFilterProductsParams,
+) => {
+  return [
+    `/api/product-filters/products`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetProductFilterProductsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getProductFilterProducts>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetProductFilterProductsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getProductFilterProducts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetProductFilterProductsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getProductFilterProducts>>
+  > = ({ signal }) =>
+    getProductFilterProducts(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getProductFilterProducts>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetProductFilterProductsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getProductFilterProducts>>
+>;
+export type GetProductFilterProductsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Doorzoekbare productlijst binnen de gekozen categorieketen
+ */
+
+export function useGetProductFilterProducts<
+  TData = Awaited<ReturnType<typeof getProductFilterProducts>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetProductFilterProductsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getProductFilterProducts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetProductFilterProductsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Valideer de filtercombinatie en geef de effectieve scope terug
+ */
+export const getResolveProductFilterScopeUrl = () => {
+  return `/api/product-filters/resolve-scope`;
+};
+
+export const resolveProductFilterScope = async (
+  productFilterResolveScopeRequest: ProductFilterResolveScopeRequest,
+  options?: RequestInit,
+): Promise<ProductFilterResolveScopeResponse> => {
+  return customFetch<ProductFilterResolveScopeResponse>(
+    getResolveProductFilterScopeUrl(),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(productFilterResolveScopeRequest),
+    },
+  );
+};
+
+export const getResolveProductFilterScopeMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resolveProductFilterScope>>,
+    TError,
+    { data: BodyType<ProductFilterResolveScopeRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof resolveProductFilterScope>>,
+  TError,
+  { data: BodyType<ProductFilterResolveScopeRequest> },
+  TContext
+> => {
+  const mutationKey = ["resolveProductFilterScope"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof resolveProductFilterScope>>,
+    { data: BodyType<ProductFilterResolveScopeRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return resolveProductFilterScope(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ResolveProductFilterScopeMutationResult = NonNullable<
+  Awaited<ReturnType<typeof resolveProductFilterScope>>
+>;
+export type ResolveProductFilterScopeMutationBody =
+  BodyType<ProductFilterResolveScopeRequest>;
+export type ResolveProductFilterScopeMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Valideer de filtercombinatie en geef de effectieve scope terug
+ */
+export const useResolveProductFilterScope = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof resolveProductFilterScope>>,
+    TError,
+    { data: BodyType<ProductFilterResolveScopeRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof resolveProductFilterScope>>,
+  TError,
+  { data: BodyType<ProductFilterResolveScopeRequest> },
+  TContext
+> => {
+  return useMutation(getResolveProductFilterScopeMutationOptions(options));
+};

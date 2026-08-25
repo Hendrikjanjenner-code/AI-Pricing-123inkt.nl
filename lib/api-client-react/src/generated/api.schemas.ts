@@ -5,6 +5,53 @@
  * AI Pricing Decision Engine API
  * OpenAPI spec version: 0.1.0
  */
+export interface ProductFilterNode {
+  id: number;
+  name: string;
+  level: number;
+  /** @nullable */
+  path?: string | null;
+  /** @nullable */
+  path_names?: string | null;
+}
+
+export interface ProductFilterNodeList {
+  items: ProductFilterNode[];
+}
+
+export interface ProductFilterProduct {
+  sku_id: string;
+  name: string;
+  label: string;
+}
+
+export interface ProductFilterProductList {
+  items: ProductFilterProduct[];
+}
+
+export interface ProductFilterResolveScopeRequest {
+  /** @nullable */
+  main_category_id?: number | null;
+  /** @nullable */
+  subcategory_id?: number | null;
+  /** @nullable */
+  sub_subcategory_id?: number | null;
+  /** @nullable */
+  sub_sub_subcategory_id?: number | null;
+  /** @nullable */
+  sku_id?: string | null;
+}
+
+export interface ProductFilterResolveScopeResponse {
+  valid: boolean;
+  levels: ProductFilterNode[];
+  product?: ProductFilterProduct | null;
+  /** @nullable */
+  deepest_node_id?: number | null;
+  /** @nullable */
+  breadcrumb?: string | null;
+}
+
 export interface CompetitorScoreSummary {
   competitor_name: string;
   run_date: string;
@@ -1435,3 +1482,38 @@ export type GetCompetitorFullProfileParams = {
 };
 
 export type GetCompetitorFullProfile200 = { [key: string]: unknown };
+
+export type GetProductFilterSubcategoriesParams = {
+  main_category_id: number;
+};
+
+export type GetProductFilterSubSubcategoriesParams = {
+  subcategory_id: number;
+};
+
+export type GetProductFilterSubSubSubcategoriesParams = {
+  sub_subcategory_id: number;
+};
+
+export type GetProductFilterProductsParams = {
+  /**
+   * @nullable
+   */
+  main_category_id?: number | null;
+  /**
+   * @nullable
+   */
+  subcategory_id?: number | null;
+  /**
+   * @nullable
+   */
+  sub_subcategory_id?: number | null;
+  /**
+   * @nullable
+   */
+  sub_sub_subcategory_id?: number | null;
+  /**
+   * @nullable
+   */
+  search?: string | null;
+};

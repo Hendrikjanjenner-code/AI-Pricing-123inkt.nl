@@ -23,8 +23,24 @@ export interface HierarchyNodeSelection {
   pathNames?: string | null;
 }
 
+/** Directe productselectie via het cascaderende Product-filter (taak #301). */
+export interface ProductSelection {
+  skuId: string;
+  /** Weergavelabel, bv. "SKU 123456 – HP 305XL Zwart". */
+  label: string;
+}
+
 export interface GlobalFilters {
   hierarchy: HierarchyNodeSelection[];
+  /**
+   * Cascaderende categoriekeuze (taak #301): geordend pad van maximaal 4
+   * niveaus (Hoofdcategorie → Subcategorie → Sub-Subcategorie →
+   * Sub-Sub-Subcategorie). Het diepste niveau bepaalt de scope; de server
+   * telt descendants automatisch mee.
+   */
+  categoryPath: HierarchyNodeSelection[];
+  /** Direct gekozen product (exacte SKU-scope); wint van skuQuery. */
+  product: ProductSelection | null;
   brands: string[];
   /** Lifecycle-statussen (bv. active, new, end_of_life, discontinued). */
   statuses: string[];
@@ -33,17 +49,37 @@ export interface GlobalFilters {
   skuQuery: string;
 }
 
-export const FILTER_PARAM_KEYS = ["f_hn", "f_brand", "f_status", "f_days", "f_sku"] as const;
+export const FILTER_PARAM_KEYS = [
+  "f_hn", "f_cat", "f_prod", "f_prodl", "f_brand", "f_status", "f_days", "f_sku",
+] as const;
 const STORAGE_KEY = "global_filter_context_v1";
 const EVENT = "global-filters-changed";
 
 export function emptyFilters(): GlobalFilters {
-  return { hierarchy: [], brands: [], statuses: [], periodDays: null, skuQuery: "" };
+  return {
+    hierarchy: [], categoryPath: [], product: null,
+    brands: [], statuses: [], periodDays: null, skuQuery: "",
+  };
 }
 
 export function hasActiveFilters(f: GlobalFilters): boolean {
-  return f.hierarchy.length > 0 || f.brands.length > 0 ||
+  return f.hierarchy.length > 0 || f.categoryPath.length > 0 ||
+    f.product !== null || f.brands.length > 0 ||
     f.statuses.length > 0 || f.periodDays !== null || f.skuQuery.trim() !== "";
+}
+
+/**
+ * Zet een categorieniveau (0 = Hoofdcategorie … 3 = Sub-Sub-Subcategorie).
+ * Een wijziging reset alle diepere niveaus én de productselectie
+ * (cascade-regel). `node = null` maakt het niveau (en alles eronder) leeg.
+ */
+export function setCategoryLevelPath(
+  path: HierarchyNodeSelection[], levelIndex: number,
+  node: HierarchyNodeSelection | null
+): HierarchyNodeSelection[] {
+  const next = path.slice(0, levelIndex);
+  if (node !== null) next.push(node);
+  return next;
 }
 
 /** Is `node` een descendant van `maybeAncestor` (o.b.v. gematerialiseerd pad)? */
@@ -93,6 +129,13 @@ export function writeFiltersToParams(f: GlobalFilters, params: URLSearchParams):
   if (f.hierarchy.length > 0) {
     params.set("f_hn", f.hierarchy.map((n) => n.id).join(","));
   }
+  if (f.categoryPath.length > 0) {
+    params.set("f_cat", f.categoryPath.map((n) => n.id).join(","));
+  }
+  if (f.product !== null) {
+    params.set("f_prod", f.product.skuId);
+    params.set("f_prodl", encodeURIComponent(f.product.label));
+  }
   if (f.brands.length > 0) {
     params.set(
       "f_brand",
@@ -125,6 +168,22 @@ export function readFiltersFromParams(
     .map((s) => parseInt(s.trim(), 10))
     .filter((n) => Number.isFinite(n))
     .map((id) => byId.get(id) ?? { id, name: `#${id}`, path: null });
+  const categoryPath: HierarchyNodeSelection[] = (params.get("f_cat") || "")
+    .split(",")
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => Number.isFinite(n))
+    .map((id) => byId.get(id) ?? { id, name: `#${id}`, path: null });
+  const prodSku = (params.get("f_prod") || "").trim();
+  let product: ProductSelection | null = null;
+  if (prodSku !== "") {
+    let label = prodSku;
+    try {
+      label = decodeURIComponent(params.get("f_prodl") || "") || prodSku;
+    } catch {
+      label = prodSku;
+    }
+    product = { skuId: prodSku, label };
+  }
   const brands = (params.get("f_brand") || "")
     .split("~")
     .map((s) => decodeURIComponent(s))
@@ -136,18 +195,31 @@ export function readFiltersFromParams(
   const rawDays = params.get("f_days");
   const periodDays = rawDays && /^\d+$/.test(rawDays) ? parseInt(rawDays, 10) : null;
   const skuQuery = params.get("f_sku") || "";
-  return { hierarchy, brands, statuses, periodDays, skuQuery };
+  return { hierarchy, categoryPath, product, brands, statuses, periodDays, skuQuery };
 }
 
 /** Querystring-fragment voor API-aanroepen (server-side descendant-expansie). */
 export function apiFilterParams(f: GlobalFilters): string {
   const p = new URLSearchParams();
-  if (f.hierarchy.length > 0) {
-    p.set("hierarchy_node_ids", f.hierarchy.map((n) => n.id).join(","));
+  // Hiërarchie-scope: legacy multi-select + het diepste cascade-niveau.
+  const nodeIds = f.hierarchy.map((n) => n.id);
+  if (f.categoryPath.length > 0) {
+    const deepest = f.categoryPath[f.categoryPath.length - 1].id;
+    if (!nodeIds.includes(deepest)) nodeIds.push(deepest);
   }
+  if (nodeIds.length > 0) p.set("hierarchy_node_ids", nodeIds.join(","));
   if (f.brands.length > 0) p.set("brands", f.brands.join(","));
   if (f.statuses.length > 0) p.set("statuses", f.statuses.join(","));
-  if (f.skuQuery.trim() !== "") p.set("sku_query", f.skuQuery.trim());
+  if (f.product !== null) {
+    // Exacte productscope wint van de vrije zoekterm ("sku:"-conventie,
+    // server-side exact gematcht in de globale filterlaag).
+    p.set("sku_query", `sku:${f.product.skuId}`);
+  } else if (f.skuQuery.trim() !== "") {
+    // Vrije zoekterm nooit als exact kanaal laten binnenkomen: een gebruiker
+    // die letterlijk "sku:123" typt, bedoelt zoeken op "123" — de exacte
+    // "sku:"-scope is gereserveerd voor de productselectie hierboven.
+    p.set("sku_query", f.skuQuery.trim().replace(/^sku:\s*/i, ""));
+  }
   return p.toString();
 }
 
@@ -161,6 +233,12 @@ function loadStored(): GlobalFilters | null {
     const parsed = JSON.parse(raw);
     return {
       hierarchy: Array.isArray(parsed.hierarchy) ? parsed.hierarchy : [],
+      categoryPath: Array.isArray(parsed.categoryPath) ? parsed.categoryPath : [],
+      product:
+        parsed.product && typeof parsed.product.skuId === "string" &&
+        typeof parsed.product.label === "string"
+          ? { skuId: parsed.product.skuId, label: parsed.product.label }
+          : null,
       brands: Array.isArray(parsed.brands) ? parsed.brands : [],
       statuses: Array.isArray(parsed.statuses) ? parsed.statuses : [],
       periodDays: typeof parsed.periodDays === "number" ? parsed.periodDays : null,

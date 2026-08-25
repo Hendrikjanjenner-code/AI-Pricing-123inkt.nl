@@ -2025,3 +2025,132 @@ export const GetCompetitorFullProfileResponse = zod.record(
   zod.string(),
   zod.unknown(),
 );
+
+/**
+ * @summary Hoofdcategorieën voor het cascaderende productfilter
+ */
+export const GetProductFilterMainCategoriesResponse = zod.object({
+  items: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      level: zod.number(),
+      path: zod.string().nullish(),
+      path_names: zod.string().nullish(),
+    }),
+  ),
+});
+
+/**
+ * @summary Subcategorieën (children van de gekozen hoofdcategorie)
+ */
+export const GetProductFilterSubcategoriesQueryParams = zod.object({
+  main_category_id: zod.coerce.number(),
+});
+
+export const GetProductFilterSubcategoriesResponse = zod.object({
+  items: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      level: zod.number(),
+      path: zod.string().nullish(),
+      path_names: zod.string().nullish(),
+    }),
+  ),
+});
+
+/**
+ * @summary Sub-Subcategorieën (children van de gekozen subcategorie)
+ */
+export const GetProductFilterSubSubcategoriesQueryParams = zod.object({
+  subcategory_id: zod.coerce.number(),
+});
+
+export const GetProductFilterSubSubcategoriesResponse = zod.object({
+  items: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      level: zod.number(),
+      path: zod.string().nullish(),
+      path_names: zod.string().nullish(),
+    }),
+  ),
+});
+
+/**
+ * @summary Sub-Sub-Subcategorieën (children van de gekozen sub-subcategorie)
+ */
+export const GetProductFilterSubSubSubcategoriesQueryParams = zod.object({
+  sub_subcategory_id: zod.coerce.number(),
+});
+
+export const GetProductFilterSubSubSubcategoriesResponse = zod.object({
+  items: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      level: zod.number(),
+      path: zod.string().nullish(),
+      path_names: zod.string().nullish(),
+    }),
+  ),
+});
+
+/**
+ * @summary Doorzoekbare productlijst binnen de gekozen categorieketen
+ */
+export const GetProductFilterProductsQueryParams = zod.object({
+  main_category_id: zod.coerce.number().nullish(),
+  subcategory_id: zod.coerce.number().nullish(),
+  sub_subcategory_id: zod.coerce.number().nullish(),
+  sub_sub_subcategory_id: zod.coerce.number().nullish(),
+  search: zod.coerce.string().nullish(),
+});
+
+export const GetProductFilterProductsResponse = zod.object({
+  items: zod.array(
+    zod.object({
+      sku_id: zod.string(),
+      name: zod.string(),
+      label: zod.string(),
+    }),
+  ),
+});
+
+/**
+ * @summary Valideer de filtercombinatie en geef de effectieve scope terug
+ */
+export const ResolveProductFilterScopeBody = zod.object({
+  main_category_id: zod.number().nullish(),
+  subcategory_id: zod.number().nullish(),
+  sub_subcategory_id: zod.number().nullish(),
+  sub_sub_subcategory_id: zod.number().nullish(),
+  sku_id: zod.string().nullish(),
+});
+
+export const ResolveProductFilterScopeResponse = zod.object({
+  valid: zod.boolean(),
+  levels: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      level: zod.number(),
+      path: zod.string().nullish(),
+      path_names: zod.string().nullish(),
+    }),
+  ),
+  product: zod
+    .union([
+      zod.object({
+        sku_id: zod.string(),
+        name: zod.string(),
+        label: zod.string(),
+      }),
+      zod.null(),
+    ])
+    .optional(),
+  deepest_node_id: zod.number().nullish(),
+  breadcrumb: zod.string().nullish(),
+});

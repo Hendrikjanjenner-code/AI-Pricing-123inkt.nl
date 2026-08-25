@@ -27,7 +27,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { getAuthHeaders } from "@/lib/auth";
 import { InfoTooltip } from "@/components/InfoTooltip";
 import { SavedViewsMenu } from "@/components/filters/SavedViewsMenu";
-import { HierarchyFilter } from "@/components/filters/HierarchyFilter";
+import {
+  CascadingProductFilter, CATEGORY_LEVEL_LABELS,
+} from "@/components/filters/CascadingProductFilter";
 import { useGlobalFilters } from "@/hooks/use-global-filters";
 import {
   clearGlobalFilters,
@@ -143,10 +145,7 @@ function StatusFilter({ filters }: { filters: GlobalFilters }) {
 function FilterControls({ filters }: { filters: GlobalFilters }) {
   return (
     <>
-      <HierarchyFilter
-        selection={filters.hierarchy}
-        onChange={(hierarchy) => setGlobalFilters({ hierarchy })}
-      />
+      <CascadingProductFilter filters={filters} />
       <BrandFilter filters={filters} />
       <StatusFilter filters={filters} />
       <Select
@@ -181,6 +180,10 @@ export function activeContextSummary(filters: GlobalFilters): string | null {
   if (filters.hierarchy.length > 0) {
     parts.push(filters.hierarchy.map((h) => h.name).join(", "));
   }
+  if (filters.categoryPath.length > 0) {
+    parts.push(filters.categoryPath.map((n) => n.name).join(" > "));
+  }
+  if (filters.product !== null) parts.push(filters.product.label);
   if (filters.brands.length > 0) parts.push(filters.brands.join(", "));
   if (filters.statuses.length > 0) {
     parts.push(filters.statuses.map(statusLabel).join(", "));
@@ -209,6 +212,29 @@ function ActiveContextBlock({ filters }: { filters: GlobalFilters }) {
           </button>
         </Badge>
       ))}
+      {filters.categoryPath.map((n, i) => (
+        <Badge key={`c-${n.id}`} variant="secondary" className="gap-1"
+          title={`${CATEGORY_LEVEL_LABELS[i]}: ${n.pathNames ?? n.name}`}>
+          {n.name}
+          <button type="button" aria-label={`Verwijder ${CATEGORY_LEVEL_LABELS[i]} ${n.name}`}
+            onClick={() => setGlobalFilters({
+              // Cascade-regel: dit niveau én alles eronder + product wissen.
+              categoryPath: filters.categoryPath.slice(0, i),
+              product: null,
+            })}>
+            <X className="w-3 h-3" />
+          </button>
+        </Badge>
+      ))}
+      {filters.product !== null && (
+        <Badge variant="secondary" className="gap-1" title={filters.product.label}>
+          {filters.product.label}
+          <button type="button" aria-label="Verwijder product"
+            onClick={() => setGlobalFilters({ product: null })}>
+            <X className="w-3 h-3" />
+          </button>
+        </Badge>
+      )}
       {filters.brands.map((b) => (
         <Badge key={`b-${b}`} variant="secondary" className="gap-1">
           {b}
