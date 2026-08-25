@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import pytest
 
 import models
+from conftest import purge_hierarchy_import_jobs, register_hierarchy_test_prefix
 from database import SessionLocal
 from services.product_hierarchy import (
     AUTO_ASSIGN_SOURCE, apply_job, auto_assign_new_products, stage_rows,
@@ -16,6 +17,7 @@ from services.product_hierarchy import (
 )
 
 PFX = f"AAT{uuid.uuid4().hex[:6].upper()}"
+register_hierarchy_test_prefix(PFX)
 
 
 def _mk_job(db) -> models.ImportJob:
@@ -103,16 +105,9 @@ def scenario(hierarchy_suite_lock):
     # óók als een test halverwege faalde: een achtergebleven job met status
     # "geimporteerd" en toekomstige completed_at zou anders de "laatst
     # toegepaste import" worden en auto_assign in productiepaden breken.
-    J = models.ImportJob
-    job_ids = [j for (j,) in db.query(J.id).filter(
-        J.upload_type == "product_hierarchy",
-        J.filename == f"{PFX}.csv")]
-    if job_ids:
-        db.query(A).filter(A.import_job_id.in_(job_ids)).update(
-            {A.import_job_id: None}, synchronize_session=False)
-        db.query(S).filter(S.job_id.in_(job_ids)).delete(synchronize_session=False)
-        db.query(C).filter(C.import_job_id.in_(job_ids)).delete(synchronize_session=False)
-        db.query(J).filter(J.id.in_(job_ids)).delete(synchronize_session=False)
+    # De gedeelde helper nult assignments.import_job_id, wist staging en
+    # changelog, en verwijdert de jobs zelf.
+    purge_hierarchy_import_jobs(db, PFX)
     # Herstel de auto-boomstaat die apply_job heeft geretireerd.
     if auto_node_ids:
         db.query(N).filter(N.id.in_(auto_node_ids)).update(

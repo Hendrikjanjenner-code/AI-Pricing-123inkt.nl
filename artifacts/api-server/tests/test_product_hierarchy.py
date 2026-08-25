@@ -6,10 +6,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 import models
+from conftest import purge_hierarchy_import_jobs, register_hierarchy_test_prefix
 from database import SessionLocal
 from main import app
 
 PFX = f"PHT{uuid.uuid4().hex[:6].upper()}"  # unieke prefix per testrun
+register_hierarchy_test_prefix(PFX)
 
 
 @pytest.fixture(scope="module")
@@ -84,20 +86,10 @@ def ph_products():
     db.query(C).filter(C.sku_id.in_(skus)).delete(synchronize_session=False)
     db.query(S).filter(S.product_code.in_(skus)).delete(synchronize_session=False)
     # ImportJob-residu opruimen: test-jobs mogen nooit als "laatst toegepaste
-    # import" achterblijven (zie _upload). Eerst alle verwijzingen lossnijden
-    # (retire_auto_hierarchy stempelt superseded rijen met het job-id).
-    J = models.ImportJob
-    job_ids = [j for (j,) in db.query(J.id).filter(
-        J.upload_type == "product_hierarchy",
-        J.filename.like(f"{PFX}%"))]
-    if job_ids:
-        db.query(A).filter(A.import_job_id.in_(job_ids)).update(
-            {A.import_job_id: None}, synchronize_session=False)
-        db.query(C).filter(C.import_job_id.in_(job_ids)).delete(
-            synchronize_session=False)
-        db.query(S).filter(S.job_id.in_(job_ids)).delete(
-            synchronize_session=False)
-        db.query(J).filter(J.id.in_(job_ids)).delete(synchronize_session=False)
+    # import" achterblijven (zie _upload). De gedeelde helper snijdt eerst
+    # alle verwijzingen los (retire_auto_hierarchy stempelt superseded rijen
+    # met het job-id) en verwijdert dan staging/changelog/jobs.
+    purge_hierarchy_import_jobs(db, PFX)
     # diepste nodes eerst verwijderen i.v.m. self-FK
     if node_ids:
         for n in sorted(db.query(N).filter(N.id.in_(node_ids)),

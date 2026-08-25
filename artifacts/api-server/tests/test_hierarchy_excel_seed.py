@@ -14,6 +14,9 @@ met andere testmodules te voorkomen.
 import os
 import pytest
 
+from conftest import (
+    purge_hierarchy_import_jobs_by_ids, register_hierarchy_test_job_ids,
+)
 from database import SessionLocal
 import models
 from services.hierarchy_autobuild import AUTO_SOURCE
@@ -22,20 +25,6 @@ SEED_PREFIX = "exseedtest"
 
 
 # ── Opruimhulpen ─────────────────────────────────────────────────────────────
-
-def _delete_imported_job(db, job_id):
-    """Verwijder staging + job die door de seed is aangemaakt."""
-    db.query(models.ProductHierarchyStagingRow).filter(
-        models.ProductHierarchyStagingRow.job_id == job_id
-    ).delete(synchronize_session=False)
-    db.query(models.ProductHierarchyChangeLog).filter(
-        models.ProductHierarchyChangeLog.import_job_id == job_id
-    ).delete(synchronize_session=False)
-    db.query(models.ImportJob).filter(
-        models.ImportJob.id == job_id
-    ).delete(synchronize_session=False)
-    db.commit()
-
 
 def _retire_seed_nodes(db, job_id: int):
     """
@@ -88,47 +77,60 @@ def db(hierarchy_suite_lock):
     session.close()
 
 
-# ── Hulpfunctie ──────────────────────────────────────────────────────────────
+# ── Getrackte seed-run met gegarandeerde opruiming ───────────────────────────
 
-def _run_seed_with_flag_enabled():
-    """Roep seed_hierarchy_from_excel() aan met de vlag uitgeschakeld."""
-    original = os.environ.get("DISABLE_HIERARCHY_SEED", "true")
-    os.environ["DISABLE_HIERARCHY_SEED"] = "false"
-    try:
-        # Importeer hier zodat conftest al geladen is maar de vlag overschreven is.
-        from seed import seed_hierarchy_from_excel
-        seed_hierarchy_from_excel()
-    finally:
-        os.environ["DISABLE_HIERARCHY_SEED"] = original
+@pytest.fixture()
+def run_seed(db):
+    """
+    Voer seed_hierarchy_from_excel() uit en houd bij welke ImportJobs erdoor
+    ontstaan. Nieuwe job-ids worden direct (vóór enige assert) geregistreerd
+    voor de suite-brede residu-check, en de teardown ruimt ze gegarandeerd op
+    — óók als een assert halverwege faalt. Een achtergebleven seed-job met
+    status "geimporteerd" zou anders de echte Excel-import maskeren als
+    "laatst toegepaste import" (incident 25-08).
+    """
+    created: list[int] = []
+
+    def _run(flag: str = "false") -> list[int]:
+        before = {j for (j,) in db.query(models.ImportJob.id).filter(
+            models.ImportJob.upload_type == "product_hierarchy")}
+        original = os.environ.get("DISABLE_HIERARCHY_SEED", "true")
+        os.environ["DISABLE_HIERARCHY_SEED"] = flag
+        try:
+            from seed import seed_hierarchy_from_excel
+            seed_hierarchy_from_excel()
+        finally:
+            os.environ["DISABLE_HIERARCHY_SEED"] = original
+        db.expire_all()
+        new_ids = [j for (j,) in db.query(models.ImportJob.id).filter(
+            models.ImportJob.upload_type == "product_hierarchy")
+            if j not in before]
+        created.extend(new_ids)
+        register_hierarchy_test_job_ids(new_ids)
+        return new_ids
+
+    yield _run
+
+    db.rollback()
+    for jid in created:
+        _retire_seed_nodes(db, jid)
+    purge_hierarchy_import_jobs_by_ids(db, created)
+    db.commit()
 
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 
 class TestSeedHierarchyExcel:
 
-    def test_skip_when_disable_flag_set(self, db):
+    def test_skip_when_disable_flag_set(self, db, run_seed):
         """Met DISABLE_HIERARCHY_SEED=true mag er geen nieuwe ImportJob aangemaakt worden."""
-        # conftest.py heeft de vlag al op 'true' — maar we controleren expliciet.
-        os.environ["DISABLE_HIERARCHY_SEED"] = "true"
-        job_count_before = (
-            db.query(models.ImportJob)
-            .filter(models.ImportJob.upload_type == "product_hierarchy")
-            .count()
-        )
-        from seed import seed_hierarchy_from_excel
-        seed_hierarchy_from_excel()
-        db.expire_all()
-        job_count_after = (
-            db.query(models.ImportJob)
-            .filter(models.ImportJob.upload_type == "product_hierarchy")
-            .count()
-        )
-        assert job_count_after == job_count_before, (
+        new_ids = run_seed(flag="true")
+        assert new_ids == [], (
             "seed_hierarchy_from_excel() mocht geen nieuwe job aanmaken "
             "als DISABLE_HIERARCHY_SEED=true"
         )
 
-    def test_skip_when_manual_nodes_exist(self, db):
+    def test_skip_when_manual_nodes_exist(self, db, run_seed):
         """Als er al actieve handmatige nodes zijn, wordt de seed overgeslagen."""
         # Controleer of er al handmatige nodes zijn (productie/dev kunnen ze hebben).
         existing = (
@@ -145,30 +147,13 @@ class TestSeedHierarchyExcel:
                 "idempotentie-skip kan alleen getest worden als de boom al bestaat."
             )
 
-        os.environ["DISABLE_HIERARCHY_SEED"] = "false"
-        job_count_before = (
-            db.query(models.ImportJob)
-            .filter(models.ImportJob.upload_type == "product_hierarchy")
-            .count()
-        )
-        try:
-            from seed import seed_hierarchy_from_excel
-            seed_hierarchy_from_excel()
-        finally:
-            os.environ["DISABLE_HIERARCHY_SEED"] = "true"
-
-        db.expire_all()
-        job_count_after = (
-            db.query(models.ImportJob)
-            .filter(models.ImportJob.upload_type == "product_hierarchy")
-            .count()
-        )
-        assert job_count_after == job_count_before, (
+        new_ids = run_seed()
+        assert new_ids == [], (
             "seed_hierarchy_from_excel() mocht geen nieuwe job aanmaken "
             "als er al actieve handmatige nodes zijn"
         )
 
-    def test_import_creates_nodes_and_job(self, db):
+    def test_import_creates_nodes_and_job(self, db, run_seed):
         """
         Op een database zonder actieve handmatige nodes importeert de seed
         de Excel-boom correct: er komen nodes en een 'geimporteerd'-job.
@@ -197,39 +182,17 @@ class TestSeedHierarchyExcel:
         if excel_path is None or not os.path.isfile(excel_path):
             pytest.skip("Excel-bestand niet aanwezig in deze omgeving.")
 
-        job_count_before = (
-            db.query(models.ImportJob)
-            .filter(models.ImportJob.upload_type == "product_hierarchy")
-            .count()
-        )
+        new_ids = run_seed()
 
-        os.environ["DISABLE_HIERARCHY_SEED"] = "false"
-        created_job_id = None
-        try:
-            from seed import seed_hierarchy_from_excel
-            seed_hierarchy_from_excel()
-        finally:
-            os.environ["DISABLE_HIERARCHY_SEED"] = "true"
-
-        db.expire_all()
-
-        # Er moet een nieuwe 'geimporteerd'-job zijn.
-        job_count_after = (
-            db.query(models.ImportJob)
-            .filter(models.ImportJob.upload_type == "product_hierarchy")
-            .count()
-        )
-        assert job_count_after == job_count_before + 1, (
+        # Er moet precies één nieuwe 'geimporteerd'-job zijn.
+        assert len(new_ids) == 1, (
             "seed_hierarchy_from_excel() moet precies 1 nieuwe ImportJob aanmaken"
         )
-
         latest_job = (
             db.query(models.ImportJob)
-            .filter(models.ImportJob.upload_type == "product_hierarchy")
-            .order_by(models.ImportJob.id.desc())
-            .first()
+            .filter(models.ImportJob.id == new_ids[0])
+            .one()
         )
-        created_job_id = latest_job.id
         assert latest_job.status == "geimporteerd", (
             f"Job-status moet 'geimporteerd' zijn, was: {latest_job.status}"
         )
@@ -246,14 +209,9 @@ class TestSeedHierarchyExcel:
         assert node_count > 0, (
             "Na seed_hierarchy_from_excel() moeten er actieve handmatige nodes zijn"
         )
+        # Opruimen gebeurt gegarandeerd in de run_seed-teardown.
 
-        # Opruimen: verwijder de aangemaakte nodes en job weer,
-        # zodat andere tests niet op deze toestand bouwen.
-        if created_job_id is not None:
-            _retire_seed_nodes(db, created_job_id)
-            _delete_imported_job(db, created_job_id)
-
-    def test_idempotent_when_called_twice_on_empty_db(self, db):
+    def test_idempotent_when_called_twice_on_empty_db(self, db, run_seed):
         """
         Twee opeenvolgende aanroepen op een schone DB mogen maar 1 job produceren.
         De tweede aanroep detecteert de actieve handmatige nodes en slaat over.
@@ -281,44 +239,13 @@ class TestSeedHierarchyExcel:
         if excel_path is None or not os.path.isfile(excel_path):
             pytest.skip("Excel-bestand niet aanwezig in deze omgeving.")
 
-        job_count_before = (
-            db.query(models.ImportJob)
-            .filter(models.ImportJob.upload_type == "product_hierarchy")
-            .count()
-        )
+        # Eerste aanroep — importeert de boom.
+        first_ids = run_seed()
+        assert len(first_ids) == 1
 
-        os.environ["DISABLE_HIERARCHY_SEED"] = "false"
-        first_job_id = None
-        try:
-            from seed import seed_hierarchy_from_excel
-            # Eerste aanroep — importeert de boom.
-            seed_hierarchy_from_excel()
-            db.expire_all()
-
-            latest = (
-                db.query(models.ImportJob)
-                .filter(models.ImportJob.upload_type == "product_hierarchy")
-                .order_by(models.ImportJob.id.desc())
-                .first()
-            )
-            first_job_id = latest.id if latest else None
-
-            # Tweede aanroep — moet de boom al zien en overslaan.
-            seed_hierarchy_from_excel()
-        finally:
-            os.environ["DISABLE_HIERARCHY_SEED"] = "true"
-
-        db.expire_all()
-        job_count_after = (
-            db.query(models.ImportJob)
-            .filter(models.ImportJob.upload_type == "product_hierarchy")
-            .count()
-        )
-        assert job_count_after == job_count_before + 1, (
+        # Tweede aanroep — moet de boom al zien en overslaan.
+        second_ids = run_seed()
+        assert second_ids == [], (
             "Tweede aanroep van seed_hierarchy_from_excel() mag géén extra job aanmaken"
         )
-
-        # Opruimen.
-        if first_job_id is not None:
-            _retire_seed_nodes(db, first_job_id)
-            _delete_imported_job(db, first_job_id)
+        # Opruimen gebeurt gegarandeerd in de run_seed-teardown.

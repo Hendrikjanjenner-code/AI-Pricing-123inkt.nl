@@ -55,6 +55,9 @@ def test_apply_guard_breekt_af_bij_handmatige_boom():
         db.add(job)
         db.commit()
         db.refresh(job)
+        # Registreer vóór enige assert voor de suite-brede residu-check.
+        from conftest import register_hierarchy_test_job_ids
+        register_hierarchy_test_job_ids([job.id])
 
         rows = [{"Level 1": UNIEK}]
         mapping = svc.detect_mapping(list(rows[0].keys()))
@@ -92,14 +95,7 @@ def test_apply_guard_breekt_af_bij_handmatige_boom():
                 models.ProductHierarchyNode.id == manual_node_id
             ).delete(synchronize_session=False)
         if job is not None:
-            db.query(models.ProductHierarchyStagingRow).filter(
-                models.ProductHierarchyStagingRow.job_id == job.id
-            ).delete(synchronize_session=False)
-            db.query(models.ProductHierarchyChangeLog).filter(
-                models.ProductHierarchyChangeLog.import_job_id == job.id
-            ).delete(synchronize_session=False)
-            db.query(models.ImportJob).filter(
-                models.ImportJob.id == job.id
-            ).delete(synchronize_session=False)
+            from conftest import purge_hierarchy_import_jobs_by_ids
+            purge_hierarchy_import_jobs_by_ids(db, [job.id])
         db.commit()
         db.close()
