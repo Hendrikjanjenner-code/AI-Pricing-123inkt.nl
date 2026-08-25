@@ -1159,6 +1159,25 @@ def _test_priceshape_feed(creds: dict) -> dict:
     has_price = bool(get_alias(sample, *COMPETITOR_PRICE_ALIASES))
     has_name = bool(get_alias(sample, *COMPETITOR_NAME_ALIASES))
 
+    # Breed exportformaat (vendor_N-kolommen) — de standaard PriceShape-export.
+    # De ingest un-nest deze kolomgroepen zelf (feed_ingest), dus voor de
+    # verbindingstest tellen `vendor_N price`/`vendor_N domain` als geldige
+    # concurrentprijs-/naamkolommen.
+    from feed_ingest import _WIDE_VENDOR_RE
+    wide_fields = set()
+    for key in sample.keys():
+        m = _WIDE_VENDOR_RE.match(str(key).strip().lower())
+        if m:
+            wide_fields.add(m.group(2).strip())
+    if not has_price and any(f in COMPETITOR_PRICE_ALIASES for f in wide_fields):
+        has_price = True
+    if not has_name and any(f in COMPETITOR_NAME_ALIASES for f in wide_fields):
+        has_name = True
+    # In het brede formaat is itemGroupId de productsleutel (de ingest matcht
+    # daar zelf op); accepteer die dan ook als identifier voor de test.
+    if wide_fields and not has_identifier:
+        has_identifier = bool(get_alias(sample, "itemgroupid", "item_group_id"))
+
     if not (has_identifier and has_price):
         missing = []
         if not has_identifier:
