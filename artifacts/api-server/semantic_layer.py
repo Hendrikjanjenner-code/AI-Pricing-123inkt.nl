@@ -934,6 +934,136 @@ def signal_to_dict(s: models.IntelligenceSignal) -> dict:
     }
 
 
+def get_assortment_overview(db: Session, user: models.User,
+                            shop_id: Optional[int] = None,
+                            hierarchy_node_ids: Optional[list] = None) -> dict:
+    """Assortimentsomvang: hoeveel producten, merken en categorieën hebben we,
+    en hoeveel producten hebben een eigen prijs en concurrentprijzen (dekking)."""
+    _check_access(user, ALL_ROLES)
+    sid = _shop_scope(db, shop_id)
+    sku_scope, hierarchy_scope = _hierarchy_scope(db, hierarchy_node_ids)
+
+    P = models.DimProduct
+    q = db.query(P).filter(P.shop_id == sid)
+    if sku_scope is not None:
+        q = q.filter(P.sku_id.in_(sku_scope))
+
+    total = q.count()
+    active = q.filter(P.lifecycle_status == "active").count()
+    with_price = q.filter(P.current_price.isnot(None)).count()
+    brands = q.filter(P.brand.isnot(None), P.brand != "").with_entities(
+        func.count(func.distinct(P.brand))).scalar() or 0
+    categories = q.filter(P.category.isnot(None), P.category != "").with_entities(
+        func.count(func.distinct(P.category))).scalar() or 0
+    private_label = q.filter(P.is_private_label.is_(True)).count()
+
+    # Concurrentprijsdekking: SKU's met minstens één concurrentaanbieding op
+    # de meest recente feeddag (feed-offers zijn de bron van concurrentprijzen;
+    # scoping via join op DimProduct van deze shop).
+    O = models.FactCompetitorOfferDaily
+    latest_day = (db.query(func.max(O.date))
+                  .join(P, P.sku_id == O.own_sku_id)
+                  .filter(P.shop_id == sid).scalar())
+    covered = 0
+    if latest_day is not None:
+        cov_q = (db.query(func.count(func.distinct(O.own_sku_id)))
+                 .join(P, P.sku_id == O.own_sku_id)
+                 .filter(P.shop_id == sid, O.date == latest_day))
+        if sku_scope is not None:
+            cov_q = cov_q.filter(O.own_sku_id.in_(sku_scope))
+        covered = cov_q.scalar() or 0
+
+    top_cats = (q.filter(P.category.isnot(None), P.category != "")
+                .with_entities(P.category, func.count(P.sku_id).label("n"))
+                .group_by(P.category).order_by(desc("n")).limit(10).all())
+    top_brands = (q.filter(P.brand.isnot(None), P.brand != "")
+                  .with_entities(P.brand, func.count(P.sku_id).label("n"))
+                  .group_by(P.brand).order_by(desc("n")).limit(10).all())
+
+    return {
+        "shop_id": sid,
+        "shop_scope_applied": True,
+        "data_available": total > 0,
+        "records": total,
+        "total_products": total,
+        "active_products": active,
+        "products_with_own_price": with_price,
+        "products_with_competitor_price": covered,
+        "competitor_price_coverage_pct": round(safe_div(covered, total) * 100, 1),
+        "distinct_brands": int(brands),
+        "distinct_categories": int(categories),
+        "private_label_products": private_label,
+        "latest_competitor_price_date": str(latest_day) if latest_day else None,
+        "top_categories": [{"category": c, "products": int(n)} for c, n in top_cats],
+        "top_brands": [{"brand": b, "products": int(n)} for b, n in top_brands],
+        "hierarchy_scope": hierarchy_scope,
+    }
+
+
+def get_portfolio_price_position(db: Session, user: models.User,
+                                 shop_id: Optional[int] = None,
+                                 hierarchy_node_ids: Optional[list] = None) -> dict:
+    """Portfolio-brede prijspositie: gemiddelde prijsindex en verdeling
+    goedkoper/duurder over alle gescoorde SKU's (laatste PCIS-run)."""
+    _check_access(user, ALL_ROLES)
+    sid = _shop_scope(db, shop_id)
+    sku_scope, hierarchy_scope = _hierarchy_scope(db, hierarchy_node_ids)
+
+    S = models.SkuCompetitionScore
+    latest = db.query(func.max(S.run_date)).scalar()
+    if not latest:
+        return {"shop_id": sid, "shop_scope_applied": False,
+                "data_available": False, "records": 0,
+                "hierarchy_scope": hierarchy_scope}
+
+    base = db.query(S).filter(S.run_date == latest)
+    if sku_scope is not None:
+        base = base.filter(S.sku_id.in_(sku_scope))
+
+    idx = base.filter(S.price_index.isnot(None))
+    total_scored = base.count()
+    with_index = idx.count()
+    if with_index == 0:
+        return {"shop_id": sid, "shop_scope_applied": False,
+                "run_date": str(latest), "data_available": False,
+                "records": total_scored, "skus_scored": total_scored,
+                "skus_with_price_index": 0,
+                "hierarchy_scope": hierarchy_scope}
+
+    avg_index = idx.with_entities(func.avg(S.price_index)).scalar() or 0.0
+    # price_index = eigen / concurrent: <1.0 goedkoper, >1.0 duurder
+    cheaper = idx.filter(S.price_index < 0.99).count()
+    par = idx.filter(S.price_index >= 0.99, S.price_index <= 1.01).count()
+    more_expensive = idx.filter(S.price_index > 1.01).count()
+    avg_pcis = base.with_entities(func.avg(S.pcis_score)).scalar() or 0.0
+
+    class_rows = (base.filter(S.competition_class.isnot(None))
+                  .with_entities(S.competition_class, func.count(S.id))
+                  .group_by(S.competition_class).all())
+
+    return {
+        "shop_id": sid,
+        # sku_competition_score is organisatie-breed gescoord.
+        "shop_scope_applied": False,
+        "run_date": str(latest),
+        "data_available": True,
+        "records": with_index,
+        "skus_scored": total_scored,
+        "skus_with_price_index": with_index,
+        "avg_price_index": round(float(avg_index), 4),
+        "cheaper_count": cheaper,
+        "at_par_count": par,
+        "more_expensive_count": more_expensive,
+        "cheaper_share_pct": round(safe_div(cheaper, with_index) * 100, 1),
+        "more_expensive_share_pct": round(safe_div(more_expensive, with_index) * 100, 1),
+        "avg_pcis": round(float(avg_pcis), 4),
+        "by_competition_class": {c: int(n) for c, n in class_rows},
+        "price_index_explanation": ("price_index = eigen prijs / concurrentprijs: "
+                                    "<1.0 = wij zijn goedkoper, >1.0 = wij zijn duurder"),
+        "hierarchy_scope": hierarchy_scope,
+    }
+
+
 # Concurrentprofiel-functies (taak #249): implementaties in
 # semantic_layer_competitor.py; registratie in hetzelfde gesloten register.
 from semantic_layer_competitor import (  # noqa: E402
@@ -965,6 +1095,17 @@ SEMANTIC_FUNCTIONS: dict[str, SemanticFunction] = {
             "get_price_position",
             "Prijspositie van een SKU t.o.v. de concurrentie (PCIS, prijsindex).",
             ALL_ROLES, get_price_position),
+        SemanticFunction(
+            "get_assortment_overview",
+            "Assortimentsomvang: aantal producten, merken, categorieën, "
+            "huismerkaandeel en concurrentprijsdekking (portfolio-breed).",
+            ALL_ROLES, get_assortment_overview),
+        SemanticFunction(
+            "get_portfolio_price_position",
+            "Portfolio-brede prijspositie: gemiddelde prijsindex, aandeel "
+            "goedkoper/duurder en verdeling per competition-class over alle "
+            "gescoorde SKU's (niet per SKU).",
+            ALL_ROLES, get_portfolio_price_position),
         SemanticFunction(
             "get_customer_switching",
             "Interne overstapanalyse A-merk naar huismerk (ISV).",

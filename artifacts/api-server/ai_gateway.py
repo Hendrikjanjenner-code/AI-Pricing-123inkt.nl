@@ -561,6 +561,8 @@ FUNCTION_PERMISSIONS: dict[str, Optional[str]] = {
     "get_category_performance": None,
     "get_competitor_ranking": "competition.view",
     "get_price_position": "competition.view",
+    "get_assortment_overview": None,
+    "get_portfolio_price_position": "competition.view",
     "get_customer_switching": "catman.view",
     "get_traffic_summary": "seo.view",
     "get_active_signals": None,
@@ -623,6 +625,7 @@ HIERARCHY_CAPABLE_FUNCTIONS = {
     "get_category_performance", "get_traffic_summary", "get_active_signals",
     "get_margin_erosion", "get_private_label_potential",
     "get_promotion_effectiveness", "get_supplier_risk", "get_opportunities",
+    "get_assortment_overview", "get_portfolio_price_position",
 }
 
 _HIERARCHY_TOOL_PARAM = {
@@ -735,6 +738,14 @@ _TOOL_PARAMETERS: dict[str, dict] = {
         "required": ["sku_id", "change_pct"],
     },
     # ── Concurrentprofiel (taak #249) ──────────────────────────────────
+    "get_assortment_overview": {
+        "type": "object",
+        "properties": {},
+    },
+    "get_portfolio_price_position": {
+        "type": "object",
+        "properties": {},
+    },
     "get_competitor_business_profile": {
         "type": "object",
         "properties": {
@@ -859,14 +870,22 @@ def build_tools(allowed: Optional[set] = None) -> list[dict]:
 DEFAULT_MAX_CALLS_PER_DAY = int(os.environ.get("AI_MAX_CALLS_PER_DAY", "50"))
 DEFAULT_MAX_TOKENS_PER_DAY = int(os.environ.get("AI_MAX_TOKENS_PER_DAY", "500000"))
 
-# Worst-case tokenreservering per aanvraag, upfront vergrendeld vóór de eerste
-# LLM-aanroep. Dekt alle MAX_TOOL_ROUNDS rondes inclusief invoertokens:
-#   - Voltooiingstokens: MAX_TOOL_ROUNDS × max_completion_tokens (8192) = 49.152
-#   - Invoertokens (systeem-prompt, geschiedenis, toolresultaten): vergelijkbaar
-# Totale reservering = MAX_TOOL_ROUNDS × 8192 × 2 ≈ 98.304 tokens.
-# reconcile_budget_slot() geeft het ongebruikte deel terug na de call.
 _MAX_COMPLETION_PER_CALL = 8192                                      # max_completion_tokens
-_UPFRONT_TOKEN_RESERVATION = MAX_TOOL_ROUNDS * _MAX_COMPLETION_PER_CALL * 2  # ≈ 98_304
+
+# Harde per-verzoek tokenlimiet (worst case, alle MAX_TOOL_ROUNDS rondes
+# inclusief invoertokens): MAX_TOOL_ROUNDS × 8192 × 2 ≈ 98.304. Deze cap
+# begrenst het verbruik van één lopend verzoek (pre-/post-ronde checks in
+# run_copilot), zodat één vraag nooit meer dan dit kan kosten.
+_PER_REQUEST_TOKEN_CAP = MAX_TOOL_ROUNDS * _MAX_COMPLETION_PER_CALL * 2  # ≈ 98_304
+
+# Realistische upfront-reservering per aanvraag (§34, taak #298). Een typische
+# Copilot-vraag kost 2-3 LLM-rondes met korte JSON-antwoorden: in de praktijk
+# 5k-15k tokens. De oude worst-case-reservering (98k) blokkeerde korte vragen
+# zodra het dagbudget deels op was ("98.304 nodig > limiet"). We reserveren
+# daarom 2 rondebudgetten; reconcile_budget_slot() boekt na afloop het
+# werkelijke verbruik (incl. eventuele overrun boven de reservering), zodat de
+# dagteller altijd klopt. De per-verzoek cap hierboven blijft de harde grens.
+_UPFRONT_TOKEN_RESERVATION = _MAX_COMPLETION_PER_CALL * 2  # 16_384
 
 # Kleinere reservering voor interne hulp-calls (samenvatting, geheugenextractie):
 # max_completion_tokens=1024, transcript ≤ 20 000 chars ≈ 5 000 tokens invoer.
@@ -1208,14 +1227,14 @@ def run_copilot(
                 if max_tokens is not None:
                     est_prompt = len(json.dumps(messages, default=str)) // 4
                     if (usage["total_tokens"] + est_prompt + _MAX_COMPLETION_PER_CALL
-                            > _UPFRONT_TOKEN_RESERVATION):
+                            > _PER_REQUEST_TOKEN_CAP):
                         answer = _default_answer(
                             "De beschikbare tokenruimte voor dit verzoek is bijna op. "
                             "Stel een kortere of specifiekere vraag om binnen het "
                             "dagbudget te blijven.",
                             [f"Geschatte prompt ({est_prompt:,} tokens) + "
                              f"voltooiing ({_MAX_COMPLETION_PER_CALL:,}) zou de "
-                             f"reservering ({_UPFRONT_TOKEN_RESERVATION:,} tokens) "
+                             f"per-verzoek cap ({_PER_REQUEST_TOKEN_CAP:,} tokens) "
                              "overschrijden."],
                             freshness,
                         )
@@ -1236,19 +1255,18 @@ def run_copilot(
                     usage["total_tokens"] += resp.usage.total_tokens or 0
 
                 # Post-ronde tokencontrole (§34): stop verdere rondes zodra dit
-                # verzoek zijn upfront-reservering heeft opgebruikt. Door te
-                # vergelijken met _UPFRONT_TOKEN_RESERVATION (de per-verzoek
-                # toewijzing) in plaats van max_tokens (de dagelijkse limiet)
-                # wordt ook het eerder door andere verzoeken verbruikte dagbudget
-                # correct meegewogen: de toewijzing is immer gelijk aan de
-                # reservering, ongeacht hoeveel tokens eerder die dag zijn gebruikt.
-                if max_tokens is not None and usage["total_tokens"] >= _UPFRONT_TOKEN_RESERVATION:
+                # verzoek zijn harde per-verzoek cap heeft opgebruikt. De cap is
+                # bewust hoger dan de (realistische) upfront-reservering: het
+                # meerverbruik wordt bij reconciliatie als overrun op de dag-
+                # teller geboekt, terwijl één verzoek nooit meer dan de cap kan
+                # kosten, ongeacht hoeveel tokens eerder die dag zijn gebruikt.
+                if max_tokens is not None and usage["total_tokens"] >= _PER_REQUEST_TOKEN_CAP:
                     answer = _default_answer(
                         "De tokenruimte voor dit verzoek is bereikt. Stel een kortere of "
                         "specifiekere vraag, of neem contact op met een beheerder voor een "
                         "hogere dagelijkse limiet.",
                         [f"Verzoek-tokenlimiet bereikt "
-                         f"({usage['total_tokens']:,} ≥ {_UPFRONT_TOKEN_RESERVATION:,} tokens)."],
+                         f"({usage['total_tokens']:,} ≥ {_PER_REQUEST_TOKEN_CAP:,} tokens)."],
                         freshness,
                     )
                     status = "budget_exceeded"

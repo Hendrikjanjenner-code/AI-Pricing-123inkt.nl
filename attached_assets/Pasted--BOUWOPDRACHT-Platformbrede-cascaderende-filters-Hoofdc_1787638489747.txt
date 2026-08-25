@@ -1,0 +1,1699 @@
+# BOUWOPDRACHT
+
+## Platformbrede cascaderende filters: Hoofdcategorie → Subcategorie → Sub-Subcategorie → Sub-Sub-Subcategorie → Product
+
+Pas de bestaande filterstructuur van het volledige **AI Commercial Intelligence Platform** aan.
+
+De huidige generieke filter **“Hiërarchie”** moet NIET de primaire manier zijn waarop gebruikers producten en categorieën selecteren.
+
+Ik wil duidelijke afzonderlijke zoek-/filtervelden:
+
+1. **Hoofdcategorie**
+2. **Subcategorie**
+3. **Sub-Subcategorie**
+4. **Sub-Sub-Subcategorie**
+5. **Product**
+
+Deze filters moeten over de HELE applicatie op exact dezelfde manier werken.
+
+Dit is een platformbrede wijziging.
+
+Gebruik hiervoor de reeds ingeladen centrale producthiërarchie en de gekoppelde producten.
+
+---
+
+# 1. CENTRALE BUSINESSREGEL
+
+De filters zijn afhankelijk van elkaar.
+
+Wanneer een gebruiker bijvoorbeeld kiest:
+
+**Hoofdcategorie = Office_Food**
+
+dan mag de filter:
+
+**Subcategorie**
+
+ALLEEN subcategorieën tonen die daadwerkelijk onder **Office_Food** vallen.
+
+De gebruiker mag daar dus GEEN:
+
+* Office_Writing;
+* Office_Notes;
+* Markers;
+* of andere categorieën uit een andere hoofdcategorie
+
+meer kunnen selecteren.
+
+Vervolgens geldt exact hetzelfde voor ieder volgend niveau.
+
+Voorbeeld:
+
+Hoofdcategorie:
+**Office_Food**
+
+↓
+
+Subcategorie:
+**Drinks**
+
+↓
+
+Sub-Subcategorie:
+**Coffee**
+
+↓
+
+Sub-Sub-Subcategorie:
+**Beans**
+
+↓
+
+Product:
+alleen producten die onder **Office_Food → Drinks → Coffee → Beans** vallen.
+
+Dit noemen we:
+
+# CASCADING / DEPENDENT FILTERING
+
+---
+
+# 2. GEEN ENKELE GENERIEKE “HIËRARCHIE”-FILTER
+
+Vervang op belangrijke gebruikersschermen de ene brede selectie:
+
+**Hiërarchie**
+
+door afzonderlijke duidelijke velden.
+
+Toon bijvoorbeeld horizontaal:
+
+| Hoofdcategorie | Subcategorie | Sub-Subcategorie | Sub-Sub-Subcategorie | Product |
+| -------------- | ------------ | ---------------- | -------------------- | ------- |
+
+Gebruik duidelijke dropdowns met zoekfunctie.
+
+De gebruiker moet direct begrijpen op welk niveau hij filtert.
+
+---
+
+# 3. HOOFDCATEGORIE
+
+Het eerste filter is:
+
+**Hoofdcategorie**
+
+Toon alleen geldige hoofdcategorieën uit de centrale producthiërarchie.
+
+Geen hardcoded categorieën gebruiken.
+
+Lees deze uit de centrale database.
+
+Voorbeelden kunnen zijn:
+
+* Office_Food
+* Office_Notes
+* Office_Writing
+* enzovoort
+
+maar gebruik altijd de actuele databasewaarden.
+
+Wanneer geen hoofdcategorie is geselecteerd:
+
+* toon alle data;
+* toon alle producten;
+* toon alle beschikbare hoofdcategorieën.
+
+---
+
+# 4. SUBCATEGORIE
+
+De filter:
+
+**Subcategorie**
+
+is afhankelijk van Hoofdcategorie.
+
+Voorbeeld:
+
+Hoofdcategorie:
+Office_Food
+
+Dan bevat Subcategorie uitsluitend children van Office_Food.
+
+Bijvoorbeeld:
+
+* Drinks
+* Food
+* Snacks
+* etc.
+
+Toon GEEN subcategorieën die horen bij:
+
+Office_Writing
+Office_Notes
+andere hoofdcategorieën.
+
+---
+
+# 5. SUB-SUBCATEGORIE
+
+De filter:
+
+**Sub-Subcategorie**
+
+is afhankelijk van:
+
+Hoofdcategorie
++
+Subcategorie.
+
+Voorbeeld:
+
+Hoofdcategorie:
+Office_Food
+
+Subcategorie:
+Drinks
+
+Dan toont Sub-Subcategorie uitsluitend onderdelen onder:
+
+Office_Food → Drinks.
+
+Bijvoorbeeld:
+
+* Coffee
+* Tea
+* Soft Drinks
+
+indien deze werkelijk in de database staan.
+
+Geen categorieën buiten Drinks tonen.
+
+---
+
+# 6. SUB-SUB-SUBCATEGORIE
+
+De filter:
+
+**Sub-Sub-Subcategorie**
+
+is afhankelijk van:
+
+Hoofdcategorie
++
+Subcategorie
++
+Sub-Subcategorie.
+
+Voorbeeld:
+
+Office_Food
+→ Drinks
+→ Coffee
+
+Dan toont Sub-Sub-Subcategorie alleen children onder Coffee.
+
+Bijvoorbeeld:
+
+* Beans
+* Cups
+* Ground Coffee
+
+alleen indien deze daadwerkelijk in de centrale hiërarchie aanwezig zijn.
+
+---
+
+# 7. PRODUCT
+
+De laatste filter is:
+
+**Product**
+
+Dit filter mag uitsluitend producten tonen die vallen binnen de reeds geselecteerde categorieketen.
+
+Voorbeeld:
+
+Hoofdcategorie:
+Office_Food
+
+Subcategorie:
+Drinks
+
+Sub-Subcategorie:
+Coffee
+
+Sub-Sub-Subcategorie:
+Beans
+
+Dan toont Product uitsluitend:
+
+producten die daadwerkelijk onder:
+
+Office_Food
+→ Drinks
+→ Coffee
+→ Beans
+
+vallen.
+
+Geen product uit:
+
+* Office_Writing;
+* Office_Notes;
+* Markers;
+* een andere Coffee-subcategorie;
+* een andere hoofdgroep
+
+mag zichtbaar zijn.
+
+---
+
+# 8. PRODUCTFILTER MOET ZOEKBAAR ZIJN
+
+Het Product-filter moet zoeken op minimaal:
+
+* productnaam;
+* SKU;
+* productcode;
+* EAN;
+* OEM indien beschikbaar.
+
+Toon bijvoorbeeld:
+
+SKU 123456 – Huismerk koffiebonen 1 kg
+
+Niet alleen:
+
+123456.
+
+---
+
+# 9. BELANGRIJK: GEEN FILTER GEKOZEN = ALLE DATA
+
+Dit is een harde businessregel.
+
+Wanneer GEEN van deze filters is geselecteerd:
+
+Hoofdcategorie = leeg
+Subcategorie = leeg
+Sub-Subcategorie = leeg
+Sub-Sub-Subcategorie = leeg
+Product = leeg
+
+dan moet de applicatie:
+
+# ALLE PRODUCTEN EN ALLE CATEGORIEËN TONEN
+
+Dus:
+
+geen impliciete category restriction;
+geen standaard Office_Food filter;
+geen verborgen scope;
+geen laatste oude selectie tenzij de gebruiker die bewust heeft opgeslagen.
+
+Alle dashboards en tabellen tonen dan de volledige toegestane dataset.
+
+---
+
+# 10. HOOFDCATEGORIE GEKOZEN = HELE SUBTREE
+
+Wanneer alleen:
+
+Hoofdcategorie = Office_Food
+
+is geselecteerd en de andere filters leeg zijn:
+
+gebruik ALLE producten die onder Office_Food vallen.
+
+Dus:
+
+Office_Food
+→ alle subcategorieën
+→ alle sub-subcategorieën
+→ alle sub-sub-subcategorieën
+→ alle producten.
+
+Geen enkel product buiten Office_Food mag worden meegenomen.
+
+---
+
+# 11. SUBCATEGORIE GEKOZEN = ALLEEN DIE SUBTREE
+
+Voorbeeld:
+
+Hoofdcategorie:
+Office_Food
+
+Subcategorie:
+Drinks
+
+Andere filters:
+leeg
+
+Dan gebruik je:
+
+Office_Food
+→ Drinks
+→ alle onderliggende categorieën
+→ alle onderliggende producten.
+
+Geen Food/Snacks of andere sibling-categorie meenemen.
+
+---
+
+# 12. SUB-SUBCATEGORIE GEKOZEN
+
+Voorbeeld:
+
+Office_Food
+→ Drinks
+→ Coffee
+
+Dan worden uitsluitend:
+
+Coffee
++
+alle descendants
++
+alle producten onder Coffee
+
+gebruikt.
+
+Geen Tea.
+Geen Soft Drinks.
+Geen andere Drinks-subcategorieën.
+
+---
+
+# 13. SUB-SUB-SUBCATEGORIE GEKOZEN
+
+Voorbeeld:
+
+Office_Food
+→ Drinks
+→ Coffee
+→ Beans
+
+Dan mogen uitsluitend producten onder Beans zichtbaar en analyseerbaar zijn.
+
+---
+
+# 14. PRODUCT GEKOZEN
+
+Wanneer een specifiek Product is gekozen:
+
+gebruik alleen dat product.
+
+Alle:
+
+* KPI's;
+* rankings;
+* analyses;
+* prijsgegevens;
+* concurrenten;
+* traffic;
+* marge;
+* omzet;
+* voorraad;
+* forecasts;
+* recommendations
+
+moeten dan uitsluitend betrekking hebben op dat product, tenzij een widget expliciet anders is ontworpen en dit duidelijk vermeldt.
+
+---
+
+# 15. FILTERS RESETTEN BIJ WIJZIGING BOVENLIGGEND NIVEAU
+
+Zeer belangrijk.
+
+Voorbeeld:
+
+Gebruiker selecteert:
+
+Office_Food
+→ Drinks
+→ Coffee
+→ Beans.
+
+Daarna verandert gebruiker Hoofdcategorie naar:
+
+Office_Writing.
+
+Dan mogen:
+
+Drinks
+Coffee
+Beans
+
+NIET geselecteerd blijven.
+
+Reset automatisch:
+
+Subcategorie
+Sub-Subcategorie
+Sub-Sub-Subcategorie
+Product.
+
+Dus bij wijziging Hoofdcategorie:
+
+reset alle filters eronder.
+
+Bij wijziging Subcategorie:
+
+reset:
+
+* Sub-Subcategorie;
+* Sub-Sub-Subcategorie;
+* Product.
+
+Bij wijziging Sub-Subcategorie:
+
+reset:
+
+* Sub-Sub-Subcategorie;
+* Product.
+
+Bij wijziging Sub-Sub-Subcategorie:
+
+reset:
+
+* Product.
+
+---
+
+# 16. ONGELDIGE COMBINATIES ZIJN ONMOGELIJK
+
+De gebruiker mag nooit kunnen selecteren:
+
+Hoofdcategorie:
+Office_Food
+
+Subcategorie:
+Office_Writing.
+
+Of:
+
+Office_Food
+→ Drinks
+→ Marker.
+
+Deze opties mogen simpelweg niet in de dropdown verschijnen.
+
+Vertrouw niet alleen op de frontend.
+
+Valideer ook backend-side dat geselecteerde categorieën daadwerkelijk parent/child van elkaar zijn.
+
+---
+
+# 17. FILTERS MOETEN DATA ERONDER ECHT FILTEREN
+
+Dit is zeer belangrijk.
+
+Het is NIET voldoende dat alleen de dropdowns wijzigen.
+
+Als:
+
+Hoofdcategorie = Office_Food
+
+is gekozen, mogen ook ALLE onderstaande gegevens alleen Office_Food-data bevatten.
+
+Dit geldt voor:
+
+* tabellen;
+* grafieken;
+* KPI cards;
+* rankings;
+* dashboards;
+* exports;
+* recommendations;
+* AI analyses;
+* Copilot;
+* alerts;
+* opportunities;
+* risico's.
+
+Geen data uit Office_Writing mag door de API worden teruggestuurd en vervolgens alleen visueel verborgen worden.
+
+Filtering moet in de query/data layer plaatsvinden.
+
+---
+
+# 18. FILTERS OVER DE GEHELE TOOL
+
+Gebruik exact dezelfde filtercomponent en filterlogica in alle relevante modules.
+
+Minimaal:
+
+## Concurrentie
+
+* CI Dashboard;
+* Concurrent Ranking;
+* Concurrenten;
+* Competition Relevance;
+* Price Relevance;
+* Influence;
+* Competition DNA;
+* Product Matching;
+* Price Observations;
+* Future Threat;
+* Assortimentsvergelijking.
+
+## Pricing
+
+* Pricing Dashboard;
+* Pricing Grid;
+* Price Recommendations;
+* Price Gap;
+* Margin;
+* Price History;
+* Pricing Scenarios.
+
+## CatMan
+
+* Category Dashboard;
+* Brand Intelligence;
+* BCG;
+* Assortiment;
+* Customer Switching;
+* Cannibalisation;
+* Basket;
+* Promotions;
+* Opportunities.
+
+## Inkoop
+
+* Supplier Intelligence;
+* Purchase Price;
+* Supplier Risk;
+* Supplier Comparison;
+* Procurement Opportunities.
+
+## Supply Chain
+
+* Stock;
+* Availability;
+* Stockouts;
+* Lead Time;
+* Demand Forecast;
+* Inventory Risk.
+
+## SEO / SEA / GEO / AEO
+
+* Traffic;
+* Search;
+* Demand;
+* Keywords;
+* Visibility;
+* Conversion;
+* content opportunities.
+
+## Loyalty
+
+* Customer Value;
+* category behaviour;
+* campaigns;
+* retention.
+
+## Forecast
+
+* Sales Forecast;
+* Margin Forecast;
+* Demand Forecast;
+* Risk.
+
+## Decision Engine
+
+* Intelligence Signals;
+* scenarios;
+* recommendations.
+
+## Management
+
+* management KPI's;
+* opportunities;
+* risks;
+* category drilldown.
+
+## Commercial AI Copilot
+
+Copilot moet dezelfde geselecteerde productscope respecteren.
+
+---
+
+# 19. GLOBAL FILTER CONTEXT
+
+Bouw of verbeter één centrale:
+
+**GlobalProductFilterContext**
+
+Met minimaal:
+
+* main_category_id
+* subcategory_id
+* sub_subcategory_id
+* sub_sub_subcategory_id
+* product_id
+
+Deze filtercontext moet tijdens navigatie behouden blijven.
+
+Voorbeeld:
+
+Gebruiker kiest in Concurrentie:
+
+Office_Food
+→ Drinks
+→ Coffee.
+
+Gebruiker gaat vervolgens naar Pricing.
+
+Dezelfde filters blijven actief.
+
+Daarna naar Brand.
+
+Nog steeds:
+
+Office_Food
+→ Drinks
+→ Coffee.
+
+---
+
+# 20. DUIDELIJKE ACTIEVE FILTERWEERGAVE
+
+Toon boven relevante schermen bijvoorbeeld:
+
+**Actieve productselectie**
+
+Hoofdcategorie:
+Office_Food
+
+Subcategorie:
+Drinks
+
+Sub-Subcategorie:
+Coffee
+
+Sub-Sub-Subcategorie:
+Alle
+
+Product:
+Alle
+
+Toon daarnaast:
+
+**Filters wissen**
+
+---
+
+# 21. DROPDOWNGEDRAG
+
+Ieder veld moet:
+
+* zoekbaar zijn;
+* alfabetisch kunnen sorteren;
+* alleen geldige opties tonen;
+* loading-state hebben;
+* empty-state hebben;
+* aantallen kunnen tonen indien performant.
+
+Bijvoorbeeld:
+
+Coffee (187 producten)
+
+Gebruik productaantallen alleen wanneer deze efficiënt kunnen worden berekend.
+
+---
+
+# 22. DISABLED STATE
+
+Wanneer nog geen Hoofdcategorie is geselecteerd:
+
+Subcategorie mag:
+
+A. alle beschikbare subcategorieën tonen binnen alle hoofdcategorieën;
+
+OF bij voorkeur:
+
+B. visueel beschikbaar blijven maar duidelijk aangeven:
+
+“Selecteer eerst een hoofdcategorie voor een gerichte selectie.”
+
+BELANGRIJK:
+
+Wanneer geen filter gekozen is, moet de data zelf wel volledig zichtbaar blijven.
+
+Voor UX heeft voorkeursgedrag:
+
+* Hoofdcategorie direct selecteerbaar;
+* Subcategorie wordt actief na selectie Hoofdcategorie;
+* Sub-Subcategorie wordt actief na selectie Subcategorie;
+* Sub-Sub-Subcategorie wordt actief na selectie Sub-Subcategorie;
+* Product wordt actief zodra voldoende context bestaat.
+
+Gebruik dit tenzij de bestaande UX een aantoonbaar betere aanpak heeft.
+
+---
+
+# 23. PRODUCT MOET EVENTUEEL EERDER ZOEKBAAR KUNNEN ZIJN
+
+Naast cascading filtering moet een gebruiker ook snel rechtstreeks een product kunnen zoeken.
+
+Wanneer geen categorie is gekozen en de gebruiker zoekt rechtstreeks naar SKU/EAN/product:
+
+toon toegestane producten uit de volledige productlijst.
+
+Wanneer hij vervolgens een product kiest:
+
+leid indien mogelijk automatisch de correcte categorievelden af:
+
+Hoofdcategorie
+Subcategorie
+Sub-Subcategorie
+Sub-Sub-Subcategorie.
+
+Zo blijft de context duidelijk.
+
+---
+
+# 24. CENTRALE PRODUCTHIERARCHIE IS LEIDEND
+
+Gebruik uitsluitend de canonical product hierarchy als bron voor deze filters.
+
+Niet:
+
+* losse Competition categories;
+* PriceShape category tags;
+* zelf gegenereerde AI-categorieën;
+* frontend-hardcoding.
+
+PriceShape-categorieën mogen als bronmetadata worden opgeslagen.
+
+DRS / de centrale Product Master + canonical hierarchy bepalen de commerciële productindeling.
+
+---
+
+# 25. NIEUWE CATEGORIEËN AUTOMATISCH BESCHIKBAAR
+
+Wanneer later nieuwe producthiërarchie wordt toegevoegd vanuit DRS/import:
+
+bijvoorbeeld:
+
+Office_Food
+→ Snacks
+→ Protein Bars
+
+dan moet dit automatisch in de filters verschijnen.
+
+Geen nieuwe code deployment nodig.
+
+Proces:
+
+source
+→ staging
+→ validation
+→ canonical hierarchy
+→ filters.
+
+---
+
+# 26. NIEUWE PRODUCTEN AUTOMATISCH BESCHIKBAAR
+
+Nieuwe producten uit DRS moeten na correcte hierarchy mapping automatisch verschijnen binnen:
+
+Product.
+
+Voorbeeld:
+
+nieuw product gekoppeld aan:
+
+Office_Food
+→ Drinks
+→ Coffee
+→ Beans.
+
+Dan moet het product onmiddellijk na sync selecteerbaar zijn wanneer deze keten gekozen wordt.
+
+---
+
+# 27. PRICESHAPE
+
+PriceShape-productdata moet via de interne productmapping dezelfde productscope volgen.
+
+Voorbeeld:
+
+Hoofdcategorie:
+Office_Food.
+
+Dan mag Competition uitsluitend PriceShape-waarnemingen gebruiken waarvan het gematchte interne product onder Office_Food valt.
+
+Niet simpelweg filteren op PriceShape-category text.
+
+Gebruik:
+
+PriceShape observation
+→ matched internal product
+→ product hierarchy assignment
+→ selected product scope.
+
+---
+
+# 28. SQL / QUERY IMPLEMENTATIE
+
+Los dit centraal op.
+
+Maak een functie/service zoals:
+
+resolveProductScope(filters)
+
+Input:
+
+* main_category_id
+* subcategory_id
+* sub_subcategory_id
+* sub_sub_subcategory_id
+* product_id
+
+Output:
+
+* effective hierarchy node
+* descendant hierarchy IDs
+* effective product IDs
+* count
+* validation status.
+
+Iedere module gebruikt deze service.
+
+Maak NIET iedere module zijn eigen categorie-query.
+
+---
+
+# 29. PRODUCT SCOPE SERVICE
+
+Maak bijvoorbeeld:
+
+ProductScopeService
+
+Functies:
+
+getMainCategories()
+
+getSubcategories(mainCategoryId)
+
+getSubSubcategories(subcategoryId)
+
+getSubSubSubcategories(subSubcategoryId)
+
+getProducts(filters)
+
+resolveProductIds(filters)
+
+validateHierarchyPath(filters)
+
+getBreadcrumb(filters)
+
+clearDependentFilters(changedLevel).
+
+---
+
+# 30. API-ENDPOINTS
+
+Gebruik waar passend:
+
+GET /api/product-filters/main-categories
+
+GET /api/product-filters/subcategories?mainCategoryId=
+
+GET /api/product-filters/sub-subcategories?subcategoryId=
+
+GET /api/product-filters/sub-sub-subcategories?subSubcategoryId=
+
+GET /api/product-filters/products?mainCategoryId=&subcategoryId=&subSubcategoryId=&subSubSubcategoryId=&search=
+
+POST /api/product-filters/resolve-scope
+
+Maak queries snel en geïndexeerd.
+
+---
+
+# 31. GEEN FRONTEND-ONLY FILTER
+
+Harde technische eis:
+
+NIET:
+
+alle producten ophalen
+→ in browser filteren.
+
+WEL:
+
+filter parameters
+→ backend
+→ ProductScopeService
+→ database query
+→ alleen relevante dataset.
+
+Dit is noodzakelijk voor:
+
+* correctheid;
+* performance;
+* security;
+* schaalbaarheid.
+
+---
+
+# 32. PAGINA CONCURRENTIE – VOORBEELD
+
+Boven CI Dashboard moet bijvoorbeeld staan:
+
+**Hoofdcategorie**
+[ Office_Food ▼ ]
+
+**Subcategorie**
+[ Drinks ▼ ]
+
+**Sub-Subcategorie**
+[ Coffee ▼ ]
+
+**Sub-Sub-Subcategorie**
+[ Alle ▼ ]
+
+**Product**
+[ Alle producten ▼ ]
+
+Daaronder:
+
+Competition Ranking.
+
+Deze ranking mag dan uitsluitend worden berekend op de gekozen scope.
+
+---
+
+# 33. CONCURRENTIE PER CATEGORIENIVEAU
+
+Dezelfde concurrent kan verschillende scores hebben per gekozen scope.
+
+Bijvoorbeeld:
+
+Concurrent X
+
+Alle producten:
+Competition Relevance = 71
+
+Office_Food:
+86
+
+Office_Food → Drinks:
+91
+
+Office_Food → Drinks → Coffee:
+94
+
+Office_Writing:
+24.
+
+Gebruik dus niet één globale Competition Relevance-score voor alle categorieën.
+
+---
+
+# 34. PRODUCTNIVEAU CONCURRENTIE
+
+Wanneer een Product wordt geselecteerd:
+
+toon minimaal:
+
+* concurrerende aanbieders;
+* matches;
+* prijzen;
+* Price Relevance;
+* beschikbaarheid;
+* prijsverschil;
+* voorraad indien bekend;
+* last seen;
+* source;
+* confidence.
+
+---
+
+# 35. CATMAN VOORBEELD
+
+Selecteer:
+
+Hoofdcategorie:
+Office_Food.
+
+CatMan Dashboard toont uitsluitend Office_Food:
+
+* omzet;
+* marge;
+* merken;
+* BCG;
+* switching;
+* basket;
+* promotions;
+* opportunities.
+
+Geen Office_Writing.
+
+---
+
+# 36. MANAGEMENTGEDRAG
+
+Geen filters:
+
+Management ziet gehele productportfolio.
+
+Office_Food geselecteerd:
+
+Management ziet Office_Food.
+
+Coffee geselecteerd:
+
+Management ziet Coffee.
+
+Product geselecteerd:
+
+Management ziet uitsluitend dat product waar de metric productniveau ondersteunt.
+
+---
+
+# 37. COPILOT
+
+Copilot moet actieve filters automatisch meekrijgen.
+
+Voorbeeld actieve context:
+
+Office_Food
+→ Drinks
+→ Coffee.
+
+Gebruiker vraagt:
+
+“Welke concurrent vraagt aandacht?”
+
+Copilot moet dit interpreteren als:
+
+“Welke concurrent vraagt aandacht binnen Office_Food → Drinks → Coffee?”
+
+Toon in het antwoord:
+
+**Actieve scope: Office_Food > Drinks > Coffee**
+
+---
+
+# 38. RESET KNOP
+
+Maak één duidelijke knop:
+
+**Alle productfilters wissen**
+
+Na klik:
+
+Hoofdcategorie = Alle
+Subcategorie = Alle
+Sub-Subcategorie = Alle
+Sub-Sub-Subcategorie = Alle
+Product = Alle
+
+Resultaat:
+
+volledige productdataset.
+
+---
+
+# 39. FILTER CHIPS
+
+Toon eventueel actieve filters als chips:
+
+Office_Food ×
+Drinks ×
+Coffee ×
+
+Wanneer Office_Food wordt verwijderd:
+
+verwijder automatisch ook:
+
+Drinks
+Coffee
+alle onderliggende selectie.
+
+---
+
+# 40. URL STATE
+
+Bewaar filters waar technisch logisch in URL/state.
+
+Bijvoorbeeld:
+
+?mainCategory=123
+&subcategory=456
+&subSubcategory=789
+&product=all
+
+Zo blijft selectie behouden bij refresh en kan een pagina worden gedeeld.
+
+Respecteer permissions.
+
+---
+
+# 41. SAVED VIEWS
+
+Saved Views moeten deze filters opslaan.
+
+Voorbeelden:
+
+“Office Food totaal”
+
+Hoofdcategorie:
+Office_Food.
+
+“Coffee concurrentie”
+
+Office_Food
+→ Drinks
+→ Coffee.
+
+“Coffee Beans”
+
+Office_Food
+→ Drinks
+→ Coffee
+→ Beans.
+
+---
+
+# 42. EXPORTS
+
+Exports moeten dezelfde filters respecteren.
+
+Wanneer Office_Food actief is:
+
+mag Excel/CSV/PDF export uitsluitend Office_Food-data bevatten.
+
+Neem exportmetadata op:
+
+* hoofdcategorie;
+* subcategorie;
+* sub-subcategorie;
+* sub-sub-subcategorie;
+* product;
+* periode;
+* shop;
+* generated_at.
+
+---
+
+# 43. DATA QUALITY
+
+Detecteer:
+
+* product zonder hoofdcategorie;
+* product zonder geldige path;
+* orphan subcategory;
+* incorrect parent;
+* product gekoppeld aan verkeerde branch;
+* duplicate hierarchy mapping;
+* ontbrekend product;
+* inactive category met actieve products.
+
+Deze fouten mogen niet leiden tot stille vervuiling van filters.
+
+---
+
+# 44. TEST 1 – GEEN FILTER
+
+Filter:
+
+geen.
+
+Verwacht:
+
+alle producten.
+
+Controleer:
+
+* totaal product count;
+* dashboards;
+* analyses;
+* rankings.
+
+Geen onverwachte categoriebeperking.
+
+---
+
+# 45. TEST 2 – OFFICE_FOOD
+
+Selecteer:
+
+Hoofdcategorie = Office_Food.
+
+Controleer:
+
+Subcategorie bevat uitsluitend children van Office_Food.
+
+Controleer databasequery:
+
+ieder resultaatproduct moet descendant zijn van Office_Food.
+
+Controleer dat geen Office_Writing-product voorkomt.
+
+---
+
+# 46. TEST 3 – DRILLDOWN
+
+Selecteer:
+
+Office_Food
+→ Drinks
+→ Coffee.
+
+Controleer:
+
+Sub-Sub-Subcategorie bevat uitsluitend children van Coffee.
+
+Product bevat uitsluitend producten onder Coffee.
+
+Controleer dezelfde scope in:
+
+* CI Dashboard;
+* Pricing;
+* Brand;
+* CatMan;
+* Basket;
+* Decision Engine.
+
+---
+
+# 47. TEST 4 – VERANDER HOOFDCATEGORIE
+
+Begin:
+
+Office_Food
+→ Drinks
+→ Coffee.
+
+Verander naar:
+
+Office_Writing.
+
+Verwacht:
+
+Subcategorie reset.
+
+Sub-Subcategorie reset.
+
+Sub-Sub-Subcategorie reset.
+
+Product reset.
+
+Subcategorie toont alleen children van Office_Writing.
+
+---
+
+# 48. TEST 5 – ONGELDIGE COMBINATIE API
+
+Stuur handmatig API-request:
+
+mainCategory = Office_Food
+
+subcategory = een Office_Writing-node.
+
+API moet dit afwijzen of veilig corrigeren.
+
+Geen gemengde data retourneren.
+
+---
+
+# 49. TEST 6 – PRODUCT
+
+Selecteer één Product.
+
+Controleer dat:
+
+alle data die productniveau ondersteunt alleen betrekking heeft op dit product.
+
+Geen andere SKU's in resultaten.
+
+---
+
+# 50. TEST 7 – NAVIGATIE
+
+Selecteer:
+
+Office_Food
+→ Drinks
+→ Coffee.
+
+Navigeer:
+
+Competition
+→ Pricing
+→ CatMan
+→ Basket
+→ Decision Engine.
+
+De selectie blijft actief.
+
+Resultaten blijven dezelfde productscope gebruiken.
+
+---
+
+# 51. TEST 8 – NIEUWE CATEGORIE
+
+Voeg in testdata een nieuwe geldige category path toe.
+
+Run hierarchy sync.
+
+Controleer dat:
+
+* node in database staat;
+* parent correct is;
+* dropdown automatisch is bijgewerkt;
+* geen frontend-codewijziging nodig is.
+
+---
+
+# 52. TEST 9 – NIEUW PRODUCT
+
+Voeg testproduct toe onder Coffee.
+
+Run product sync.
+
+Controleer dat Product dropdown dit product toont bij Coffee.
+
+Controleer dat het niet zichtbaar is onder Office_Writing.
+
+---
+
+# 53. PERFORMANCE
+
+De productdatabase bevat veel producten.
+
+Gebruik:
+
+* server-side filtering;
+* indexed hierarchy columns;
+* caching waar geschikt;
+* lazy loading;
+* debounced product search;
+* pagination.
+
+De Product-dropdown mag niet tienduizenden records tegelijk naar browser sturen.
+
+---
+
+# 54. UI-EIS
+
+Gebruik compacte, duidelijke velden.
+
+Bijvoorbeeld desktop:
+
+[ Hoofdcategorie ▼ ]
+[ Subcategorie ▼ ]
+[ Sub-Subcategorie ▼ ]
+[ Sub-Sub-Subcategorie ▼ ]
+[ Product zoeken... ▼ ]
+
+[ Filters wissen ]
+
+Gebruik GEEN enorm tree-menu als primaire filterinterface.
+
+Een tree-view mag eventueel bestaan op de aparte Producthiërarchie-beheerpagina.
+
+Voor dagelijks analyseren gebruiken we de vijf afzonderlijke filters.
+
+---
+
+# 55. LABELS
+
+Gebruik in de Nederlandse UI exact:
+
+**Hoofdcategorie**
+
+**Subcategorie**
+
+**Sub-Subcategorie**
+
+**Sub-Sub-Subcategorie**
+
+**Product**
+
+Gebruik niet:
+
+Level 1
+Level 2
+Level 3
+
+op reguliere gebruikersschermen.
+
+Intern mogen levels technisch wel zo worden opgeslagen.
+
+---
+
+# 56. OMGAAN MET ONDIEPERE CATEGORIEPADEN
+
+Niet ieder pad hoeft alle vier categorieniveaus te hebben.
+
+Als een categorie bijvoorbeeld eindigt op Sub-Subcategorie:
+
+maak Sub-Sub-Subcategorie leeg / niet van toepassing.
+
+Product moet dan wel selecteerbaar zijn binnen de geselecteerde bestaande path.
+
+De gebruiker hoeft geen fictief categorieniveau te kiezen.
+
+---
+
+# 57. OMGAAN MET DIEPERE HIERARCHIE
+
+Als de centrale database incidenteel meer niveaus bevat dan:
+
+Hoofdcategorie
+Subcategorie
+Sub-Subcategorie
+Sub-Sub-Subcategorie
+
+analyseer hoe deze veilig aan de gebruikersinterface gekoppeld moeten worden.
+
+Gebruik bij voorkeur:
+
+de vier gevraagde categorievelden
+
+plus
+
+Product,
+
+zonder informatieverlies.
+
+Als een extra categorieniveau commercieel noodzakelijk blijkt, rapporteer dit eerst in Plan Mode voordat een extra gebruikersveld wordt toegevoegd.
+
+---
+
+# 58. GEEN DATALEKKAGE TUSSEN CATEGORIEËN
+
+Een van de belangrijkste acceptance criteria:
+
+Wanneer Office_Food actief is, mag geen Office_Writing-data voorkomen in:
+
+* API-response;
+* table;
+* chart;
+* KPI;
+* ranking;
+* recommendation;
+* export;
+* Copilot-resultaat.
+
+Maak hiervoor automatische tests.
+
+---
+
+# 59. ROOT CAUSE BESTAANDE FILTERS
+
+Analyseer voordat je implementeert:
+
+* waar huidige categorie-dropdown data vandaan haalt;
+* of PriceShape category-text wordt gebruikt;
+* of canonical hierarchy daadwerkelijk wordt gebruikt;
+* of modules verschillende categorie-definities hanteren;
+* of filtering alleen frontend-side plaatsvindt.
+
+Documenteer de gevonden inconsistenties.
+
+---
+
+# 60. PLAN MODE
+
+Voer eerst in Plan Mode uit:
+
+1. Existing Filter Audit
+2. Canonical Hierarchy Audit
+3. Product Mapping Audit
+4. Module Query Audit
+5. Global Filter Architecture
+6. ProductScopeService ontwerp
+7. API ontwerp
+8. UI component ontwerp
+9. Migration plan
+10. Performance plan
+11. Testplan.
+
+Herbruik bestaande correcte functionaliteit.
+
+Vervang alleen inconsistente of foutieve onderdelen.
+
+---
+
+# 61. IMPLEMENTATIEVOLGORDE
+
+Gebruik deze volgorde:
+
+1. Canonical hierarchy valideren.
+2. Product-to-hierarchy mappings valideren.
+3. ProductScopeService bouwen.
+4. Cascading filter API bouwen.
+5. Herbruikbare filtercomponent bouwen.
+6. Global Filter Context bouwen.
+7. CI Dashboard migreren.
+8. Competition overige pagina's migreren.
+9. Pricing migreren.
+10. CatMan migreren.
+11. overige Intelligence Engines migreren.
+12. Decision Engine migreren.
+13. Copilot migreren.
+14. exports migreren.
+15. end-to-end tests.
+
+---
+
+# 62. DEFINITION OF DONE
+
+Deze wijziging is pas afgerond wanneer:
+
+* er vijf duidelijke productfilters bestaan;
+* Hoofdcategorie werkt;
+* Subcategorie alleen geldige children toont;
+* Sub-Subcategorie alleen geldige children toont;
+* Sub-Sub-Subcategorie alleen geldige children toont;
+* Product alleen relevante producten toont;
+* bovenliggende wijziging onderliggende filters reset;
+* geen filter alle producten toont;
+* Office_Food alleen Office_Food-data toont;
+* filtering backend-side gebeurt;
+* alle belangrijke modules dezelfde ProductScopeService gebruiken;
+* filtercontext bij navigatie behouden blijft;
+* exports dezelfde scope respecteren;
+* Copilot dezelfde scope respecteert;
+* nieuwe categorieën automatisch worden opgepakt;
+* nieuwe producten automatisch worden opgepakt;
+* ongeldige categoriecombinaties technisch onmogelijk zijn;
+* automatische cross-category leakage tests slagen.
+
+---
+
+# 63. HARDE EINDTEST
+
+Voer uiteindelijk deze test uit:
+
+## Situatie A
+
+Geen filters geselecteerd.
+
+Verwacht:
+
+volledig productportfolio.
+
+## Situatie B
+
+Hoofdcategorie:
+Office_Food.
+
+Verwacht:
+
+alleen Office_Food en descendants.
+
+## Situatie C
+
+Office_Food
+→ Drinks.
+
+Verwacht:
+
+alleen Drinks en descendants.
+
+## Situatie D
+
+Office_Food
+→ Drinks
+→ Coffee.
+
+Verwacht:
+
+alleen Coffee en descendants.
+
+## Situatie E
+
+Office_Food
+→ Drinks
+→ Coffee
+→ Beans.
+
+Verwacht:
+
+alleen Beans-producten.
+
+## Situatie F
+
+Specifiek product geselecteerd.
+
+Verwacht:
+
+alleen geselecteerd product.
+
+Voer deze zes situaties uit op minimaal:
+
+* Competition;
+* Pricing;
+* CatMan;
+* Brand;
+* Basket;
+* Decision Engine;
+* Copilot.
+
+Geen enkele test mag data uit een sibling- of andere hoofdcategorie bevatten.
+
+---
+
+# 64. EINDEDOEL
+
+De gebruiker moet op ieder relevant scherm onmiddellijk kunnen bepalen:
+
+**Over welk deel van het assortiment wil ik nu informatie zien?**
+
+Met een logische selectie:
+
+Hoofdcategorie
+→ Subcategorie
+→ Sub-Subcategorie
+→ Sub-Sub-Subcategorie
+→ Product.
+
+Zonder filter:
+
+**alles.**
+
+Met Office_Food geselecteerd:
+
+**uitsluitend Office_Food.**
+
+Met Coffee geselecteerd:
+
+**uitsluitend Coffee.**
+
+Met één product geselecteerd:
+
+**uitsluitend dat product.**
+
+Deze logica moet overal in het AI Commercial Intelligence Platform exact hetzelfde zijn.
+
+START NU IN PLAN MODE, CONTROLEER EERST DE BESTAANDE IMPLEMENTATIE EN VOER DAARNA DEZE WIJZIGING PLATFORMBREED UIT.

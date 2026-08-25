@@ -283,15 +283,27 @@ class TestCheckAndReserveBudget(unittest.TestCase):
                              calls_reserved=0, tokens_reserved=already)
         self.assertTrue(db.committed)
 
-    def test_upfront_covers_all_tool_rounds(self):
-        """De upfront-reservering dekt alle MAX_TOOL_ROUNDS LLM-rondes (voltooiing + invoer)."""
+    def test_per_request_cap_covers_all_tool_rounds(self):
+        """De harde per-verzoek cap dekt alle MAX_TOOL_ROUNDS LLM-rondes
+        (voltooiing + invoer); de upfront-reservering is bewust lager
+        (realistische schatting, taak #298) maar altijd ≥ 1 rondebudget."""
         worst_case_completion = ai_gateway.MAX_TOOL_ROUNDS * ai_gateway._MAX_COMPLETION_PER_CALL
         self.assertGreaterEqual(
-            ai_gateway._UPFRONT_TOKEN_RESERVATION,
+            ai_gateway._PER_REQUEST_TOKEN_CAP,
             worst_case_completion,
-            f"_UPFRONT_TOKEN_RESERVATION ({ai_gateway._UPFRONT_TOKEN_RESERVATION}) moet "
+            f"_PER_REQUEST_TOKEN_CAP ({ai_gateway._PER_REQUEST_TOKEN_CAP}) moet "
             f"minstens MAX_TOOL_ROUNDS × max_completion_tokens "
             f"({worst_case_completion}) zijn",
+        )
+        self.assertGreaterEqual(
+            ai_gateway._UPFRONT_TOKEN_RESERVATION,
+            ai_gateway._MAX_COMPLETION_PER_CALL,
+            "De upfront-reservering moet minstens één volledig rondebudget dekken",
+        )
+        self.assertLessEqual(
+            ai_gateway._UPFRONT_TOKEN_RESERVATION,
+            ai_gateway._PER_REQUEST_TOKEN_CAP,
+            "De reservering mag nooit boven de per-verzoek cap liggen",
         )
 
     def test_exceeded_is_logged_with_separate_session(self):
@@ -571,17 +583,17 @@ class TestPerRoundTokenCheck(unittest.TestCase):
             def rollback(self): pass
         return FakeDb()
 
-    def test_stops_after_round_exceeds_upfront_reservation(self):
+    def test_stops_after_round_exceeds_per_request_cap(self):
         """
-        Als na de eerste LLM-ronde total_tokens >= _UPFRONT_TOKEN_RESERVATION,
+        Als na de eerste LLM-ronde total_tokens >= _PER_REQUEST_TOKEN_CAP,
         stopt run_copilot verdere rondes (status='budget_exceeded').
 
-        De drempel is de per-verzoek toewijzing (_UPFRONT_TOKEN_RESERVATION),
+        De drempel is de harde per-verzoek cap (_PER_REQUEST_TOKEN_CAP),
         NIET de dagelijkse max_tokens, zodat eerder verbruik correct wordt
         meegewogen. (Een verzoek met 400k tokens_reserved bij een 500k dagcap
-        heeft slechts 98k toewijzing, niet 500k.)
+        heeft slechts de per-verzoek cap als toewijzing, niet 500k.)
         """
-        upfront = ai_gateway._UPFRONT_TOKEN_RESERVATION
+        upfront = ai_gateway._PER_REQUEST_TOKEN_CAP
         fake_client = MagicMock()
         # Eerste ronde: net boven de per-verzoek toewijzing
         fake_client.chat.completions.create.return_value = self._make_resp(upfront + 1)
@@ -622,7 +634,7 @@ class TestPerRoundTokenCheck(unittest.TestCase):
         pii_scrub wordt gemockt zodat de regressietest niet afhankelijk is van
         de regex-implementatie (die langzaam kan zijn op grote strings).
         """
-        upfront = ai_gateway._UPFRONT_TOKEN_RESERVATION
+        upfront = ai_gateway._PER_REQUEST_TOKEN_CAP
         completion_max = ai_gateway._MAX_COMPLETION_PER_CALL
         fake_client = MagicMock()
 
