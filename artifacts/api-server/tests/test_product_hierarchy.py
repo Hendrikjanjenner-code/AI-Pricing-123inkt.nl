@@ -43,7 +43,13 @@ def _csv(rows: list[str]) -> bytes:
     return ("optionId,productCode,path\n" + "\n".join(rows)).encode()
 
 
-def _upload(client, headers, content: bytes, name="hier.csv"):
+def _upload(client, headers, content: bytes, name=None):
+    # Unieke bestandsnaam per testrun: zo is testresidu herkenbaar én kan de
+    # teardown de ImportJob-rijen gericht verwijderen. Test-importjobs die
+    # achterblijven met status "geimporteerd" worden anders de "laatst
+    # toegepaste import" voor auto_assign_new_products, waardoor echte
+    # feed-producten nooit meer automatisch worden toegewezen.
+    name = name or f"{PFX}-hier.csv"
     r = client.post(
         "/api/product-hierarchy/import/upload",
         headers=headers,
@@ -77,6 +83,21 @@ def ph_products():
     db.query(A).filter(A.sku_id.in_(skus)).delete(synchronize_session=False)
     db.query(C).filter(C.sku_id.in_(skus)).delete(synchronize_session=False)
     db.query(S).filter(S.product_code.in_(skus)).delete(synchronize_session=False)
+    # ImportJob-residu opruimen: test-jobs mogen nooit als "laatst toegepaste
+    # import" achterblijven (zie _upload). Eerst alle verwijzingen lossnijden
+    # (retire_auto_hierarchy stempelt superseded rijen met het job-id).
+    J = models.ImportJob
+    job_ids = [j for (j,) in db.query(J.id).filter(
+        J.upload_type == "product_hierarchy",
+        J.filename.like(f"{PFX}%"))]
+    if job_ids:
+        db.query(A).filter(A.import_job_id.in_(job_ids)).update(
+            {A.import_job_id: None}, synchronize_session=False)
+        db.query(C).filter(C.import_job_id.in_(job_ids)).delete(
+            synchronize_session=False)
+        db.query(S).filter(S.job_id.in_(job_ids)).delete(
+            synchronize_session=False)
+        db.query(J).filter(J.id.in_(job_ids)).delete(synchronize_session=False)
     # diepste nodes eerst verwijderen i.v.m. self-FK
     if node_ids:
         for n in sorted(db.query(N).filter(N.id.in_(node_ids)),
@@ -475,3 +496,56 @@ def test_tree_telt_subtree_producten(client, admin_headers, ph_products):
     assert r.status_code == 200
     kids = {n["id"]: n for n in r.json()}
     assert kids[mid_id]["sku_count"] == 2
+
+
+def test_testimport_kan_geen_laatst_toegepaste_import_blijven(
+        client, admin_headers, ph_products):
+    """Bewaakt de opruimafspraak: een test-apply mag na cleanup nooit de
+    "laatst toegepaste import" zijn — anders koppelt auto_assign_new_products
+    echte feed-producten nooit meer aan de echte Excel-boom (incident 25-08)."""
+    from services.product_hierarchy import last_applied_import
+    sku1, _ = ph_products
+
+    db = SessionLocal()
+    try:
+        voor = last_applied_import(db)
+        voor_id = voor.id if voor else None
+
+        up = _upload(client, admin_headers, _csv([
+            f"{PFX}-GO1,{sku1},{PFX}-Guard > {PFX}-GuardLeaf",
+        ]))
+        r = client.post(f"/api/product-hierarchy/import/{up['job_id']}/validate",
+                        headers=admin_headers)
+        assert r.status_code == 200, r.text
+        r = client.post(f"/api/product-hierarchy/import/{up['job_id']}/apply",
+                        headers=admin_headers)
+        assert r.status_code == 200, r.text
+
+        db.expire_all()
+        na = last_applied_import(db)
+        # 1) déze apply is nu de laatst toegepaste en herkenbaar aan de
+        #    PFX-bestandsnaam (dus opruimbaar door de teardown) …
+        assert na is not None and na.id == up["job_id"]
+        assert na.filename.startswith(PFX)
+
+        # 2) … en de teardown-opruimlogica herstelt de oude situatie.
+        A = models.ProductHierarchyAssignment
+        C = models.ProductHierarchyChangeLog
+        S = models.ProductHierarchyStagingRow
+        J = models.ImportJob
+        job_ids = [j for (j,) in db.query(J.id).filter(
+            J.upload_type == "product_hierarchy",
+            J.filename.like(f"{PFX}%"))]
+        db.query(A).filter(A.import_job_id.in_(job_ids)).update(
+            {A.import_job_id: None}, synchronize_session=False)
+        db.query(C).filter(C.import_job_id.in_(job_ids)).delete(
+            synchronize_session=False)
+        db.query(S).filter(S.job_id.in_(job_ids)).delete(
+            synchronize_session=False)
+        db.query(J).filter(J.id.in_(job_ids)).delete(synchronize_session=False)
+        db.commit()
+
+        hersteld = last_applied_import(db)
+        assert (hersteld.id if hersteld else None) == voor_id
+    finally:
+        db.close()

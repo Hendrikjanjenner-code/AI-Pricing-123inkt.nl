@@ -95,14 +95,24 @@ def scenario(hierarchy_suite_lock):
     if skus:
         db.query(A).filter(A.sku_id.in_(skus)).delete(synchronize_session=False)
         db.query(C).filter(C.sku_id.in_(skus)).delete(synchronize_session=False)
-    db.query(S).filter(S.job_id == job.id).delete(synchronize_session=False)
     if node_ids:
         for n in sorted(db.query(N).filter(N.id.in_(node_ids)),
                         key=lambda x: -(x.level or 0)):
             db.delete(n)
-    db.query(C).filter(C.import_job_id == job.id).delete(synchronize_session=False)
-    db.query(models.ImportJob).filter(models.ImportJob.id == job.id) \
-        .delete(synchronize_session=False)
+    # ALLE importjobs van deze testrun opruimen (job én eventuele job2's),
+    # óók als een test halverwege faalde: een achtergebleven job met status
+    # "geimporteerd" en toekomstige completed_at zou anders de "laatst
+    # toegepaste import" worden en auto_assign in productiepaden breken.
+    J = models.ImportJob
+    job_ids = [j for (j,) in db.query(J.id).filter(
+        J.upload_type == "product_hierarchy",
+        J.filename == f"{PFX}.csv")]
+    if job_ids:
+        db.query(A).filter(A.import_job_id.in_(job_ids)).update(
+            {A.import_job_id: None}, synchronize_session=False)
+        db.query(S).filter(S.job_id.in_(job_ids)).delete(synchronize_session=False)
+        db.query(C).filter(C.import_job_id.in_(job_ids)).delete(synchronize_session=False)
+        db.query(J).filter(J.id.in_(job_ids)).delete(synchronize_session=False)
     # Herstel de auto-boomstaat die apply_job heeft geretireerd.
     if auto_node_ids:
         db.query(N).filter(N.id.in_(auto_node_ids)).update(
@@ -235,15 +245,7 @@ def test_nieuwste_toegepaste_import_wint_van_verouderde(scenario):
     assert len(rows) == 1
     assert rows[0].node_id == _leaf(db, "Markers").id
     assert rows[0].import_job_id == job2.id
-
-    # teardown-hulp: job2-restanten opruimen (zelfde PFX-conventies)
-    C = models.ProductHierarchyChangeLog
-    S = models.ProductHierarchyStagingRow
-    db.query(S).filter(S.job_id == job2.id).delete(synchronize_session=False)
-    db.query(C).filter(C.import_job_id == job2.id).delete(synchronize_session=False)
-    db.query(models.ImportJob).filter(models.ImportJob.id == job2.id) \
-        .delete(synchronize_session=False)
-    db.commit()
+    # job2 wordt door de scenario-finalizer opgeruimd (PFX-bestandsnaam).
 
 
 def test_lopende_apply_blokkeert_auto_assign(scenario):
@@ -299,15 +301,7 @@ def test_lopende_apply_blokkeert_auto_assign(scenario):
     rows = _active(db, f"{PFX}-NEW-RACE")
     assert len(rows) == 1
     assert rows[0].node_id == _leaf(db, "Markers").id
-
-    # job2-restanten opruimen
-    C = models.ProductHierarchyChangeLog
-    S = models.ProductHierarchyStagingRow
-    db.query(S).filter(S.job_id == job2.id).delete(synchronize_session=False)
-    db.query(C).filter(C.import_job_id == job2.id).delete(synchronize_session=False)
-    db.query(models.ImportJob).filter(models.ImportJob.id == job2.id) \
-        .delete(synchronize_session=False)
-    db.commit()
+    # job2 wordt door de scenario-finalizer opgeruimd (PFX-bestandsnaam).
 
 
 def test_sku_van_gekoppeld_product_wint_van_ean_collision(scenario):
