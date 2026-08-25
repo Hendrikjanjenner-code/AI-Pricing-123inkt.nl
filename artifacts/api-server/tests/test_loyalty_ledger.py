@@ -398,10 +398,14 @@ def test_expiry_forecast_fifo_redeems_reduce_buckets(db, member):
 def test_expiry_forecast_disabled_policy_empty(db):
     """Bij een uitgeschakeld verloopbeleid bevat liability_summary een lege
     verloopcurve (geen speculatieve buckets)."""
-    policy = li._get_expiry_policy(db)
-    was_enabled = policy.enabled
+    # Residu-bestendig (shared test-DB): andere tests kunnen shops met een
+    # eigen enabled verloopbeleid achterlaten; het ongescopete dashboard
+    # aggregeert over álle loyalty-shops. Schakel daarom elk beleid uit.
+    policies = [li._get_expiry_policy(db, sid) for sid in li._loyalty_shop_ids(db)]
+    policies.append(li._get_expiry_policy(db))
     try:
-        policy.enabled = False
+        for p in policies:
+            p.enabled = False
         db.flush()
         summary = li.liability_summary(db)
         assert summary["expiry_forecast"] == []

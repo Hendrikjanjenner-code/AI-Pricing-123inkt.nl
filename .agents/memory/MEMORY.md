@@ -77,4 +77,4 @@
 - [Batch feed-ingest & expliciete bron](feed-batch-ingest.md) — spool-passes, guard vóór elke delete, toggles per her-iteratie; weigering mag nooit "niet geconfigureerd" bevatten.
 - [PriceShape standaard-feed na DB-reset](priceshape-default-feed-confirm.md) — sync weigert tot herbevestiging (save met lege feed_url); modelrun via BackgroundSessionLocal-script, niet via POST /api/model-runs.
 - [Hiërarchie test-importjob-residu](hierarchy-import-job-residue.md) — test-applies mogen nooit de "laatst toegepaste import" blijven; auto_assign matcht op de staging van die job.
-- [Validatie vs eigen apitests-run](parallel-suite-runs.md) — completion-validatie draait de volledige suite op de gedeelde dev-DB; nooit tegelijk zelf de apitests-workflow starten of DQ/hiërarchie-tests flaken ('bezig'-status, autobuild-residu).
+- [Testsuite in eigen testdatabase](parallel-suite-runs.md) — pytest draait sinds taak #312 in "<appdb>_test" (guard tegen dbname-bypass); app-data veilig, maar parallelle suite-runs delen die test-DB nog.

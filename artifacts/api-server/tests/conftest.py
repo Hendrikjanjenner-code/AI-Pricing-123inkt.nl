@@ -8,6 +8,90 @@ De schedulers hebben hun eigen gerichte tests die ze expliciet aanroepen.
 """
 import os
 
+# ── Eigen testdatabase (taak #312) ───────────────────────────────────────────
+# De suite draaide tegen dezelfde database als de draaiende app en wiste
+# daarbij app-data (connector-bevestiging, concurrentprijzen). Vanaf nu
+# draait de suite ALTIJD in een aparte database op dezelfde Postgres-server:
+# standaard "<dbnaam>_test", overschrijfbaar via TEST_DATABASE_URL. De
+# omgevingsvariabele DATABASE_URL wordt hier — vóór elke import van
+# database.py — omgezet naar de testdatabase, met een harde guard die
+# weigert te draaien als test- en app-database dezelfde zouden zijn.
+
+
+def _effective_dbname(url: str) -> str:
+    """Effectieve databasenaam zoals libpq die ziet — óók wanneer een
+    `?dbname=`-queryparameter het URL-pad overschrijft. Weigert `service=`
+    -indirectie (kan naar een willekeurige database wijzen)."""
+    from psycopg2.extensions import parse_dsn
+    params = parse_dsn(url)
+    if params.get("service"):
+        raise RuntimeError(
+            "Testsuite geweigerd: database-URL gebruikt een libpq 'service'-"
+            "verwijzing; de effectieve database is dan niet verifieerbaar.")
+    name = (params.get("dbname") or "").strip()
+    if not name:
+        raise RuntimeError("Database-URL bevat geen databasenaam.")
+    return name
+
+
+def _derive_test_url(app_url: str) -> str:
+    """Leid de testdatabase-URL af: zelfde server/credentials/query-opties
+    (sslmode e.d.), databasenaam '<app-db>_test'. Een eventueel
+    `dbname=`-queryparam wordt verwijderd zodat het pad de enige bron van de
+    databasenaam is."""
+    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+    parts = urlsplit(app_url)
+    query = [(k, v) for (k, v) in parse_qsl(parts.query, keep_blank_values=True)
+             if k.lower() != "dbname"]
+    app_db = _effective_dbname(app_url)
+    return urlunsplit(parts._replace(path=f"/{app_db}_test",
+                                     query=urlencode(query)))
+
+
+def _assert_distinct_databases(app_url: str, test_url: str) -> None:
+    """Harde guard: nooit tegen de app-database draaien. Vergelijkt de
+    effectieve libpq-databasenamen, niet alleen het URL-pad."""
+    if _effective_dbname(test_url) == _effective_dbname(app_url):
+        raise RuntimeError(
+            "Testsuite geweigerd: de testdatabase is gelijk aan de app-database "
+            f"({_effective_dbname(app_url)!r}). Tests wissen app-data; zet "
+            "TEST_DATABASE_URL naar een aparte database.")
+
+
+def _setup_test_database() -> None:
+    app_url = os.environ.get("DATABASE_URL")
+    if not app_url:
+        return  # database.py geeft zelf al een duidelijke fout
+
+    test_url = (os.environ.get("TEST_DATABASE_URL") or "").strip() or _derive_test_url(app_url)
+    _assert_distinct_databases(app_url, test_url)
+
+    # Maak de testdatabase aan als hij nog niet bestaat (idempotent, en
+    # bestand tegen gelijktijdige eerste runs: duplicate_database is dan ok).
+    import psycopg2
+    from psycopg2 import sql, errors as pg_errors
+
+    conn = psycopg2.connect(app_url, connect_timeout=5)
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM pg_database WHERE datname = %s",
+                        (_effective_dbname(test_url),))
+            if cur.fetchone() is None:
+                try:
+                    cur.execute(sql.SQL("CREATE DATABASE {}").format(
+                        sql.Identifier(_effective_dbname(test_url))))
+                except pg_errors.DuplicateDatabase:
+                    pass  # gelijktijdige suite-run was ons voor
+    finally:
+        conn.close()
+
+    os.environ["DATABASE_URL"] = test_url
+    os.environ["APP_DATABASE_URL_ORIGINAL"] = app_url  # alleen ter diagnose
+
+
+_setup_test_database()
+
 os.environ.setdefault("DISABLE_HEALTH_MONITOR", "true")
 os.environ.setdefault("DISABLE_FEED_SYNC", "true")
 os.environ.setdefault("DISABLE_DQ_SCAN", "true")
@@ -34,6 +118,21 @@ os.environ.setdefault("DISABLE_HIERARCHY_SEED", "true")
 import pytest as _pytest
 
 HIERARCHY_SUITE_LOCK_KEY = 774411277
+
+
+@_pytest.fixture(scope="session", autouse=True)
+def _bootstrap_test_database_schema():
+    """Zorg dat de (verse) testdatabase schema + seeds heeft vóór welke test
+    dan ook — ook tests die de database direct benaderen zonder eerst een
+    TestClient te starten. Eén TestClient-startup draait de volledige
+    idempotente bootstrap uit main.py (create_all, migraties, canonical,
+    users/authz-seed) en zet _db_bootstrap_done zodat latere TestClients
+    hem overslaan."""
+    from fastapi.testclient import TestClient
+    import main
+    with TestClient(main.app):
+        pass
+    yield
 
 
 # ── Gedeelde opruiming van hiërarchie-test-importjobs ───────────────────────

@@ -1,7 +1,10 @@
 ---
-name: Parallelle full-suite runs botsen op de gedeelde dev-DB
-description: Waarom completion-validatie en de apitests-workflow nooit tegelijk mogen draaien
+name: Testsuite draait in eigen testdatabase
+description: Sinds taak #312 draait pytest in "<appdb>_test"; app-data is veilig, maar suite-runs delen die testdatabase nog wel.
 ---
-Regel: start de apitests-workflow niet (en laat hem niet lopen) terwijl markTaskComplete-validatie draait.
-**Why:** beide draaien de volledige pytest-suite op dezelfde dev-database; tests als test_data_quality_scan (verwacht scanstatus 'geslaagd', ziet 'bezig' van de parallelle run) en test_hierarchy_autobuild (gedeelde boom/residu) falen dan met schijnbare regressies.
-**How to apply:** wacht tot de apitests-workflow FINISHED is vóór markTaskComplete; bij validatiefalen eerst de verdachte tests standalone herdraaien voordat je code aanpast.
+
+Regel: `tests/conftest.py` zet DATABASE_URL vóór elke import om naar een eigen testdatabase (`<appdb>_test`, overschrijfbaar via TEST_DATABASE_URL), met harde guard op de effectieve libpq-dbnaam (ook `?dbname=`-bypass en `service=` geweigerd) en een sessie-fixture die één TestClient-startup doet voor schema/seeds.
+
+**Why:** de suite draaide eerder op de app-database en wiste bij elke completion-validatie de feed-bevestiging en alle concurrentprijzen (terugkerende gebruikersklacht, opgelost in taak #312).
+
+**How to apply:** app-data is nu veilig tijdens validatieruns; wél delen gelijktijdige suite-runs (eigen run + completion-validatie) nog dezelfde testdatabase — vermijd parallel draaien of reken op de bestaande advisory-locks. De testdatabase houdt residu tussen runs, dus alle bestaande shared-DB-isolatieconventies blijven gelden. Handmatige psql-checks van app-data blijven gewoon via $DATABASE_URL (die wijst buiten pytest nog naar de app-DB).
