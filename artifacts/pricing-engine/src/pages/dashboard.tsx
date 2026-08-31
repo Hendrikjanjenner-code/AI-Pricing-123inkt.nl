@@ -12,6 +12,7 @@ import { InfoTooltip } from "@/components/InfoTooltip";
 import { WidgetError } from "@/components/WidgetError";
 import { getAuthHeaders, useAuth } from "@/lib/auth";
 import { gebruikersPermissies } from "@/lib/route-registry";
+import { verwachteMargeverbetering } from "@/lib/dashboard-kpis";
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 
@@ -396,7 +397,7 @@ export default function Dashboard() {
               <ArrowUpRight className="h-4 w-4 text-emerald-500" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-emerald-600">{formatBedrag(summary.estimated_margin_impact)}</div>
+              <div className="text-2xl font-bold text-emerald-600">{formatBedrag(verwachteMargeverbetering(summary))}</div>
               <p className="text-xs text-muted-foreground mt-1">Op basis van openstaande adviezen</p>
             </CardContent>
           </Card>
