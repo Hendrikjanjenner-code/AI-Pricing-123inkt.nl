@@ -76,4 +76,11 @@ export type GetCompetitorRankingsParams = {
    * @nullable
    */
   sku_query?: string | null;
+  /**
+   * Top-N afkapping server-side (bv. 10/20); weglaten = alle
+   * @minimum 1
+   * @maximum 500
+   * @nullable
+   */
+  limit?: number | null;
 };

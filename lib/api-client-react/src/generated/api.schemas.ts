@@ -1391,6 +1391,13 @@ export type GetCompetitorRankingsParams = {
    * @nullable
    */
   sku_query?: string | null;
+  /**
+   * Top-N afkapping server-side (bv. 10/20); weglaten = alle
+   * @minimum 1
+   * @maximum 500
+   * @nullable
+   */
+  limit?: number | null;
 };
 
 export type GetCompetitorRankings200NodesUsedItem = { [key: string]: unknown };
@@ -1402,6 +1409,8 @@ export type GetCompetitorRankings200 = {
   /** @nullable */
   run_date?: string | null;
   total?: number;
+  /** Aantal geretourneerde rijen na Top-N-afkapping */
+  shown?: number;
   /** "overall" of "hierarchy_nodes" — bij een actieve hiërarchieselectie zijn de scores node-specifiek (berekend over uitsluitend descendants van de selectie). */
   score_basis?: string;
   /**
@@ -1412,6 +1421,149 @@ export type GetCompetitorRankings200 = {
   /** @nullable */
   nodes_used?: GetCompetitorRankings200NodesUsedItem[] | null;
   rankings?: GetCompetitorRankings200RankingsItem[];
+};
+
+export type GetCompetitionPricePositionParams = {
+  /**
+   * @nullable
+   */
+  shop_id?: number | null;
+  /**
+   * @nullable
+   */
+  hierarchy_node_ids?: string | null;
+  /**
+   * @nullable
+   */
+  brands?: string | null;
+  /**
+   * @nullable
+   */
+  statuses?: string | null;
+  /**
+   * @nullable
+   */
+  sku_query?: string | null;
+  /**
+   * position_asc (1→20) of position_desc (20→1)
+   */
+  sort?: GetCompetitionPricePositionSort;
+  /**
+   * @minimum 1
+   * @maximum 500
+   * @nullable
+   */
+  limit?: number | null;
+  /**
+   * Alleen aanbieders met ≥ N vergeleken items (eigen shop blijft altijd zichtbaar)
+   * @minimum 1
+   * @maximum 10000
+   */
+  min_items?: number;
+};
+
+export type GetCompetitionPricePositionSort =
+  (typeof GetCompetitionPricePositionSort)[keyof typeof GetCompetitionPricePositionSort];
+
+export const GetCompetitionPricePositionSort = {
+  position_asc: "position_asc",
+  position_desc: "position_desc",
+} as const;
+
+export type GetCompetitionPricePosition200ExcludedByReason = {
+  [key: string]: number;
+};
+
+export type GetCompetitionPricePosition200ProvidersItem = {
+  [key: string]: unknown;
+};
+
+/**
+ * @nullable
+ */
+export type GetCompetitionPricePosition200ItemDetail = {
+  [key: string]: unknown;
+} | null;
+
+export type GetCompetitionPricePosition200 = {
+  shop_id?: number;
+  own_shop_name?: string;
+  sort?: string;
+  /** @nullable */
+  limit?: number | null;
+  items_total?: number;
+  items_compared?: number;
+  items_without_valid_competitor?: number;
+  excluded_by_reason?: GetCompetitionPricePosition200ExcludedByReason;
+  /** @nullable */
+  as_of_min?: string | null;
+  /** @nullable */
+  as_of_max?: string | null;
+  total_providers?: number;
+  providers?: GetCompetitionPricePosition200ProvidersItem[];
+  /** @nullable */
+  item_detail?: GetCompetitionPricePosition200ItemDetail;
+};
+
+export type GetCompetitionPriceIncreaseRoomParams = {
+  /**
+   * @nullable
+   */
+  shop_id?: number | null;
+  /**
+   * @nullable
+   */
+  hierarchy_node_ids?: string | null;
+  /**
+   * @nullable
+   */
+  brands?: string | null;
+  /**
+   * @nullable
+   */
+  statuses?: string | null;
+  /**
+   * @nullable
+   */
+  sku_query?: string | null;
+  /**
+   * @minimum 0
+   * @maximum 10
+   */
+  safety_margin_pct?: number;
+  /**
+   * @minimum 1
+   * @maximum 200
+   */
+  limit?: number;
+};
+
+export type GetCompetitionPriceIncreaseRoom200BoundaryCompetitorsItem = {
+  [key: string]: unknown;
+};
+
+export type GetCompetitionPriceIncreaseRoom200ItemsItem = {
+  [key: string]: unknown;
+};
+
+export type GetCompetitionPriceIncreaseRoom200 = {
+  shop_id?: number;
+  own_shop_name?: string;
+  safety_margin_pct?: number;
+  items_compared?: number;
+  items_at_pos1_strict?: number;
+  items_pos1_shared?: number;
+  items_with_room?: number;
+  boundary_competitors?: GetCompetitionPriceIncreaseRoom200BoundaryCompetitorsItem[];
+  volume_known?: boolean;
+  /** @nullable */
+  total_uplift_estimate_30d?: number | null;
+  /** @nullable */
+  as_of_min?: string | null;
+  /** @nullable */
+  as_of_max?: string | null;
+  total_items_with_room?: number;
+  items?: GetCompetitionPriceIncreaseRoom200ItemsItem[];
 };
 
 export type GetCompetitorLandscapeParams = {

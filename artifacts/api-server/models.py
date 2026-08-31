@@ -277,6 +277,12 @@ class FactCompetitorPriceDaily(Base):
     excluded_reason = Column(String(60), index=True)   # bv. COMPETITOR_IGNORED_OUTLIER
     exclusion_detail = Column(JSON)            # {deviation_pct, median, ratio, suspected_cause, ...}
 
+    __table_args__ = (
+        # Prijspositie: "meest recente waarneming per SKU" filtert op
+        # sku_id + date-venster; zonder composiete index statement-timeouts.
+        Index("ix_fact_comp_price_sku_date", "sku_id", "date"),
+    )
+
 
 class FactInventoryDaily(Base):
     __tablename__ = "fact_inventory_daily"

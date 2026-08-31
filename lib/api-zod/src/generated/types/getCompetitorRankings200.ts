@@ -13,6 +13,8 @@ export type GetCompetitorRankings200 = {
   /** @nullable */
   run_date?: string | null;
   total?: number;
+  /** Aantal geretourneerde rijen na Top-N-afkapping */
+  shown?: number;
   /** "overall" of "hierarchy_nodes" — bij een actieve hiërarchieselectie zijn de scores node-specifiek (berekend over uitsluitend descendants van de selectie). */
   score_basis?: string;
   /**

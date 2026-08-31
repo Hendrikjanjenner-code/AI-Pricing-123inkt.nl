@@ -1536,6 +1536,8 @@ def get_competitor_rankings(
     brands: Optional[str] = Query(None),
     statuses: Optional[str] = Query(None),
     sku_query: Optional[str] = Query(None),
+    limit: Optional[int] = Query(None, ge=1, le=500,
+                                 description="Top-N (bv. 10/20); None = alle"),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -1546,7 +1548,7 @@ def get_competitor_rankings(
     en scoreklassen (taak #248); totalen kloppen met de filters.
     """
     from sqlalchemy import func as _func
-    sid = _scope(db, shop_id)
+    sid = _scope_authz(db, shop_id, current_user)
     latest = db.query(_func.max(models.CompetitorRanking.run_date)).filter(
         models.CompetitorRanking.scope == scope,
         models.CompetitorRanking.shop_id == sid,
@@ -1671,6 +1673,11 @@ def get_competitor_rankings(
         resp["total"] = len(node_rankings)
         resp["nodes_used"] = node_ctx[1]
         resp["unmapped_observations"] = node_ctx[2]
+    # Top-N (taak #318): server-side afkappen; total blijft het volledige
+    # aantal binnen de filters zodat "Top 10 van 34" klopt.
+    if limit is not None:
+        resp["rankings"] = resp["rankings"][:limit]
+    resp["shown"] = len(resp["rankings"])
     return resp
 
 
@@ -1982,6 +1989,17 @@ def _scope(db: Session, shop_id: Optional[int]) -> int:
     shop_id is meegegeven; 404 bij onbekende shop)."""
     from semantic_layer import _shop_scope
     return _shop_scope(db, shop_id)
+
+def _scope_authz(db: Session, shop_id: Optional[int],
+                 current_user: models.User) -> int:
+    """Als _scope, maar dwingt óók de shop-scopes van de gebruiker af:
+    een gebruiker beperkt tot shop A mag geen data van shop B opvragen."""
+    import authz as authz_mod
+    sid = _scope(db, shop_id)
+    allowed = authz_mod.user_allowed_shop_ids(db, current_user)
+    if allowed is not None and sid not in allowed:
+        raise HTTPException(status_code=403, detail="Geen toegang tot deze winkel")
+    return sid
 
 def _shop_or_legacy(col, sid: int, db: Session):
     """Shop-filter voor tabellen met legacy-rijen: rijen met shop_id NULL
@@ -2635,4 +2653,359 @@ def get_competitor_landscape(
         "run_date": str(latest) if latest else None,
         "items": items,
         "total": len(items),
+    }
+
+
+# ── NIEUW (taak #318): Prijspositie per aanbieder & veilige verhogingsruimte ──
+
+def _price_position_per_sku(db: Session, sid: int, hierarchy_node_ids, brands,
+                            statuses, sku_query):
+    """
+    Bouw per SKU de gesorteerde aanbiederlijst (eigen shop + concurrenten) met
+    competitie-ranking: gelijke prijzen delen dezelfde positie ("1-2-2-4").
+
+    Peildatum per SKU = de meest recente waarnemingsdag in de prijshistorie
+    (inclusief uitgesloten rijen, zodat de peildatum eerlijk blijft); alleen
+    geldige (niet-uitgesloten, niet-geblokkeerde) prijzen van die dag tellen
+    mee in de ranking. Eigen prijs = actuele verkoopprijs (DimProduct).
+
+    Retourneert (per_sku, meta):
+      per_sku[sku_id] = {
+        "product_name", "own_price", "max_price", "as_of",
+        "providers": [{"name", "is_own", "price", "position"}],
+      }  — uitsluitend SKU's met eigen prijs én ≥1 geldige concurrentprijs.
+      meta = {"items_total", "items_without_valid_competitor",
+              "excluded_by_reason", "as_of_min", "as_of_max"}
+    """
+    from sqlalchemy import func as _func
+    F = models.FactCompetitorPriceDaily
+    P = models.DimProduct
+
+    own_q = db.query(P.sku_id, P.product_name, P.current_price, P.max_price)\
+        .filter(P.shop_id == sid, P.current_price.isnot(None))
+    _sku_q = sku_filter_query(db, hierarchy_node_ids, brands, statuses, sku_query)
+    if _sku_q is not None:
+        own_q = own_q.filter(P.sku_id.in_(_sku_q.scalar_subquery()))
+    own_rows = own_q.all()
+    meta = {"items_total": len(own_rows), "items_without_valid_competitor": 0,
+            "excluded_by_reason": {}, "as_of_min": None, "as_of_max": None}
+    if not own_rows:
+        return {}, meta
+
+    sku_sq = db.query(P.sku_id).filter(
+        P.shop_id == sid, P.current_price.isnot(None))
+    if _sku_q is not None:
+        sku_sq = sku_sq.filter(P.sku_id.in_(_sku_q.scalar_subquery()))
+    sku_sq = sku_sq.scalar_subquery()
+
+    # Recente-venster-begrenzing: de max(date)-per-SKU-join over de volledige
+    # prijshistorie loopt bij een grote catalogus tegen de statement-timeout.
+    # SKU's zonder waarneming in de laatste 14 dagen vanaf de nieuwste
+    # feed-dag tellen als "geen geldige concurrentprijs".
+    overall_max = (db.query(_func.max(F.date))
+                   .filter(F.shop_id == sid).scalar())
+    if overall_max is None:
+        meta["items_without_valid_competitor"] = len(own_rows)
+        return {}, meta
+    window_start = overall_max - timedelta(days=14)
+
+    # Peildatum per SKU over álle waarnemingen (ook uitgesloten rijen).
+    latest_sq = (db.query(F.sku_id.label("sku_id"),
+                          _func.max(F.date).label("d"))
+                 .filter(F.shop_id == sid, F.sku_id.in_(sku_sq),
+                         F.date >= window_start)
+                 .group_by(F.sku_id).subquery())
+
+    blocked = _blocked_names(db)
+    base = (db.query(F.sku_id, F.competitor_name, _func.min(F.price), latest_sq.c.d)
+            .join(latest_sq, (F.sku_id == latest_sq.c.sku_id) &
+                             (F.date == latest_sq.c.d))
+            .filter(F.shop_id == sid, F.date >= window_start,
+                    F.excluded_reason.is_(None),
+                    F.price.isnot(None), F.price > 0)
+            .group_by(F.sku_id, F.competitor_name, latest_sq.c.d))
+    if blocked:
+        base = base.filter(F.competitor_name.notin_(blocked))
+    comp_rows = base.all()
+
+    # Uitgesloten waarnemingen op de peildatum, per reden (transparantie).
+    excl_q = (db.query(F.excluded_reason, _func.count(F.id))
+              .join(latest_sq, (F.sku_id == latest_sq.c.sku_id) &
+                               (F.date == latest_sq.c.d))
+              .filter(F.shop_id == sid, F.date >= window_start,
+                      F.excluded_reason.isnot(None))
+              .group_by(F.excluded_reason))
+    meta["excluded_by_reason"] = {r: int(c) for r, c in excl_q.all()}
+
+    by_sku: dict = {}
+    for sku_id, comp, price, d in comp_rows:
+        by_sku.setdefault(sku_id, {"comps": [], "as_of": d})
+        by_sku[sku_id]["comps"].append((comp, float(price)))
+
+    per_sku: dict = {}
+    dates = []
+    for sku_id, name, own_price, max_price in own_rows:
+        entry = by_sku.get(sku_id)
+        if not entry or not entry["comps"]:
+            meta["items_without_valid_competitor"] += 1
+            continue
+        providers = [{"name": c, "is_own": False, "price": p}
+                     for c, p in entry["comps"]]
+        providers.append({"name": "__own__", "is_own": True,
+                          "price": float(own_price)})
+        providers.sort(key=lambda x: (x["price"], not x["is_own"], x["name"]))
+        # Competitie-ranking: gelijke prijs = gedeelde positie.
+        pos = 0
+        prev_price = None
+        for i, pr in enumerate(providers, start=1):
+            if prev_price is None or pr["price"] > prev_price:
+                pos = i
+                prev_price = pr["price"]
+            pr["position"] = pos
+        per_sku[sku_id] = {
+            "product_name": name,
+            "own_price": float(own_price),
+            "max_price": float(max_price) if max_price is not None else None,
+            "as_of": entry["as_of"],
+            "providers": providers,
+        }
+        dates.append(entry["as_of"])
+    if dates:
+        meta["as_of_min"] = str(min(dates))
+        meta["as_of_max"] = str(max(dates))
+    return per_sku, meta
+
+
+@router.get("/price-position")
+def get_price_position_overview(
+    shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
+    sort: str = Query("position_asc", pattern="^position_(asc|desc)$"),
+    limit: Optional[int] = Query(None, ge=1, le=500),
+    min_items: int = Query(1, ge=1, le=10000,
+                           description="Alleen aanbieders met ≥ N vergeleken items"),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """
+    Prijspositie per aanbieder binnen de actieve globale productscope:
+    de eigen shop staat in dezelfde ranglijst als de concurrenten.
+
+    Per aanbieder: aantal vergeleken items, aandeel op positie 1,
+    gemiddelde/mediane positie en gemiddelde prijsindex (eigen/aanbieder).
+    Op portfolio-niveau wordt bewust géén enkele "prijsrang" getoond —
+    dat zou misleidend zijn; de verdelingscijfers wél.
+
+    Bij een exacte productscope (precies één SKU) bevat de respons ook
+    `item_detail` met de volledige aanbiederlijst voor dat product.
+    """
+    import statistics
+    sid = _scope_authz(db, shop_id, current_user)
+    shop = db.query(models.DimShop).filter(models.DimShop.id == sid).first()
+    own_label = (shop.name if shop and getattr(shop, "name", None)
+                 else f"Shop {sid}")
+    per_sku, meta = _price_position_per_sku(
+        db, sid, hierarchy_node_ids, brands, statuses, sku_query)
+
+    agg: dict = {}
+    for sku_id, item in per_sku.items():
+        own_price = item["own_price"]
+        for pr in item["providers"]:
+            key = "__own__" if pr["is_own"] else pr["name"]
+            a = agg.setdefault(key, {
+                "is_own": pr["is_own"], "positions": [], "pos1": 0,
+                "pos1_shared": 0, "price_indices": []})
+            a["positions"].append(pr["position"])
+            if pr["position"] == 1:
+                n_at_1 = sum(1 for q in item["providers"] if q["position"] == 1)
+                a["pos1"] += 1
+                if n_at_1 > 1:
+                    a["pos1_shared"] += 1
+            if not pr["is_own"] and pr["price"] > 0:
+                a["price_indices"].append(own_price / pr["price"])
+
+    providers = []
+    for key, a in agg.items():
+        n = len(a["positions"])
+        providers.append({
+            "name": own_label if a["is_own"] else key,
+            "is_own": a["is_own"],
+            "items_compared": n,
+            "pos1_count": a["pos1"],
+            "pos1_shared_count": a["pos1_shared"],
+            "pos1_share": round(a["pos1"] / n, 4) if n else 0.0,
+            "avg_position": round(sum(a["positions"]) / n, 2) if n else None,
+            "median_position": (float(statistics.median(a["positions"]))
+                                if n else None),
+            "avg_price_index": (round(sum(a["price_indices"]) /
+                                      len(a["price_indices"]), 4)
+                                if a["price_indices"] else None),
+        })
+    # Dekking-drempel: aanbieders met een handvol items domineren anders de
+    # top (positie 1 op 2 items zegt weinig). Eigen shop valt nooit weg.
+    if min_items > 1:
+        providers = [p for p in providers
+                     if p["is_own"] or p["items_compared"] >= min_items]
+    reverse = sort == "position_desc"
+    providers.sort(key=lambda p: (p["median_position"] or 0,
+                                  p["avg_position"] or 0,
+                                  -p["items_compared"]), reverse=reverse)
+    total_providers = len(providers)
+    own_row = next((p for p in providers if p["is_own"]), None)
+    if limit is not None:
+        # Eigen shop blijft altijd zichtbaar, op de juiste plek in de sortering.
+        providers = [p for p in providers if not p["is_own"]][:limit]
+        if own_row is not None:
+            providers.append(own_row)
+            providers.sort(key=lambda p: (p["median_position"] or 0,
+                                          p["avg_position"] or 0,
+                                          -p["items_compared"]),
+                           reverse=reverse)
+
+    item_detail = None
+    if len(per_sku) == 1:
+        sku_id, item = next(iter(per_sku.items()))
+        item_detail = {
+            "sku_id": sku_id,
+            "product_name": item["product_name"],
+            "as_of": str(item["as_of"]),
+            "providers": [
+                {"name": own_label if pr["is_own"] else pr["name"],
+                 "is_own": pr["is_own"],
+                 "price": round(pr["price"], 2),
+                 "position": pr["position"]}
+                for pr in item["providers"]
+            ],
+        }
+
+    return {
+        "shop_id": sid,
+        "own_shop_name": own_label,
+        "sort": sort,
+        "limit": limit,
+        "items_total": meta["items_total"],
+        "items_compared": len(per_sku),
+        "items_without_valid_competitor": meta["items_without_valid_competitor"],
+        "excluded_by_reason": meta["excluded_by_reason"],
+        "as_of_min": meta["as_of_min"],
+        "as_of_max": meta["as_of_max"],
+        "total_providers": total_providers,
+        "providers": providers,
+        "item_detail": item_detail,
+    }
+
+
+@router.get("/price-increase-room")
+def get_price_increase_room(
+    shop_id: Optional[int] = Query(None),
+    hierarchy_node_ids: Optional[str] = Query(None),
+    brands: Optional[str] = Query(None),
+    statuses: Optional[str] = Query(None),
+    sku_query: Optional[str] = Query(None),
+    safety_margin_pct: float = Query(1.0, ge=0.0, le=10.0),
+    limit: int = Query(20, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth_utils.get_current_user),
+):
+    """
+    Veilige verhogingsruimte: voor items waar de eigen shop strikt de
+    goedkoopste is (positie 1, niet gedeeld) — hoeveel kan de prijs omhoog
+    zonder positie 1 te verliezen aan de nummer 2?
+
+    Voorstel = prijs nr. 2 × (1 − veiligheidsmarge%), afgerond omlaag op
+    hele centen, en nooit boven een ingestelde maximumprijs. Zonder
+    afzetdata tonen we uitsluitend extra marge per stuk — géén verzonnen
+    totaalbedrag (total_uplift_estimate blijft dan null).
+    """
+    import math
+    from sqlalchemy import func as _func
+    sid = _scope_authz(db, shop_id, current_user)
+    shop = db.query(models.DimShop).filter(models.DimShop.id == sid).first()
+    own_label = (shop.name if shop and getattr(shop, "name", None)
+                 else f"Shop {sid}")
+    per_sku, meta = _price_position_per_sku(
+        db, sid, hierarchy_node_ids, brands, statuses, sku_query)
+
+    items = []
+    items_at_pos1 = 0
+    items_pos1_shared = 0
+    boundary: dict = {}
+    for sku_id, item in per_sku.items():
+        own = next(pr for pr in item["providers"] if pr["is_own"])
+        if own["position"] != 1:
+            continue
+        comp_prices = [pr for pr in item["providers"] if not pr["is_own"]]
+        if not comp_prices:
+            continue
+        cheapest_comp = min(comp_prices, key=lambda p: p["price"])
+        if cheapest_comp["price"] <= own["price"]:
+            # Gedeelde positie 1: elke verhoging kost de koppositie.
+            items_pos1_shared += 1
+            continue
+        items_at_pos1 += 1
+        pos2_price = cheapest_comp["price"]
+        proposed = math.floor(pos2_price * (1 - safety_margin_pct / 100.0)
+                              * 100) / 100.0
+        capped_by_max_price = False
+        if item["max_price"] is not None and proposed > item["max_price"]:
+            proposed = item["max_price"]
+            capped_by_max_price = True
+        room = round(proposed - own["price"], 2)
+        if room <= 0:
+            continue
+        boundary[cheapest_comp["name"]] = boundary.get(
+            cheapest_comp["name"], 0) + 1
+        items.append({
+            "sku_id": sku_id,
+            "product_name": item["product_name"],
+            "as_of": str(item["as_of"]),
+            "own_price": round(own["price"], 2),
+            "pos2_price": round(pos2_price, 2),
+            "pos2_competitor": cheapest_comp["name"],
+            "proposed_price": round(proposed, 2),
+            "extra_margin_per_unit": room,
+            "capped_by_max_price": capped_by_max_price,
+        })
+    items.sort(key=lambda i: i["extra_margin_per_unit"], reverse=True)
+    items_with_room = len(items)
+
+    # Alleen een totaalbedrag als er échte afzetdata is (masterprompt: geen
+    # verzonnen totalen). Maandschatting = afzet laatste 30 dagen × ruimte/stuk.
+    total_uplift_estimate = None
+    volume_known = False
+    if items:
+        from datetime import date as _date
+        cutoff = _date.today() - timedelta(days=30)
+        S = models.FactSalesDaily
+        sales = dict(
+            db.query(S.sku_id, _func.coalesce(_func.sum(S.units_sold), 0))
+            .filter(S.shop_id == sid, S.date >= cutoff,
+                    S.sku_id.in_([i["sku_id"] for i in items]))
+            .group_by(S.sku_id).all())
+        if sales:
+            volume_known = True
+            total_uplift_estimate = round(sum(
+                i["extra_margin_per_unit"] * int(sales.get(i["sku_id"], 0))
+                for i in items), 2)
+
+    return {
+        "shop_id": sid,
+        "own_shop_name": own_label,
+        "safety_margin_pct": safety_margin_pct,
+        "items_compared": len(per_sku),
+        "items_at_pos1_strict": items_at_pos1,
+        "items_pos1_shared": items_pos1_shared,
+        "items_with_room": items_with_room,
+        "boundary_competitors": sorted(
+            [{"name": k, "count": v} for k, v in boundary.items()],
+            key=lambda b: b["count"], reverse=True),
+        "volume_known": volume_known,
+        "total_uplift_estimate_30d": total_uplift_estimate,
+        "as_of_min": meta["as_of_min"],
+        "as_of_max": meta["as_of_max"],
+        "items": items[:limit],
+        "total_items_with_room": items_with_room,
     }

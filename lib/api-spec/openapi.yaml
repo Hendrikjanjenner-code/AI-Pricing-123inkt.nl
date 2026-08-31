@@ -1541,6 +1541,10 @@ paths:
         - name: sku_query
           in: query
           schema: { type: ["string", "null"] }
+        - name: limit
+          in: query
+          description: Top-N afkapping server-side (bv. 10/20); weglaten = alle
+          schema: { type: ["integer", "null"], minimum: 1, maximum: 500 }
       responses:
         "200":
           description: Gefilterde rankinglijst met correcte totalen
@@ -1552,6 +1556,9 @@ paths:
                   scope: { type: string }
                   run_date: { type: ["string", "null"] }
                   total: { type: integer }
+                  shown:
+                    type: integer
+                    description: Aantal geretourneerde rijen na Top-N-afkapping
                   score_basis:
                     type: string
                     description: >-
@@ -1567,6 +1574,126 @@ paths:
                       type: object
                       additionalProperties: true
                   rankings:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+
+  /competition/price-position:
+    get:
+      operationId: getCompetitionPricePosition
+      tags: [competition]
+      summary: Prijspositie per aanbieder (eigen shop in dezelfde ranglijst)
+      parameters:
+        - name: shop_id
+          in: query
+          schema: { type: ["integer", "null"] }
+        - name: hierarchy_node_ids
+          in: query
+          schema: { type: ["string", "null"] }
+        - name: brands
+          in: query
+          schema: { type: ["string", "null"] }
+        - name: statuses
+          in: query
+          schema: { type: ["string", "null"] }
+        - name: sku_query
+          in: query
+          schema: { type: ["string", "null"] }
+        - name: sort
+          in: query
+          description: position_asc (1→20) of position_desc (20→1)
+          schema: { type: string, enum: [position_asc, position_desc], default: position_asc }
+        - name: limit
+          in: query
+          schema: { type: ["integer", "null"], minimum: 1, maximum: 500 }
+        - name: min_items
+          in: query
+          description: Alleen aanbieders met ≥ N vergeleken items (eigen shop blijft altijd zichtbaar)
+          schema: { type: integer, minimum: 1, maximum: 10000, default: 1 }
+      responses:
+        "200":
+          description: Aanbieders met positieverdeling binnen de scope
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shop_id: { type: integer }
+                  own_shop_name: { type: string }
+                  sort: { type: string }
+                  limit: { type: ["integer", "null"] }
+                  items_total: { type: integer }
+                  items_compared: { type: integer }
+                  items_without_valid_competitor: { type: integer }
+                  excluded_by_reason:
+                    type: object
+                    additionalProperties: { type: integer }
+                  as_of_min: { type: ["string", "null"] }
+                  as_of_max: { type: ["string", "null"] }
+                  total_providers: { type: integer }
+                  providers:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  item_detail:
+                    type: ["object", "null"]
+                    additionalProperties: true
+
+  /competition/price-increase-room:
+    get:
+      operationId: getCompetitionPriceIncreaseRoom
+      tags: [competition]
+      summary: Veilige verhogingsruimte voor items waar de eigen shop op positie 1 staat
+      parameters:
+        - name: shop_id
+          in: query
+          schema: { type: ["integer", "null"] }
+        - name: hierarchy_node_ids
+          in: query
+          schema: { type: ["string", "null"] }
+        - name: brands
+          in: query
+          schema: { type: ["string", "null"] }
+        - name: statuses
+          in: query
+          schema: { type: ["string", "null"] }
+        - name: sku_query
+          in: query
+          schema: { type: ["string", "null"] }
+        - name: safety_margin_pct
+          in: query
+          schema: { type: number, minimum: 0, maximum: 10, default: 1.0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 20 }
+      responses:
+        "200":
+          description: Verhogingsruimte per item plus samenvatting
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  shop_id: { type: integer }
+                  own_shop_name: { type: string }
+                  safety_margin_pct: { type: number }
+                  items_compared: { type: integer }
+                  items_at_pos1_strict: { type: integer }
+                  items_pos1_shared: { type: integer }
+                  items_with_room: { type: integer }
+                  boundary_competitors:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  volume_known: { type: boolean }
+                  total_uplift_estimate_30d: { type: ["number", "null"] }
+                  as_of_min: { type: ["string", "null"] }
+                  as_of_max: { type: ["string", "null"] }
+                  total_items_with_room: { type: integer }
+                  items:
                     type: array
                     items:
                       type: object

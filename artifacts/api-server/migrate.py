@@ -420,6 +420,14 @@ def run_migrations(engine, metadata) -> None:
             'ON ai_budget_config ((username IS NULL)) '
             'WHERE username IS NULL',
         ),
+        # Prijspositie/topconcurrenten: de "meest recente waarneming per SKU"
+        # subquery filtert op sku_id + date-venster; zonder composiete index
+        # loopt dat op grote feed-tabellen tegen de statement-timeout aan.
+        (
+            "ix_fact_comp_price_sku_date",
+            'CREATE INDEX IF NOT EXISTS ix_fact_comp_price_sku_date '
+            'ON fact_competitor_price_daily (sku_id, date)',
+        ),
         # Run-historie (scheduled_engine_runs) mag een shop-verwijdering nooit
         # blokkeren: herzet de FK naar ON DELETE CASCADE als hij nog zonder
         # cascade bestaat (idempotent via DO-blok).

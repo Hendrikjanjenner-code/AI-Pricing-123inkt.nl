@@ -1900,6 +1900,8 @@ export const getCompetitorRankingsQueryMinProcurementPowerMax = 100;
 export const getCompetitorRankingsQueryMinDataCompletenessMin = 0;
 export const getCompetitorRankingsQueryMinDataCompletenessMax = 100;
 
+export const getCompetitorRankingsQueryLimitMax = 500;
+
 export const GetCompetitorRankingsQueryParams = zod.object({
   scope: zod.coerce.string().default(getCompetitorRankingsQueryScopeDefault),
   shop_id: zod.coerce.number().nullish(),
@@ -1934,12 +1936,22 @@ export const GetCompetitorRankingsQueryParams = zod.object({
   brands: zod.coerce.string().nullish().describe("CSV van merknamen"),
   statuses: zod.coerce.string().nullish(),
   sku_query: zod.coerce.string().nullish(),
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(getCompetitorRankingsQueryLimitMax)
+    .nullish()
+    .describe("Top-N afkapping server-side (bv. 10\/20); weglaten = alle"),
 });
 
 export const GetCompetitorRankingsResponse = zod.object({
   scope: zod.string().optional(),
   run_date: zod.string().nullish(),
   total: zod.number().optional(),
+  shown: zod
+    .number()
+    .optional()
+    .describe("Aantal geretourneerde rijen na Top-N-afkapping"),
   score_basis: zod
     .string()
     .optional()
@@ -1954,6 +1966,103 @@ export const GetCompetitorRankingsResponse = zod.object({
     ),
   nodes_used: zod.array(zod.record(zod.string(), zod.unknown())).nullish(),
   rankings: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+});
+
+/**
+ * @summary Prijspositie per aanbieder (eigen shop in dezelfde ranglijst)
+ */
+export const getCompetitionPricePositionQuerySortDefault = `position_asc`;
+export const getCompetitionPricePositionQueryLimitMax = 500;
+
+export const getCompetitionPricePositionQueryMinItemsDefault = 1;
+export const getCompetitionPricePositionQueryMinItemsMax = 10000;
+
+export const GetCompetitionPricePositionQueryParams = zod.object({
+  shop_id: zod.coerce.number().nullish(),
+  hierarchy_node_ids: zod.coerce.string().nullish(),
+  brands: zod.coerce.string().nullish(),
+  statuses: zod.coerce.string().nullish(),
+  sku_query: zod.coerce.string().nullish(),
+  sort: zod
+    .enum(["position_asc", "position_desc"])
+    .default(getCompetitionPricePositionQuerySortDefault)
+    .describe("position_asc (1→20) of position_desc (20→1)"),
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(getCompetitionPricePositionQueryLimitMax)
+    .nullish(),
+  min_items: zod.coerce
+    .number()
+    .min(1)
+    .max(getCompetitionPricePositionQueryMinItemsMax)
+    .default(getCompetitionPricePositionQueryMinItemsDefault)
+    .describe(
+      "Alleen aanbieders met ≥ N vergeleken items (eigen shop blijft altijd zichtbaar)",
+    ),
+});
+
+export const GetCompetitionPricePositionResponse = zod.object({
+  shop_id: zod.number().optional(),
+  own_shop_name: zod.string().optional(),
+  sort: zod.string().optional(),
+  limit: zod.number().nullish(),
+  items_total: zod.number().optional(),
+  items_compared: zod.number().optional(),
+  items_without_valid_competitor: zod.number().optional(),
+  excluded_by_reason: zod.record(zod.string(), zod.number()).optional(),
+  as_of_min: zod.string().nullish(),
+  as_of_max: zod.string().nullish(),
+  total_providers: zod.number().optional(),
+  providers: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+  item_detail: zod.record(zod.string(), zod.unknown()).nullish(),
+});
+
+/**
+ * @summary Veilige verhogingsruimte voor items waar de eigen shop op positie 1 staat
+ */
+export const getCompetitionPriceIncreaseRoomQuerySafetyMarginPctDefault = 1;
+export const getCompetitionPriceIncreaseRoomQuerySafetyMarginPctMin = 0;
+export const getCompetitionPriceIncreaseRoomQuerySafetyMarginPctMax = 10;
+
+export const getCompetitionPriceIncreaseRoomQueryLimitDefault = 20;
+export const getCompetitionPriceIncreaseRoomQueryLimitMax = 200;
+
+export const GetCompetitionPriceIncreaseRoomQueryParams = zod.object({
+  shop_id: zod.coerce.number().nullish(),
+  hierarchy_node_ids: zod.coerce.string().nullish(),
+  brands: zod.coerce.string().nullish(),
+  statuses: zod.coerce.string().nullish(),
+  sku_query: zod.coerce.string().nullish(),
+  safety_margin_pct: zod.coerce
+    .number()
+    .min(getCompetitionPriceIncreaseRoomQuerySafetyMarginPctMin)
+    .max(getCompetitionPriceIncreaseRoomQuerySafetyMarginPctMax)
+    .default(getCompetitionPriceIncreaseRoomQuerySafetyMarginPctDefault),
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(getCompetitionPriceIncreaseRoomQueryLimitMax)
+    .default(getCompetitionPriceIncreaseRoomQueryLimitDefault),
+});
+
+export const GetCompetitionPriceIncreaseRoomResponse = zod.object({
+  shop_id: zod.number().optional(),
+  own_shop_name: zod.string().optional(),
+  safety_margin_pct: zod.number().optional(),
+  items_compared: zod.number().optional(),
+  items_at_pos1_strict: zod.number().optional(),
+  items_pos1_shared: zod.number().optional(),
+  items_with_room: zod.number().optional(),
+  boundary_competitors: zod
+    .array(zod.record(zod.string(), zod.unknown()))
+    .optional(),
+  volume_known: zod.boolean().optional(),
+  total_uplift_estimate_30d: zod.number().nullish(),
+  as_of_min: zod.string().nullish(),
+  as_of_max: zod.string().nullish(),
+  total_items_with_room: zod.number().optional(),
+  items: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
 });
 
 /**

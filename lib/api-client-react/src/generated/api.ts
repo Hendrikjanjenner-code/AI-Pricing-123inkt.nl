@@ -49,6 +49,10 @@ import type {
   ExportRecommendationsParams,
   ExportResult,
   FileUploadRequest,
+  GetCompetitionPriceIncreaseRoom200,
+  GetCompetitionPriceIncreaseRoomParams,
+  GetCompetitionPricePosition200,
+  GetCompetitionPricePositionParams,
   GetCompetitorFullProfile200,
   GetCompetitorFullProfileParams,
   GetCompetitorLandscape200,
@@ -6160,6 +6164,225 @@ export function useGetCompetitorRankings<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetCompetitorRankingsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Prijspositie per aanbieder (eigen shop in dezelfde ranglijst)
+ */
+export const getGetCompetitionPricePositionUrl = (
+  params?: GetCompetitionPricePositionParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/competition/price-position?${stringifiedParams}`
+    : `/api/competition/price-position`;
+};
+
+export const getCompetitionPricePosition = async (
+  params?: GetCompetitionPricePositionParams,
+  options?: RequestInit,
+): Promise<GetCompetitionPricePosition200> => {
+  return customFetch<GetCompetitionPricePosition200>(
+    getGetCompetitionPricePositionUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetCompetitionPricePositionQueryKey = (
+  params?: GetCompetitionPricePositionParams,
+) => {
+  return [
+    `/api/competition/price-position`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetCompetitionPricePositionQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCompetitionPricePosition>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetCompetitionPricePositionParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCompetitionPricePosition>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetCompetitionPricePositionQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getCompetitionPricePosition>>
+  > = ({ signal }) =>
+    getCompetitionPricePosition(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCompetitionPricePosition>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetCompetitionPricePositionQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCompetitionPricePosition>>
+>;
+export type GetCompetitionPricePositionQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Prijspositie per aanbieder (eigen shop in dezelfde ranglijst)
+ */
+
+export function useGetCompetitionPricePosition<
+  TData = Awaited<ReturnType<typeof getCompetitionPricePosition>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetCompetitionPricePositionParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCompetitionPricePosition>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetCompetitionPricePositionQueryOptions(
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Veilige verhogingsruimte voor items waar de eigen shop op positie 1 staat
+ */
+export const getGetCompetitionPriceIncreaseRoomUrl = (
+  params?: GetCompetitionPriceIncreaseRoomParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/competition/price-increase-room?${stringifiedParams}`
+    : `/api/competition/price-increase-room`;
+};
+
+export const getCompetitionPriceIncreaseRoom = async (
+  params?: GetCompetitionPriceIncreaseRoomParams,
+  options?: RequestInit,
+): Promise<GetCompetitionPriceIncreaseRoom200> => {
+  return customFetch<GetCompetitionPriceIncreaseRoom200>(
+    getGetCompetitionPriceIncreaseRoomUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetCompetitionPriceIncreaseRoomQueryKey = (
+  params?: GetCompetitionPriceIncreaseRoomParams,
+) => {
+  return [
+    `/api/competition/price-increase-room`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetCompetitionPriceIncreaseRoomQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCompetitionPriceIncreaseRoom>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetCompetitionPriceIncreaseRoomParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCompetitionPriceIncreaseRoom>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetCompetitionPriceIncreaseRoomQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getCompetitionPriceIncreaseRoom>>
+  > = ({ signal }) =>
+    getCompetitionPriceIncreaseRoom(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCompetitionPriceIncreaseRoom>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetCompetitionPriceIncreaseRoomQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCompetitionPriceIncreaseRoom>>
+>;
+export type GetCompetitionPriceIncreaseRoomQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Veilige verhogingsruimte voor items waar de eigen shop op positie 1 staat
+ */
+
+export function useGetCompetitionPriceIncreaseRoom<
+  TData = Awaited<ReturnType<typeof getCompetitionPriceIncreaseRoom>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetCompetitionPriceIncreaseRoomParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCompetitionPriceIncreaseRoom>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetCompetitionPriceIncreaseRoomQueryOptions(
+    params,
+    options,
+  );
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;
