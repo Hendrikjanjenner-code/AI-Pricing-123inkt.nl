@@ -431,7 +431,13 @@ def get_competitor_ranking(db: Session, user: models.User, sku_id: Optional[str]
 
     latest = db.query(func.max(models.CompetitorInfluenceScore.run_date)).scalar()
     if not latest:
-        return {"shop_id": sid, "shop_scope_applied": False, "data_available": False, "competitors": []}
+        return {
+            "shop_id": sid,
+            "shop_scope_applied": False,
+            "data_available": False,
+            "records": 0,
+            "competitors": [],
+        }
 
     q = db.query(
         models.CompetitorInfluenceScore.competitor_name,
@@ -451,6 +457,7 @@ def get_competitor_ranking(db: Session, user: models.User, sku_id: Optional[str]
         "run_date": str(latest),
         "sku_id": sku_id,
         "data_available": len(rows) > 0,
+        "records": len(rows),
         "competitors": [
             {
                 "rank": i + 1,

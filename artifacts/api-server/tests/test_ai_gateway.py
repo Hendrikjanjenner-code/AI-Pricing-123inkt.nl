@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("DISABLE_SCRAPE_SCHEDULER", "true")
 
 import ai_gateway  # noqa: E402
-from semantic_layer import SEMANTIC_FUNCTIONS  # noqa: E402
+from semantic_layer import SEMANTIC_FUNCTIONS, get_competitor_ranking  # noqa: E402
 
 
 def _user(role="viewer"):
@@ -206,6 +206,41 @@ class TestFailSafe(unittest.TestCase):
         self.assertIn("niet geconfigureerd", a["conclusion"])
         self.assertEqual(a["confidence"], 0.0)
         self.assertTrue(a["warnings"])
+
+
+class TestCompetitorRankingRecords(unittest.TestCase):
+    @patch("semantic_layer._shop_scope", return_value=1)
+    def test_filled_ranking_reports_competitor_count(self, _shop_scope):
+        latest_query = unittest.mock.MagicMock()
+        latest_query.scalar.return_value = "2026-09-03"
+        ranking_query = unittest.mock.MagicMock()
+        ranking_query.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            types.SimpleNamespace(
+                competitor_name="Concurrent A", avg_cis=80, avg_csrs=90, sku_count=4),
+            types.SimpleNamespace(
+                competitor_name="Concurrent B", avg_cis=70, avg_csrs=85, sku_count=3),
+        ]
+        db = unittest.mock.MagicMock()
+        db.query.side_effect = [latest_query, ranking_query]
+
+        result = get_competitor_ranking(db, _user(), shop_id=1)
+
+        self.assertEqual(result["records"], 2)
+        self.assertEqual(len(result["competitors"]), 2)
+        self.assertTrue(result["data_available"])
+
+    @patch("semantic_layer._shop_scope", return_value=1)
+    def test_empty_ranking_reports_zero_records(self, _shop_scope):
+        latest_query = unittest.mock.MagicMock()
+        latest_query.scalar.return_value = None
+        db = unittest.mock.MagicMock()
+        db.query.return_value = latest_query
+
+        result = get_competitor_ranking(db, _user(), shop_id=1)
+
+        self.assertEqual(result["records"], 0)
+        self.assertEqual(result["competitors"], [])
+        self.assertFalse(result["data_available"])
 
 
 
