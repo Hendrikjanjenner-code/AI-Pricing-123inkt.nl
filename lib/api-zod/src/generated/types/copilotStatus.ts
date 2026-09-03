@@ -5,6 +5,7 @@
  * AI Pricing Decision Engine API
  * OpenAPI spec version: 0.1.0
  */
+import type { CopilotStarter } from "./copilotStarter";
 import type { CopilotStatusApprovedFunctionsItem } from "./copilotStatusApprovedFunctionsItem";
 import type { CopilotStatusDataFreshness } from "./copilotStatusDataFreshness";
 
@@ -12,6 +13,7 @@ export interface CopilotStatus {
   ai_available: boolean;
   model: string;
   example_questions: string[];
+  starter_library?: CopilotStarter[];
   approved_functions: CopilotStatusApprovedFunctionsItem[];
   data_freshness?: CopilotStatusDataFreshness;
 }

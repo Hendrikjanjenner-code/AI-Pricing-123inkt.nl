@@ -8,7 +8,7 @@ import json
 from datetime import date, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import case, desc, func
 from sqlalchemy.orm import Session
@@ -22,24 +22,83 @@ from services import product_scope as product_scope_service
 
 router = APIRouter(prefix="/api/copilot", tags=["copilot"])
 
-# Voorbeeldvragen uit masterprompt §26
-EXAMPLE_QUESTIONS = [
-    "Welke concurrenten verdienen deze week onze aandacht?",
-    "Waar verliezen we op dit moment marge?",
-    "Welke producten hebben de grootste huismerkpotentie?",
-    "Hoeveel switching-volume zien we van A-merk naar huismerk?",
-    "Welke promotie werkte het afgelopen kwartaal het best?",
-    "Hoe ontwikkelen traffic en conversie zich?",
-    "Bij welke leveranciers lopen we margerisico?",
-    "Wat zijn nu onze grootste kansen (opportunities)?",
-    "Wat gebeurt er met omzet en marge als we SKU X 3% duurder maken?",
+# Gecureerde, versiebeheerbare gespreksstarters. Een starter is een template,
+# geen gesprek: pas na een klik wordt een gebruiker-eigen conversatie gemaakt.
+COPILOT_STARTERS = [
+    {"key": "competitors-attention", "module_key": "competition", "module_label": "Concurrentie",
+     "title": "Belangrijkste concurrenten", "question": "Welke concurrenten zijn binnen mijn huidige selectie het belangrijkst en waarom?",
+     "description": "Rangschikt concurrenten op invloed en licht de belangrijkste factoren toe.", "required_function": "get_competitor_ranking"},
+    {"key": "position-one-room", "module_key": "competition", "module_label": "Concurrentie",
+     "title": "Positie 1 en prijsruimte", "question": "Waar staan wij op positie 1 en waar kunnen we veilig verhogen?",
+     "description": "Zoekt producten waar de eigen prijs marktleider is en duidt prijsruimte.", "required_function": "get_portfolio_price_position"},
+    {"key": "more-expensive", "module_key": "competition", "module_label": "Concurrentie",
+     "title": "Duurder dan de markt", "question": "Bij welke producten zijn wij duurder dan onze belangrijkste concurrenten?",
+     "description": "Brengt ongunstige prijsposities binnen de actieve selectie in beeld.", "required_function": "get_portfolio_price_position"},
+    {"key": "price-winner", "module_key": "competition", "module_label": "Concurrentie",
+     "title": "Wie wint op prijs?", "question": "Welke concurrent wint het vaakst op prijs binnen deze categorie?",
+     "description": "Vergelijkt de prijspositie van aanbieders binnen de huidige categorie.", "required_function": "get_competitor_ranking"},
+    {"key": "excluded-prices", "module_key": "competition", "module_label": "Concurrentie",
+     "title": "Uitgesloten prijzen", "question": "Welke uitgesloten concurrentprijzen beïnvloeden de vergelijking niet?",
+     "description": "Legt uit welke observaties buiten de betrouwbare vergelijking vallen.", "required_function": "get_price_position"},
+    {"key": "margin-loss", "module_key": "pricing", "module_label": "Pricing & aanbevelingen",
+     "title": "Margeverlies vinden", "question": "Waar verliezen we op dit moment marge?",
+     "description": "Toont de grootste margedalingen en waar actie nodig is.", "required_function": "get_margin_erosion"},
+    {"key": "price-simulation", "module_key": "pricing", "module_label": "Pricing & aanbevelingen",
+     "title": "Prijswijziging simuleren", "question": "Wat gebeurt er met omzet en marge als ik het geselecteerde product 3% duurder maak?",
+     "description": "Berekent de verwachte impact van een prijswijziging.", "required_function": "simulate_price_change"},
+    {"key": "private-label", "module_key": "assortment", "module_label": "Assortiment & substitutie",
+     "title": "Huismerkpotentie", "question": "Welke producten hebben de grootste huismerkpotentie?",
+     "description": "Vindt producten met kansrijke huismerkalternatieven.", "required_function": "get_private_label_potential"},
+    {"key": "switching", "module_key": "assortment", "module_label": "Assortiment & substitutie",
+     "title": "Overstap naar huismerk", "question": "Hoeveel switching-volume zien we van A-merk naar huismerk?",
+     "description": "Analyseert interne overstapbewegingen tussen merktypen.", "required_function": "get_customer_switching"},
+    {"key": "break-even", "module_key": "sales", "module_label": "Verkoop, marge & break-even",
+     "title": "Omzet en marge", "question": "Hoe ontwikkelen omzet, afzet en marge zich binnen mijn huidige selectie?",
+     "description": "Vat commerciële prestaties voor de actieve scope samen.", "required_function": "get_category_performance"},
+    {"key": "promotion", "module_key": "sales", "module_label": "Verkoop, marge & break-even",
+     "title": "Effectieve promoties", "question": "Welke promotie werkte het afgelopen kwartaal het best?",
+     "description": "Vergelijkt gemeten uplift en incrementele marge.", "required_function": "get_promotion_effectiveness"},
+    {"key": "supplier-risk", "module_key": "forecast", "module_label": "Voorraad, forecast & inkoop",
+     "title": "Leveranciersrisico", "question": "Bij welke leveranciers lopen we margerisico?",
+     "description": "Brengt inkooprisico en margedruk per leverancier of product in beeld.", "required_function": "get_supplier_risk"},
+    {"key": "active-signals", "module_key": "data_quality", "module_label": "Data quality & imports",
+     "title": "Dataproblemen met impact", "question": "Welke actieve signalen vragen nu aandacht en op welke data zijn ze gebaseerd?",
+     "description": "Vat actuele signalen en hun brondata samen.", "required_function": "get_active_signals"},
+    {"key": "opportunities", "module_key": "management", "module_label": "Management & kansen",
+     "title": "Grootste kansen", "question": "Wat zijn nu onze grootste commerciële kansen?",
+     "description": "Rangschikt kansen uit de centrale Opportunity Engine.", "required_function": "get_opportunities"},
+    {"key": "traffic", "module_key": "management", "module_label": "Management & kansen",
+     "title": "Traffic en conversie", "question": "Hoe ontwikkelen traffic en conversie zich?",
+     "description": "Geeft een managementsamenvatting van bereik en conversie.", "required_function": "get_traffic_summary"},
 ]
+
+STARTERS_BY_KEY = {s["key"]: s for s in COPILOT_STARTERS}
+MODULE_LABELS = {s["module_key"]: s["module_label"] for s in COPILOT_STARTERS}
+EXAMPLE_QUESTIONS = [s["question"] for s in COPILOT_STARTERS if s["module_key"] == "competition"]
+
+
+def _starter_library(db: Session, user: models.User) -> list[dict]:
+    allowed = ai_gateway.allowed_function_names(db, user)
+    result = []
+    for starter in COPILOT_STARTERS:
+        available = starter["required_function"] in allowed
+        result.append({
+            **starter,
+            "available": available,
+            "availability_reason": None if available else
+                "Niet beschikbaar voor jouw rol of afdeling.",
+        })
+    return result
 
 
 def _conversation_out(c: models.AiConversation) -> dict:
     return {
         "id": c.id,
+        "shop_id": c.shop_id,
         "title": c.title,
+        "module_key": c.module_key or "general",
+        "module_label": MODULE_LABELS.get(c.module_key or "general", "Algemeen"),
+        "starter_key": c.starter_key,
         "created_at": c.created_at.isoformat() if c.created_at else None,
         "updated_at": c.updated_at.isoformat() if c.updated_at else None,
     }
@@ -55,12 +114,21 @@ def _message_out(m: models.AiMessage) -> dict:
     }
 
 
-def _own_conversation(db: Session, user: models.User, conversation_id: int) -> models.AiConversation:
+def _own_conversation(
+    db: Session, user: models.User, conversation_id: int,
+    requested_shop_id: Optional[int] = None,
+) -> models.AiConversation:
     conv = db.query(models.AiConversation).filter(
         models.AiConversation.id == conversation_id,
         models.AiConversation.user_id == user.id,
     ).first()
     if not conv:
+        raise HTTPException(status_code=404, detail="Gesprek niet gevonden")
+    allowed_shops = authz.user_allowed_shop_ids(db, user)
+    if allowed_shops is not None and conv.shop_id not in allowed_shops:
+        # Gebruik 404 zodat geen gesprek-id of voormalige toegang wordt gelekt.
+        raise HTTPException(status_code=404, detail="Gesprek niet gevonden")
+    if requested_shop_id is not None and conv.shop_id != requested_shop_id:
         raise HTTPException(status_code=404, detail="Gesprek niet gevonden")
     return conv
 
@@ -86,6 +154,7 @@ def copilot_status(
         "provider_error": probe_error,
         "model": ai_gateway.AI_MODEL,
         "example_questions": EXAMPLE_QUESTIONS,
+        "starter_library": _starter_library(db, current_user),
         # Alleen functies die deze gebruiker vanuit zijn afdelingsrechten mag
         # gebruiken (taak 220) — zelfde allowlist als het toolaanbod in de
         # gateway.
@@ -100,11 +169,18 @@ def copilot_status(
 
 @router.get("/conversations")
 def list_conversations(
+    shop_id: int = Query(...),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
+    from semantic_layer import _shop_scope
+    sid = _shop_scope(db, shop_id)
+    allowed_shops = authz.user_allowed_shop_ids(db, current_user)
+    if allowed_shops is not None and sid not in allowed_shops:
+        raise HTTPException(status_code=403, detail="Geen toegang tot deze winkel")
     rows = db.query(models.AiConversation).filter(
-        models.AiConversation.user_id == current_user.id
+        models.AiConversation.user_id == current_user.id,
+        models.AiConversation.shop_id == sid,
     ).order_by(desc(models.AiConversation.updated_at)).limit(100).all()
     return [_conversation_out(c) for c in rows]
 
@@ -115,8 +191,29 @@ def create_conversation(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    title = (payload.get("title") or "Nieuw gesprek")[:300]
-    conv = models.AiConversation(user_id=current_user.id, title=title)
+    starter_key = (payload.get("starter_key") or "").strip() or None
+    starter = STARTERS_BY_KEY.get(starter_key) if starter_key else None
+    if starter_key and not starter:
+        raise HTTPException(status_code=422, detail="Onbekende gespreksstarter")
+    if starter and not next(
+        (s for s in _starter_library(db, current_user)
+         if s["key"] == starter_key and s["available"]), None
+    ):
+        raise HTTPException(status_code=403, detail="Deze gespreksstarter is niet beschikbaar")
+    module_key = (starter["module_key"] if starter else
+                  (payload.get("module_key") or "general").strip())[:80]
+    if module_key != "general" and module_key not in MODULE_LABELS:
+        raise HTTPException(status_code=422, detail="Onbekend Copilot-onderdeel")
+    title = (payload.get("title") or (starter["title"] if starter else "Nieuw gesprek"))[:300]
+    from semantic_layer import _shop_scope
+    sid = _shop_scope(db, payload.get("shop_id"))
+    allowed_shops = authz.user_allowed_shop_ids(db, current_user)
+    if allowed_shops is not None and sid not in allowed_shops:
+        raise HTTPException(status_code=403, detail="Geen toegang tot deze winkel")
+    conv = models.AiConversation(
+        user_id=current_user.id, shop_id=sid, title=title,
+        module_key=module_key, starter_key=starter_key,
+    )
     db.add(conv)
     db.commit()
     db.refresh(conv)
@@ -126,10 +223,11 @@ def create_conversation(
 @router.get("/conversations/{conversation_id}")
 def get_conversation(
     conversation_id: int,
+    shop_id: int = Query(...),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    conv = _own_conversation(db, current_user, conversation_id)
+    conv = _own_conversation(db, current_user, conversation_id, shop_id)
     msgs = db.query(models.AiMessage).filter(
         models.AiMessage.conversation_id == conv.id
     ).order_by(models.AiMessage.id).all()
@@ -141,10 +239,11 @@ def get_conversation(
 @router.delete("/conversations/{conversation_id}")
 def delete_conversation(
     conversation_id: int,
+    shop_id: int = Query(...),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
-    conv = _own_conversation(db, current_user, conversation_id)
+    conv = _own_conversation(db, current_user, conversation_id, shop_id)
     db.query(models.AiMessage).filter(
         models.AiMessage.conversation_id == conv.id).delete()
     db.delete(conv)
@@ -157,6 +256,7 @@ def send_message(
     conversation_id: int,
     background_tasks: BackgroundTasks,
     payload: dict = Body(...),
+    shop_id: int = Query(...),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
@@ -174,7 +274,7 @@ def send_message(
     if len(question) > 4000:
         raise HTTPException(status_code=400, detail="Vraag is te lang (max 4000 tekens)")
 
-    conv = _own_conversation(db, current_user, conversation_id)
+    conv = _own_conversation(db, current_user, conversation_id, shop_id)
 
     # Global Filter Context (taak 220): de frontend stuurt de actieve
     # hiërarchie-selectie mee als default scope voor de tooldata. Alleen
@@ -183,7 +283,25 @@ def send_message(
     ctx = payload.get("context") or {}
     hierarchy_node_ids: list[int] = []
     product_scope: Optional[dict] = None
+    global_filter_context: dict = {}
     if isinstance(ctx, dict):
+        # Niet-hiërarchische filters worden als gecontroleerde context aan het
+        # model doorgegeven. Tools passen alleen ondersteunde parameters toe;
+        # de prompt verplicht de Copilot beperkingen expliciet te melden.
+        for key in ("brands", "statuses"):
+            values = ctx.get(key)
+            if isinstance(values, list):
+                cleaned = [
+                    str(v)[:255] for v in values if isinstance(v, str)
+                ][:100]
+                if cleaned:
+                    global_filter_context[key] = cleaned
+        sku_query = ctx.get("sku_query")
+        if isinstance(sku_query, str) and sku_query.strip():
+            global_filter_context["sku_query"] = sku_query.strip()[:100]
+        period_days = ctx.get("period_days")
+        if isinstance(period_days, int) and 1 <= period_days <= 3650:
+            global_filter_context["period_days"] = period_days
         raw_ids = ctx.get("hierarchy_node_ids") or []
         if isinstance(raw_ids, list):
             hierarchy_node_ids = [int(v) for v in raw_ids[:50]
@@ -229,7 +347,9 @@ def send_message(
     # niet wordt uitgeput door een mislukte opslaagtransactie.
     try:
         db.add(models.AiMessage(conversation_id=conv.id, role="user", content=question))
-        if not prior:
+        # Handmatige lege gesprekken krijgen hun eerste vraag als titel.
+        # Gecureerde starters behouden de korte, herkenbare bibliotheektitel.
+        if not prior and not conv.starter_key:
             conv.title = question[:300]
         db.commit()
     except Exception:
@@ -270,6 +390,7 @@ def send_message(
                 budget_warning=budget_warning,
                 hierarchy_node_ids=hierarchy_node_ids or None,
                 product_scope=product_scope,
+                global_filter_context=global_filter_context or None,
             ):
                 if event.get("type") == "answer":
                     final_answer = event["answer"]

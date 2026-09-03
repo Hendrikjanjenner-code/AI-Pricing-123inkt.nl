@@ -6,4 +6,7 @@ export * from "./generated/types";
 export {
   GetCompetitorScoreDetailParams,
   GetCompetitorFullProfileParams,
+  GetCopilotConversationParams,
+  DeleteCopilotConversationParams,
+  SendCopilotMessageParams,
 } from "./generated/api";

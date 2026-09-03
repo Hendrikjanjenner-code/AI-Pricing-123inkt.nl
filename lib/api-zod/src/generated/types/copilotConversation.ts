@@ -9,6 +9,11 @@
 export interface CopilotConversation {
   id: number;
   title: string;
+  shop_id?: number;
+  module_key?: string;
+  module_label?: string;
+  /** @nullable */
+  starter_key?: string | null;
   /** @nullable */
   created_at?: string | null;
   /** @nullable */

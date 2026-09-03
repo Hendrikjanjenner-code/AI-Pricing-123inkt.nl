@@ -9,4 +9,10 @@
 export interface CopilotCreateConversationRequest {
   /** @nullable */
   title?: string | null;
+  /** @nullable */
+  module_key?: string | null;
+  /** @nullable */
+  starter_key?: string | null;
+  /** @nullable */
+  shop_id?: number | null;
 }

@@ -429,11 +429,16 @@ def get_competitor_ranking(db: Session, user: models.User, sku_id: Optional[str]
     _check_access(user, ALL_ROLES)
     sid = _shop_scope(db, shop_id)
 
-    latest = db.query(func.max(models.CompetitorInfluenceScore.run_date)).scalar()
+    latest = db.query(
+        func.max(models.CompetitorInfluenceScore.run_date)
+    ).join(
+        models.DimProduct,
+        models.DimProduct.sku_id == models.CompetitorInfluenceScore.sku_id,
+    ).filter(models.DimProduct.shop_id == sid).scalar()
     if not latest:
         return {
             "shop_id": sid,
-            "shop_scope_applied": False,
+            "shop_scope_applied": True,
             "data_available": False,
             "records": 0,
             "competitors": [],
@@ -444,7 +449,13 @@ def get_competitor_ranking(db: Session, user: models.User, sku_id: Optional[str]
         func.avg(models.CompetitorInfluenceScore.cis_score).label("avg_cis"),
         func.avg(models.CompetitorInfluenceScore.csrs_score).label("avg_csrs"),
         func.count(models.CompetitorInfluenceScore.id).label("sku_count"),
-    ).filter(models.CompetitorInfluenceScore.run_date == latest)
+    ).join(
+        models.DimProduct,
+        models.DimProduct.sku_id == models.CompetitorInfluenceScore.sku_id,
+    ).filter(
+        models.CompetitorInfluenceScore.run_date == latest,
+        models.DimProduct.shop_id == sid,
+    )
     if sku_id:
         q = q.filter(models.CompetitorInfluenceScore.sku_id == sku_id)
     rows = q.group_by(models.CompetitorInfluenceScore.competitor_name)\
@@ -452,8 +463,8 @@ def get_competitor_ranking(db: Session, user: models.User, sku_id: Optional[str]
 
     return {
         "shop_id": sid,
-        # Bronscores hebben (nog) geen shop_id-kolom: organisatie-breed.
-        "shop_scope_applied": False,
+        # Bronscores hebben geen shop_id; de productdimensie bepaalt de shop.
+        "shop_scope_applied": True,
         "run_date": str(latest),
         "sku_id": sku_id,
         "data_available": len(rows) > 0,
@@ -476,16 +487,24 @@ def get_price_position(db: Session, user: models.User, sku_id: str,
     """Prijspositie t.o.v. concurrentie (PCIS, prijsindex, referentieprijs)."""
     _check_access(user, ALL_ROLES)
     sid = _shop_scope(db, shop_id)
+    product_exists = db.query(models.DimProduct.sku_id).filter(
+        models.DimProduct.sku_id == sku_id,
+        models.DimProduct.shop_id == sid,
+    ).first()
+    if not product_exists:
+        return {"sku_id": sku_id, "shop_id": sid,
+                "shop_scope_applied": True, "data_available": False}
     score = db.query(models.SkuCompetitionScore).filter(
-        models.SkuCompetitionScore.sku_id == sku_id
+        models.SkuCompetitionScore.sku_id == sku_id,
+        models.SkuCompetitionScore.shop_id == sid,
     ).order_by(desc(models.SkuCompetitionScore.run_date)).first()
     if not score:
-        return {"sku_id": sku_id, "shop_id": sid, "shop_scope_applied": False, "data_available": False}
+        return {"sku_id": sku_id, "shop_id": sid, "shop_scope_applied": True, "data_available": False}
     return {
         "sku_id": sku_id,
         "shop_id": sid,
-        # sku_competition_score heeft (nog) geen shop_id-kolom.
-        "shop_scope_applied": False,
+        # Score is via de globaal unieke SKU aan de shop gekoppeld.
+        "shop_scope_applied": True,
         "data_available": True,
         "run_date": str(score.run_date),
         "pcis_score": score.pcis_score,
@@ -502,12 +521,21 @@ def get_customer_switching(db: Session, user: models.User, sku_id: Optional[str]
     """Interne overstap A-merk → huismerk (ISV) — alleen analist en hoger."""
     _check_access(user, ANALYST_UP)
     sid = _shop_scope(db, shop_id)
-    latest = db.query(func.max(models.InternalCompetitionScore.run_date)).scalar()
+    latest = db.query(
+        func.max(models.InternalCompetitionScore.run_date)
+    ).join(
+        models.DimProduct,
+        models.DimProduct.sku_id == models.InternalCompetitionScore.sku_id,
+    ).filter(models.DimProduct.shop_id == sid).scalar()
     if not latest:
-        return {"shop_id": sid, "shop_scope_applied": False, "data_available": False, "pairs": []}
+        return {"shop_id": sid, "shop_scope_applied": True, "data_available": False, "pairs": []}
 
-    q = db.query(models.InternalCompetitionScore).filter(
-        models.InternalCompetitionScore.run_date == latest
+    q = db.query(models.InternalCompetitionScore).join(
+        models.DimProduct,
+        models.DimProduct.sku_id == models.InternalCompetitionScore.sku_id,
+    ).filter(
+        models.InternalCompetitionScore.run_date == latest,
+        models.DimProduct.shop_id == sid,
     )
     if sku_id:
         q = q.filter(models.InternalCompetitionScore.sku_id == sku_id)
@@ -515,7 +543,7 @@ def get_customer_switching(db: Session, user: models.User, sku_id: Optional[str]
 
     return {
         "shop_id": sid,
-        "shop_scope_applied": False,
+        "shop_scope_applied": True,
         "run_date": str(latest),
         "data_available": len(rows) > 0,
         "pairs": [
@@ -545,7 +573,14 @@ def get_traffic_summary(db: Session, user: models.User, entity_id: Optional[str]
         func.coalesce(func.sum(models.FactTrafficDaily.pageviews), 0),
         func.coalesce(func.sum(models.FactTrafficDaily.orders), 0),
         func.count(models.FactTrafficDaily.id),
-    ).filter(models.FactTrafficDaily.date >= since)
+    ).join(
+        models.DimProduct,
+        models.DimProduct.sku_id == models.FactTrafficDaily.entity_id,
+    ).filter(
+        models.FactTrafficDaily.date >= since,
+        models.FactTrafficDaily.entity_type == "SKU",
+        models.DimProduct.shop_id == sid,
+    )
     if entity_id:
         q = q.filter(models.FactTrafficDaily.entity_id == entity_id)
     if sku_scope is not None:
@@ -556,8 +591,8 @@ def get_traffic_summary(db: Session, user: models.User, entity_id: Optional[str]
     conv = safe_div(orders, sessions)
     return {
         "shop_id": sid,
-        # fact_traffic_daily heeft (nog) geen shop_id-kolom.
-        "shop_scope_applied": False,
+        # Traffic is via de SKU-productdimensie aan de shop gekoppeld.
+        "shop_scope_applied": True,
         "period_days": days,
         "entity_id": entity_id,
         "data_available": records > 0,

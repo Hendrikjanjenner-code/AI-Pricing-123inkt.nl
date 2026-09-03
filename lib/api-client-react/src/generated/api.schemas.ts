@@ -127,10 +127,19 @@ export type CompetitorScoreDetail = CompetitorScoreSummary & {
 export interface CopilotCreateConversationRequest {
   /** @nullable */
   title?: string | null;
+  /** @nullable */
+  module_key?: string | null;
+  /** @nullable */
+  starter_key?: string | null;
+  /** @nullable */
+  shop_id?: number | null;
 }
+
+export type CopilotAskRequestContext = { [key: string]: unknown };
 
 export interface CopilotAskRequest {
   content: string;
+  context?: CopilotAskRequestContext;
 }
 
 export type CopilotStatusApprovedFunctionsItem = {
@@ -140,10 +149,24 @@ export type CopilotStatusApprovedFunctionsItem = {
 
 export type CopilotStatusDataFreshness = { [key: string]: unknown };
 
+export interface CopilotStarter {
+  key: string;
+  module_key: string;
+  module_label: string;
+  title: string;
+  question: string;
+  description: string;
+  required_function: string;
+  available: boolean;
+  /** @nullable */
+  availability_reason?: string | null;
+}
+
 export interface CopilotStatus {
   ai_available: boolean;
   model: string;
   example_questions: string[];
+  starter_library?: CopilotStarter[];
   approved_functions: CopilotStatusApprovedFunctionsItem[];
   data_freshness?: CopilotStatusDataFreshness;
 }
@@ -151,6 +174,11 @@ export interface CopilotStatus {
 export interface CopilotConversation {
   id: number;
   title: string;
+  shop_id?: number;
+  module_key?: string;
+  module_label?: string;
+  /** @nullable */
+  starter_key?: string | null;
   /** @nullable */
   created_at?: string | null;
   /** @nullable */
@@ -1266,6 +1294,25 @@ export type ListSignalsParams = {
    * @nullable
    */
   page_size?: number | null;
+};
+
+export type ListCopilotConversationsParams = {
+  /**
+   * @nullable
+   */
+  shop_id: number | null;
+};
+
+export type GetCopilotConversationParams = {
+  shop_id: number;
+};
+
+export type DeleteCopilotConversationParams = {
+  shop_id: number;
+};
+
+export type SendCopilotMessageParams = {
+  shop_id: number;
 };
 
 export type ListCopilotModelCallsParams = {

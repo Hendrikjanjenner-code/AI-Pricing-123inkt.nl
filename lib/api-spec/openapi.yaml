@@ -1278,6 +1278,11 @@ paths:
       operationId: listCopilotConversations
       tags: [copilot]
       summary: List own copilot conversations
+      parameters:
+        - name: shop_id
+          in: query
+          required: true
+          schema: { type: ["integer", "null"] }
       responses:
         "200":
           description: Conversation list
@@ -1316,6 +1321,10 @@ paths:
           required: true
           schema:
             type: integer
+        - name: shop_id
+          in: query
+          required: true
+          schema: { type: integer }
       responses:
         "200":
           description: Conversation detail
@@ -1339,6 +1348,10 @@ paths:
           required: true
           schema:
             type: integer
+        - name: shop_id
+          in: query
+          required: true
+          schema: { type: integer }
       responses:
         "200":
           description: Deleted
@@ -1358,6 +1371,10 @@ paths:
           required: true
           schema:
             type: integer
+        - name: shop_id
+          in: query
+          required: true
+          schema: { type: integer }
       requestBody:
         required: true
         content:
@@ -2113,6 +2130,12 @@ components:
       properties:
         title:
           type: ["string", "null"]
+        module_key:
+          type: ["string", "null"]
+        starter_key:
+          type: ["string", "null"]
+        shop_id:
+          type: ["integer", "null"]
 
     CopilotAskRequest:
       type: object
@@ -2120,6 +2143,9 @@ components:
       properties:
         content:
           type: string
+        context:
+          type: object
+          additionalProperties: true
 
     CopilotStatus:
       type: object
@@ -2133,6 +2159,10 @@ components:
           type: array
           items:
             type: string
+        starter_library:
+          type: array
+          items:
+            $ref: "#/components/schemas/CopilotStarter"
         approved_functions:
           type: array
           items:
@@ -2155,10 +2185,32 @@ components:
           type: integer
         title:
           type: string
+        shop_id:
+          type: integer
+        module_key:
+          type: string
+        module_label:
+          type: string
+        starter_key:
+          type: ["string", "null"]
         created_at:
           type: ["string", "null"]
         updated_at:
           type: ["string", "null"]
+
+    CopilotStarter:
+      type: object
+      required: [key, module_key, module_label, title, question, description, required_function, available]
+      properties:
+        key: { type: string }
+        module_key: { type: string }
+        module_label: { type: string }
+        title: { type: string }
+        question: { type: string }
+        description: { type: string }
+        required_function: { type: string }
+        available: { type: boolean }
+        availability_reason: { type: ["string", "null"] }
 
     CopilotMessage:
       type: object

@@ -40,6 +40,7 @@ import type {
   CreateUserRequest,
   DashboardSummary,
   DataQualityReport,
+  DeleteCopilotConversationParams,
   Department,
   DepartmentListResponse,
   DepartmentUpdateRequest,
@@ -61,6 +62,7 @@ import type {
   GetCompetitorRankingsParams,
   GetCompetitorScoreDetailParams,
   GetCompetitorScoreRankingsParams,
+  GetCopilotConversationParams,
   GetDataQualityOutliersParams,
   GetExportHistoryParams,
   GetProductFilterProductsParams,
@@ -72,6 +74,7 @@ import type {
   IntelligenceSignal,
   ListAuthzPermissions200,
   ListCompetitorScoresParams,
+  ListCopilotConversationsParams,
   ListCopilotModelCallsParams,
   ListProductsParams,
   ListRecommendationsParams,
@@ -100,6 +103,7 @@ import type {
   RolesMatrixUpdateRequest,
   RunCompetitorScores200,
   RunCompetitorScoresParams,
+  SendCopilotMessageParams,
   Shop,
   ShopListResponse,
   SignalCatalog,
@@ -5110,42 +5114,66 @@ export function useGetCopilotStatus<
 /**
  * @summary List own copilot conversations
  */
-export const getListCopilotConversationsUrl = () => {
-  return `/api/copilot/conversations`;
+export const getListCopilotConversationsUrl = (
+  params: ListCopilotConversationsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/copilot/conversations?${stringifiedParams}`
+    : `/api/copilot/conversations`;
 };
 
 export const listCopilotConversations = async (
+  params: ListCopilotConversationsParams,
   options?: RequestInit,
 ): Promise<CopilotConversation[]> => {
-  return customFetch<CopilotConversation[]>(getListCopilotConversationsUrl(), {
-    ...options,
-    method: "GET",
-  });
+  return customFetch<CopilotConversation[]>(
+    getListCopilotConversationsUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
 };
 
-export const getListCopilotConversationsQueryKey = () => {
-  return [`/api/copilot/conversations`] as const;
+export const getListCopilotConversationsQueryKey = (
+  params?: ListCopilotConversationsParams,
+) => {
+  return [`/api/copilot/conversations`, ...(params ? [params] : [])] as const;
 };
 
 export const getListCopilotConversationsQueryOptions = <
   TData = Awaited<ReturnType<typeof listCopilotConversations>>,
   TError = ErrorType<unknown>,
->(options?: {
-  query?: UseQueryOptions<
-    Awaited<ReturnType<typeof listCopilotConversations>>,
-    TError,
-    TData
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}) => {
+>(
+  params: ListCopilotConversationsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listCopilotConversations>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
   const { query: queryOptions, request: requestOptions } = options ?? {};
 
   const queryKey =
-    queryOptions?.queryKey ?? getListCopilotConversationsQueryKey();
+    queryOptions?.queryKey ?? getListCopilotConversationsQueryKey(params);
 
   const queryFn: QueryFunction<
     Awaited<ReturnType<typeof listCopilotConversations>>
-  > = ({ signal }) => listCopilotConversations({ signal, ...requestOptions });
+  > = ({ signal }) =>
+    listCopilotConversations(params, { signal, ...requestOptions });
 
   return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
     Awaited<ReturnType<typeof listCopilotConversations>>,
@@ -5166,15 +5194,18 @@ export type ListCopilotConversationsQueryError = ErrorType<unknown>;
 export function useListCopilotConversations<
   TData = Awaited<ReturnType<typeof listCopilotConversations>>,
   TError = ErrorType<unknown>,
->(options?: {
-  query?: UseQueryOptions<
-    Awaited<ReturnType<typeof listCopilotConversations>>,
-    TError,
-    TData
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getListCopilotConversationsQueryOptions(options);
+>(
+  params: ListCopilotConversationsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listCopilotConversations>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListCopilotConversationsQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;
@@ -5273,16 +5304,32 @@ export const useCreateCopilotConversation = <
 /**
  * @summary Get conversation with messages
  */
-export const getGetCopilotConversationUrl = (id: number) => {
-  return `/api/copilot/conversations/${id}`;
+export const getGetCopilotConversationUrl = (
+  id: number,
+  params: GetCopilotConversationParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/copilot/conversations/${id}?${stringifiedParams}`
+    : `/api/copilot/conversations/${id}`;
 };
 
 export const getCopilotConversation = async (
   id: number,
+  params: GetCopilotConversationParams,
   options?: RequestInit,
 ): Promise<CopilotConversationDetail> => {
   return customFetch<CopilotConversationDetail>(
-    getGetCopilotConversationUrl(id),
+    getGetCopilotConversationUrl(id, params),
     {
       ...options,
       method: "GET",
@@ -5290,8 +5337,14 @@ export const getCopilotConversation = async (
   );
 };
 
-export const getGetCopilotConversationQueryKey = (id: number) => {
-  return [`/api/copilot/conversations/${id}`] as const;
+export const getGetCopilotConversationQueryKey = (
+  id: number,
+  params?: GetCopilotConversationParams,
+) => {
+  return [
+    `/api/copilot/conversations/${id}`,
+    ...(params ? [params] : []),
+  ] as const;
 };
 
 export const getGetCopilotConversationQueryOptions = <
@@ -5299,6 +5352,7 @@ export const getGetCopilotConversationQueryOptions = <
   TError = ErrorType<ErrorResponse>,
 >(
   id: number,
+  params: GetCopilotConversationParams,
   options?: {
     query?: UseQueryOptions<
       Awaited<ReturnType<typeof getCopilotConversation>>,
@@ -5311,11 +5365,12 @@ export const getGetCopilotConversationQueryOptions = <
   const { query: queryOptions, request: requestOptions } = options ?? {};
 
   const queryKey =
-    queryOptions?.queryKey ?? getGetCopilotConversationQueryKey(id);
+    queryOptions?.queryKey ?? getGetCopilotConversationQueryKey(id, params);
 
   const queryFn: QueryFunction<
     Awaited<ReturnType<typeof getCopilotConversation>>
-  > = ({ signal }) => getCopilotConversation(id, { signal, ...requestOptions });
+  > = ({ signal }) =>
+    getCopilotConversation(id, params, { signal, ...requestOptions });
 
   return {
     queryKey,
@@ -5343,6 +5398,7 @@ export function useGetCopilotConversation<
   TError = ErrorType<ErrorResponse>,
 >(
   id: number,
+  params: GetCopilotConversationParams,
   options?: {
     query?: UseQueryOptions<
       Awaited<ReturnType<typeof getCopilotConversation>>,
@@ -5352,7 +5408,11 @@ export function useGetCopilotConversation<
     request?: SecondParameter<typeof customFetch>;
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getGetCopilotConversationQueryOptions(id, options);
+  const queryOptions = getGetCopilotConversationQueryOptions(
+    id,
+    params,
+    options,
+  );
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;
@@ -5364,18 +5424,37 @@ export function useGetCopilotConversation<
 /**
  * @summary Delete a conversation
  */
-export const getDeleteCopilotConversationUrl = (id: number) => {
-  return `/api/copilot/conversations/${id}`;
+export const getDeleteCopilotConversationUrl = (
+  id: number,
+  params: DeleteCopilotConversationParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/copilot/conversations/${id}?${stringifiedParams}`
+    : `/api/copilot/conversations/${id}`;
 };
 
 export const deleteCopilotConversation = async (
   id: number,
+  params: DeleteCopilotConversationParams,
   options?: RequestInit,
 ): Promise<MessageResponse> => {
-  return customFetch<MessageResponse>(getDeleteCopilotConversationUrl(id), {
-    ...options,
-    method: "DELETE",
-  });
+  return customFetch<MessageResponse>(
+    getDeleteCopilotConversationUrl(id, params),
+    {
+      ...options,
+      method: "DELETE",
+    },
+  );
 };
 
 export const getDeleteCopilotConversationMutationOptions = <
@@ -5385,14 +5464,14 @@ export const getDeleteCopilotConversationMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof deleteCopilotConversation>>,
     TError,
-    { id: number },
+    { id: number; params: DeleteCopilotConversationParams },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof deleteCopilotConversation>>,
   TError,
-  { id: number },
+  { id: number; params: DeleteCopilotConversationParams },
   TContext
 > => {
   const mutationKey = ["deleteCopilotConversation"];
@@ -5406,11 +5485,11 @@ export const getDeleteCopilotConversationMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof deleteCopilotConversation>>,
-    { id: number }
+    { id: number; params: DeleteCopilotConversationParams }
   > = (props) => {
-    const { id } = props ?? {};
+    const { id, params } = props ?? {};
 
-    return deleteCopilotConversation(id, requestOptions);
+    return deleteCopilotConversation(id, params, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
@@ -5432,14 +5511,14 @@ export const useDeleteCopilotConversation = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof deleteCopilotConversation>>,
     TError,
-    { id: number },
+    { id: number; params: DeleteCopilotConversationParams },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
   Awaited<ReturnType<typeof deleteCopilotConversation>>,
   TError,
-  { id: number },
+  { id: number; params: DeleteCopilotConversationParams },
   TContext
 > => {
   return useMutation(getDeleteCopilotConversationMutationOptions(options));
@@ -5448,16 +5527,32 @@ export const useDeleteCopilotConversation = <
 /**
  * @summary Ask the copilot a question (SSE stream response)
  */
-export const getSendCopilotMessageUrl = (id: number) => {
-  return `/api/copilot/conversations/${id}/messages`;
+export const getSendCopilotMessageUrl = (
+  id: number,
+  params: SendCopilotMessageParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/copilot/conversations/${id}/messages?${stringifiedParams}`
+    : `/api/copilot/conversations/${id}/messages`;
 };
 
 export const sendCopilotMessage = async (
   id: number,
   copilotAskRequest: CopilotAskRequest,
+  params: SendCopilotMessageParams,
   options?: RequestInit,
 ): Promise<string> => {
-  return customFetch<string>(getSendCopilotMessageUrl(id), {
+  return customFetch<string>(getSendCopilotMessageUrl(id, params), {
     ...options,
     method: "POST",
     headers: { "Content-Type": "application/json", ...options?.headers },
@@ -5472,14 +5567,22 @@ export const getSendCopilotMessageMutationOptions = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof sendCopilotMessage>>,
     TError,
-    { id: number; data: BodyType<CopilotAskRequest> },
+    {
+      id: number;
+      data: BodyType<CopilotAskRequest>;
+      params: SendCopilotMessageParams;
+    },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof sendCopilotMessage>>,
   TError,
-  { id: number; data: BodyType<CopilotAskRequest> },
+  {
+    id: number;
+    data: BodyType<CopilotAskRequest>;
+    params: SendCopilotMessageParams;
+  },
   TContext
 > => {
   const mutationKey = ["sendCopilotMessage"];
@@ -5493,11 +5596,15 @@ export const getSendCopilotMessageMutationOptions = <
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof sendCopilotMessage>>,
-    { id: number; data: BodyType<CopilotAskRequest> }
+    {
+      id: number;
+      data: BodyType<CopilotAskRequest>;
+      params: SendCopilotMessageParams;
+    }
   > = (props) => {
-    const { id, data } = props ?? {};
+    const { id, data, params } = props ?? {};
 
-    return sendCopilotMessage(id, data, requestOptions);
+    return sendCopilotMessage(id, data, params, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
@@ -5519,14 +5626,22 @@ export const useSendCopilotMessage = <
   mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof sendCopilotMessage>>,
     TError,
-    { id: number; data: BodyType<CopilotAskRequest> },
+    {
+      id: number;
+      data: BodyType<CopilotAskRequest>;
+      params: SendCopilotMessageParams;
+    },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
   Awaited<ReturnType<typeof sendCopilotMessage>>,
   TError,
-  { id: number; data: BodyType<CopilotAskRequest> },
+  {
+    id: number;
+    data: BodyType<CopilotAskRequest>;
+    params: SendCopilotMessageParams;
+  },
   TContext
 > => {
   return useMutation(getSendCopilotMessageMutationOptions(options));

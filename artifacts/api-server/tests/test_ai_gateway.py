@@ -212,9 +212,9 @@ class TestCompetitorRankingRecords(unittest.TestCase):
     @patch("semantic_layer._shop_scope", return_value=1)
     def test_filled_ranking_reports_competitor_count(self, _shop_scope):
         latest_query = unittest.mock.MagicMock()
-        latest_query.scalar.return_value = "2026-09-03"
+        latest_query.join.return_value.filter.return_value.scalar.return_value = "2026-09-03"
         ranking_query = unittest.mock.MagicMock()
-        ranking_query.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = [
+        ranking_query.join.return_value.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = [
             types.SimpleNamespace(
                 competitor_name="Concurrent A", avg_cis=80, avg_csrs=90, sku_count=4),
             types.SimpleNamespace(
@@ -232,7 +232,7 @@ class TestCompetitorRankingRecords(unittest.TestCase):
     @patch("semantic_layer._shop_scope", return_value=1)
     def test_empty_ranking_reports_zero_records(self, _shop_scope):
         latest_query = unittest.mock.MagicMock()
-        latest_query.scalar.return_value = None
+        latest_query.join.return_value.filter.return_value.scalar.return_value = None
         db = unittest.mock.MagicMock()
         db.query.return_value = latest_query
 

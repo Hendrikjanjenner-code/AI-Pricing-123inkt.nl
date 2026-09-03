@@ -2672,6 +2672,8 @@ class AiConversation(Base):
     shop_id = Column(Integer, ForeignKey("dim_shop.id"), default=1, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     title = Column(String(300), default="Nieuw gesprek")
+    module_key = Column(String(80), default="general", index=True)
+    starter_key = Column(String(120), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

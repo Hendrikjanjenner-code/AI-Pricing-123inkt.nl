@@ -9,9 +9,11 @@ import {
   useGetCopilotConversation,
   getGetCopilotConversationQueryKey,
   getListCopilotConversationsQueryKey,
+  CopilotStarter
 } from "@workspace/api-client-react";
 import { getAuthHeaders, useAuth } from "@/lib/auth";
 import { getGlobalFilters } from "@/lib/global-filters";
+import { useShopId } from "@/hooks/use-shop-id";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +24,9 @@ import {
   Database, Clock, Link2, Loader2, ShieldCheck, ThumbsUp, ThumbsDown,
   Brain, Pencil, Gauge,
 } from "lucide-react";
+import { StarterLibraryDialog } from "@/components/copilot/starter-library";
+import { FALLBACK_QUESTIONS, FALLBACK_STARTERS } from "@/components/copilot/starter-library-data";
+import { useToast } from "@/hooks/use-toast";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -676,6 +681,7 @@ function useBudgetMe(refreshKey: number) {
 export default function CopilotPage() {
   const queryClient = useQueryClient();
   const [activeId, setActiveId] = useState<number | null>(null);
+  const activeIdRef = useRef<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -683,20 +689,42 @@ export default function CopilotPage() {
   const [budgetRefresh, setBudgetRefresh] = useState(0);
   const { budget, atLimit: budgetExhausted } = useBudgetMe(budgetRefresh);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const streamingConversationIdRef = useRef<number | null>(null);
+  const creatingConversationRef = useRef(false);
+  const [creatingConversation, setCreatingConversation] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const { toast } = useToast();
+  const shopId = useShopId();
+  const activateConversation = (id: number | null) => {
+    activeIdRef.current = id;
+    setActiveId(id);
+  };
 
-  const { data: status } = useGetCopilotStatus();
-  const { data: conversations, isLoading: convsLoading } = useListCopilotConversations();
-  const createConv = useCreateCopilotConversation();
-  const deleteConv = useDeleteCopilotConversation();
-  const { data: activeConv } = useGetCopilotConversation(activeId ?? 0, {
+  const { data: status, isLoading: statusLoading, isError: isStatusError, refetch: refetchStatus } = useGetCopilotStatus();
+  const { data: conversations, isLoading: convsLoading } = useListCopilotConversations({
+    shop_id: shopId ?? null,
+  }, {
     query: {
-      enabled: activeId != null,
-      queryKey: getGetCopilotConversationQueryKey(activeId ?? 0),
+      enabled: shopId != null,
+      queryKey: getListCopilotConversationsQueryKey({ shop_id: shopId ?? null }),
     },
   });
+  const createConv = useCreateCopilotConversation();
+  const deleteConv = useDeleteCopilotConversation();
+  const { data: activeConv } = useGetCopilotConversation(
+    activeId ?? 0,
+    { shop_id: shopId ?? 0 },
+    { query: {
+      enabled: activeId != null,
+      queryKey: getGetCopilotConversationQueryKey(activeId ?? 0),
+    } },
+  );
 
   useEffect(() => {
-    if (activeConv && activeConv.id === activeId) {
+    if (
+      activeConv && activeConv.id === activeId &&
+      streamingConversationIdRef.current !== activeConv.id
+    ) {
       setMessages(
         (activeConv.messages || []).map((m) => ({
           id: String(m.id),
@@ -710,32 +738,76 @@ export default function CopilotPage() {
   }, [activeConv, activeId]);
 
   useEffect(() => {
+    // Een gesprek hoort bij precies één winkel. Na een winkelwissel nooit een
+    // oud gesprek met de nieuwe zichtbare filters blijven tonen.
+    activeIdRef.current = null;
+    setActiveId(null);
+    setMessages([]);
+  }, [shopId]);
+
+  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, statusLine]);
 
   const refreshConversations = () =>
-    queryClient.invalidateQueries({ queryKey: getListCopilotConversationsQueryKey() });
+    queryClient.invalidateQueries({
+      queryKey: getListCopilotConversationsQueryKey({ shop_id: shopId ?? null }),
+    });
 
-  const newConversation = async (): Promise<number | null> => {
+  const handleStartConversation = async (starter?: CopilotStarter) => {
+    if (creatingConversationRef.current || streamingConversationIdRef.current !== null) return;
+    creatingConversationRef.current = true;
+    setCreatingConversation(true);
+    setLibraryOpen(false);
     try {
-      const conv = await createConv.mutateAsync({ data: {} });
+      const data = starter
+        ? { title: starter.title, module_key: starter.module_key, starter_key: starter.key, shop_id: shopId }
+        : { shop_id: shopId };
+      const conv = await createConv.mutateAsync({ data });
       await refreshConversations();
-      setActiveId(conv.id);
+      activateConversation(conv.id);
       setMessages([]);
-      return conv.id;
+
+      if (starter) {
+        await ask(starter.question, conv.id);
+      }
     } catch {
-      return null;
+      toast({
+        variant: "destructive",
+        title: "Fout",
+        description: "Kon het gesprek niet aanmaken. Probeer het opnieuw.",
+      });
+    } finally {
+      creatingConversationRef.current = false;
+      setCreatingConversation(false);
     }
   };
 
-  const ask = async (question: string) => {
+  const ask = async (question: string, overrideConvId?: number) => {
     const q = question.trim();
-    if (!q || busy || budgetExhausted) return;
-    let convId = activeId;
+    if (!q || busy || budgetExhausted || streamingConversationIdRef.current !== null) return;
+
+    let convId = overrideConvId ?? activeId;
+    streamingConversationIdRef.current = convId ?? -1;
+
     if (convId == null) {
-      convId = await newConversation();
-      if (convId == null) return;
+      try {
+        const conv = await createConv.mutateAsync({ data: { shop_id: shopId } });
+        await refreshConversations();
+        activateConversation(conv.id);
+        setMessages([]);
+        convId = conv.id;
+      } catch {
+        streamingConversationIdRef.current = null;
+        toast({
+          variant: "destructive",
+          title: "Fout",
+          description: "Kon het gesprek niet aanmaken. Probeer het opnieuw.",
+        });
+        return;
+      }
     }
+    streamingConversationIdRef.current = convId;
     setBusy(true);
     setInput("");
     setStatusLine("Bezig…");
@@ -743,7 +815,9 @@ export default function CopilotPage() {
 
     try {
       // Eigen AbortSignal: LLM-antwoorden duren langer dan de globale 15s-timeout.
-      const res = await fetch(`${BASE}/api/copilot/conversations/${convId}/messages`, {
+      const res = await fetch(
+        `${BASE}/api/copilot/conversations/${convId}/messages?shop_id=${shopId ?? 0}`,
+        {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         // Actieve Global Filter Context meesturen als default scope (taak 220):
@@ -760,12 +834,17 @@ export default function CopilotPage() {
             }
             return {
               hierarchy_node_ids: ids,
+              brands: f.brands,
+              statuses: f.statuses,
+              sku_query: f.skuQuery,
+              period_days: f.periodDays,
               ...(f.product ? { product: { sku_id: f.product.skuId } } : {}),
             };
           })(),
         }),
         signal: AbortSignal.timeout(180_000),
-      });
+        },
+      );
       // Race met de server-side budgetbewaking (429): toon dan een specifieke
       // budgetmelding in plaats van de generieke netwerk/AI-storing.
       if (res.status === 429) {
@@ -775,7 +854,7 @@ export default function CopilotPage() {
         } catch {
           /* geen JSON-body */
         }
-        setMessages((prev) => [
+        setMessages((prev) => activeIdRef.current === convId ? [
           ...prev,
           {
             id: `a-${Date.now()}`,
@@ -784,7 +863,7 @@ export default function CopilotPage() {
               detail || "Dagbudget bereikt — morgen weer beschikbaar. Je vraag is niet verwerkt.",
             answer: null,
           },
-        ]);
+        ] : prev);
         return;
       }
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
@@ -811,13 +890,14 @@ export default function CopilotPage() {
             setStatusLine(`Data opgehaald: ${evt.name}${evt.records != null ? ` (${evt.records} records)` : ""}`);
           else if (evt.type === "answer") {
             const a: CopilotAnswer = evt.answer || {};
-            setMessages((prev) => [
+            setMessages((prev) => activeIdRef.current === convId ? [
               ...prev,
               { id: `a-${Date.now()}`, role: "assistant", content: a.conclusion || "", answer: a },
-            ]);
+            ] : prev);
           } else if (evt.type === "done" && evt.message_id) {
             // Koppel het DB-id aan het laatste assistant-bericht (voor feedback)
             setMessages((prev) => {
+              if (activeIdRef.current !== convId) return prev;
               const next = [...prev];
               for (let i = next.length - 1; i >= 0; i--) {
                 if (next[i].role === "assistant") {
@@ -832,7 +912,7 @@ export default function CopilotPage() {
       }
       refreshConversations();
     } catch {
-      setMessages((prev) => [
+      setMessages((prev) => activeIdRef.current === convId ? [
         ...prev,
         {
           id: `a-${Date.now()}`,
@@ -841,8 +921,12 @@ export default function CopilotPage() {
             "Het antwoord kon niet worden opgehaald (netwerk- of AI-storing). De rest van de applicatie blijft gewoon werken — probeer het zo opnieuw.",
           answer: null,
         },
-      ]);
+      ] : prev);
     } finally {
+      streamingConversationIdRef.current = null;
+      queryClient.invalidateQueries({
+        queryKey: getGetCopilotConversationQueryKey(convId),
+      });
       setBusy(false);
       setStatusLine(null);
       setBudgetRefresh((n) => n + 1);
@@ -851,22 +935,33 @@ export default function CopilotPage() {
 
   const removeConversation = async (id: number) => {
     try {
-      await deleteConv.mutateAsync({ id });
+      await deleteConv.mutateAsync({ id, params: { shop_id: shopId ?? 0 } });
       if (activeId === id) {
-        setActiveId(null);
+        activateConversation(null);
         setMessages([]);
       }
       refreshConversations();
     } catch {
-      /* noop */
+      toast({
+        variant: "destructive",
+        title: "Fout",
+        description: "Gesprek kon niet worden verwijderd.",
+      });
     }
   };
+
+  const exampleQuestions = status?.example_questions?.length
+    ? status.example_questions
+    : FALLBACK_QUESTIONS;
+  const starterLibrary = status?.starter_library?.length
+    ? status.starter_library
+    : FALLBACK_STARTERS;
 
   return (
     <div className="flex h-[calc(100vh-6rem)] gap-4">
       {/* Gespreksgeschiedenis */}
       <div className="hidden w-64 shrink-0 flex-col gap-2 md:flex">
-        <Button onClick={() => void newConversation()} className="gap-2" size="sm">
+        <Button onClick={() => setLibraryOpen(true)} disabled={busy || creatingConversation} className="gap-2" size="sm" data-testid="button-desktop-new-chat">
           <Plus className="h-4 w-4" /> Nieuw gesprek
         </Button>
         <div className="flex-1 space-y-1 overflow-y-auto">
@@ -877,10 +972,19 @@ export default function CopilotPage() {
               className={`group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted ${
                 activeId === c.id ? "bg-muted font-medium" : ""
               }`}
-              onClick={() => setActiveId(c.id)}
+              onClick={() => {
+                if (!busy && !creatingConversation) activateConversation(c.id);
+              }}
+              aria-disabled={busy || creatingConversation}
+              data-testid={`link-conversation-${c.id}`}
             >
               <Bot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <span className="flex-1 truncate">{c.title}</span>
+              <div className="flex-1 min-w-0 flex flex-col">
+                <span className="truncate">{c.title}</span>
+                {c.module_label && (
+                  <span className="text-[10px] text-muted-foreground truncate">{c.module_label}</span>
+                )}
+              </div>
               <button
                 className="hidden text-muted-foreground hover:text-destructive group-hover:block"
                 onClick={(e) => {
@@ -888,6 +992,7 @@ export default function CopilotPage() {
                   void removeConversation(c.id);
                 }}
                 aria-label="Verwijder gesprek"
+                disabled={busy || creatingConversation}
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
@@ -914,17 +1019,31 @@ export default function CopilotPage() {
             <h1 className="flex items-center gap-2 text-xl font-semibold">
               <Sparkles className="h-5 w-5 text-primary" /> Commercial AI Copilot
             </h1>
-            <p className="text-sm text-muted-foreground">
+            <p className="hidden text-sm text-muted-foreground sm:block">
               Stel vragen over pricing, marge, concurrentie, promoties en kansen.
             </p>
           </div>
-          <BudgetIndicator budget={budget} />
-          {status && (
-            <Badge variant={status.ai_available ? "default" : "destructive"}>
-              {status.ai_available ? `AI actief (${status.model})` : "AI niet beschikbaar"}
-            </Badge>
-          )}
+          <div className="flex items-center gap-3">
+            <BudgetIndicator budget={budget} />
+            {status && (
+              <Badge variant={status.ai_available ? "default" : "destructive"} className="hidden md:inline-flex">
+                {status.ai_available ? `AI actief (${status.model})` : "AI niet beschikbaar"}
+              </Badge>
+            )}
+            <Button onClick={() => setLibraryOpen(true)} disabled={busy || creatingConversation} className="gap-2 md:hidden" size="sm" data-testid="button-mobile-new-chat">
+              <Plus className="h-4 w-4" /> Nieuw
+            </Button>
+          </div>
         </div>
+
+        {isStatusError && (
+          <div className="mb-3 flex items-center justify-between rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive" data-testid="status-error-banner">
+            <span>Er ging iets mis bij het ophalen van de status. Sommige functies zijn mogelijk beperkt.</span>
+            <Button variant="outline" size="sm" onClick={() => void refetchStatus()} data-testid="button-retry-status">
+              Probeer opnieuw
+            </Button>
+          </div>
+        )}
 
         {status && !status.ai_available && (
           <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
@@ -937,10 +1056,10 @@ export default function CopilotPage() {
           <CardContent className="flex min-h-0 flex-1 flex-col p-4">
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
               {messages.length === 0 && (
-                <div className="space-y-3 py-6">
+                <div className="space-y-3 py-6" data-testid="empty-chat-suggestions">
                   <p className="text-sm text-muted-foreground">Voorbeeldvragen:</p>
                   <div className="flex flex-wrap gap-2">
-                    {(status?.example_questions || []).map((q, i) => (
+                    {exampleQuestions.map((q, i) => (
                       <Button
                         key={i}
                         variant="outline"
@@ -948,6 +1067,7 @@ export default function CopilotPage() {
                         className="h-auto whitespace-normal py-1.5 text-left text-xs"
                         onClick={() => void ask(q)}
                         disabled={busy || budgetExhausted}
+                        data-testid={`button-example-${i}`}
                       >
                         {q}
                       </Button>
@@ -1032,6 +1152,13 @@ export default function CopilotPage() {
           </CardContent>
         </Card>
       </div>
+
+      <StarterLibraryDialog
+        open={libraryOpen}
+        onOpenChange={setLibraryOpen}
+        starters={starterLibrary}
+        onSelect={handleStartConversation}
+      />
     </div>
   );
 }

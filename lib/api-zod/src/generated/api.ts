@@ -1646,6 +1646,21 @@ export const GetCopilotStatusResponse = zod.object({
   ai_available: zod.boolean(),
   model: zod.string(),
   example_questions: zod.array(zod.string()),
+  starter_library: zod
+    .array(
+      zod.object({
+        key: zod.string(),
+        module_key: zod.string(),
+        module_label: zod.string(),
+        title: zod.string(),
+        question: zod.string(),
+        description: zod.string(),
+        required_function: zod.string(),
+        available: zod.boolean(),
+        availability_reason: zod.string().nullish(),
+      }),
+    )
+    .optional(),
   approved_functions: zod.array(
     zod.object({
       name: zod.string(),
@@ -1658,9 +1673,17 @@ export const GetCopilotStatusResponse = zod.object({
 /**
  * @summary List own copilot conversations
  */
+export const ListCopilotConversationsQueryParams = zod.object({
+  shop_id: zod.coerce.number().nullable(),
+});
+
 export const ListCopilotConversationsResponseItem = zod.object({
   id: zod.number(),
   title: zod.string(),
+  shop_id: zod.number().optional(),
+  module_key: zod.string().optional(),
+  module_label: zod.string().optional(),
+  starter_key: zod.string().nullish(),
   created_at: zod.string().nullish(),
   updated_at: zod.string().nullish(),
 });
@@ -1673,11 +1696,18 @@ export const ListCopilotConversationsResponse = zod.array(
  */
 export const CreateCopilotConversationBody = zod.object({
   title: zod.string().nullish(),
+  module_key: zod.string().nullish(),
+  starter_key: zod.string().nullish(),
+  shop_id: zod.number().nullish(),
 });
 
 export const CreateCopilotConversationResponse = zod.object({
   id: zod.number(),
   title: zod.string(),
+  shop_id: zod.number().optional(),
+  module_key: zod.string().optional(),
+  module_label: zod.string().optional(),
+  starter_key: zod.string().nullish(),
   created_at: zod.string().nullish(),
   updated_at: zod.string().nullish(),
 });
@@ -1689,10 +1719,18 @@ export const GetCopilotConversationParams = zod.object({
   id: zod.coerce.number(),
 });
 
+export const GetCopilotConversationQueryParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
 export const GetCopilotConversationResponse = zod
   .object({
     id: zod.number(),
     title: zod.string(),
+    shop_id: zod.number().optional(),
+    module_key: zod.string().optional(),
+    module_label: zod.string().optional(),
+    starter_key: zod.string().nullish(),
     created_at: zod.string().nullish(),
     updated_at: zod.string().nullish(),
   })
@@ -1717,6 +1755,10 @@ export const DeleteCopilotConversationParams = zod.object({
   id: zod.coerce.number(),
 });
 
+export const DeleteCopilotConversationQueryParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
 export const DeleteCopilotConversationResponse = zod.object({
   message: zod.string(),
 });
@@ -1728,8 +1770,13 @@ export const SendCopilotMessageParams = zod.object({
   id: zod.coerce.number(),
 });
 
+export const SendCopilotMessageQueryParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
 export const SendCopilotMessageBody = zod.object({
   content: zod.string(),
+  context: zod.record(zod.string(), zod.unknown()).optional(),
 });
 
 /**

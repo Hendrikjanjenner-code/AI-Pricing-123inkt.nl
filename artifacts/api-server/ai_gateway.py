@@ -604,8 +604,11 @@ def allowed_function_names(db: Session, user: models.User) -> set[str]:
         perms = frozenset()
     return {
         name for name in SEMANTIC_FUNCTIONS
-        if FUNCTION_PERMISSIONS.get(name) is None
-        or FUNCTION_PERMISSIONS[name] in perms
+        if user.role in SEMANTIC_FUNCTIONS[name].required_roles
+        and (
+            FUNCTION_PERMISSIONS.get(name) is None
+            or FUNCTION_PERMISSIONS[name] in perms
+        )
     }
 
 
@@ -1158,6 +1161,7 @@ def run_copilot(
     budget_warning: Optional[str] = None,
     hierarchy_node_ids: Optional[list] = None,
     product_scope: Optional[dict] = None,
+    global_filter_context: Optional[dict] = None,
 ) -> Generator[dict, None, None]:
     """
     Voer de volledige gateway-pipeline uit en yield events:
@@ -1246,6 +1250,13 @@ def run_copilot(
                 "voorkeur zulke producttools en benoem de productscope "
                 "expliciet in je antwoord. Meld het als een tool alleen "
                 "categorie- of assortimentsniveau ondersteunt.")
+        if global_filter_context:
+            context_lines.append(
+                "Overige actieve Global Filter Context: "
+                f"{json.dumps(global_filter_context, ensure_ascii=False)}. "
+                "Gebruik deze filters wanneer de gekozen tool ze ondersteunt. "
+                "Als een tool een filter niet ondersteunt, meld dat expliciet "
+                "als beperking en suggereer geen gefilterde uitkomst.")
         if context_lines:
             messages.insert(1, {"role": "system",
                                 "content": pii_scrub(" ".join(context_lines))})
@@ -1398,6 +1409,22 @@ def run_copilot(
              if m.get("hierarchy") and m["hierarchy"].get("resolved")), None)
         answer["hierarchy_context"] = used_hierarchy or hierarchy_context
         answer["product_scope"] = product_scope or None
+        answer["global_filter_context"] = global_filter_context or None
+        unsupported_filters = [
+            label for key, label in (
+                ("brands", "merk"), ("statuses", "status"),
+                ("sku_query", "SKU-zoekopdracht"),
+            )
+            if global_filter_context and global_filter_context.get(key)
+        ]
+        if unsupported_filters:
+            answer["warnings"].append(
+                "De actieve " + ", ".join(unsupported_filters)
+                + "-filter kon niet door elke gebruikte analysetool server-side "
+                  "worden afgedwongen; uitkomsten zijn daarom niet als volledig "
+                  "gefilterd gepresenteerd."
+            )
+            answer["confidence"] = min(float(answer.get("confidence") or 0), 0.5)
         answer["department"] = department
         answer["data_freshness"] = freshness
         answer["records"] = sum(int(m.get("records") or 0) for m in calls_meta)
