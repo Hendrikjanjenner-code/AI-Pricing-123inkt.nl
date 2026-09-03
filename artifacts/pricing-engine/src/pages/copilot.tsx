@@ -13,7 +13,12 @@ import {
 } from "@workspace/api-client-react";
 import { getAuthHeaders, useAuth } from "@/lib/auth";
 import { getGlobalFilters } from "@/lib/global-filters";
-import { useShopId } from "@/hooks/use-shop-id";
+import { setActiveShopId, useShopId } from "@/hooks/use-shop-id";
+import {
+  copilotMessageUrl,
+  copilotScopeErrorMessage,
+  resolveCopilotShopId,
+} from "@/lib/copilot-shop";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -681,6 +686,7 @@ function useBudgetMe(refreshKey: number) {
 export default function CopilotPage() {
   const queryClient = useQueryClient();
   const [activeId, setActiveId] = useState<number | null>(null);
+  const [activeConversationShopId, setActiveConversationShopId] = useState<number | null>(null);
   const activeIdRef = useRef<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -695,9 +701,10 @@ export default function CopilotPage() {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const { toast } = useToast();
   const shopId = useShopId();
-  const activateConversation = (id: number | null) => {
+  const activateConversation = (id: number | null, conversationShopId?: number | null) => {
     activeIdRef.current = id;
     setActiveId(id);
+    setActiveConversationShopId(id == null ? null : resolveCopilotShopId(conversationShopId));
   };
 
   const { data: status, isLoading: statusLoading, isError: isStatusError, refetch: refetchStatus } = useGetCopilotStatus();
@@ -713,9 +720,9 @@ export default function CopilotPage() {
   const deleteConv = useDeleteCopilotConversation();
   const { data: activeConv } = useGetCopilotConversation(
     activeId ?? 0,
-    { shop_id: shopId ?? 0 },
+    { shop_id: resolveCopilotShopId(activeConversationShopId, shopId) ?? 1 },
     { query: {
-      enabled: activeId != null,
+      enabled: activeId != null && resolveCopilotShopId(activeConversationShopId, shopId) != null,
       queryKey: getGetCopilotConversationQueryKey(activeId ?? 0),
     } },
   );
@@ -740,10 +747,12 @@ export default function CopilotPage() {
   useEffect(() => {
     // Een gesprek hoort bij precies één winkel. Na een winkelwissel nooit een
     // oud gesprek met de nieuwe zichtbare filters blijven tonen.
+    if (activeConversationShopId != null && activeConversationShopId === shopId) return;
     activeIdRef.current = null;
     setActiveId(null);
+    setActiveConversationShopId(null);
     setMessages([]);
-  }, [shopId]);
+  }, [shopId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -753,6 +762,15 @@ export default function CopilotPage() {
     queryClient.invalidateQueries({
       queryKey: getListCopilotConversationsQueryKey({ shop_id: shopId ?? null }),
     });
+
+  const initializeShopFromConversation = (
+    conversationShopId: number | null | undefined,
+  ): number => {
+    const resolved = resolveCopilotShopId(conversationShopId);
+    if (resolved == null) throw new Error("Gesprek heeft geen geldige winkel");
+    if (shopId == null) setActiveShopId(resolved);
+    return resolved;
+  };
 
   const handleStartConversation = async (starter?: CopilotStarter) => {
     if (creatingConversationRef.current || streamingConversationIdRef.current !== null) return;
@@ -764,12 +782,13 @@ export default function CopilotPage() {
         ? { title: starter.title, module_key: starter.module_key, starter_key: starter.key, shop_id: shopId }
         : { shop_id: shopId };
       const conv = await createConv.mutateAsync({ data });
+      const conversationShopId = initializeShopFromConversation(conv.shop_id);
       await refreshConversations();
-      activateConversation(conv.id);
+      activateConversation(conv.id, conversationShopId);
       setMessages([]);
 
       if (starter) {
-        await ask(starter.question, conv.id);
+        await ask(starter.question, conv.id, conversationShopId);
       }
     } catch {
       toast({
@@ -783,18 +802,30 @@ export default function CopilotPage() {
     }
   };
 
-  const ask = async (question: string, overrideConvId?: number) => {
+  const ask = async (
+    question: string,
+    overrideConvId?: number,
+    overrideShopId?: number,
+  ) => {
     const q = question.trim();
     if (!q || busy || budgetExhausted || streamingConversationIdRef.current !== null) return;
 
     let convId = overrideConvId ?? activeId;
+    let requestShopId = resolveCopilotShopId(
+      overrideShopId,
+      activeConv?.id === convId ? activeConv.shop_id : null,
+      (conversations || []).find((conversation) => conversation.id === convId)?.shop_id,
+      activeConversationShopId,
+      shopId,
+    );
     streamingConversationIdRef.current = convId ?? -1;
 
     if (convId == null) {
       try {
         const conv = await createConv.mutateAsync({ data: { shop_id: shopId } });
+        requestShopId = initializeShopFromConversation(conv.shop_id);
         await refreshConversations();
-        activateConversation(conv.id);
+        activateConversation(conv.id, requestShopId);
         setMessages([]);
         convId = conv.id;
       } catch {
@@ -807,6 +838,15 @@ export default function CopilotPage() {
         return;
       }
     }
+    if (requestShopId == null) {
+      streamingConversationIdRef.current = null;
+      toast({
+        variant: "destructive",
+        title: "Winkel wordt nog geladen",
+        description: "Wacht een moment en probeer je vraag opnieuw.",
+      });
+      return;
+    }
     streamingConversationIdRef.current = convId;
     setBusy(true);
     setInput("");
@@ -816,7 +856,7 @@ export default function CopilotPage() {
     try {
       // Eigen AbortSignal: LLM-antwoorden duren langer dan de globale 15s-timeout.
       const res = await fetch(
-        `${BASE}/api/copilot/conversations/${convId}/messages?shop_id=${shopId ?? 0}`,
+        copilotMessageUrl(BASE, convId, requestShopId),
         {
         method: "POST",
         headers: { "Content-Type": "application/json", ...getAuthHeaders() },
@@ -861,6 +901,24 @@ export default function CopilotPage() {
             role: "assistant",
             content:
               detail || "Dagbudget bereikt — morgen weer beschikbaar. Je vraag is niet verwerkt.",
+            answer: null,
+          },
+        ] : prev);
+        return;
+      }
+      if (res.status === 403 || res.status === 404 || res.status === 422) {
+        let detail: string | null = null;
+        try {
+          detail = ((await res.json()) as { detail?: string }).detail ?? null;
+        } catch {
+          /* geen JSON-body */
+        }
+        setMessages((prev) => activeIdRef.current === convId ? [
+          ...prev,
+          {
+            id: `a-${Date.now()}`,
+            role: "assistant",
+            content: copilotScopeErrorMessage(res.status, detail),
             answer: null,
           },
         ] : prev);
@@ -933,9 +991,21 @@ export default function CopilotPage() {
     }
   };
 
-  const removeConversation = async (id: number) => {
+  const removeConversation = async (
+    id: number,
+    conversationShopId: number | null | undefined,
+  ) => {
+    const requestShopId = resolveCopilotShopId(conversationShopId, shopId);
+    if (requestShopId == null) {
+      toast({
+        variant: "destructive",
+        title: "Winkel wordt nog geladen",
+        description: "Wacht een moment en probeer het opnieuw.",
+      });
+      return;
+    }
     try {
-      await deleteConv.mutateAsync({ id, params: { shop_id: shopId ?? 0 } });
+      await deleteConv.mutateAsync({ id, params: { shop_id: requestShopId } });
       if (activeId === id) {
         activateConversation(null);
         setMessages([]);
@@ -973,7 +1043,7 @@ export default function CopilotPage() {
                 activeId === c.id ? "bg-muted font-medium" : ""
               }`}
               onClick={() => {
-                if (!busy && !creatingConversation) activateConversation(c.id);
+                if (!busy && !creatingConversation) activateConversation(c.id, c.shop_id);
               }}
               aria-disabled={busy || creatingConversation}
               data-testid={`link-conversation-${c.id}`}
@@ -989,7 +1059,7 @@ export default function CopilotPage() {
                 className="hidden text-muted-foreground hover:text-destructive group-hover:block"
                 onClick={(e) => {
                   e.stopPropagation();
-                  void removeConversation(c.id);
+                  void removeConversation(c.id, c.shop_id);
                 }}
                 aria-label="Verwijder gesprek"
                 disabled={busy || creatingConversation}
