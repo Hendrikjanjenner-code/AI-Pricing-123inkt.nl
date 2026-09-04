@@ -15,6 +15,7 @@ import { gebruikersPermissies } from "@/lib/route-registry";
 import { verwachteMargeverbetering } from "@/lib/dashboard-kpis";
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
+import { orderConnectors } from "@/lib/connector-order";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -70,9 +71,7 @@ function DatabronnenStrip() {
         if (!resp.ok) throw new Error("fetch failed");
         const data: ConnectorStatus[] = await resp.json();
         if (!active) return;
-        const ordered = ["priceshape", "drs", "ga4"]
-          .map((name) => data.find((c) => c.name === name))
-          .filter(Boolean) as ConnectorStatus[];
+        const ordered = orderConnectors(data);
 
         // Detect healthy → unhealthy transitions and warn once per transition.
         // Skip on the very first successful load so we only alert on changes,

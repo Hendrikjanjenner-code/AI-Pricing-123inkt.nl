@@ -11,6 +11,7 @@ import {
   Loader2, RefreshCw, Server, Unlink, Zap,
 } from "lucide-react";
 import { getAuthHeaders } from "@/lib/auth";
+import { orderConnectors } from "@/lib/connector-order";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -508,6 +509,7 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
               <CardDescription className="text-xs mt-0.5">
                 {connector.name === "priceshape" && "Concurrentieprijzen ophalen via PriceShape API"}
                 {connector.name === "drs" && "Productcatalogus, verkoop en voorraad via DRS API"}
+                {connector.name === "creditsafe" && "Bedrijfs- en kredietinformatie via Creditsafe Connect"}
                 {connector.name === "ga4" && "Sessies, conversies en traffic via Google Analytics 4"}
               </CardDescription>
             </div>
@@ -655,7 +657,7 @@ function ConnectorCard({ connector, onRefresh }: ConnectorCardProps) {
         {connector.name === "priceshape" && <ImportSettingsPanel />}
 
         <div className="flex flex-wrap gap-2">
-          {isConfigured && (
+          {isConfigured && connector.name !== "creditsafe" && (
             <Button size="sm" variant="default" onClick={() => handleSync()} disabled={syncing}>
               {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
               <span className="ml-1.5">Nu synchroniseren</span>
@@ -850,10 +852,7 @@ export default function Connectoren() {
       const resp = await fetch(`${BASE}/api/connectors`, { headers: getAuthHeaders() });
       if (resp.ok) {
         const data: ConnectorSummary[] = await resp.json();
-        const ordered = ["priceshape", "drs", "ga4"]
-          .map((name) => data.find((c) => c.name === name))
-          .filter(Boolean) as ConnectorSummary[];
-        setConnectors(ordered);
+        setConnectors(orderConnectors(data));
       }
     } catch {
       /* netwerk niet beschikbaar */
@@ -884,7 +883,7 @@ export default function Connectoren() {
 
       {loading ? (
         <div className="space-y-4">
-          {[1, 2, 3].map((i) => (
+            {[1, 2, 3, 4].map((i) => (
             <Card key={i}>
               <CardContent className="py-8">
                 <div className="flex items-center gap-3">
