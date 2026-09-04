@@ -154,6 +154,14 @@ CONNECTOR_FIELDS = {
         {"key": "tenant_id", "label": "Tenant ID",  "required": False, "secret": False,
          "placeholder": "optioneel"},
     ],
+    "creditsafe": [
+        {"key": "api_url", "label": "API URL", "required": False, "secret": False,
+         "placeholder": "https://connect.creditsafe.com/v1"},
+        {"key": "username", "label": "Connect gebruikersnaam", "required": True, "secret": True,
+         "placeholder": "via Replit Secrets of later hier instellen"},
+        {"key": "password", "label": "Connect wachtwoord", "required": True, "secret": True,
+         "placeholder": "geheim"},
+    ],
     "ga4": [
         {"key": "property_id",          "label": "Property ID",         "required": True,  "secret": False,
          "placeholder": "123456789"},
@@ -197,6 +205,7 @@ CONNECTOR_FIELDS = {
 CONNECTOR_LABELS = {
     "priceshape": "PriceShape",
     "drs": "DRS Datareport",
+    "creditsafe": "Creditsafe Connect",
     "ga4": "Google Analytics 4",
     "search_console": "Google Search Console",
     "google_ads": "Google Ads",
@@ -362,6 +371,11 @@ def _connector_summary(db: Session, name: str) -> dict:
         "name": name,
         "label": CONNECTOR_LABELS[name],
         "configured": configured,
+        "activation_status": (
+            "not_configured"
+            if not configured
+            else "ready_for_live_validation"
+        ),
         "source": source,
         "effective_feed_source": effective_feed_source,
         "fields": fields_def,
@@ -384,6 +398,11 @@ def _check_env_configured(name: str) -> bool:
         )
     if name == "drs":
         return bool(os.environ.get("DRS_API_URL") and os.environ.get("DRS_API_KEY"))
+    if name == "creditsafe":
+        return bool(
+            os.environ.get("CREDITSAFE_USERNAME")
+            and os.environ.get("CREDITSAFE_PASSWORD")
+        )
     if name == "ga4":
         return bool(os.environ.get("GA4_PROPERTY_ID") and os.environ.get("GA4_SERVICE_ACCOUNT_KEY"))
     if name == "search_console":
@@ -584,6 +603,14 @@ def sync_connector(
 ):
     """Handmatige synchronisatie voor een connector."""
     _validate_name(name)
+    if name == "creditsafe":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Creditsafe heeft geen bulk-sync in deze proef. Gebruik later "
+                "uitsluitend de begrensde één-bedrijf smoke-test."
+            ),
+        )
 
     cfg = _get_config(db, name)
     env_configured = _check_env_configured(name)
@@ -648,6 +675,8 @@ def _test_credentials(name: str, creds: dict) -> dict:
             return _test_priceshape(creds)
         if name == "drs":
             return _test_drs(creds)
+        if name == "creditsafe":
+            return _test_creditsafe(creds)
         if name == "ga4":
             return _test_ga4(creds)
         if name == "search_console":
@@ -669,6 +698,9 @@ def _run_live_check(name: str, db: Session) -> dict:
     if name == "drs":
         from connectors import drs_connector
         return drs_connector.check_connection(db=db)
+    if name == "creditsafe":
+        from connectors import creditsafe_connector
+        return creditsafe_connector.check_connection(db=db)
     if name == "ga4":
         from connectors import ga4_connector
         return ga4_connector.check_connection(db=db)
@@ -1229,6 +1261,37 @@ def _test_drs(creds: dict) -> dict:
         return {"status": "error", "message": "httpx niet geïnstalleerd."}
     except Exception as exc:
         return {"status": "error", "message": str(exc)[:200]}
+
+
+def _test_creditsafe(creds: dict) -> dict:
+    """Alleen authenticatie; test nooit Company Search of een betaald rapport."""
+    from connectors.creditsafe_connector import (
+        CreditsafeClient, CreditsafeError, DEFAULT_API_URL,
+    )
+
+    api_url = (creds.get("api_url") or DEFAULT_API_URL).rstrip("/")
+    username = creds.get("username", "")
+    password = creds.get("password", "")
+    if not username or not password:
+        return {
+            "status": "not_configured",
+            "message": "Connect gebruikersnaam en wachtwoord zijn verplicht.",
+        }
+    _validate_external_url(api_url)
+    try:
+        with CreditsafeClient(
+            api_url=api_url, username=username, password=password
+        ) as client:
+            client.authenticate()
+    except CreditsafeError as exc:
+        return {"status": "auth_error", "message": str(exc)}
+    return {
+        "status": "ok",
+        "message": (
+            "Authenticatie geslaagd. Company Search en Company Credit Report "
+            "zijn nog niet live gevalideerd."
+        ),
+    }
 
 
 def _test_ga4(creds: dict) -> dict:
