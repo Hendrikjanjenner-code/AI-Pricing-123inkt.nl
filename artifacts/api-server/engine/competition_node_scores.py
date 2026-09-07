@@ -43,6 +43,7 @@ MAX_NODE_LEVEL = 2
 # Zelfde gewichten als de overall rankings (engine/competition_rankings.py)
 from engine.competition_rankings import (  # noqa: E402
     W_COMPETITION_RELEVANCE, W_PRICE_RELEVANCE, W_INFLUENCE,
+    _weighted_available,
 )
 
 
@@ -176,13 +177,18 @@ def _run_for_shop(db: Session, today: date, sid: int) -> int:
                     cis_vals.append(_norm(cis))
                 if pct is not None:
                     closeness_vals.append(max(0.0, 1.0 - min(1.0, abs(pct) / 30.0)))
-            price_relevance = round(sum(closeness_vals) / len(closeness_vals), 4) \
-                if closeness_vals else 0.0
-            influence = round(sum(cis_vals) / len(cis_vals), 4) if cis_vals else 0.0
-            combined = round(
-                W_COMPETITION_RELEVANCE * competition_relevance
-                + W_PRICE_RELEVANCE * price_relevance
-                + W_INFLUENCE * influence, 4)
+            price_relevance = (
+                round(sum(closeness_vals) / len(closeness_vals), 4)
+                if closeness_vals else None)
+            influence = (
+                round(sum(cis_vals) / len(cis_vals), 4)
+                if cis_vals else None)
+            combined, combined_components = _weighted_available([
+                ("competition_relevance", competition_relevance,
+                 W_COMPETITION_RELEVANCE),
+                ("price_relevance", price_relevance, W_PRICE_RELEVANCE),
+                ("influence", influence, W_INFLUENCE),
+            ])
 
             obs_count = sum(sku_obs[s][0] for s in observed)
             first_seen = min(sku_obs[s][1] for s in observed)
@@ -207,6 +213,7 @@ def _run_for_shop(db: Session, today: date, sid: int) -> int:
                     "node_sku_count": node_total,
                     "cis_sku_count": len(cis_vals),
                     "price_closeness_sku_count": len(closeness_vals),
+                    "combined_components": combined_components,
                     "weights": {
                         "competition_relevance": W_COMPETITION_RELEVANCE,
                         "price_relevance": W_PRICE_RELEVANCE,
@@ -224,8 +231,8 @@ def _run_for_shop(db: Session, today: date, sid: int) -> int:
             shop_id=sid, run_date=today, node_id=None,
             competitor_name=name,
             node_sku_count=0, observed_sku_count=0, observation_count=cnt,
-            competition_relevance_score=0.0, price_relevance_score=0.0,
-            influence_score=0.0, combined_score=0.0, confidence=0.0,
+            competition_relevance_score=None, price_relevance_score=None,
+            influence_score=None, combined_score=None, confidence=0.0,
             first_seen=dmin, last_seen=dmax,
             evidence={"reason": "mapping_ontbreekt",
                       "note": ("waarnemingen op SKU's zonder actieve "

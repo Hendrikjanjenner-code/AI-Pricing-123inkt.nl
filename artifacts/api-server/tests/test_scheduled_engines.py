@@ -56,7 +56,7 @@ def active_shop():
 
 
 @pytest.fixture()
-def stub_shop_engines(monkeypatch):
+def stub_shop_engines(monkeypatch, active_shop):
     """Vervang de vier per-shop engines door no-ops zodat de test snel en
     deterministisch is; deze tests gaan over CIS/rankings-foutafhandeling."""
     noop = lambda db, run_date=None, shop_id=None: {"stub": True}  # noqa: E731
@@ -65,20 +65,35 @@ def stub_shop_engines(monkeypatch):
     monkeypatch.setattr("engine.forecast_engine.run_forecast_engine", noop)
     monkeypatch.setattr("engine.opportunity_engine.run_opportunity_engine", noop)
     monkeypatch.setattr("engine.competitor_scores.run_competitor_scores", noop)
+    monkeypatch.setattr(
+        "engine.category_competition.calculate_all_category_scores",
+        lambda db, shop_id=None: 2,
+    )
+    db = SessionLocal()
+    try:
+        db.query(models.ScheduledEngineRun).filter(
+            models.ScheduledEngineRun.shop_id == active_shop
+        ).delete(synchronize_session=False)
+        db.query(models.EngineRun).filter(
+            models.EngineRun.shop_id == active_shop
+        ).delete(synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
 
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
-def test_cis_crash_fails_run_but_rankings_still_execute(
+def test_cis_crash_fails_run_and_prevents_misleading_rankings(
     active_shop, stub_shop_engines, monkeypatch, caplog
 ):
-    calls = {"rankings": 0}
+    ranking_shops = []
 
-    def broken_cis(db):
+    def broken_cis(db, ref_date=None, sku_ids=None):
         raise RuntimeError("CIS kapot (testfout)")
 
-    def fake_rankings(db):
-        calls["rankings"] += 1
+    def fake_rankings(db, ref_date=None, shop_id=None):
+        ranking_shops.append(shop_id)
         return 7
 
     monkeypatch.setattr("engine.competitor_influence.run_cis_engine", broken_cis)
@@ -88,23 +103,26 @@ def test_cis_crash_fails_run_but_rankings_still_execute(
         exit_code = scheduled_engines.main()
 
     assert exit_code == 1, "Een CIS-crash moet de nachtrun met exit-code 1 laten falen"
-    assert calls["rankings"] == 1, "Rankings moeten alsnog draaien na een CIS-crash"
+    assert active_shop not in ranking_shops, (
+        "Rankings mogen voor de falende shop niet publiceren na een CIS-crash")
     assert any(
-        "[cis] mislukt" in r.message for r in caplog.records
+        "[cis]" in r.message and "mislukt" in r.message for r in caplog.records
     ), "De CIS-fout moet in de log staan"
     # De exception zelf (traceback) hoort via logger.exception in de log te staan.
     assert any(
         r.exc_info and "CIS kapot" in str(r.exc_info[1]) for r in caplog.records
     )
-    # Rankings-succes gewoon gelogd.
-    assert any("[rankings] klaar: 7" in r.getMessage() for r in caplog.records)
+    assert any(
+        "[rankings]" in r.message and "overgeslagen door mislukte upstreamstap" in r.message
+        for r in caplog.records
+    )
 
 
 def test_rankings_crash_fails_run(active_shop, stub_shop_engines, monkeypatch, caplog):
-    def fake_cis(db):
+    def fake_cis(db, ref_date=None, sku_ids=None):
         return 3
 
-    def broken_rankings(db):
+    def broken_rankings(db, ref_date=None, shop_id=None):
         raise RuntimeError("Rankings kapot (testfout)")
 
     monkeypatch.setattr("engine.competitor_influence.run_cis_engine", fake_cis)
@@ -114,20 +132,27 @@ def test_rankings_crash_fails_run(active_shop, stub_shop_engines, monkeypatch, c
         exit_code = scheduled_engines.main()
 
     assert exit_code == 1, "Een rankings-crash moet de nachtrun met exit-code 1 laten falen"
-    assert any("[rankings] mislukt" in r.message for r in caplog.records)
+    assert any(
+        "[rankings]" in r.message and "mislukt" in r.message
+        for r in caplog.records
+    )
     assert any(
         r.exc_info and "Rankings kapot" in str(r.exc_info[1]) for r in caplog.records
     )
     # CIS draaide succesvol vóór de crash en logde zijn rijenaantal.
-    assert any("[cis] klaar: 3 CIS-rijen geschreven" in r.getMessage() for r in caplog.records)
+    assert any("'cis_scores': 3" in r.getMessage() for r in caplog.records)
 
 
 def test_successful_run_logs_cis_row_count_and_exits_zero(
     active_shop, stub_shop_engines, monkeypatch, caplog
 ):
-    monkeypatch.setattr("engine.competitor_influence.run_cis_engine", lambda db: 42)
     monkeypatch.setattr(
-        "engine.competition_rankings.run_competitor_rankings", lambda db: 5
+        "engine.competitor_influence.run_cis_engine",
+        lambda db, ref_date=None, sku_ids=None: 42,
+    )
+    monkeypatch.setattr(
+        "engine.competition_rankings.run_competitor_rankings",
+        lambda db, ref_date=None, shop_id=None: 5,
     )
 
     with caplog.at_level(logging.INFO, logger="scheduled_engines"):
@@ -135,7 +160,7 @@ def test_successful_run_logs_cis_row_count_and_exits_zero(
 
     assert exit_code == 0
     assert any(
-        "[cis] klaar: 42 CIS-rijen geschreven" in r.getMessage() for r in caplog.records
+        "'cis_scores': 42" in r.getMessage() for r in caplog.records
     ), "Het aantal geschreven CIS-rijen moet bij succes in de log staan"
     assert any(
         "volledig succesvol" in r.getMessage() for r in caplog.records

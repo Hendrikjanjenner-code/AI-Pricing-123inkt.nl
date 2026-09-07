@@ -1656,10 +1656,18 @@ def get_competitor_rankings(
                 "previous_rank": r.previous_rank,
                 "trend": r.rank_trend,
                 "competitor_name": r.competitor_name,
-                "competition_relevance_score": round(float(r.competition_relevance_score or 0), 4),
-                "price_relevance_score": round(float(r.price_relevance_score or 0), 4),
-                "influence_score": round(float(r.influence_score or 0), 4),
-                "combined_score": round(float(r.combined_score or 0), 4),
+                "competition_relevance_score": (
+                    round(float(r.competition_relevance_score), 4)
+                    if r.competition_relevance_score is not None else None),
+                "price_relevance_score": (
+                    round(float(r.price_relevance_score), 4)
+                    if r.price_relevance_score is not None else None),
+                "influence_score": (
+                    round(float(r.influence_score), 4)
+                    if r.influence_score is not None else None),
+                "combined_score": (
+                    round(float(r.combined_score), 4)
+                    if r.combined_score is not None else None),
                 "confidence": round(float(r.confidence or 0), 2),
                 "explanation": r.explanation,
                 "evidence": r.evidence,
@@ -1840,17 +1848,41 @@ def _node_scores_for_selection(
         tw = float(sum(weights))
 
         def _w(getter):
-            return round(sum(float(getter(r) or 0) * w for r, w in zip(rs, weights)) / tw, 4)
+            available = [
+                (float(getter(r)), w)
+                for r, w in zip(rs, weights)
+                if getter(r) is not None
+            ]
+            available_weight = sum(w for _, w in available)
+            return (
+                round(sum(value * w for value, w in available) / available_weight, 4)
+                if available_weight else None
+            )
 
         node_names = []
         for r in rs:
             nn = db.query(N.name).filter(N.id == r.node_id).scalar()
             node_names.append(nn or str(r.node_id))
+        competition_relevance = _w(lambda r: r.competition_relevance_score)
+        price_relevance = _w(lambda r: r.price_relevance_score)
+        influence = _w(lambda r: r.influence_score)
+        from engine.competition_rankings import (
+            _weighted_available,
+            W_COMPETITION_RELEVANCE,
+            W_PRICE_RELEVANCE,
+            W_INFLUENCE,
+        )
+        combined, combined_components = _weighted_available([
+            ("competition_relevance", competition_relevance,
+             W_COMPETITION_RELEVANCE),
+            ("price_relevance", price_relevance, W_PRICE_RELEVANCE),
+            ("influence", influence, W_INFLUENCE),
+        ])
         by_comp[name] = {
-            "competition_relevance_score": _w(lambda r: r.competition_relevance_score),
-            "price_relevance_score": _w(lambda r: r.price_relevance_score),
-            "influence_score": _w(lambda r: r.influence_score),
-            "combined_score": _w(lambda r: r.combined_score),
+            "competition_relevance_score": competition_relevance,
+            "price_relevance_score": price_relevance,
+            "influence_score": influence,
+            "combined_score": combined,
             "confidence": round(max(float(r.confidence or 0) for r in rs), 2),
             "observed_sku_count": sum(r.observed_sku_count or 0 for r in rs),
             "node_sku_count": sum(r.node_sku_count or 0 for r in rs),
@@ -1868,11 +1900,14 @@ def _node_scores_for_selection(
                      "observed_sku_count": r.observed_sku_count,
                      "node_sku_count": r.node_sku_count,
                      "observation_count": r.observation_count,
-                     "combined_score": round(float(r.combined_score or 0), 4),
+                     "combined_score": (
+                         round(float(r.combined_score), 4)
+                         if r.combined_score is not None else None),
                      "first_seen": str(r.first_seen) if r.first_seen else None,
                      "last_seen": str(r.last_seen) if r.last_seen else None}
                     for r in rs
                 ],
+                "combined_components": combined_components,
             },
             "model_version": rs[0].model_version,
         }

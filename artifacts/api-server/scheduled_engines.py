@@ -14,8 +14,9 @@ Volgorde (afhankelijkheidsvolgorde):
   2. Promotion-engine   → promotie-effecten
   3. Forecast/Risk-engine → dagelijkse forecasts en risicoklassen
   4. Opportunity-engine  → kansen (aggregeert signalen van bovenstaande)
-  5. CIS-engine          → Competitor Influence Scores per (SKU, concurrent)
-  6. Competitor rankings → rankings op basis van (o.a.) verse CIS-scores
+  5. Categoriescores     → concurrent × categorie, vanuit recente waarnemingen
+  6. CIS-engine          → Competitor Influence Scores per (SKU, concurrent)
+  7. Competitor rankings → rankings op basis van verse categorie- en CIS-scores
 
 De CIS-engine draait bewust VÓÓR de rankings: de Influence-score in de
 rankings is het gemiddelde van de CIS-scores, dus verouderde CIS-rijen
@@ -123,6 +124,22 @@ def main() -> int:
         from engine.forecast_engine import run_forecast_engine
         from engine.opportunity_engine import run_opportunity_engine
         from engine.competitor_scores import run_competitor_scores
+        from engine.category_competition import calculate_all_category_scores
+        from engine.competitor_influence import run_cis_engine
+        from engine.competition_rankings import run_competitor_rankings
+
+        def _category_scores(db, run_date=None, shop_id=None):
+            return {"category_scores": calculate_all_category_scores(db, shop_id=shop_id)}
+
+        def _cis(db, run_date=None, shop_id=None):
+            sku_ids = [sku for (sku,) in db.query(models.DimProduct.sku_id).filter(
+                models.DimProduct.shop_id == shop_id).all()]
+            return {"cis_scores": run_cis_engine(
+                db, ref_date=run_date, sku_ids=sku_ids)}
+
+        def _rankings(db, run_date=None, shop_id=None):
+            return {"rankings": run_competitor_rankings(
+                db, ref_date=run_date, shop_id=shop_id)}
 
         engines = [
             ("basket",    run_basket_engine),
@@ -132,6 +149,9 @@ def main() -> int:
             # Concurrentscores vóór de globale rankings-stap: de rankings
             # gebruiken Business Strength als ondersteunende dimensie.
             ("competitor_scores", run_competitor_scores),
+            ("category_scores", _category_scores),
+            ("cis", _cis),
+            ("rankings", _rankings),
         ]
 
         run_date = date.today()
@@ -145,7 +165,12 @@ def main() -> int:
             # eerdere 'succes' was op verouderde upstream-data gebaseerd
             # (bv. opportunity op T-2 forecasts).
             upstream_reran = False
+            competition_chain_failed = False
             for engine_name, engine_fn in engines:
+                if competition_chain_failed and engine_name in ("cis", "rankings"):
+                    logger.error("[%s] shop=%d overgeslagen door mislukte upstreamstap.",
+                                 engine_name, shop_id)
+                    continue
                 if not upstream_reran and _has_successful_run(db, models, run_date, shop_id, engine_name):
                     logger.info("[%s] shop=%d overgeslagen: vandaag al succesvol gedraaid.",
                                 engine_name, shop_id)
@@ -155,31 +180,11 @@ def main() -> int:
                 ok = _run_engine(engine_name, engine_fn, db, models, shop_id, run_date)
                 if not ok:
                     failures += 1
+                    if engine_name in ("category_scores", "cis"):
+                        competition_chain_failed = True
 
         if skipped:
             logger.info("%d engine-run(s) overgeslagen (idempotente herstart).", skipped)
-
-        # ── CIS + rankings (globaal, niet per shop) ──────────────────────
-        # Eerst CIS herberekenen zodat de Influence-score in de rankings op
-        # verse scores is gebaseerd; daarna pas de rankings zelf.
-        from engine.competitor_influence import run_cis_engine
-        from engine.competition_rankings import run_competitor_rankings
-
-        try:
-            cis_written = run_cis_engine(db)
-            logger.info("[cis] klaar: %d CIS-rijen geschreven.", cis_written)
-        except Exception:
-            db.rollback()
-            failures += 1
-            logger.exception("[cis] mislukt — rankings draaien op bestaande CIS-rijen.")
-
-        try:
-            rankings_written = run_competitor_rankings(db)
-            logger.info("[rankings] klaar: %d ranking-rijen geschreven.", rankings_written)
-        except Exception:
-            db.rollback()
-            failures += 1
-            logger.exception("[rankings] mislukt.")
 
         if failures:
             logger.error(

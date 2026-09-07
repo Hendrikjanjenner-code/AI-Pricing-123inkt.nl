@@ -105,11 +105,13 @@ def run_hierarchy_auto_assign() -> dict | None:
         return None
 
 
-def run_rankings_refresh(db, shop_id: int | None = None,
+def run_rankings_refresh(db, shop_id: int = 1,
                          trigger: str = "feed_sync") -> dict | None:
     """
-    Herbereken CIS-scores + concurrent-rankings direct na een feed-sync, zodat
-    het CI Dashboard altijd rankings toont die bij de laatste feed horen.
+    Herbereken categoriescores, CIS-scores en daarna concurrent-rankings direct
+    na een feed-sync, zodat alle downstreamscores bij dezelfde feed horen.
+    PriceShape-ingest is winkelgericht (standaard de hoofdwinkel), daarom is
+    ook een aanroep zonder expliciete scope veilig beperkt tot shop 1.
 
     Fout-tolerant: gooit NOOIT door (de feed-sync zelf mag hier niet op falen),
     maar registreert de uitkomst wel zichtbaar als EngineRun-rij
@@ -120,13 +122,22 @@ def run_rankings_refresh(db, shop_id: int | None = None,
     from datetime import datetime as _dt
 
     started = _dt.utcnow()
+    failed_step = "setup"
+    empty_counts = {
+        "trigger": trigger,
+        "category_scores": None,
+        "cis_scores": None,
+        "rankings": None,
+    }
     try:
         from engine.competitor_influence import run_cis_engine
         from engine.competition_rankings import run_competitor_rankings
+        from engine.category_competition import calculate_all_category_scores
 
         # Serialiseer met de feed-ingest: dezelfde advisory lock als _run_sync,
         # zodat de rankings nooit lezen terwijl een tweede sync de feed-data
         # aan het vervangen is (delete-then-insert → gemengd snapshot).
+        failed_step = "feed_sync_lock"
         with _feed_sync_lock() as got:
             if not got:
                 raise RuntimeError(
@@ -135,13 +146,20 @@ def run_rankings_refresh(db, shop_id: int | None = None,
                 )
             return _do_rankings_refresh(
                 db, shop_id=shop_id, trigger=trigger, started=started,
+                calculate_all_category_scores=calculate_all_category_scores,
                 run_cis_engine=run_cis_engine,
                 run_competitor_rankings=run_competitor_rankings)
     except Exception as exc:
         db.rollback()
         logger.exception("Rankings-refresh na %s mislukt — de feed-sync zelf blijft geslaagd.", trigger)
         _log_engine_run(db, shop_id=shop_id, started_at=started, status="failed",
-                        error_message=f"{type(exc).__name__}: {exc}"[:4000])
+                        error_message=(
+                            f"step={failed_step}; {type(exc).__name__}: {exc}"
+                        )[:4000],
+                        result_summary={
+                            **empty_counts,
+                            "failed_step": failed_step,
+                        })
         return None
 
 
@@ -185,9 +203,20 @@ def _feed_sync_lock():
 
 
 def _do_rankings_refresh(db, *, shop_id, trigger, started,
+                         calculate_all_category_scores,
                          run_cis_engine, run_competitor_rankings) -> dict:
     import models
+    failing_step = "category_scores"
+    result = {
+        "trigger": trigger,
+        "category_scores": None,
+        "cis_scores": None,
+        "rankings": None,
+    }
     try:
+        category_scores_written = calculate_all_category_scores(db, shop_id=shop_id)
+        result["category_scores"] = category_scores_written
+        failing_step = "cis_scores"
         if shop_id is not None:
             sku_ids = [p.sku_id for p in
                        db.query(models.DimProduct.sku_id).filter(
@@ -195,11 +224,12 @@ def _do_rankings_refresh(db, *, shop_id, trigger, started,
             cis_written = run_cis_engine(db, sku_ids=sku_ids) if sku_ids else 0
         else:
             cis_written = run_cis_engine(db)
+        result["cis_scores"] = cis_written
+        failing_step = "rankings"
         rankings_written = run_competitor_rankings(db, shop_id=shop_id)
-        result = {"trigger": trigger, "cis_scores": cis_written,
-                  "rankings": rankings_written}
-        logger.info("Rankings-refresh na %s klaar: %d CIS-rijen, %d ranking-rijen.",
-                    trigger, cis_written, rankings_written)
+        result["rankings"] = rankings_written
+        logger.info("Rankings-refresh na %s klaar: %d categoriescores, %d CIS-rijen, %d ranking-rijen.",
+                    trigger, category_scores_written, cis_written, rankings_written)
         _log_engine_run(db, shop_id=shop_id, started_at=started,
                         status="success", result_summary=result)
         return result
@@ -207,7 +237,10 @@ def _do_rankings_refresh(db, *, shop_id, trigger, started,
         db.rollback()
         logger.exception("Rankings-refresh na %s mislukt — de feed-sync zelf blijft geslaagd.", trigger)
         _log_engine_run(db, shop_id=shop_id, started_at=started, status="failed",
-                        error_message=f"{type(exc).__name__}: {exc}"[:4000])
+                        error_message=(
+                            f"step={failing_step}; {type(exc).__name__}: {exc}"
+                        )[:4000],
+                        result_summary={**result, "failed_step": failing_step})
         return None
 
 

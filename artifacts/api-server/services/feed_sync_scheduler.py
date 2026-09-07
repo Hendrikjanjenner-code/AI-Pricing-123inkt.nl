@@ -114,7 +114,7 @@ def _run_sync_once() -> dict | None:
             # verouderde rankings toont na een sync. Fout-tolerant: een
             # mislukking wordt zichtbaar gelogd maar faalt de sync niet.
             from services.refresh import run_rankings_refresh
-            run_rankings_refresh(db, trigger="geplande feed-sync")
+            run_rankings_refresh(db, shop_id=1, trigger="geplande feed-sync")
         return result
     finally:
         db.close()

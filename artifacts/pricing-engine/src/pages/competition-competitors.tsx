@@ -31,7 +31,7 @@ function TrendIcon({ trend }: { trend: string | null }) {
 }
 
 function ScoreCell({ v }: { v: number | null | undefined }) {
-  return <span className="tabular-nums">{v == null ? "—" : Math.round(v * 100)}</span>;
+  return <span className="tabular-nums">{v == null ? "Niet beschikbaar" : Math.round(v * 100)}</span>;
 }
 
 export default function CompetitionCompetitors() {

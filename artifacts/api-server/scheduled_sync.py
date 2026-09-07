@@ -95,7 +95,7 @@ def _run_priceshape_refresh() -> int:
         # maar laat de feed-refresh zelf niet falen.
         logger.info("Stap 4b: concurrent-rankings herberekenen ...")
         from services.refresh import run_rankings_refresh
-        run_rankings_refresh(db, trigger="scheduled_sync")
+        run_rankings_refresh(db, shop_id=1, trigger="scheduled_sync")
 
         logger.info("Geplande PriceShape-refresh volledig voltooid.")
         return 0

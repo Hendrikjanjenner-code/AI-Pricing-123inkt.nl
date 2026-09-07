@@ -2095,10 +2095,10 @@ class CompetitorRanking(Base):
     scope = Column(String(200), nullable=False, default="overall", index=True)  # "overall" of categorienaam
     competitor_name = Column(String(255), nullable=False, index=True)
 
-    competition_relevance_score = Column(Float, default=0.0)   # §9.1
-    price_relevance_score = Column(Float, default=0.0)         # §9.2
-    influence_score = Column(Float, default=0.0)               # §9.3
-    combined_score = Column(Float, default=0.0)
+    competition_relevance_score = Column(Float)   # §9.1; NULL = niet beschikbaar
+    price_relevance_score = Column(Float)         # §9.2; NULL = niet beschikbaar
+    influence_score = Column(Float)               # §9.3; NULL = niet beschikbaar
+    combined_score = Column(Float)                 # NULL als geen dimensie beschikbaar is
 
     rank = Column(Integer)
     previous_rank = Column(Integer)
@@ -2145,10 +2145,10 @@ class CompetitorHierarchyNodeScore(Base):
     observation_count = Column(Integer, default=0)    # aantal prijswaarnemingen
 
     # Drie gestandaardiseerde scores (0..1) + combinatie, zoals CompetitorRanking
-    competition_relevance_score = Column(Float, default=0.0)
-    price_relevance_score = Column(Float, default=0.0)
-    influence_score = Column(Float, default=0.0)
-    combined_score = Column(Float, default=0.0)
+    competition_relevance_score = Column(Float)
+    price_relevance_score = Column(Float)
+    influence_score = Column(Float)
+    combined_score = Column(Float)
 
     confidence = Column(Float, default=0.0)
     first_seen = Column(Date)

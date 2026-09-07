@@ -36,9 +36,29 @@ W_INFLUENCE = 0.30
 W_BUSINESS_STRENGTH_SUPPORT = 0.10
 
 
-def _avg(values: list[float]) -> float:
+def _avg(values: list[float | None]) -> float | None:
     vals = [v for v in values if v is not None]
-    return sum(vals) / len(vals) if vals else 0.0
+    return sum(vals) / len(vals) if vals else None
+
+
+def _weighted_available(components: list[tuple[str, float | None, float]]) -> tuple[float | None, dict]:
+    """Herverdeel gewichten over beschikbare waarden; een gemeten 0 blijft geldig."""
+    used = [(name, value, weight) for name, value, weight in components if value is not None]
+    weight_sum = sum(weight for _, _, weight in used)
+    score = (
+        round(sum(value * weight for _, value, weight in used) / weight_sum, 4)
+        if weight_sum else None
+    )
+    evidence = {
+        name: {
+            "available": value is not None,
+            "value": round(value, 4) if value is not None else None,
+            "configured_weight": weight,
+            "effective_weight": round(weight / weight_sum, 4) if value is not None and weight_sum else 0,
+        }
+        for name, value, weight in components
+    }
+    return score, evidence
 
 
 def run_competitor_rankings(db: Session, ref_date: date | None = None,
@@ -108,7 +128,9 @@ def _run_for_shop(db: Session, today: date, sid: int) -> int:
     cis_by_comp: dict[str, list[float]] = {}
     cis_count_by_comp: dict[str, int] = {}
     for r in cis_rows:
-        cis_by_comp.setdefault(r.competitor_name, []).append(float(r.cis_score or 0))
+        if r.cis_score is None:
+            continue
+        cis_by_comp.setdefault(r.competitor_name, []).append(float(r.cis_score))
         cis_count_by_comp[r.competitor_name] = cis_count_by_comp.get(r.competitor_name, 0) + 1
 
     all_names = set(profiles) | set(cat_by_comp) | set(cis_by_comp)
@@ -153,38 +175,63 @@ def _run_for_shop(db: Session, today: date, sid: int) -> int:
 
     written = 0
 
-    def _scores_for(name: str, scope_rows: list[models.CategoryCompetitorRelevance]) -> tuple[float, float, float, float, dict]:
-        def _norm(v: float) -> float:
+    def _scores_for(name: str, scope_rows: list[models.CategoryCompetitorRelevance]) -> tuple[float | None, float | None, float | None, float | None, dict]:
+        def _norm(v: float | None) -> float | None:
             """Normaliseer naar 0..1 (bronvelden mixen 0..1- en 0..100-schalen)."""
+            if v is None:
+                return None
             return min(1.0, v / 100.0 if v > 1.0 else v)
 
         prof = profiles.get(name)
-        overlap = _norm(float(prof.functional_overlap_score or 0)) if prof else 0.0
-        relevance_cat = _norm(_avg([float(r.relevance_score or 0) for r in scope_rows]))
-        coverage = _norm(_avg([float(r.coverage_index or 0) for r in scope_rows]))
-        competition_relevance = round(0.40 * overlap + 0.40 * relevance_cat + 0.20 * coverage, 4)
+        overlap = _norm(float(prof.functional_overlap_score)
+                        if prof and prof.functional_overlap_score is not None else None)
+        relevance_cat = _norm(_avg([
+            float(r.relevance_score) if r.relevance_score is not None else None
+            for r in scope_rows]))
+        coverage = _norm(_avg([
+            float(r.coverage_index) if r.coverage_index is not None else None
+            for r in scope_rows]))
+        competition_relevance, competition_components = _weighted_available([
+            ("functional_overlap_score", overlap, 0.40),
+            ("avg_category_relevance", relevance_cat, 0.40),
+            ("avg_coverage_index", coverage, 0.20),
+        ])
 
-        pricing_rel = _norm(_avg([float(r.pricing_relevance_score or 0) for r in scope_rows]))
-        freq = min(1.0, float(prof.price_change_frequency or 0) / 100.0) if prof else 0.0
-        price_relevance = round(0.70 * pricing_rel + 0.30 * freq, 4)
+        pricing_rel = _norm(_avg([
+            float(r.pricing_relevance_score)
+            if r.pricing_relevance_score is not None else None
+            for r in scope_rows]))
+        freq = (min(1.0, float(prof.price_change_frequency) / 100.0)
+                if prof and prof.price_change_frequency is not None else None)
+        price_relevance, price_components = _weighted_available([
+            ("avg_pricing_relevance", pricing_rel, 0.70),
+            ("price_change_frequency", freq, 0.30),
+        ])
 
         cis_values = cis_by_comp.get(name, [])
         if cis_values:
             influence = round(_norm(_avg(cis_values)), 4)
             influence_basis = "prijshistorie"
-        elif prof is not None:
+        elif prof is not None and any(
+            value is not None for value in (
+                prof.functional_overlap_score,
+                prof.relevance_label,
+                prof.in_stock_rate,
+            )
+        ):
             # Geen prijshistorie: baseline op basis van profiel alleen, zodat
             # pas ontdekte concurrenten niet stilletjes op Influence 0 blijven.
             influence = profile_baseline_influence(prof)
             influence_basis = "profiel"
         else:
-            influence = 0.0
+            influence = None
             influence_basis = "geen_data"
 
-        base_combined = round(
-            W_COMPETITION_RELEVANCE * competition_relevance
-            + W_PRICE_RELEVANCE * price_relevance
-            + W_INFLUENCE * influence, 4)
+        base_combined, combined_components = _weighted_available([
+            ("competition_relevance", competition_relevance, W_COMPETITION_RELEVANCE),
+            ("price_relevance", price_relevance, W_PRICE_RELEVANCE),
+            ("influence", influence, W_INFLUENCE),
+        ])
 
         # Business Strength als ONDERSTEUNENDE dimensie (nooit dominant):
         # klein vast gewicht, alleen als er een score bekend is. Unknown
@@ -192,22 +239,29 @@ def _run_for_shop(db: Session, today: date, sid: int) -> int:
         strength_row = strength_by_comp.get(name)
         bs = (strength_row.business_strength_score
               if strength_row is not None else None)
-        if bs is not None:
+        if bs is not None and base_combined is not None:
             combined = round((1.0 - W_BUSINESS_STRENGTH_SUPPORT) * base_combined
                              + W_BUSINESS_STRENGTH_SUPPORT * (float(bs) / 100.0), 4)
         else:
             combined = base_combined
 
         evidence = {
-            "functional_overlap_score": round(overlap, 4),
-            "avg_category_relevance": round(relevance_cat, 4),
-            "avg_coverage_index": round(coverage, 4),
-            "avg_pricing_relevance": round(pricing_rel, 4),
-            "price_change_frequency": float(prof.price_change_frequency or 0) if prof else 0,
+            "functional_overlap_score": round(overlap, 4) if overlap is not None else None,
+            "avg_category_relevance": round(relevance_cat, 4) if relevance_cat is not None else None,
+            "avg_coverage_index": round(coverage, 4) if coverage is not None else None,
+            "avg_pricing_relevance": round(pricing_rel, 4) if pricing_rel is not None else None,
+            "price_change_frequency": (
+                float(prof.price_change_frequency)
+                if prof and prof.price_change_frequency is not None else None),
             "avg_cis_score": influence,
             "influence_basis": influence_basis,
             "cis_sku_count": cis_count_by_comp.get(name, 0),
             "category_rows_used": len(scope_rows),
+            "components": {
+                "competition_relevance": competition_components,
+                "price_relevance": price_components,
+                "combined": combined_components,
+            },
             "weights": {
                 "competition_relevance": W_COMPETITION_RELEVANCE,
                 "price_relevance": W_PRICE_RELEVANCE,
@@ -230,7 +284,11 @@ def _run_for_shop(db: Session, today: date, sid: int) -> int:
         for name in names:
             cr, pr, infl, comb, ev = _scores_for(name, rows_for(name))
             scored.append((name, cr, pr, infl, comb, ev))
-        scored.sort(key=lambda t: t[4], reverse=True)
+        scored.sort(key=lambda t: (
+            t[4] is None,
+            -(t[4] or 0),
+            t[0].lower(),
+        ))
 
         for idx, (name, cr, pr, infl, comb, ev) in enumerate(scored, start=1):
             prev = prev_ranks.get((scope, name))
@@ -244,25 +302,37 @@ def _run_for_shop(db: Session, today: date, sid: int) -> int:
                 trend = "stable"
 
             datapunten = ev["cis_sku_count"] + ev["category_rows_used"]
-            confidence = round(min(0.95, 0.35 + 0.05 * min(datapunten, 12)), 2)
+            confidence = (
+                round(min(0.95, 0.35 + 0.05 * min(datapunten, 12)), 2)
+                if datapunten else 0.0)
 
             if ev.get("influence_basis") == "profiel":
                 influence_uitleg = (
                     f"Influence-score op basis van profiel (geen prijshistorie beschikbaar); "
                     f"gebaseerd op {ev['category_rows_used']} categoriescores."
                 )
+            elif ev.get("influence_basis") == "geen_data":
+                influence_uitleg = "Influence-score niet beschikbaar: geen geldige brondata."
             else:
                 influence_uitleg = (
                     f"Influence-score op basis van prijshistorie; gebaseerd op "
                     f"{ev['category_rows_used']} categoriescores en "
                     f"{ev['cis_sku_count']} SKU-invloedscores."
                 )
-            explanation = (
-                f"{name} staat op rank {idx} in scope '{scope}' met gecombineerde score {comb:.2f} "
-                f"(competition relevance {cr:.2f}, price relevance {pr:.2f}, influence {infl:.2f}). "
-                + influence_uitleg
+            explanation = ((
+                f"{name} staat op rank {idx} in scope '{scope}' met gecombineerde score "
+                f"{comb:.2f}" if comb is not None else
+                f"{name} staat op rank {idx} in scope '{scope}' zonder beschikbare gecombineerde score"
+            ) + (
+                f" (competition relevance {cr:.2f}" if cr is not None else " (competition relevance niet beschikbaar"
+            ) + (
+                f", price relevance {pr:.2f}" if pr is not None else ", price relevance niet beschikbaar"
+            ) + (
+                f", influence {infl:.2f}). " if infl is not None else ", influence niet beschikbaar). "
+            ) + (
+                influence_uitleg
                 + (f" Vorige rank: {prev}." if prev else " Nieuw in de ranking.")
-            )
+            ))
 
             db.add(models.CompetitorRanking(
                 run_date=today,

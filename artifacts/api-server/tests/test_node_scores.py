@@ -184,6 +184,36 @@ def _rows(db, sid, name=None, node_id="__any__"):
     return q.all()
 
 
+def test_selected_node_preserves_unknown_scores_and_renormalizes(seed, node_run):
+    """De hiërarchie-API mag ontbrekende node-input niet opnieuw als nul wegen."""
+    from routes.competition import _node_scores_for_selection
+
+    db = SessionLocal()
+    try:
+        row = db.query(models.CompetitorHierarchyNodeScore).filter(
+            models.CompetitorHierarchyNodeScore.shop_id == seed["sid"],
+            models.CompetitorHierarchyNodeScore.node_id == seed["coffee"],
+            models.CompetitorHierarchyNodeScore.competitor_name == COMP_A,
+        ).one()
+        row.price_relevance_score = None
+        row.influence_score = None
+        row.combined_score = row.competition_relevance_score
+        db.commit()
+
+        by_comp, _, _ = _node_scores_for_selection(
+            db, seed["sid"], str(seed["coffee"]))
+        score = by_comp[COMP_A]
+        assert score["price_relevance_score"] is None
+        assert score["influence_score"] is None
+        assert score["combined_score"] == score["competition_relevance_score"]
+        assert score["evidence"]["combined_components"]["price_relevance"][
+            "available"] is False
+    finally:
+        run_competitor_node_scores(db, shop_id=seed["sid"])
+        db.commit()
+        db.close()
+
+
 def test_scores_verschillen_per_node(seed, node_run):
     db = SessionLocal()
     try:

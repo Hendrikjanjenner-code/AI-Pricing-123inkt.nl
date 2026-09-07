@@ -642,7 +642,8 @@ def sync_connector(
             if name == "priceshape":
                 from services.refresh import (run_rankings_refresh,
                                               run_hierarchy_auto_assign)
-                run_rankings_refresh(sync_db, trigger="handmatige sync")
+                run_rankings_refresh(
+                    sync_db, shop_id=1, trigger="handmatige sync")
                 # Nieuwe feed-producten meteen in de Excel-categorieboom
                 # laten vallen (fout-tolerant, eigen sessie).
                 run_hierarchy_auto_assign()
