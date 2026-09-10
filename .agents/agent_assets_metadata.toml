@@ -28,3 +28,17 @@ uri = "file://.local/outputs/AI-Pricing-Decision-Engine-Management-Deck.pdf"
 type = "pdf"
 title = "AI Pricing Decision Engine — Management Deck (PDF)"
 logical_id = "937772ad-67fa-44e7-a5e7-68c321f3cd03"
+
+[[outputs]]
+id = "5RPGVX3NLA6_78Xn5uHd3"
+uri = "file://artifacts/api-server/templates/concurrentprofiel_template_v1.xlsx"
+type = "table"
+title = "Concurrentprofiel-template v1"
+description = "Compact Nederlandstalig Excel-template met Creditsafe-context, profielverrijking, juridische en commerciële relaties, bronnen en vaste importvelden."
+logical_id = "159a946d-3f44-4a6d-a1fc-6cdf91fd480b"
+content_hash = "sha256:18cf6af818ae2262eb371e2165a9bac3beeca80ef4de63d2d9624e162a8ee7c0"
+size = 15165
+mtime_ms = 1789039299688
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:c5358af1-c6fb-4c89-bfc3-9b5b66a6ff49/159a946d-3f44-4a6d-a1fc-6cdf91fd480b/151f7f6f-d238-45ed-8922-2a38603088b4"
+storage_version_token = "1789039312982662"
+content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
