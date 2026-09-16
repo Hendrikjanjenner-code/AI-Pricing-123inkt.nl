@@ -42,3 +42,9 @@ mtime_ms = 1789039299688
 storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:c5358af1-c6fb-4c89-bfc3-9b5b66a6ff49/159a946d-3f44-4a6d-a1fc-6cdf91fd480b/151f7f6f-d238-45ed-8922-2a38603088b4"
 storage_version_token = "1789039312982662"
 content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+[[outputs]]
+id = "0d16Uf2gMfMf9Nkyi2OVg"
+uri = "file://.local/outputs/AI-Pricing---Commercial-Intelligence-Platform---Kick-off.pdf"
+type = "pdf"
+title = "AI Pricing & Commercial Intelligence Platform — Kick-off.pdf"
