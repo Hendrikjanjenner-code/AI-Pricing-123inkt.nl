@@ -142,6 +142,7 @@ def validate_job(db: Session, job: models.ImportJob) -> dict:
     feed_id_map: dict[str, str] = {}
     ean_map: dict[str, str] = {}
     oem_map: dict[str, str] = {}
+    business_map: dict[str, set] = {}
     CHUNK = 5000
     code_list = list(codes)
     # Feed-product-id (raw_attributes.id) — hiërarchie-exports uit PriceShape
@@ -153,11 +154,16 @@ def validate_job(db: Session, job: models.ImportJob) -> dict:
             sku_set.add(sku)
         for sku, fid in db.query(P.sku_id, feed_id_expr).filter(feed_id_expr.in_(chunk)):
             if fid is not None:
-                feed_id_map[str(fid)] = sku
+                key = str(fid)
+                feed_id_map[key] = sku if key not in feed_id_map else None
         for sku, ean in db.query(P.sku_id, P.ean).filter(P.ean.in_(chunk)):
-            ean_map[ean] = sku
+            ean_map[ean] = sku if ean not in ean_map else None
         for sku, oem in db.query(P.sku_id, P.oem_code).filter(P.oem_code.in_(chunk)):
-            oem_map[oem] = sku
+            oem_map[oem] = sku if oem not in oem_map else None
+        for sku, code in db.query(P.sku_id, P.business_sku).filter(P.business_sku.in_(chunk)):
+            business_map.setdefault(code, set()).add(sku)
+        for a in db.query(models.ProductSourceAlias).filter(models.ProductSourceAlias.code.in_(chunk)):
+            business_map.setdefault(a.code, set()).add(a.sku_id)
 
     seen_opt: dict[str, int] = {}
     sku_target: dict[str, tuple] = {}   # sku → pad; conflict = fout
@@ -207,7 +213,16 @@ def validate_job(db: Session, job: models.ImportJob) -> dict:
 
         # productmatching: DRS product-ID / SKU → feed-id → EAN → OEM
         if r.product_code:
-            if r.product_code in sku_set:
+            business_candidates = business_map.get(r.product_code, set())
+            if len(business_candidates) > 1:
+                r.status = "fout"
+                r.message = "Ambigue winkel-/bronartikelcode; expliciete productkoppeling vereist."
+                counts["fouten"] += 1
+                errors.append({"rij": r.row_number, "bericht": r.message})
+                continue
+            if len(business_candidates) == 1:
+                r.matched_sku_id, r.match_method = next(iter(business_candidates)), "business_sku"
+            elif r.product_code in sku_set:
                 r.matched_sku_id, r.match_method = r.product_code, "drs_id"
             elif r.product_code in feed_id_map:
                 r.matched_sku_id, r.match_method = feed_id_map[r.product_code], "feed_id"
@@ -736,6 +751,7 @@ def auto_assign_new_products(db: Session, sku_ids: list[str] | None = None) -> d
     ean_map: dict[str, str] = {}
     oem_map: dict[str, str] = {}
     feed_id_expr = P.raw_attributes["id"].as_string()
+    business_map: dict[str, set] = {}
     code_list = list(codes)
     CHUNK = 5000
     for i in range(0, len(code_list), CHUNK):
@@ -744,11 +760,16 @@ def auto_assign_new_products(db: Session, sku_ids: list[str] | None = None) -> d
             sku_set.add(sku)
         for sku, fid in db.query(P.sku_id, feed_id_expr).filter(feed_id_expr.in_(chunk)):
             if fid is not None:
-                feed_id_map[str(fid)] = sku
+                key = str(fid)
+                feed_id_map[key] = sku if key not in feed_id_map else None
         for sku, ean in db.query(P.sku_id, P.ean).filter(P.ean.in_(chunk)):
-            ean_map[ean] = sku
+            ean_map[ean] = sku if ean not in ean_map else None
         for sku, oem in db.query(P.sku_id, P.oem_code).filter(P.oem_code.in_(chunk)):
-            oem_map[oem] = sku
+            oem_map[oem] = sku if oem not in oem_map else None
+        for sku, code in db.query(P.sku_id, P.business_sku).filter(P.business_sku.in_(chunk)):
+            business_map.setdefault(code, set()).add(sku)
+        for a in db.query(models.ProductSourceAlias).filter(models.ProductSourceAlias.code.in_(chunk)):
+            business_map.setdefault(a.code, set()).add(a.sku_id)
 
     # Resolve elke geldige staging-rij één keer (rijvolgorde = bestandsvolgorde)
     # en verzamel per product het doelpad. Net als bij validate_job wint de
@@ -762,7 +783,12 @@ def auto_assign_new_products(db: Session, sku_ids: list[str] | None = None) -> d
     for code, names, opt in rows:
         if not names:
             continue
-        if code in sku_set:
+        candidates = business_map.get(code, set())
+        if len(candidates) > 1:
+            continue
+        if len(candidates) == 1:
+            sku, method = next(iter(candidates)), "business_sku"
+        elif code in sku_set:
             sku, method = code, "drs_id"
         elif code in feed_id_map:
             sku, method = feed_id_map[code], "feed_id"

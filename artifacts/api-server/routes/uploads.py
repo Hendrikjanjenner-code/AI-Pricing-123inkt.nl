@@ -85,6 +85,8 @@ async def _process_upload(
         job.error_log = [{"rij": None, "bericht": str(e)[:500]}]
         job.completed_at = datetime.utcnow()
         db.commit()
+        if isinstance(e, HTTPException):
+            raise
         raise HTTPException(status_code=400, detail=f"Upload failed: {str(e)}")
 
 
@@ -558,6 +560,32 @@ async def upload_sales(
         def _proc(rows, db):
             processed, failed, warnings = 0, 0, []
             from datetime import date
+            from services.product_identity import authorize_shop, sales_lock
+            products = {p.sku_id: p for p in db.query(models.DimProduct).all()}
+            shops = sorted({products[_normalize_sku(r)].shop_id for r in rows
+                            if _normalize_sku(r) in products})
+            for shop in shops:
+                authorize_shop(db, current_user, shop)
+                sales_lock(db, shop)
+            uploaded_days = []
+            for row in rows:
+                try:
+                    uploaded_days.append(date.fromisoformat((_r(row, "date", "datum") or "").strip()))
+                except ValueError:
+                    pass  # existing validation reports the invalid row below
+            start_day = min(uploaded_days) if uploaded_days else date.min
+            end_day = max(uploaded_days) if uploaded_days else date.min
+            # One batched inventory, not one query per CSV row. Include zero
+            # DRS claims, which deliberately may have no analytics fact.
+            occupied = {(s, k, d) for s, k, d in db.query(
+                models.SalesDailyClaim.shop_id, models.SalesDailyClaim.sku_id,
+                models.SalesDailyClaim.date).filter(models.SalesDailyClaim.shop_id.in_(shops),
+                    models.SalesDailyClaim.date.between(start_day, end_day))}
+            occupied.update((s, k, d) for s, k, d in db.query(
+                models.FactSalesDaily.shop_id, models.FactSalesDaily.sku_id,
+                models.FactSalesDaily.date).filter(models.FactSalesDaily.shop_id.in_(shops),
+                    models.FactSalesDaily.date.between(start_day, end_day)))
+            new_claims = []
             for i, row in enumerate(rows, start=1):
                 try:
                     if not _enforce_row_validation(row, i, warnings):
@@ -570,9 +598,18 @@ async def upload_sales(
                         continue
                     rev_raw = _r(row, "revenue_inc_vat", "revenue_incl_vat", "revenue_incl_btw", "revenue")
                     date_raw = _r(row, "date", "datum")
+                    product = products.get(sku_id)
+                    if not product:
+                        raise ValueError(f"Onbekende technische SKU {sku_id}; importeer eerst catalogus.")
+                    day = date.fromisoformat(date_raw.strip())
+                    key = (product.shop_id, sku_id, day)
+                    if key in occupied:
+                        raise ValueError(f"Overlap: {sku_id} op {day} heeft reeds dagverkoop/DRS-claim.")
                     entry = models.FactSalesDaily(
-                        date=date.fromisoformat(date_raw.strip()),
+                        date=day,
                         sku_id=sku_id,
+                        shop_id=product.shop_id,
+                        source="LEGACY_SALES",
                         units_sold=_safe_int(_r(row, "units_sold", "quantity_sold", "aantallen")) or 0,
                         revenue=_safe_float(rev_raw),
                         cost=_safe_float(_r(row, "cost", "cost_exc_vat", "kosten")),
@@ -580,10 +617,15 @@ async def upload_sales(
                         margin_pct=_safe_float(_r(row, "margin_pct", "margin_percentage", "marge_pct")),
                     )
                     db.add(entry)
+                    occupied.add(key)
+                    new_claims.append({"shop_id": product.shop_id, "sku_id": sku_id,
+                                       "date": day, "source": "LEGACY_SALES"})
                     processed += 1
                 except Exception as e:
                     warnings.append(str(e))
                     failed += 1
+            if new_claims:
+                db.bulk_insert_mappings(models.SalesDailyClaim, new_claims)
             db.commit()
             return processed, failed, warnings
         return await _process_upload(file, "sales", db, current_user, _proc)
@@ -986,6 +1028,18 @@ async def upload_bulk(
                             "reden": "Type niet herkend op basis van kolomnamen of bestandsnaam"})
             continue
 
+        if upload_type == "sales":
+            # Exactly the standalone sales pipeline: authorization, shop lock,
+            # legacy overlap AND zero-day claims. Never maintain a ZIP writer.
+            result = await upload_sales(
+                UploadFile(filename=f"{file.filename}::{csv_name}", file=io.BytesIO(raw)),
+                db, current_user)
+            totaal_verwerkt += result["rows_processed"]
+            totaal_mislukt += result["rows_failed"]
+            totaal_duplicaten += result["rows_duplicates"]
+            results.append({"bestand": csv_name, "type": "sales", "status": "voltooid", **result})
+            continue
+
         rows, dup_count = _dedupe_rows(rows, file_warns)
         job = models.ImportJob(
             upload_type=upload_type,
@@ -1006,31 +1060,6 @@ async def upload_bulk(
 
             if upload_type == "products":
                 proc, fail, warns = _process_products(rows, db)
-
-            elif upload_type == "sales":
-                proc, fail, warns = 0, 0, []
-                for i, row in enumerate(rows, start=1):
-                    try:
-                        if not _enforce_row_validation(row, i, warns):
-                            fail += 1; continue
-                        sku_id = _normalize_sku(row)
-                        if not sku_id:
-                            fail += 1; continue
-                        rev_raw = _r(row, "revenue_inc_vat", "revenue_incl_vat", "revenue_incl_btw", "revenue")
-                        date_raw = _r(row, "date", "datum")
-                        entry = models.FactSalesDaily(
-                            date=_date.fromisoformat(date_raw.strip()),
-                            sku_id=sku_id,
-                            units_sold=_safe_int(_r(row, "units_sold", "quantity_sold", "aantallen")) or 0,
-                            revenue=_safe_float(rev_raw),
-                            cost=_safe_float(_r(row, "cost", "cost_exc_vat")),
-                            margin=_safe_float(_r(row, "margin", "marge")),
-                            margin_pct=_safe_float(_r(row, "margin_pct", "marge_pct")),
-                        )
-                        db.add(entry); proc += 1
-                    except Exception as e:
-                        warns.append(str(e)); fail += 1
-                db.commit()
 
             elif upload_type == "prices":
                 proc, fail, warns = 0, 0, []

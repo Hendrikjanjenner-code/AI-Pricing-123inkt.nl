@@ -1,12 +1,14 @@
 import { useState, useCallback } from "react";
 import { Link } from "wouter";
-import { useListProducts } from "@workspace/api-client-react";
+import { useListProducts, ListProductsIdentityStatus } from "@workspace/api-client-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Search, ChevronRight } from "lucide-react";
+import { Search, ChevronRight, Download } from "lucide-react";
+import type { Product } from "@workspace/api-client-react";
 import SmartFilters, { SmartFilterValues, EMPTY_FILTERS } from "@/components/filters/SmartFilters";
 import { GlobalFilterBar } from "@/components/filters/GlobalFilterBar";
 import { useGlobalFilters } from "@/hooks/use-global-filters";
@@ -90,6 +92,30 @@ function filtersFromUrl(): SmartFilterValues {
   };
 }
 
+function xmlEsc(v: unknown): string {
+  return (v == null ? "" : String(v)).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// Excel-werkmap (SpreadsheetML) met elke cel expliciet als tekst: voorloopnullen
+// blijven behouden en waarden worden nooit als formule uitgevoerd.
+function exportIdentiteit(rows: Product[]) {
+  const head = ["Technisch ID", "Zakelijke SKU", "EAN", "OEM", "Bron-ID's", "Productnaam", "Merk"];
+  const data = rows.map(p => [
+    p.sku_id, p.business_sku, p.ean, p.oem_code,
+    (p.source_aliases || []).map(a => `${a.source}:${a.code}${a.shop_id != null ? "@" + a.shop_id : ""}`).join(" | "),
+    p.product_name, p.brand,
+  ]);
+  const row = (cells: unknown[]) => `<Row>${cells.map(c => `<Cell><Data ss:Type="String">${xmlEsc(c)}</Data></Cell>`).join("")}</Row>`;
+  const xml = `<?xml version="1.0" encoding="UTF-8"?><?mso-application progid="Excel.Sheet"?>` +
+    `<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">` +
+    `<Styles><Style ss:ID="Default"><NumberFormat ss:Format="@"/></Style></Styles>` +
+    `<Worksheet ss:Name="Productidentiteit"><Table>${[head, ...data].map(row).join("")}</Table></Worksheet></Workbook>`;
+  const url = URL.createObjectURL(new Blob([xml], { type: "application/vnd.ms-excel" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = `productidentiteit-${new Date().toISOString().slice(0, 10)}.xls`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
 export default function Producten() {
   const [page, setPage] = useState(1);
 
@@ -120,6 +146,7 @@ export default function Producten() {
 
   // Applied: what actually drives the API call and client-side filter
   const [zoekterm, setZoekterm] = useState("");
+  const [identityStatus, setIdentityStatus] = useState<ListProductsIdentityStatus>(ListProductsIdentityStatus.all);
   const [appliedFilters, setAppliedFilters] = useState<SmartFilterValues>(initialFilters);
 
   const hasPendingChanges =
@@ -151,6 +178,7 @@ export default function Producten() {
     page,
     page_size: 100,
     search: zoekterm || undefined,
+    identity_status: identityStatus === ListProductsIdentityStatus.all ? undefined : identityStatus,
     category: appliedFilters.categorie_naam || undefined,
     subcategory: appliedFilters.subcategorie_naam || undefined,
     is_private_label:
@@ -230,13 +258,27 @@ export default function Producten() {
         <div className="relative flex-1">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Zoek op SKU-ID, naam of merk..."
+            placeholder="Zoek op technisch ID, zakelijke SKU, EAN, OEM, naam of merk..."
             className="pl-9 bg-background"
             value={stagedZoekterm}
             onChange={e => setStagedZoekterm(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter") applySearch(); }}
           />
         </div>
+        <Select value={identityStatus} onValueChange={v => { setIdentityStatus(v as ListProductsIdentityStatus); setPage(1); }}>
+          <SelectTrigger className="w-[210px] shrink-0 bg-background" data-testid="select-identity-status"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ListProductsIdentityStatus.all}>Alle identiteiten</SelectItem>
+            <SelectItem value={ListProductsIdentityStatus.with_business_sku}>Met zakelijke SKU</SelectItem>
+            <SelectItem value={ListProductsIdentityStatus.without_business_sku}>Zonder zakelijke SKU</SelectItem>
+            <SelectItem value={ListProductsIdentityStatus.with_ean}>Met EAN</SelectItem>
+            <SelectItem value={ListProductsIdentityStatus.without_ean}>Zonder EAN</SelectItem>
+            <SelectItem value={ListProductsIdentityStatus.with_oem}>Met OEM</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button variant="outline" className="shrink-0" data-testid="button-export-identity" disabled={items.length === 0} onClick={() => exportIdentiteit(items)} title="Excel-werkmap met identiteitsvelden als tekst (voorloopnullen blijven behouden) voor de getoonde pagina">
+          <Download className="h-4 w-4 mr-2" />Identiteit (Excel, tekst)
+        </Button>
         <Button
           onClick={applySearch}
           variant={hasPendingChanges ? "default" : "outline"}
@@ -277,9 +319,11 @@ export default function Producten() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>SKU-ID</TableHead>
+              <TableHead title="Stabiele interne sleutel; geen zakelijke code">Technisch ID</TableHead>
+              <TableHead title="DRS productcode / artikelcode">Zakelijke SKU</TableHead>
               <TableHead>EAN</TableHead>
               <TableHead>OEM</TableHead>
+              <TableHead>Bron-ID's</TableHead>
               <TableHead>Naam</TableHead>
               <TableHead>Merk</TableHead>
               <TableHead>Categorie</TableHead>
@@ -296,22 +340,29 @@ export default function Producten() {
             {isLoading ? (
               Array.from({ length: 10 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 13 }).map((__, j) => (
+                  {Array.from({ length: 15 }).map((__, j) => (
                     <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                   ))}
                 </TableRow>
               ))
             ) : items.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={13} className="h-32 text-center text-muted-foreground">
+                <TableCell colSpan={15} className="h-32 text-center text-muted-foreground">
                   Geen producten gevonden voor de geselecteerde filters.
                 </TableCell>
               </TableRow>
             ) : items.map((sku) => (
               <TableRow key={sku.sku_id} className="group cursor-pointer hover:bg-muted/50">
-                <TableCell className="font-mono text-xs">{sku.sku_id}</TableCell>
+                <TableCell className="font-mono text-[11px] text-muted-foreground" data-testid={`text-technical-id-${sku.sku_id}`}>{sku.sku_id}</TableCell>
+                <TableCell className="font-mono text-xs font-medium" data-testid={`text-business-sku-${sku.sku_id}`}>{sku.business_sku || <span className="text-muted-foreground/60 font-sans">niet gekoppeld</span>}</TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{sku.ean || "—"}</TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">{sku.oem_code || "—"}</TableCell>
+                <TableCell className="text-xs text-muted-foreground max-w-[180px]">
+                  {sku.source_aliases?.length ? sku.source_aliases.slice(0, 2).map((a, i) => (
+                    <div key={i} className="truncate"><span className="uppercase text-[10px]">{a.source}</span> <span className="font-mono">{a.code}</span>{a.shop_id != null && <span className="text-[10px]"> #{a.shop_id}</span>}</div>
+                  )) : "—"}
+                  {(sku.source_aliases?.length ?? 0) > 2 && <div className="text-[10px]">+{(sku.source_aliases?.length ?? 0) - 2}</div>}
+                </TableCell>
                 <TableCell className="font-medium max-w-[200px] truncate" title={sku.product_name}>
                   {sku.product_name}
                 </TableCell>

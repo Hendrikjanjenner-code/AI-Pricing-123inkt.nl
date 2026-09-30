@@ -91,11 +91,17 @@ def safe_div(numerator, denominator):
 
 
 def gross_margin(revenue, cost):
-    return float(revenue or 0) - float(cost or 0)
+    # Missing historical cost is not free stock / 100% profit.
+    if revenue is None or cost is None:
+        return None
+    return float(revenue) - float(cost)
 
 
 def gross_margin_pct(revenue, cost):
-    r = safe_div(gross_margin(revenue, cost), revenue)
+    margin = gross_margin(revenue, cost)
+    if margin is None:
+        return None
+    r = safe_div(margin, revenue)
     return r * 100 if r is not None else None
 
 
@@ -108,7 +114,10 @@ def margin_ratio(price, cost, default: float = 0.25):
     Centrale definitie — engines mogen dit niet zelf herberekenen (§consolidatie).
     Geeft `default` terug wanneer de prijs ontbreekt of 0 is.
     """
-    r = safe_div(gross_margin(price, cost), price)
+    margin = gross_margin(price, cost)
+    if margin is None:
+        return default
+    r = safe_div(margin, price)
     return r if r is not None else default
 
 def price_index(own_price, reference_price, default: float = 1.0):

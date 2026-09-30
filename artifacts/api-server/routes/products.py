@@ -1,8 +1,8 @@
 """Product/SKU management endpoints."""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
-from typing import Optional
+from sqlalchemy import or_, func
+from typing import Optional, Literal
 from pydantic import BaseModel
 from database import get_db
 import models
@@ -13,6 +13,8 @@ router = APIRouter(prefix="/api/products", tags=["products"])
 
 class ProductOut(BaseModel):
     sku_id: str
+    business_sku: Optional[str] = None
+    source_aliases: list[dict] = []
     product_name: str
     brand: Optional[str] = None
     category: Optional[str] = None
@@ -51,6 +53,8 @@ def list_products(
     strategy_type: Optional[str] = Query(None),
     lifecycle_status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
+    identity_status: Literal["all", "with_business_sku", "without_business_sku",
+                             "with_ean", "without_ean", "with_oem"] = Query("all"),
     hierarchy_node_ids: Optional[str] = Query(None),
     brands: Optional[str] = Query(None),
     statuses: Optional[str] = Query(None),
@@ -61,6 +65,23 @@ def list_products(
     current_user: models.User = Depends(auth_utils.get_current_user),
 ):
     q = db.query(models.DimProduct)
+    from authz import user_allowed_shop_ids
+    allowed = user_allowed_shop_ids(db, current_user)
+    if allowed is not None:
+        q = q.filter(models.DimProduct.shop_id.in_(allowed))
+    identity_columns = {
+        "with_business_sku": models.DimProduct.business_sku,
+        "without_business_sku": models.DimProduct.business_sku,
+        "with_ean": models.DimProduct.ean,
+        "without_ean": models.DimProduct.ean,
+        "with_oem": models.DimProduct.oem_code,
+    }
+    if identity_status != "all":
+        column = identity_columns[identity_status]
+        if identity_status.startswith("without_"):
+            q = q.filter(or_(column.is_(None), func.trim(column) == ""))
+        else:
+            q = q.filter(column.isnot(None), func.trim(column) != "")
     # Globale filtercontext (hiërarchie + merk) — zelfde semantiek als de
     # dashboards: subtree-expansie server-side, lege selectie ≠ geen filter.
     from routes.global_filters import sku_filter_query
@@ -81,14 +102,27 @@ def list_products(
         q = q.filter(
             or_(
                 models.DimProduct.sku_id.ilike(f"%{search}%"),
+                models.DimProduct.business_sku.ilike(f"%{search}%"),
+                models.DimProduct.ean.ilike(f"%{search}%"),
+                models.DimProduct.oem_code.ilike(f"%{search}%"),
                 models.DimProduct.product_name.ilike(f"%{search}%"),
                 models.DimProduct.brand.ilike(f"%{search}%"),
             )
         )
     total = q.count()
     items = q.offset((page - 1) * page_size).limit(page_size).all()
+    aliases = {}
+    if items:
+        from sqlalchemy import tuple_
+        for a in db.query(models.ProductSourceAlias).filter(
+            tuple_(models.ProductSourceAlias.shop_id, models.ProductSourceAlias.sku_id).in_(
+                [(p.shop_id, p.sku_id) for p in items])
+        ):
+            aliases.setdefault((a.shop_id, a.sku_id), []).append(
+                {"source": a.source, "code": a.code, "shop_id": a.shop_id})
     return {
-        "items": [_product_out(p) for p in items],
+        "items": [{**_product_out(p), "source_aliases": aliases.get((p.shop_id, p.sku_id), [])}
+                  for p in items],
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -104,7 +138,12 @@ def get_product(
     p = db.query(models.DimProduct).filter(models.DimProduct.sku_id == id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Product not found")
-    return _product_out(p)
+    from services.product_identity import authorize_shop
+    authorize_shop(db, current_user, p.shop_id)
+    return {**_product_out(p), "source_aliases": [
+        {"source": a.source, "code": a.code, "shop_id": a.shop_id}
+        for a in db.query(models.ProductSourceAlias).filter_by(shop_id=p.shop_id, sku_id=p.sku_id)
+    ]}
 
 
 @router.patch("/{id}", response_model=ProductOut)
@@ -117,6 +156,8 @@ def update_product(
     p = db.query(models.DimProduct).filter(models.DimProduct.sku_id == id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Product not found")
+    from services.product_identity import authorize_shop
+    authorize_shop(db, current_user, p.shop_id)
     if req.strategy_type is not None:
         p.strategy_type = req.strategy_type
     if req.lifecycle_status is not None:
@@ -135,6 +176,7 @@ def update_product(
 def _product_out(p: models.DimProduct) -> dict:
     return {
         "sku_id": p.sku_id,
+        "business_sku": p.business_sku,
         "product_name": p.product_name,
         "brand": p.brand,
         "category": p.category,

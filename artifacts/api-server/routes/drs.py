@@ -258,7 +258,11 @@ async def validate_drs(
 
     dubbele_skus = [sku for sku, rijen in sku_gezien.items() if len(rijen) > 1]
     for dup in dubbele_skus:
-        warnings.append(f"Dubbele productcode '{dup}' op rijen: {sku_gezien[dup]}")
+        fouten.append({"tab": "Sales", "rij": sku_gezien[dup][0],
+                       "veld": "productcode", "type": "dubbele_productcode",
+                       "bericht": f"Dubbele productcode '{dup}' op rijen {sku_gezien[dup]}. "
+                                  "Maak productcodes uniek vóór import; verschillende EANs "
+                                  "maken dubbele cataloguscodes niet veilig."})
 
     # ── Hierarchy tab row validation ──────────────────────────────────────
     geldig_hier = 0
@@ -286,6 +290,7 @@ async def validate_drs(
         len(ontbrekende_sales_kols) == 0
         and len(ontbrekende_hier_kols) == 0
         and geldig_sales > 0
+        and not dubbele_skus
     )
 
     return {
@@ -328,6 +333,7 @@ async def validate_drs(
 async def import_drs(
     file: UploadFile = File(...),
     mode: str = Form(DEFAULT_IMPORT_MODE),
+    shop_id: int = Form(1),
     confirm_phrase: str | None = Form(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth_utils.require_role("admin", "pricing_manager")),
@@ -342,9 +348,9 @@ async def import_drs(
     `mode` bepaalt het importgedrag:
     - "aanvullen": alleen nieuwe SKU's toevoegen, bestaande SKU's ongemoeid laten.
     - "updaten" (standaard): bestaande SKU's bijwerken, nieuwe toevoegen.
-    - "vervangen": zoals "updaten", maar verwijdert daarna ook alle DRS-SKU's
-      die niet in dit bestand voorkomen. Vereist `confirm_phrase` exact gelijk
-      aan DRS_REPLACE_CONFIRM_PHRASE — data wordt nooit stilzwijgend verwijderd.
+    - "vervangen": zoals "updaten", maar deactiveert ontbrekende DRS-SKU's
+      binnen de gekozen winkel. Identiteit en historie blijven intact.
+      Vereist `confirm_phrase` exact gelijk aan DRS_REPLACE_CONFIRM_PHRASE.
     """
     fname = (file.filename or "")
     if not fname.lower().endswith((".xlsx", ".xls")):
@@ -361,6 +367,37 @@ async def import_drs(
 
     content = await file.read()
     sales_rows, hier_rows, file_warnings = _load_drs_xlsx(content, fname)
+    from services.product_identity import authorize_shop, IdentityIndex, alias_discriminator
+    from uuid import uuid4
+    authorize_shop(db, current_user, shop_id)
+    # Catalog/hierarchy processing is keyed by productcode, not (code, EAN).
+    # Reject before jobs, category writes or replace retirement can happen.
+    code_rows = {}
+    for row_number, row in enumerate(sales_rows, start=2):
+        code = row.get("productcode", "").strip()
+        if code:
+            code_rows.setdefault(code, []).append(row_number)
+    duplicates = {code: rows for code, rows in code_rows.items() if len(rows) > 1}
+    if duplicates:
+        details = "; ".join(f"'{code}' op rijen {rows}" for code, rows in list(duplicates.items())[:20])
+        raise HTTPException(422, "Dubbele productcodes: " + details +
+                            ". Maak productcodes uniek vóór catalogusimport, ook bij verschillende EANs. "
+                            "Geen producten, aliassen of hiërarchie gewijzigd.")
+    identity = IdentityIndex(db, shop_id)
+    resolved_codes = {}
+    for row in sales_rows:
+        code = row.get("productcode", "").strip()
+        if not code:
+            continue
+        if len(code) > 100:
+            raise HTTPException(422, "Artikelcode te lang; identiteit wordt niet afgekapt.")
+        try:
+            resolved_codes[code] = identity.resolve(code, row.get("ean", "").strip())[0]
+        except ValueError as exc:
+            if code in identity.codes:
+                raise HTTPException(409, f"Artikelcode {code}: {exc}")
+            # Catalog import may create products; daily imports never may.
+            resolved_codes[code] = "drs:" + str(uuid4())
     file_type = "xls" if fname.lower().endswith(".xls") else "xlsx"
 
     from engine.import_engine import new_batch_id as _new_batch_id
@@ -467,10 +504,22 @@ async def import_drs(
 
         # ── Step 4: Upsert SKU's vanuit Sales-tabblad ─────────────────────────
         # Laad alle bestaande producten in één query (voorkomt N queries → timeout)
-        existing_products = {p.sku_id: p for p in db.query(models.DimProduct).all()}
+        # Earlier hierarchy/job commits release transaction locks. Refresh
+        # identity under the same shop lock as feed and daily confirmation.
+        from services.product_identity import sales_lock
+        sales_lock(db, shop_id)
+        identity = IdentityIndex(db, shop_id)
+        for row in sales_rows:
+            code = row.get("productcode", "").strip()
+            if code and code in identity.codes:
+                try:
+                    resolved_codes[code] = identity.resolve(code, row.get("ean", "").strip())[0]
+                except ValueError as exc:
+                    raise HTTPException(409, f"Artikelcode {code}: {exc}")
+        existing_products = dict(identity.products)
 
         for i, row in enumerate(sales_rows, start=2):
-            pc = _trunc(row.get("productcode", "").strip(), 100)
+            pc = row.get("productcode", "").strip()
             if not pc:
                 continue
 
@@ -510,8 +559,9 @@ async def import_drs(
             if not pad:
                 warnings.append(f"SKU '{pc}': geen Hierarchy-pad gevonden, category/product_group leeg gelaten")
 
-            seen_skus.add(pc)
-            existing = existing_products.get(pc)
+            technical_sku = resolved_codes[pc]
+            seen_skus.add(technical_sku)
+            existing = existing_products.get(technical_sku)
 
             if existing and mode == "aanvullen":
                 # "aanvullen": alleen nieuwe SKU's toevoegen, bestaande overslaan.
@@ -519,6 +569,7 @@ async def import_drs(
                 continue
 
             if existing:
+                existing.business_sku = pc
                 existing.product_name = naam
                 existing.brand = merk
                 existing.category = categorie
@@ -548,8 +599,13 @@ async def import_drs(
                 existing.updated_at = now
                 sku_updated += 1
             else:
+                full_ean = row.get("ean", "").strip()
                 new_product = models.DimProduct(
-                    sku_id=pc,
+                    sku_id=technical_sku,
+                    business_sku=pc,
+                    shop_id=shop_id,
+                    ean=full_ean if len(full_ean) <= 50 else None,
+                    raw_attributes={"_ean_full": full_ean} if len(full_ean) > 50 else None,
                     product_name=naam,
                     brand=merk,
                     category=categorie,
@@ -576,8 +632,14 @@ async def import_drs(
                     import_source="DRS",
                 )
                 db.add(new_product)
-                existing_products[pc] = new_product
+                existing_products[technical_sku] = new_product
                 sku_created += 1
+            discriminator = alias_discriminator(row.get("ean", "").strip())
+            if not identity.aliases.get((pc, discriminator)):
+                db.flush()
+                db.add(models.ProductSourceAlias(shop_id=shop_id, source="DRS", code=pc,
+                       discriminator=discriminator, sku_id=technical_sku))
+                identity.aliases[(pc, discriminator)].add(technical_sku)
 
         # ── Step 5: "vervangen" — verwijder DRS-SKU's die niet in dit bestand voorkomen ──
         sku_deleted = 0
@@ -587,7 +649,9 @@ async def import_drs(
                 if sku not in seen_skus and (p.import_source or "").upper() == "DRS"
             ]
             for p in stale_products:
-                db.delete(p)
+                # Retire instead of destroying technical identity and history.
+                p.is_active = False
+                p.lifecycle_status = "discontinued"
                 sku_deleted += 1
             if stale_products:
                 _log_audit(db, "dim_product", "DRS_REPLACE", "delete", current_user.username,
@@ -614,7 +678,7 @@ async def import_drs(
         mode_msg = {
             "aanvullen": f"{sku_skipped} bestaande SKU's overgeslagen (aanvullen-modus).",
             "updaten": "",
-            "vervangen": f"{sku_deleted} verouderde DRS-SKU's verwijderd (vervangen-modus).",
+            "vervangen": f"{sku_deleted} verouderde DRS-SKU's gedeactiveerd; historie behouden.",
         }.get(mode, "")
 
         return {
@@ -623,7 +687,8 @@ async def import_drs(
             "skus_created": sku_created,
             "skus_updated": sku_updated,
             "skus_skipped": sku_skipped,
-            "skus_deleted": sku_deleted,
+            "skus_deleted": 0,
+            "skus_retired": sku_deleted,
             "hierarchy_created": hier_created,
             "hierarchy_updated": hier_updated,
             "categories_created": cat_created,

@@ -32,7 +32,7 @@ from datetime import date, timedelta
 from typing import Callable, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import func, desc
+from sqlalchemy import func, desc, case
 from sqlalchemy.orm import Session
 
 import models
@@ -67,7 +67,7 @@ def _bq_route_product_performance(
         sql = f"""
             SELECT
                 COALESCE(SUM(revenue), 0)    AS revenue,
-                COALESCE(SUM(cost), 0)       AS cost,
+                IF(COUNT(cost) = COUNT(*), SUM(cost), NULL) AS cost,
                 COALESCE(SUM(units_sold), 0) AS units_sold,
                 COUNT(*)                     AS records
             FROM `{project}.{dataset}.fact_sales_daily`
@@ -89,7 +89,7 @@ def _bq_route_product_performance(
 
         r = rows[0]
         revenue = float(r.get("revenue") or 0)
-        cost = float(r.get("cost") or 0)
+        cost = float(r["cost"]) if r.get("cost") is not None else None
         units = int(r.get("units_sold") or 0)
         records = int(r.get("records") or 0)
 
@@ -98,6 +98,7 @@ def _bq_route_product_performance(
             "units_sold": units,
             "gross_margin": gross_margin(revenue, cost),
             "gross_margin_pct": gross_margin_pct(revenue, cost),
+            "historical_margin_available": cost is not None,
             "asp": asp(revenue, units),
             "records": records,
             "data_available": records > 0,
@@ -131,11 +132,12 @@ def _bq_route_category_performance(
             SELECT
                 p.category,
                 COALESCE(SUM(s.revenue), 0)    AS revenue,
-                COALESCE(SUM(s.cost), 0)       AS cost,
+                IF(COUNT(s.cost) = COUNT(*), SUM(s.cost), NULL) AS cost,
                 COALESCE(SUM(s.units_sold), 0) AS units
             FROM `{project}.{dataset}.fact_sales_daily` s
             JOIN `{project}.pricing_dims.dim_product` p USING (sku_id)
             WHERE s.shop_id = @shop_id
+              AND p.shop_id = @shop_id
               AND s.date >= DATE_SUB(CURRENT_DATE(), INTERVAL {days} DAY)
               {cat_filter}
             GROUP BY p.category
@@ -161,6 +163,7 @@ def _bq_route_category_performance(
                 "units_sold": int(r["units"] or 0),
                 "gross_margin": gross_margin(r["revenue"], r["cost"]),
                 "gross_margin_pct": gross_margin_pct(r["revenue"], r["cost"]),
+                "historical_margin_available": r["cost"] is not None,
             }
             for r in rows
         ]
@@ -308,16 +311,16 @@ def get_product_performance(db: Session, user: models.User, sku_id: str,
 
     if bq_data:
         revenue = bq_data["revenue"]
-        cost = 0.0  # BQ-query retourneert geen cost apart; margin berekend via bq_data
         units = bq_data["units_sold"]
         records = bq_data["records"]
-        gross_margin_val = bq_data.get("gross_margin", 0)
-        gross_margin_pct_val = bq_data.get("gross_margin_pct", 0)
+        gross_margin_val = bq_data.get("gross_margin")
+        gross_margin_pct_val = bq_data.get("gross_margin_pct")
     else:
         since = date.today() - timedelta(days=days)
         row = db.query(
             func.coalesce(func.sum(models.FactSalesDaily.revenue), 0),
-            func.coalesce(func.sum(models.FactSalesDaily.cost), 0),
+            case((func.count(models.FactSalesDaily.cost) == func.count(models.FactSalesDaily.id),
+                  func.sum(models.FactSalesDaily.cost)), else_=None),
             func.coalesce(func.sum(models.FactSalesDaily.units_sold), 0),
             func.count(models.FactSalesDaily.id),
         ).filter(
@@ -344,6 +347,7 @@ def get_product_performance(db: Session, user: models.User, sku_id: str,
         "units_sold": int(units or 0),
         "gross_margin": gross_margin_val,
         "gross_margin_pct": gross_margin_pct_val,
+        "historical_margin_available": gross_margin_val is not None,
         "asp": asp(revenue, units),
         "current_price": float(product.current_price) if product.current_price is not None else None,
         "cost_price": float(product.cost_price) if product.cost_price is not None else None,
@@ -386,7 +390,8 @@ def get_category_performance(db: Session, user: models.User, category: Optional[
         q = db.query(
             models.DimProduct.category,
             func.coalesce(func.sum(models.FactSalesDaily.revenue), 0).label("revenue"),
-            func.coalesce(func.sum(models.FactSalesDaily.cost), 0).label("cost"),
+            case((func.count(models.FactSalesDaily.cost) == func.count(models.FactSalesDaily.id),
+                  func.sum(models.FactSalesDaily.cost)), else_=None).label("cost"),
             func.coalesce(func.sum(models.FactSalesDaily.units_sold), 0).label("units"),
         ).join(
             models.FactSalesDaily, models.FactSalesDaily.sku_id == models.DimProduct.sku_id
@@ -407,6 +412,7 @@ def get_category_performance(db: Session, user: models.User, category: Optional[
                 "units_sold": int(r.units),
                 "gross_margin": gross_margin(r.revenue, r.cost),
                 "gross_margin_pct": gross_margin_pct(r.revenue, r.cost),
+                "historical_margin_available": r.cost is not None,
             }
             for r in rows
         ]
@@ -670,7 +676,8 @@ def get_margin_erosion(db: Session, user: models.User, days: int = 30,
     def _margin_by_sku(start, end):
         q = db.query(
             models.FactSalesDaily.sku_id,
-            func.coalesce(func.sum(models.FactSalesDaily.margin), 0).label("margin"),
+            case((func.count(models.FactSalesDaily.margin) == func.count(models.FactSalesDaily.id),
+                  func.sum(models.FactSalesDaily.margin)), else_=None).label("margin"),
             func.coalesce(func.sum(models.FactSalesDaily.revenue), 0).label("revenue"),
             func.count(models.FactSalesDaily.id).label("records"),
         ).filter(
@@ -690,6 +697,8 @@ def get_margin_erosion(db: Session, user: models.User, days: int = 30,
     losers = []
     for sku, c in cur.items():
         p = prev.get(sku)
+        if c.margin is None or (p is not None and p.margin is None):
+            continue  # Unknown historical margin is not a measured decline to zero.
         prev_margin = float(p.margin) if p else 0.0
         delta = float(c.margin) - prev_margin
         if delta < 0:

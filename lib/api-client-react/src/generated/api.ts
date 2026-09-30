@@ -44,6 +44,12 @@ import type {
   Department,
   DepartmentListResponse,
   DepartmentUpdateRequest,
+  DrsDailyConfirmation,
+  DrsDailyPreview,
+  DrsDailyResult,
+  DrsDailyTemplate,
+  DrsDailyUpload,
+  DrsMappingResult,
   DrsPushResult,
   ErrorResponse,
   ExportHistoryResponse,
@@ -128,6 +134,410 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+export const getGetDrsDailyTemplatesUrl = () => {
+  return `/api/uploads/drs-daily/templates`;
+};
+
+export const getDrsDailyTemplates = async (
+  options?: RequestInit,
+): Promise<DrsDailyTemplate[]> => {
+  return customFetch<DrsDailyTemplate[]>(getGetDrsDailyTemplatesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetDrsDailyTemplatesQueryKey = () => {
+  return [`/api/uploads/drs-daily/templates`] as const;
+};
+
+export const getGetDrsDailyTemplatesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDrsDailyTemplates>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getDrsDailyTemplates>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetDrsDailyTemplatesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDrsDailyTemplates>>
+  > = ({ signal }) => getDrsDailyTemplates({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDrsDailyTemplates>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDrsDailyTemplatesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDrsDailyTemplates>>
+>;
+export type GetDrsDailyTemplatesQueryError = ErrorType<unknown>;
+
+export function useGetDrsDailyTemplates<
+  TData = Awaited<ReturnType<typeof getDrsDailyTemplates>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getDrsDailyTemplates>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDrsDailyTemplatesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getPreviewDrsDailyUrl = () => {
+  return `/api/uploads/drs-daily/preview`;
+};
+
+export const previewDrsDaily = async (
+  drsDailyUpload: DrsDailyUpload,
+  options?: RequestInit,
+): Promise<DrsDailyPreview> => {
+  const formData = new FormData();
+  formData.append(`file`, drsDailyUpload.file);
+  formData.append(`shop_id`, drsDailyUpload.shop_id.toString());
+  formData.append(`year`, drsDailyUpload.year.toString());
+  formData.append(`period_start`, drsDailyUpload.period_start);
+  formData.append(`period_end`, drsDailyUpload.period_end);
+  if (drsDailyUpload.template !== undefined) {
+    formData.append(`template`, drsDailyUpload.template);
+  }
+  if (drsDailyUpload.mapping !== undefined) {
+    formData.append(`mapping`, drsDailyUpload.mapping);
+  }
+
+  return customFetch<DrsDailyPreview>(getPreviewDrsDailyUrl(), {
+    ...options,
+    method: "POST",
+    body: formData,
+  });
+};
+
+export const getPreviewDrsDailyMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewDrsDaily>>,
+    TError,
+    { data: BodyType<DrsDailyUpload> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof previewDrsDaily>>,
+  TError,
+  { data: BodyType<DrsDailyUpload> },
+  TContext
+> => {
+  const mutationKey = ["previewDrsDaily"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof previewDrsDaily>>,
+    { data: BodyType<DrsDailyUpload> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return previewDrsDaily(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PreviewDrsDailyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof previewDrsDaily>>
+>;
+export type PreviewDrsDailyMutationBody = BodyType<DrsDailyUpload>;
+export type PreviewDrsDailyMutationError = ErrorType<unknown>;
+
+export const usePreviewDrsDaily = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewDrsDaily>>,
+    TError,
+    { data: BodyType<DrsDailyUpload> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof previewDrsDaily>>,
+  TError,
+  { data: BodyType<DrsDailyUpload> },
+  TContext
+> => {
+  return useMutation(getPreviewDrsDailyMutationOptions(options));
+};
+
+export const getGetDrsDailyStageUrl = (stageId: string) => {
+  return `/api/uploads/drs-daily/${stageId}`;
+};
+
+export const getDrsDailyStage = async (
+  stageId: string,
+  options?: RequestInit,
+): Promise<DrsDailyPreview> => {
+  return customFetch<DrsDailyPreview>(getGetDrsDailyStageUrl(stageId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetDrsDailyStageQueryKey = (stageId: string) => {
+  return [`/api/uploads/drs-daily/${stageId}`] as const;
+};
+
+export const getGetDrsDailyStageQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDrsDailyStage>>,
+  TError = ErrorType<unknown>,
+>(
+  stageId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDrsDailyStage>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetDrsDailyStageQueryKey(stageId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDrsDailyStage>>
+  > = ({ signal }) => getDrsDailyStage(stageId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!stageId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDrsDailyStage>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDrsDailyStageQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDrsDailyStage>>
+>;
+export type GetDrsDailyStageQueryError = ErrorType<unknown>;
+
+export function useGetDrsDailyStage<
+  TData = Awaited<ReturnType<typeof getDrsDailyStage>>,
+  TError = ErrorType<unknown>,
+>(
+  stageId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDrsDailyStage>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDrsDailyStageQueryOptions(stageId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getConfirmDrsDailyUrl = (stageId: string) => {
+  return `/api/uploads/drs-daily/${stageId}/confirm`;
+};
+
+export const confirmDrsDaily = async (
+  stageId: string,
+  drsDailyConfirmation: DrsDailyConfirmation,
+  options?: RequestInit,
+): Promise<DrsDailyResult> => {
+  return customFetch<DrsDailyResult>(getConfirmDrsDailyUrl(stageId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(drsDailyConfirmation),
+  });
+};
+
+export const getConfirmDrsDailyMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmDrsDaily>>,
+    TError,
+    { stageId: string; data: BodyType<DrsDailyConfirmation> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof confirmDrsDaily>>,
+  TError,
+  { stageId: string; data: BodyType<DrsDailyConfirmation> },
+  TContext
+> => {
+  const mutationKey = ["confirmDrsDaily"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof confirmDrsDaily>>,
+    { stageId: string; data: BodyType<DrsDailyConfirmation> }
+  > = (props) => {
+    const { stageId, data } = props ?? {};
+
+    return confirmDrsDaily(stageId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ConfirmDrsDailyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof confirmDrsDaily>>
+>;
+export type ConfirmDrsDailyMutationBody = BodyType<DrsDailyConfirmation>;
+export type ConfirmDrsDailyMutationError = ErrorType<void>;
+
+export const useConfirmDrsDaily = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmDrsDaily>>,
+    TError,
+    { stageId: string; data: BodyType<DrsDailyConfirmation> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof confirmDrsDaily>>,
+  TError,
+  { stageId: string; data: BodyType<DrsDailyConfirmation> },
+  TContext
+> => {
+  return useMutation(getConfirmDrsDailyMutationOptions(options));
+};
+
+export const getConfirmDrsDailyMappingsUrl = (stageId: string) => {
+  return `/api/uploads/drs-daily/${stageId}/confirm-mappings`;
+};
+
+export const confirmDrsDailyMappings = async (
+  stageId: string,
+  drsDailyConfirmation: DrsDailyConfirmation,
+  options?: RequestInit,
+): Promise<DrsMappingResult> => {
+  return customFetch<DrsMappingResult>(getConfirmDrsDailyMappingsUrl(stageId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(drsDailyConfirmation),
+  });
+};
+
+export const getConfirmDrsDailyMappingsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmDrsDailyMappings>>,
+    TError,
+    { stageId: string; data: BodyType<DrsDailyConfirmation> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof confirmDrsDailyMappings>>,
+  TError,
+  { stageId: string; data: BodyType<DrsDailyConfirmation> },
+  TContext
+> => {
+  const mutationKey = ["confirmDrsDailyMappings"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof confirmDrsDailyMappings>>,
+    { stageId: string; data: BodyType<DrsDailyConfirmation> }
+  > = (props) => {
+    const { stageId, data } = props ?? {};
+
+    return confirmDrsDailyMappings(stageId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ConfirmDrsDailyMappingsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof confirmDrsDailyMappings>>
+>;
+export type ConfirmDrsDailyMappingsMutationBody =
+  BodyType<DrsDailyConfirmation>;
+export type ConfirmDrsDailyMappingsMutationError = ErrorType<unknown>;
+
+export const useConfirmDrsDailyMappings = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmDrsDailyMappings>>,
+    TError,
+    { stageId: string; data: BodyType<DrsDailyConfirmation> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof confirmDrsDailyMappings>>,
+  TError,
+  { stageId: string; data: BodyType<DrsDailyConfirmation> },
+  TContext
+> => {
+  return useMutation(getConfirmDrsDailyMappingsMutationOptions(options));
+};
 
 /**
  * @summary Health check

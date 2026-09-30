@@ -32,7 +32,9 @@ export default function ProductDetail() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{product.product_name}</h1>
           <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
-            <span className="font-mono bg-muted px-1 rounded">{product.sku_id}</span>
+            {product.business_sku
+              ? <span>SKU <span className="font-mono font-medium text-foreground">{product.business_sku}</span></span>
+              : <span className="italic">geen zakelijke SKU</span>}
             <span>•</span>
             <span>{product.brand}</span>
             <span>•</span>
@@ -41,13 +43,37 @@ export default function ProductDetail() {
             {product.oem_code && (<><span>•</span><span>OEM: <span className="font-mono">{product.oem_code}</span></span></>)}
           </div>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2" />
+      </div>
+      <Card data-testid="card-product-identity">
+        <CardHeader className="pb-2"><CardTitle className="text-sm font-medium flex items-center gap-2"><Tag className="h-4 w-4" />Productidentiteit</CardTitle></CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5 text-sm">
+          {[
+            ["Zakelijke SKU", product.business_sku, "DRS productcode / artikelcode"],
+            ["EAN", product.ean, "Barcode, niet gebruikt als SKU"],
+            ["OEM", product.oem_code, "Fabrikantcode, niet uniek"],
+            ["Technisch ID", product.sku_id, "Interne stabiele sleutel"],
+          ].map(([l, v, h]) => (
+            <div key={l as string}>
+              <div className="text-xs text-muted-foreground">{l}</div>
+              <div className="font-mono break-all" data-testid={`text-identity-${l}`}>{v || <span className="font-sans text-muted-foreground">—</span>}</div>
+              <div className="text-[11px] text-muted-foreground">{h}</div>
+            </div>
+          ))}
+          <div>
+            <div className="text-xs text-muted-foreground">Bron-ID's</div>
+            {product.source_aliases?.length ? product.source_aliases.map((a, i) => (
+              <div key={i} className="text-xs"><span className="uppercase text-[10px] text-muted-foreground">{a.source}</span> <span className="font-mono">{a.code}</span>{a.shop_id != null && <span className="text-muted-foreground"> winkel #{a.shop_id}</span>}</div>
+            )) : <div className="text-muted-foreground">—</div>}
+          </div>
+        </CardContent>
+      </Card>
+      <div className="flex items-center gap-2 justify-end">
           {product.is_private_label && <Badge variant="secondary">Huismerk</Badge>}
           {product.is_a_brand && <Badge variant="outline" className="border-primary text-primary">A-merk</Badge>}
           <Badge className="uppercase tracking-wider">
             {product.lifecycle_status === 'active' ? 'Actief' : product.lifecycle_status === 'end_of_life' ? 'Einde levensduur' : product.lifecycle_status}
           </Badge>
-        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

@@ -132,3 +132,33 @@ def test_ingest_feed_survives_too_long_values():
             models.DimProduct.sku_id == sku).delete()
         db.commit()
         db.close()
+
+
+def test_long_ean_aliases_keep_distinct_suffixes_and_repeat_identity():
+    from services.product_identity import alias_discriminator
+    # Same display prefix, different full source identities: never merge.
+    prefix = str(uuid.uuid4().int)[:30] + "8" * 30
+    skus = [prefix + "111", prefix + "222"]
+    content = ("gtin,productTitle,priceInclVat,domain,price\n" + "\n".join(
+        f"{sku},Distinct {i},19.99,long-ean-test.nl,18.50"
+        for i, sku in enumerate(skus))).encode()
+    db = SessionLocal()
+    try:
+        for _ in range(2):
+            result = feed_ingest.ingest_feed(db, content=content, content_type="text/csv")
+            assert result["products_total"] == 2
+            db.expire_all()
+            products = [db.get(models.DimProduct, sku) for sku in skus]
+            assert all(products)
+            assert [p.raw_attributes["_ean_full"] for p in products] == skus
+            aliases = db.query(models.ProductSourceAlias).filter(
+                models.ProductSourceAlias.sku_id.in_(skus)).all()
+            assert {a.discriminator for a in aliases} == {alias_discriminator(s) for s in skus}
+            assert {a.sku_id for a in aliases} == set(skus)
+    finally:
+        db.rollback()
+        for model in (models.FactCompetitorPriceDaily, models.FactPriceDaily,
+                      models.ProductSourceAlias, models.DimProduct):
+            db.query(model).filter(model.sku_id.in_(skus)).delete(synchronize_session=False)
+        db.commit()
+        db.close()

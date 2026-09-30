@@ -6,10 +6,17 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ProductLifecycleStatus } from "./productLifecycleStatus";
+import type { ProductSourceAliasesItem } from "./productSourceAliasesItem";
 import type { ProductStrategyType } from "./productStrategyType";
 
 export interface Product {
   sku_id: string;
+  /**
+   * Shop-scoped business article code, never copied from EAN
+   * @nullable
+   */
+  business_sku?: string | null;
+  source_aliases?: ProductSourceAliasesItem[];
   product_name: string;
   /** @nullable */
   brand?: string | null;

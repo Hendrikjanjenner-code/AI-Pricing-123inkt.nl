@@ -21,6 +21,7 @@ router = APIRouter(prefix="/api/exports", tags=["exports"])
 EXPORT_FIELDS = [
     "sku_id", "recommended_price", "min_price", "max_price",
     "reason_code", "confidence_score", "approved_by", "date",
+    "business_sku", "ean", "oem_code",
 ]
 
 
@@ -78,6 +79,9 @@ def _build_rows(db: Session, recs: list[models.FactPricingRecommendationDaily]) 
             round(float(r.confidence_score), 3) if r.confidence_score else "",
             r.approved_by or "",
             r.date.isoformat() if r.date else "",
+            product.business_sku or "" if product else "",
+            product.ean or "" if product else "",
+            product.oem_code or "" if product else "",
         ])
     return rows
 

@@ -688,19 +688,59 @@ def _normalize_flat_stream(rows, catalog_sink, comp_sink) -> None:
 
 
 # ── persisteren ─────────────────────────────────────────────────────────────
+def _identity_rows(db, source, shop_id, catalog, comp_rows):
+    from services.product_identity import sales_lock, alias_discriminator
+    sales_lock(db, shop_id)
+    # Stable technical identities survive a DRS catalog backfill. Feed keys
+    # remain source aliases, never business SKU copies of EAN.
+    shop_products = {p.sku_id: p for p in db.query(models.DimProduct).filter_by(shop_id=shop_id)}
+    feed_aliases = {(a.code, a.discriminator): a.sku_id for a in
+                    db.query(models.ProductSourceAlias).filter_by(shop_id=shop_id, source=source)}
+    by_ean = {}
+    for p in shop_products.values():
+        full_ean = (p.raw_attributes or {}).get("_ean_full") or p.ean
+        if full_ean:
+            by_ean.setdefault(full_ean, set()).add(p.sku_id)
+    remap, alias_rows = {}, {}
+    for p in catalog:
+        original, ean = p["sku_id"], p.get("ean") or ""
+        if p.get("product_group") and len(p["product_group"]) > 255:
+            raise ValueError("Feed broncode langer dan 255 tekens; identiteit wordt niet afgekapt.")
+        discriminator = alias_discriminator(ean)
+        target = feed_aliases.get((original, discriminator))
+        if not target and original in shop_products:
+            target = original
+        if not target and ean and len(by_ean.get(ean, ())) == 1:
+            target = next(iter(by_ean[ean]))
+        if not target and ean and len(by_ean.get(ean, ())) > 1:
+            raise ValueError(f"Ambigue feed-identiteit voor {original}; sync afgebroken.")
+        target = target or original
+        remap[original] = target
+        for code in (original, p.get("product_group")):
+            if code and len(code) <= 255:
+                key = (code, discriminator)
+                previous = alias_rows.get(key) or feed_aliases.get(key)
+                if previous and previous != target:
+                    raise ValueError(f"Ambigue feed broncode {code}; geen automatische samenvoeging.")
+                alias_rows[key] = target
+
+    class IdentityRows:
+        def __init__(self, rows):
+            self.rows = rows
+        def __iter__(self):
+            for row in self.rows:
+                yield {**row, "sku_id": remap.get(row["sku_id"], row["sku_id"])}
+        def __len__(self):
+            return len(self.rows)
+
+    catalog, comp_rows = IdentityRows(catalog), IdentityRows(comp_rows)
+    return catalog, comp_rows, shop_products, feed_aliases, alias_rows
+
+
 def ingest_feed(db: Session, source: str = SOURCE_NAME,
                 content: bytes | None = None, content_type: str = "",
                 shop_id: int = 1) -> dict:
-    """Lees de feed volledig in en persisteer catalogus + prijzen + concurrenten.
-
-    `content` kan een reeds opgehaalde feed-body zijn (bijv. van schijf), zodat
-    een eenmalige bulk-load de trage download kan overslaan.
-
-    `shop_id` bepaalt voor welke winkel deze sync draait. ALLE replace-deletes
-    en alle geschreven rijen zijn strikt tot die winkel beperkt: een sync voor
-    winkel A mag nooit producten, dagprijzen of concurrentrijen van winkel B
-    wissen of overschrijven (twee-winkel-isolatie).
-    """
+    """Persist a feed within its authorized shop, retaining stable identities."""
     today = date.today()
     from services import import_settings as imps
     settings = imps.get_settings(db, "priceshape")
@@ -750,6 +790,8 @@ def _ingest_rows(db: Session, source: str, catalog, comp_rows, today,
     # verschillende te lange sku's zouden na truncatie op elkaar (of op een
     # bestaand product) kunnen mappen en zo andermans rijen overschrijven of
     # de replace-deletes corrumperen.
+    catalog, comp_rows, shop_products, feed_aliases, alias_rows = _identity_rows(
+        db, source, shop_id, catalog, comp_rows)
     _sku_limit = _string_limits(models.DimProduct)["sku_id"]
     catalog_skus: set[str] = set()
     oversized: set[str] = set()
@@ -851,6 +893,7 @@ def _ingest_rows(db: Session, source: str, catalog, comp_rows, today,
             alias_by_canon=alias_by_canon, written_names=written_names,
             offer_sku_ids=offer_sku_ids, offer_names=offer_names,
             comp_kept=comp_kept,
+            shop_products=shop_products, feed_aliases=feed_aliases, alias_rows=alias_rows,
         )
     finally:
         comp_kept.close()
@@ -864,7 +907,7 @@ def _ingest_write(db: Session, source: str, catalog, today, settings,
                   skipped_competitor_rows, comp_after_settings,
                   feed_variants, feed_canonical, alias_by_canon,
                   written_names, offer_sku_ids, offer_names,
-                  comp_kept) -> dict:
+                  comp_kept, shop_products, feed_aliases, alias_rows) -> dict:
     from services import import_settings as imps
 
     # Veiligheidsklep: een lege feed (netwerkhik, verlopen token, kapotte export)
@@ -908,6 +951,11 @@ def _ingest_write(db: Session, source: str, catalog, today, settings,
             m["cost_price"] = p["cost_price"]
         if attrs_on:
             m["raw_attributes"] = p.get("raw_attributes")
+        if p["sku_id"] in shop_products and shop_products[p["sku_id"]].import_source == "DRS":
+            # Catalog/master ownership is not transferred by a feed refresh.
+            for field in ("product_name", "brand", "category", "subcategory", "product_group",
+                          "import_source", "cost_price", "current_price", "price_incl_vat"):
+                m.pop(field, None)
         return m
 
     def _prepared_products():
@@ -947,6 +995,14 @@ def _ingest_write(db: Session, source: str, catalog, today, settings,
             db.bulk_insert_mappings(models.DimProduct, ins)
         if upd:
             db.bulk_update_mappings(models.DimProduct, upd)
+    db.flush()
+    aliases_to_insert = [{"shop_id": shop_id, "source": source, "code": code,
+                          "discriminator": discriminator, "sku_id": target}
+                         for (code, discriminator), target in alias_rows.items()
+                         if (code, discriminator) not in feed_aliases
+                         and target not in foreign_ids and target not in oversized]
+    for batch in _batches(aliases_to_insert):
+        db.bulk_insert_mappings(models.ProductSourceAlias, batch)
     db.commit()
 
     # 2. Categorieën + strategie-mapping (idempotent).

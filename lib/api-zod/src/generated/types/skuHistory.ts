@@ -7,10 +7,14 @@
  */
 import type { CompetitorTimeSeriesPoint } from "./competitorTimeSeriesPoint";
 import type { Recommendation } from "./recommendation";
+import type { SkuHistorySourceAliasesItem } from "./skuHistorySourceAliasesItem";
 import type { TimeSeriesPoint } from "./timeSeriesPoint";
 
 export interface SkuHistory {
   sku_id: string;
+  /** @nullable */
+  business_sku?: string | null;
+  source_aliases?: SkuHistorySourceAliasesItem[];
   product_name: string;
   /** @nullable */
   ean?: string | null;

@@ -7,6 +7,197 @@
  */
 import * as zod from "zod";
 
+export const GetDrsDailyTemplatesResponseItem = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  mapping: zod.record(zod.string(), zod.unknown()),
+  currency: zod.string(),
+  return_semantics: zod.string(),
+});
+export const GetDrsDailyTemplatesResponse = zod.array(
+  GetDrsDailyTemplatesResponseItem,
+);
+
+export const previewDrsDailyBodyYearMin = 1900;
+export const previewDrsDailyBodyYearMax = 2200;
+
+export const previewDrsDailyBodyTemplateDefault = `drs-sales-wide-v1`;
+
+export const PreviewDrsDailyBody = zod.object({
+  file: zod.instanceof(File),
+  shop_id: zod.number(),
+  year: zod
+    .number()
+    .min(previewDrsDailyBodyYearMin)
+    .max(previewDrsDailyBodyYearMax),
+  period_start: zod.coerce.date(),
+  period_end: zod.coerce.date(),
+  template: zod.string().default(previewDrsDailyBodyTemplateDefault),
+  mapping: zod
+    .string()
+    .optional()
+    .describe(
+      "JSON mapping with sheet and 1-based code_column, ean_column, first_day_column",
+    ),
+});
+
+export const PreviewDrsDailyResponse = zod.object({
+  stage_id: zod.string(),
+  status: zod.enum(["ready", "blocked", "confirmed"]),
+  shop_id: zod.number(),
+  period_start: zod.coerce.date(),
+  period_end: zod.coerce.date(),
+  product_count: zod.number(),
+  fact_count: zod.number(),
+  totals: zod.object({
+    quantity: zod.number(),
+    revenue_excl_vat: zod.string(),
+    revenue_incl_vat: zod.string(),
+  }),
+  errors: zod.array(
+    zod.object({
+      row: zod.number().nullable(),
+      code: zod.string(),
+      message: zod.string(),
+    }),
+  ),
+  error_count: zod.number(),
+  warnings: zod.array(zod.string()),
+  mapping_proposals: zod.array(
+    zod.object({
+      code: zod.string(),
+      ean: zod.string(),
+      sku_id: zod.string(),
+    }),
+  ),
+  mapping_proposal_count: zod.number(),
+  sample: zod.array(zod.record(zod.string(), zod.unknown())),
+  expires_at: zod.string(),
+  result: zod
+    .union([
+      zod.object({
+        stage_id: zod.string(),
+        status: zod.enum(["confirmed"]),
+        inserted: zod.number(),
+        updated: zod.number(),
+        unchanged: zod.number(),
+      }),
+      zod.null(),
+    ])
+    .optional(),
+  mapping_result: zod
+    .union([
+      zod.object({
+        stage_id: zod.string(),
+        mapped: zod.number(),
+        sales_written: zod.number(),
+        unresolved: zod.number(),
+      }),
+      zod.null(),
+    ])
+    .optional(),
+});
+
+export const GetDrsDailyStageParams = zod.object({
+  stage_id: zod.coerce.string(),
+});
+
+export const GetDrsDailyStageResponse = zod.object({
+  stage_id: zod.string(),
+  status: zod.enum(["ready", "blocked", "confirmed"]),
+  shop_id: zod.number(),
+  period_start: zod.coerce.date(),
+  period_end: zod.coerce.date(),
+  product_count: zod.number(),
+  fact_count: zod.number(),
+  totals: zod.object({
+    quantity: zod.number(),
+    revenue_excl_vat: zod.string(),
+    revenue_incl_vat: zod.string(),
+  }),
+  errors: zod.array(
+    zod.object({
+      row: zod.number().nullable(),
+      code: zod.string(),
+      message: zod.string(),
+    }),
+  ),
+  error_count: zod.number(),
+  warnings: zod.array(zod.string()),
+  mapping_proposals: zod.array(
+    zod.object({
+      code: zod.string(),
+      ean: zod.string(),
+      sku_id: zod.string(),
+    }),
+  ),
+  mapping_proposal_count: zod.number(),
+  sample: zod.array(zod.record(zod.string(), zod.unknown())),
+  expires_at: zod.string(),
+  result: zod
+    .union([
+      zod.object({
+        stage_id: zod.string(),
+        status: zod.enum(["confirmed"]),
+        inserted: zod.number(),
+        updated: zod.number(),
+        unchanged: zod.number(),
+      }),
+      zod.null(),
+    ])
+    .optional(),
+  mapping_result: zod
+    .union([
+      zod.object({
+        stage_id: zod.string(),
+        mapped: zod.number(),
+        sales_written: zod.number(),
+        unresolved: zod.number(),
+      }),
+      zod.null(),
+    ])
+    .optional(),
+});
+
+export const ConfirmDrsDailyParams = zod.object({
+  stage_id: zod.coerce.string(),
+});
+
+export const confirmDrsDailyBodyConfirmMappingDefault = false;
+
+export const ConfirmDrsDailyBody = zod.object({
+  confirm_mapping: zod
+    .boolean()
+    .default(confirmDrsDailyBodyConfirmMappingDefault),
+});
+
+export const ConfirmDrsDailyResponse = zod.object({
+  stage_id: zod.string(),
+  status: zod.enum(["confirmed"]),
+  inserted: zod.number(),
+  updated: zod.number(),
+  unchanged: zod.number(),
+});
+
+export const ConfirmDrsDailyMappingsParams = zod.object({
+  stage_id: zod.coerce.string(),
+});
+
+export const confirmDrsDailyMappingsBodyConfirmMappingDefault = false;
+
+export const ConfirmDrsDailyMappingsBody = zod.object({
+  confirm_mapping: zod
+    .boolean()
+    .default(confirmDrsDailyMappingsBodyConfirmMappingDefault),
+});
+
+export const ConfirmDrsDailyMappingsResponse = zod.object({
+  stage_id: zod.string(),
+  mapped: zod.number(),
+  sales_written: zod.number(),
+  unresolved: zod.number(),
+});
+
 /**
  * @summary Health check
  */
@@ -174,7 +365,19 @@ export const GetPriceChangeDistributionResponse = zod.array(
 /**
  * @summary List all products/SKUs
  */
+export const listProductsQueryIdentityStatusDefault = `all`;
+
 export const ListProductsQueryParams = zod.object({
+  identity_status: zod
+    .enum([
+      "all",
+      "with_business_sku",
+      "without_business_sku",
+      "with_ean",
+      "without_ean",
+      "with_oem",
+    ])
+    .default(listProductsQueryIdentityStatusDefault),
   category: zod.coerce.string().nullish(),
   subcategory: zod.coerce.string().nullish(),
   is_private_label: zod.coerce.boolean().nullish(),
@@ -193,6 +396,19 @@ export const ListProductsResponse = zod.object({
   items: zod.array(
     zod.object({
       sku_id: zod.string(),
+      business_sku: zod
+        .string()
+        .nullish()
+        .describe("Shop-scoped business article code, never copied from EAN"),
+      source_aliases: zod
+        .array(
+          zod.object({
+            source: zod.string().optional(),
+            code: zod.string().optional(),
+            shop_id: zod.number().optional(),
+          }),
+        )
+        .optional(),
       product_name: zod.string(),
       brand: zod.string().nullish(),
       category: zod.string().nullish(),
@@ -246,6 +462,19 @@ export const GetProductParams = zod.object({
 
 export const GetProductResponse = zod.object({
   sku_id: zod.string(),
+  business_sku: zod
+    .string()
+    .nullish()
+    .describe("Shop-scoped business article code, never copied from EAN"),
+  source_aliases: zod
+    .array(
+      zod.object({
+        source: zod.string().optional(),
+        code: zod.string().optional(),
+        shop_id: zod.number().optional(),
+      }),
+    )
+    .optional(),
   product_name: zod.string(),
   brand: zod.string().nullish(),
   category: zod.string().nullish(),
@@ -302,6 +531,19 @@ export const UpdateProductBody = zod.object({
 
 export const UpdateProductResponse = zod.object({
   sku_id: zod.string(),
+  business_sku: zod
+    .string()
+    .nullish()
+    .describe("Shop-scoped business article code, never copied from EAN"),
+  source_aliases: zod
+    .array(
+      zod.object({
+        source: zod.string().optional(),
+        code: zod.string().optional(),
+        shop_id: zod.number().optional(),
+      }),
+    )
+    .optional(),
   product_name: zod.string(),
   brand: zod.string().nullish(),
   category: zod.string().nullish(),
@@ -506,6 +748,19 @@ export const GetRecommendationResponse = zod.object({
   }),
   product: zod.object({
     sku_id: zod.string(),
+    business_sku: zod
+      .string()
+      .nullish()
+      .describe("Shop-scoped business article code, never copied from EAN"),
+    source_aliases: zod
+      .array(
+        zod.object({
+          source: zod.string().optional(),
+          code: zod.string().optional(),
+          shop_id: zod.number().optional(),
+        }),
+      )
+      .optional(),
     product_name: zod.string(),
     brand: zod.string().nullish(),
     category: zod.string().nullish(),
@@ -1037,6 +1292,8 @@ export const GetSkuHistoryParams = zod.object({
 
 export const GetSkuHistoryResponse = zod.object({
   sku_id: zod.string(),
+  business_sku: zod.string().nullish(),
+  source_aliases: zod.array(zod.record(zod.string(), zod.unknown())).optional(),
   product_name: zod.string(),
   ean: zod.string().nullish(),
   oem_code: zod.string().nullish(),

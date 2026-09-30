@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 
 from database import engine, Base
+from routes.drs_daily import router as drs_daily_router
 from seed import seed_database
 from migrate import run_migrations
 
@@ -647,6 +648,7 @@ app.include_router(categories.router)
 app.include_router(recommendations.router)
 app.include_router(dashboard.router)
 app.include_router(uploads.router)
+app.include_router(drs_daily_router)
 app.include_router(data_quality.router)
 app.include_router(substitutions.router)
 app.include_router(model_health.router)

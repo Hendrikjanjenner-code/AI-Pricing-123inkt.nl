@@ -428,6 +428,18 @@ def run_migrations(engine, metadata) -> None:
             'CREATE INDEX IF NOT EXISTS ix_fact_comp_price_sku_date '
             'ON fact_competitor_price_daily (sku_id, date)',
         ),
+        (
+            "ix_product_source_alias_sku_id",
+            'CREATE INDEX IF NOT EXISTS ix_product_source_alias_sku_id ON product_source_alias (sku_id)',
+        ),
+        (
+            "ix_sales_daily_claim_sku_id",
+            'CREATE INDEX IF NOT EXISTS ix_sales_daily_claim_sku_id ON sales_daily_claim (sku_id)',
+        ),
+        (
+            "ix_sales_daily_claim_fact_id",
+            'CREATE INDEX IF NOT EXISTS ix_sales_daily_claim_fact_id ON sales_daily_claim (fact_id)',
+        ),
         # Run-historie (scheduled_engine_runs) mag een shop-verwijdering nooit
         # blokkeren: herzet de FK naar ON DELETE CASCADE als hij nog zonder
         # cascade bestaat (idempotent via DO-blok).

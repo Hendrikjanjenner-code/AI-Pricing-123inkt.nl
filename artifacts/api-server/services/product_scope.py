@@ -124,7 +124,9 @@ def _scope_sku_subquery(db: Session, node: models.ProductHierarchyNode):
 
 
 def product_label(p: models.DimProduct) -> str:
-    return f"SKU {p.sku_id} – {p.product_name}"
+    if p.business_sku:
+        return f"SKU {p.business_sku} – {p.product_name} · bron-ID {p.sku_id}"
+    return f"SKU {p.sku_id} – {p.product_name} · technische bron-ID; zakelijke SKU ontbreekt"
 
 
 def get_scoped_product(db: Session, sku_id: str,
@@ -164,10 +166,11 @@ def search_products(db: Session, node: Optional[models.ProductHierarchyNode],
     term = (search or "").strip()
     if term:
         like = f"%{term}%"
-        q = q.filter(or_(P.sku_id.ilike(like), P.ean.ilike(like),
+        q = q.filter(or_(P.sku_id.ilike(like), P.business_sku.ilike(like), P.ean.ilike(like),
                          P.oem_code.ilike(like), P.product_name.ilike(like)))
     rows = q.order_by(P.product_name, P.sku_id).limit(limit).all()
-    return [{"sku_id": p.sku_id, "name": p.product_name,
+    return [{"sku_id": p.sku_id, "business_sku": p.business_sku, "ean": p.ean,
+             "oem_code": p.oem_code, "name": p.product_name,
              "label": product_label(p)} for p in rows]
 
 

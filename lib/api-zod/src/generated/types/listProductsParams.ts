@@ -5,8 +5,10 @@
  * AI Pricing Decision Engine API
  * OpenAPI spec version: 0.1.0
  */
+import type { ListProductsIdentityStatus } from "./listProductsIdentityStatus";
 
 export type ListProductsParams = {
+  identity_status?: ListProductsIdentityStatus;
   /**
    * @nullable
    */

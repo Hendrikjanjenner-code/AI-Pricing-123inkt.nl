@@ -85,7 +85,7 @@ def _direct_product_conditions(statuses: Optional[str] = None,
             conds.append(P.sku_id == term[4:].strip())
         else:
             like = f"%{term}%"
-            conds.append(or_(P.sku_id.ilike(like), P.ean.ilike(like),
+            conds.append(or_(P.sku_id.ilike(like), P.business_sku.ilike(like), P.ean.ilike(like),
                              P.oem_code.ilike(like), P.product_name.ilike(like)))
     return conds
 

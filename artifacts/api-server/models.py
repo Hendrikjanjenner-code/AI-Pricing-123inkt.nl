@@ -159,6 +159,7 @@ class DimProduct(Base):
     __tablename__ = "dim_product"
 
     sku_id = Column(String(100), primary_key=True, index=True)
+    business_sku = Column(String(100), index=True)
     product_name = Column(String(500), nullable=False)
     brand = Column(String(255))
     category = Column(String(255))
@@ -237,6 +238,55 @@ class FactSalesDaily(Base):
     cost = Column(Numeric(12, 4))
     margin = Column(Numeric(12, 4))
     margin_pct = Column(Float)
+    revenue_incl_vat = Column(Numeric(14, 4))
+    source = Column(String(50))
+
+
+class ProductSourceAlias(Base):
+    """Exact source identifiers; discriminator permits non-unique item groups."""
+    __tablename__ = "product_source_alias"
+    id = Column(Integer, primary_key=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), nullable=False)
+    source = Column(String(50), nullable=False)
+    code = Column(String(255), nullable=False)
+    discriminator = Column(String(50), nullable=False, default="")
+    sku_id = Column(String(100), ForeignKey("dim_product.sku_id", ondelete="CASCADE"), nullable=False, index=True)
+    __table_args__ = (UniqueConstraint("shop_id", "source", "code", "discriminator",
+                                      name="uq_product_source_alias"),)
+
+
+class DrsDailyStage(Base):
+    __tablename__ = "drs_daily_stage"
+    id = Column(String(36), primary_key=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), nullable=False, index=True)
+    created_by = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    status = Column(String(20), nullable=False)
+    preview = Column(JSON, nullable=False)
+    result = Column(JSON)
+    mapping_result = Column(JSON)
+
+
+class DrsDailyChunk(Base):
+    __tablename__ = "drs_daily_chunk"
+    id = Column(Integer, primary_key=True)
+    stage_id = Column(String(36), ForeignKey("drs_daily_stage.id", ondelete="CASCADE"),
+                      nullable=False, index=True)
+    rows = Column(JSON, nullable=False)
+
+
+class SalesDailyClaim(Base):
+    """DB-enforced ownership includes zero days, not only nonzero facts."""
+    __tablename__ = "sales_daily_claim"
+    id = Column(Integer, primary_key=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id"), nullable=False)
+    sku_id = Column(String(100), ForeignKey("dim_product.sku_id"), nullable=False, index=True)
+    date = Column(Date, nullable=False)
+    source = Column(String(50), nullable=False)
+    fact_id = Column(Integer, ForeignKey("fact_sales_daily.id"), index=True)
+    __table_args__ = (UniqueConstraint("shop_id", "sku_id", "date",
+                                      name="uq_sales_daily_claim"),)
 
 
 class FactPriceDaily(Base):

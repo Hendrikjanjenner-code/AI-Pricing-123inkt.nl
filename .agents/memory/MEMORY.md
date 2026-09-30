@@ -80,3 +80,4 @@
 - [Page-local fetch moet throwen op !ok](frontend-apifetch-throw.md) — React Query cachet anders een 500-payload als data; UI toont valse lege staten.
 - [Testsuite in eigen testdatabase](parallel-suite-runs.md) — pytest draait sinds taak #312 in "<appdb>_test" (guard tegen dbname-bypass); app-data veilig, maar parallelle suite-runs delen die test-DB nog.
 - [Concurrentprofiel Excel-schema](competitor-profile-excel-schema.md) — v1 gebruikt lange bedrijfskenmerk-rijen; juridische en commerciële relaties blijven strikt gescheiden.
+- [DRS dagverkoop-semantiek](drs-daily-semantics.md) — itemGroupId is niet uniek; retouren zijn niet geverifieerd; getekende bedragen exact behouden en historische kosten niet afleiden.

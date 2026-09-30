@@ -5,6 +5,107 @@
  * AI Pricing Decision Engine API
  * OpenAPI spec version: 0.1.0
  */
+export interface DrsMappingResult {
+  stage_id: string;
+  mapped: number;
+  sales_written: number;
+  unresolved: number;
+}
+
+export type DrsDailyTemplateMapping = { [key: string]: unknown };
+
+export interface DrsDailyTemplate {
+  id: string;
+  name: string;
+  mapping: DrsDailyTemplateMapping;
+  currency: string;
+  return_semantics: string;
+}
+
+export interface DrsDailyUpload {
+  file: Blob;
+  shop_id: number;
+  /**
+   * @minimum 1900
+   * @maximum 2200
+   */
+  year: number;
+  period_start: string;
+  period_end: string;
+  template?: string;
+  /** JSON mapping with sheet and 1-based code_column, ean_column, first_day_column */
+  mapping?: string;
+}
+
+export interface DrsDailyConfirmation {
+  confirm_mapping?: boolean;
+}
+
+export type DrsDailyResultStatus =
+  (typeof DrsDailyResultStatus)[keyof typeof DrsDailyResultStatus];
+
+export const DrsDailyResultStatus = {
+  confirmed: "confirmed",
+} as const;
+
+export interface DrsDailyResult {
+  stage_id: string;
+  status: DrsDailyResultStatus;
+  inserted: number;
+  updated: number;
+  unchanged: number;
+}
+
+export type DrsDailyPreviewStatus =
+  (typeof DrsDailyPreviewStatus)[keyof typeof DrsDailyPreviewStatus];
+
+export const DrsDailyPreviewStatus = {
+  ready: "ready",
+  blocked: "blocked",
+  confirmed: "confirmed",
+} as const;
+
+export type DrsDailyPreviewTotals = {
+  quantity: number;
+  revenue_excl_vat: string;
+  revenue_incl_vat: string;
+};
+
+export type DrsDailyPreviewErrorsItem = {
+  /** @nullable */
+  row: number | null;
+  code: string;
+  message: string;
+};
+
+export type DrsDailyPreviewMappingProposalsItem = {
+  code: string;
+  ean: string;
+  sku_id: string;
+};
+
+export type DrsDailyPreviewSampleItem = { [key: string]: unknown };
+
+export interface DrsDailyPreview {
+  stage_id: string;
+  status: DrsDailyPreviewStatus;
+  shop_id: number;
+  period_start: string;
+  period_end: string;
+  product_count: number;
+  fact_count: number;
+  totals: DrsDailyPreviewTotals;
+  errors: DrsDailyPreviewErrorsItem[];
+  error_count: number;
+  warnings: string[];
+  mapping_proposals: DrsDailyPreviewMappingProposalsItem[];
+  mapping_proposal_count: number;
+  sample: DrsDailyPreviewSampleItem[];
+  expires_at: string;
+  result?: DrsDailyResult | null;
+  mapping_result?: DrsMappingResult | null;
+}
+
 export interface ProductFilterNode {
   id: number;
   name: string;
@@ -412,6 +513,12 @@ export interface UpdateUserRequest {
   is_active?: boolean | null;
 }
 
+export type ProductSourceAliasesItem = {
+  source?: string;
+  code?: string;
+  shop_id?: number;
+};
+
 /**
  * @nullable
  */
@@ -446,6 +553,12 @@ export const ProductStrategyType = {
 
 export interface Product {
   sku_id: string;
+  /**
+   * Shop-scoped business article code, never copied from EAN
+   * @nullable
+   */
+  business_sku?: string | null;
+  source_aliases?: ProductSourceAliasesItem[];
   product_name: string;
   /** @nullable */
   brand?: string | null;
@@ -893,6 +1006,8 @@ export interface SubstitutionPair {
   opportunity_score?: number | null;
 }
 
+export type SkuHistorySourceAliasesItem = { [key: string]: unknown };
+
 export interface TimeSeriesPoint {
   date: string;
   value: number;
@@ -906,6 +1021,9 @@ export interface CompetitorTimeSeriesPoint {
 
 export interface SkuHistory {
   sku_id: string;
+  /** @nullable */
+  business_sku?: string | null;
+  source_aliases?: SkuHistorySourceAliasesItem[];
   product_name: string;
   /** @nullable */
   ean?: string | null;
@@ -1088,6 +1206,7 @@ export interface CreateShopRequest {
 }
 
 export type ListProductsParams = {
+  identity_status?: ListProductsIdentityStatus;
   /**
    * @nullable
    */
@@ -1137,6 +1256,18 @@ export type ListProductsParams = {
    */
   page_size?: number | null;
 };
+
+export type ListProductsIdentityStatus =
+  (typeof ListProductsIdentityStatus)[keyof typeof ListProductsIdentityStatus];
+
+export const ListProductsIdentityStatus = {
+  all: "all",
+  with_business_sku: "with_business_sku",
+  without_business_sku: "without_business_sku",
+  with_ean: "with_ean",
+  without_ean: "without_ean",
+  with_oem: "with_oem",
+} as const;
 
 export type ListRecommendationsParams = {
   /**

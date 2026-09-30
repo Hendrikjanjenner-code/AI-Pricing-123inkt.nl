@@ -18,6 +18,8 @@ def get_sku_history(
     product = db.query(models.DimProduct).filter(models.DimProduct.sku_id == id).first()
     if not product:
         raise HTTPException(status_code=404, detail="SKU not found")
+    from services.product_identity import authorize_shop
+    authorize_shop(db, current_user, product.shop_id)
 
     # Price history
     price_rows = db.query(models.FactPriceDaily).filter(
@@ -90,6 +92,10 @@ def get_sku_history(
         "sku_id": id,
         "product_name": product.product_name,
         "ean": product.ean,
+        "business_sku": product.business_sku,
+        "source_aliases": [{"source": a.source, "code": a.code, "shop_id": a.shop_id}
+                           for a in db.query(models.ProductSourceAlias).filter_by(
+                               shop_id=product.shop_id, sku_id=product.sku_id)],
         "oem_code": product.oem_code,
         "price_history": price_history,
         "sales_history": sales_history,

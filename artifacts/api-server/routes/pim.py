@@ -122,6 +122,9 @@ def list_completeness(
     if search:
         like = f"%{search}%"
         q = q.filter((models.DimProduct.sku_id.ilike(like))
+                     | (models.DimProduct.business_sku.ilike(like))
+                     | (models.DimProduct.ean.ilike(like))
+                     | (models.DimProduct.oem_code.ilike(like))
                      | (models.DimProduct.product_name.ilike(like)))
     total = q.count()
     rows = q.order_by(S.completeness_pct.asc()).offset(offset).limit(limit).all()
@@ -129,6 +132,7 @@ def list_completeness(
         "total": total,
         "items": [{
             "sku_id": s.sku_id,
+            "business_sku": p.business_sku,
             "product_name": p.product_name,
             "brand": p.brand,
             "category": p.category,
@@ -192,6 +196,9 @@ def product_content(
 
     return {
         "sku_id": sku_id,
+        "business_sku": product.business_sku,
+        "ean": product.ean,
+        "oem_code": product.oem_code,
         "product_name": product.product_name,
         "brand": product.brand,
         "category": product.category,

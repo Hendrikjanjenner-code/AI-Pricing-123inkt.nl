@@ -62,6 +62,7 @@ DEFAULT_ATTRIBUTES = [
     ("category",       "Categorie",        "text",    None,    "DRS",        True,  1.5, "category"),
     ("subcategory",    "Subcategorie",     "text",    None,    "DRS",        False, 1.0, "subcategory"),
     ("ean",            "EAN-code",         "text",    None,    "DRS",        True,  2.0, "ean"),
+    ("business_sku",   "Artikelcode (SKU)", "text",   None,    "DRS",        False, 1.0, "business_sku"),
     ("oem_code",       "OEM-code",         "text",    None,    "DRS",        False, 1.0, "oem_code"),
     ("product_type",   "Producttype",      "text",    None,    "DRS",        False, 1.0, "product_type"),
     ("description",    "Omschrijving",     "text",    None,    "Leverancier", True, 1.5, None),

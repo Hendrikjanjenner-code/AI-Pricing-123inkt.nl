@@ -391,7 +391,7 @@ def _job_ids(upload_type: str) -> set:
 
 # ── BigQuery: _upsert_rows moet MERGE op pk gebruiken (geen append) ────────
 
-def _install_fake_bigquery_module():
+def _install_fake_bigquery_module(monkeypatch):
     """Stub google.cloud.bigquery zodat de MERGE-logica zonder SDK testbaar is."""
     import sys, types
     mod = types.ModuleType("google.cloud.bigquery")
@@ -417,8 +417,8 @@ def _install_fake_bigquery_module():
     mod.SourceFormat = SourceFormat
     mod.WriteDisposition = WriteDisposition
     import google.cloud as gc
-    sys.modules["google.cloud.bigquery"] = mod
-    gc.bigquery = mod
+    monkeypatch.setitem(sys.modules, "google.cloud.bigquery", mod)
+    monkeypatch.setattr(gc, "bigquery", mod, raising=False)
 
 
 class _FakeLoadJob:
@@ -451,8 +451,8 @@ class _FakeBQClient:
         self.deleted_tables.append(table_id)
 
 
-def test_bq_upsert_rows_merges_on_pk_and_cleans_staging():
-    _install_fake_bigquery_module()
+def test_bq_upsert_rows_merges_on_pk_and_cleans_staging(monkeypatch):
+    _install_fake_bigquery_module(monkeypatch)
     from bigquery import sync as bq_sync
     from bigquery.schema import BY_PG_TABLE
 
@@ -474,8 +474,8 @@ def test_bq_upsert_rows_merges_on_pk_and_cleans_staging():
     assert "WHEN NOT MATCHED THEN INSERT" in sql
 
 
-def test_bq_upsert_rows_repeat_run_still_merges_not_appends():
-    _install_fake_bigquery_module()
+def test_bq_upsert_rows_repeat_run_still_merges_not_appends(monkeypatch):
+    _install_fake_bigquery_module(monkeypatch)
     from bigquery import sync as bq_sync
     from bigquery.schema import BY_PG_TABLE
 
@@ -699,7 +699,7 @@ def test_bq_sync_table_incremental_exports_null_prefix_and_newer_rows(monkeypatc
     upsert, en de run eindigt (geen vroegtijdige stop na de NULL-partitie)."""
     from datetime import datetime as _dt, timedelta as _td
     from sqlalchemy import text as _text
-    _install_fake_bigquery_module()
+    _install_fake_bigquery_module(monkeypatch)
     from bigquery import sync as bq_sync
     import bigquery.client as bq_client_mod
 
@@ -849,10 +849,10 @@ def test_bq_save_import_job_has_full_audit_fields():
         db.close()
 
 
-def test_bq_dim_product_merge_uses_composite_shop_sku_key():
+def test_bq_dim_product_merge_uses_composite_shop_sku_key(monkeypatch):
     """dim_product MERGEt op (shop_id, sku_id): gelijknamige SKU's in andere
     shops overschrijven elkaar niet in BigQuery."""
-    _install_fake_bigquery_module()
+    _install_fake_bigquery_module(monkeypatch)
     from bigquery import sync as bq_sync
     from bigquery.schema import BY_PG_TABLE
 

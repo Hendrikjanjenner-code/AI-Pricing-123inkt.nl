@@ -15,6 +15,7 @@ import {
   ShieldAlert, History, RefreshCw, Wifi, WifiOff,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { DrsDailyImportCard } from "@/components/drs-daily-import-card";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const TOKEN = () => localStorage.getItem("auth_token");
@@ -1421,6 +1422,11 @@ export default function Gegevensintegratie() {
       <div>
         <h2 className="text-lg font-semibold mb-3">Primaire databron</h2>
         <DrsWizardCard />
+      </div>
+
+      <div>
+        <h2 className="text-lg font-semibold mb-3">DRS dagverkoop</h2>
+        <DrsDailyImportCard />
       </div>
 
       {/* PriceShape connector — full width */}
