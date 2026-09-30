@@ -20,3 +20,9 @@ Import signed daily quantities and both supplied VAT amounts exactly. Return sem
 **Why:** The supplied report contains negative daily values but no documented return treatment or historical daily cost fields. Inferring costs would manufacture historical profit.
 
 **How to apply:** Disclose the uncertainty in preview; retain unknown historical cost/margin as unknown. Require an explicit report year because DD/MM headings omit it.
+
+For prospective DRS-based pricing effects, distinguish price bases before comparing margin: PriceShape selling prices are inclusive of VAT, while its cost prices and DRS catalog prices are exclusive. The observed DRS gross/net ratio is only an explicitly disclosed forward assumption, not proof of a historical tax rate.
+
+**Why:** Mixing those bases can show apparent improvement that is actually VAT, and current costs cannot establish realised historical profit.
+
+**How to apply:** Exclude products with an unknown conversion rather than assume 21%; use the full confirmed calendar period, including claimed zero-sale days, for daily volume. Keep historical costs unknown without a dated source.

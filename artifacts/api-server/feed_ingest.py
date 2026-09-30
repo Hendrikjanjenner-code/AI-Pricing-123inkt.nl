@@ -689,7 +689,7 @@ def _normalize_flat_stream(rows, catalog_sink, comp_sink) -> None:
 
 # ── persisteren ─────────────────────────────────────────────────────────────
 def _identity_rows(db, source, shop_id, catalog, comp_rows):
-    from services.product_identity import sales_lock, alias_discriminator
+    from services.product_identity import sales_lock, alias_discriminator, ean_values
     sales_lock(db, shop_id)
     # Stable technical identities survive a DRS catalog backfill. Feed keys
     # remain source aliases, never business SKU copies of EAN.
@@ -699,8 +699,8 @@ def _identity_rows(db, source, shop_id, catalog, comp_rows):
     by_ean = {}
     for p in shop_products.values():
         full_ean = (p.raw_attributes or {}).get("_ean_full") or p.ean
-        if full_ean:
-            by_ean.setdefault(full_ean, set()).add(p.sku_id)
+        for value in ean_values(full_ean):
+            by_ean.setdefault(value, set()).add(p.sku_id)
     remap, alias_rows = {}, {}
     for p in catalog:
         original, ean = p["sku_id"], p.get("ean") or ""
@@ -710,10 +710,16 @@ def _identity_rows(db, source, shop_id, catalog, comp_rows):
         target = feed_aliases.get((original, discriminator))
         if not target and original in shop_products:
             target = original
-        if not target and ean and len(by_ean.get(ean, ())) == 1:
-            target = next(iter(by_ean[ean]))
-        if not target and ean and len(by_ean.get(ean, ())) > 1:
+        ean_targets = set().union(*(by_ean.get(e, set()) for e in ean_values(ean)))
+        if not target and len(ean_targets) == 1:
+            target = next(iter(ean_targets))
+        if not target and len(ean_targets) > 1:
             raise ValueError(f"Ambigue feed-identiteit voor {original}; sync afgebroken.")
+        if target in shop_products:
+            existing = shop_products[target]
+            existing_eans = ean_values((existing.raw_attributes or {}).get("_ean_full") or existing.ean)
+            if existing_eans and ean_values(ean) and not existing_eans & ean_values(ean):
+                raise ValueError(f"EAN-conflict voor feed-identiteit {original}; bestaande identificatie behouden.")
         target = target or original
         remap[original] = target
         for code in (original, p.get("product_group")):
@@ -951,6 +957,12 @@ def _ingest_write(db: Session, source: str, catalog, today, settings,
             m["cost_price"] = p["cost_price"]
         if attrs_on:
             m["raw_attributes"] = p.get("raw_attributes")
+            old_raw = (shop_products[p["sku_id"]].raw_attributes or {}) if p["sku_id"] in shop_products else {}
+            # Preserve durable DRS identity evidence through repeated feed refreshes.
+            m["raw_attributes"] = {**(m["raw_attributes"] or {}),
+                                   **{k: v for k, v in old_raw.items()
+                                      if k in ("_ean_full", "_identity_stage") or
+                                      (k == "productcode" and shop_products[p["sku_id"]].import_source == "DRS")}}
         if p["sku_id"] in shop_products and shop_products[p["sku_id"]].import_source == "DRS":
             # Catalog/master ownership is not transferred by a feed refresh.
             for field in ("product_name", "brand", "category", "subcategory", "product_group",

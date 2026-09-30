@@ -13,4 +13,6 @@ export interface DrsDailyResult {
   inserted: number;
   updated: number;
   unchanged: number;
+  /** UTC instant of the first successful confirmation; unchanged on idempotent retry */
+  confirmed_at?: Date;
 }

@@ -56,6 +56,9 @@ def db():
     db.execute(text("SET LOCAL statement_timeout = '60000'"))  # isolated large-fixture cleanup only
     ids, skus = [s.id for s in shops], [p.sku_id for p in products]
     stage_ids = [s.id for s in db.query(models.DrsDailyStage).filter(models.DrsDailyStage.shop_id.in_(ids))]
+    db.query(models.DrsIdentityResolution).filter(models.DrsIdentityResolution.stage_id.in_(stage_ids)).delete(synchronize_session=False)
+    owned_skus = [s for s, in db.query(models.DimProduct.sku_id).filter(models.DimProduct.shop_id.in_(ids))]
+    db.query(models.AuditLog).filter(models.AuditLog.entity_type == "drs_identity", models.AuditLog.entity_id.in_(owned_skus)).delete(synchronize_session=False)
     db.query(models.DrsDailyChunk).filter(models.DrsDailyChunk.stage_id.in_(stage_ids)).delete(synchronize_session=False)
     db.query(models.DrsDailyStage).filter(models.DrsDailyStage.shop_id.in_(ids)).delete(synchronize_session=False)
     db.query(models.SalesDailyClaim).filter(models.SalesDailyClaim.shop_id.in_(ids)).delete(synchronize_session=False)
@@ -82,6 +85,11 @@ def test_repeat_overlap_correction_zero_and_signed_values(db):
     assert p["mapping_proposal_count"] == 1
     r = confirm(db, p)
     assert r["inserted"] == 2
+    from datetime import datetime, timezone
+    timestamp = datetime.fromisoformat(r["confirmed_at"].replace("Z", "+00:00"))
+    assert 0 <= (datetime.now(timezone.utc) - timestamp).total_seconds() < 60
+    db.expire_all()
+    assert db.get(models.DrsDailyStage, p["stage_id"]).result["confirmed_at"] == r["confirmed_at"]
     assert confirm(db, p) == r
     assert confirm(db, preview(db))["unchanged"] == 2
     correction = preview(db, [(0, 0, 0), (-2, "-24.2", "-20")])

@@ -268,6 +268,19 @@ class DrsDailyStage(Base):
     mapping_result = Column(JSON)
 
 
+class DrsIdentityResolution(Base):
+    """Immutable impact proposal, consumed once with a catalog fingerprint."""
+    __tablename__ = "drs_identity_resolution"
+    id = Column(String(36), primary_key=True)
+    stage_id = Column(String(36), ForeignKey("drs_daily_stage.id"), nullable=False, index=True)
+    created_by = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    fingerprint = Column(String(64), nullable=False)
+    impact = Column(JSON, nullable=False)
+    result = Column(JSON)
+
+
 class DrsDailyChunk(Base):
     __tablename__ = "drs_daily_chunk"
     id = Column(Integer, primary_key=True)

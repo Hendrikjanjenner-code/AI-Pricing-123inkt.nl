@@ -569,7 +569,9 @@ async def import_drs(
                 continue
 
             if existing:
-                existing.business_sku = pc
+                # Explicit DRS aliases may differ from a canonical business SKU.
+                # Catalog refresh must not erase the identity retained by repair.
+                existing.business_sku = existing.business_sku or pc
                 existing.product_name = naam
                 existing.brand = merk
                 existing.category = categorie

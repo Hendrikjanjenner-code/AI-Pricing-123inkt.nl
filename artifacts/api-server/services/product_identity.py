@@ -1,6 +1,7 @@
 """Shop-scoped identity resolution, with no fuzzy or OEM matching."""
 from collections import defaultdict
 from hashlib import sha256
+import json
 import time
 from fastapi import HTTPException
 from sqlalchemy import text
@@ -45,21 +46,34 @@ class IdentityIndex:
     def __init__(self, db, shop_id):
         self.products = {p.sku_id: p for p in db.query(models.DimProduct).filter_by(shop_id=shop_id)}
         self.codes = defaultdict(set)
+        self.code_evidence = defaultdict(list)
         self.aliases = defaultdict(set)
+        self.eans = defaultdict(set)
+        self.oems = defaultdict(set)
         for p in self.products.values():
+            for ean in ean_values((p.raw_attributes or {}).get("_ean_full") or p.ean):
+                self.eans[ean].add(p.sku_id)
+            if p.oem_code:
+                self.oems[p.oem_code].add(p.sku_id)
             # Technical IDs are not implicitly business codes or EANs.
-            for code in (p.business_sku, p.product_group if p.import_source != "DRS" else None):
+            for field, code in (("business_sku", p.business_sku),
+                                ("product_group", p.product_group if p.import_source != "DRS" else None)):
                 if code:
                     self.codes[code].add(p.sku_id)
+                    self.code_evidence[(code, p.sku_id)].append(f"{p.import_source or 'catalog'}:{field}={code}")
             if p.import_source == "DRS" and not p.business_sku:
                 self.codes[p.sku_id].add(p.sku_id)
+                self.code_evidence[(p.sku_id, p.sku_id)].append("DRS:legacy technical code")
             raw = p.raw_attributes or {}
             for key in ("itemGroupId", "itemgroupid", "productcode"):
                 if raw.get(key):
-                    self.codes[str(raw[key]).strip()].add(p.sku_id)
+                    code = str(raw[key]).strip()
+                    self.codes[code].add(p.sku_id)
+                    self.code_evidence[(code, p.sku_id)].append(f"{p.import_source or 'catalog'}:raw.{key}={code}")
         for a in db.query(models.ProductSourceAlias).filter_by(shop_id=shop_id):
             if a.sku_id in self.products:
                 self.codes[a.code].add(a.sku_id)
+                self.code_evidence[(a.code, a.sku_id)].append(f"{a.source}:alias={a.code};EAN-key={a.discriminator}")
                 if a.source == "DRS":
                     self.aliases[(a.code, a.discriminator)].add(a.sku_id)
 
@@ -81,6 +95,31 @@ class IdentityIndex:
             raise ValueError("Ambigue artikelcode; EAN ontbreekt of onderscheidt niet uniek.")
         sku = next(iter(candidates))
         p = self.products[sku]
-        if p.business_sku and p.business_sku != code:
+        if not exact and p.business_sku and p.business_sku != code:
             raise ValueError("Zakelijke SKU-conflict; bestaande code blijft behouden.")
         return sku, not bool(exact)
+
+    def candidate(self, sku, evidence=None):
+        p = self.products[sku]
+        return {"sku_id": sku, "business_sku": p.business_sku,
+                "product_name": p.product_name,
+                "ean": (p.raw_attributes or {}).get("_ean_full") or p.ean or "",
+                "oem": p.oem_code or "", "import_source": p.import_source,
+                "evidence": evidence or []}
+
+    def evidence(self, row):
+        matches = defaultdict(list)
+        for sku in self.codes.get(row["code"], ()):
+            matches[sku].extend(self.code_evidence[(row["code"], sku)])
+        for ean in ean_values(row.get("ean")):
+            for sku in self.eans.get(ean, ()):
+                matches[sku].append("EAN:" + ean)
+        for sku in self.oems.get(row.get("oem"), ()):
+            matches[sku].append("OEM (alleen aanwijzing, geen identiteit)")
+        return [self.candidate(sku, evidence) for sku, evidence in sorted(matches.items())]
+
+    def fingerprint(self):
+        data = {"products": [self.candidate(s) for s in sorted(self.products)],
+                "codes": {k: sorted(v) for k, v in sorted(self.codes.items())},
+                "aliases": [(k, sorted(v)) for k, v in sorted(self.aliases.items())]}
+        return sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()

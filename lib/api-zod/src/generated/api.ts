@@ -59,9 +59,32 @@ export const PreviewDrsDailyResponse = zod.object({
       row: zod.number().nullable(),
       code: zod.string(),
       message: zod.string(),
+      product_name: zod.string().optional(),
+      ean: zod.string().optional(),
+      oem: zod.string().optional(),
+      kind: zod.enum(["identity", "parse"]).optional(),
+      candidates: zod
+        .array(
+          zod.object({
+            sku_id: zod.string(),
+            business_sku: zod.string().nullable(),
+            product_name: zod.string(),
+            ean: zod.string(),
+            oem: zod.string(),
+            import_source: zod.string().nullable(),
+            evidence: zod.array(zod.string()),
+          }),
+        )
+        .optional(),
     }),
   ),
   error_count: zod.number(),
+  metadata_version: zod
+    .number()
+    .optional()
+    .describe(
+      "Version 2 carries complete source identifiers and candidate evidence",
+    ),
   warnings: zod.array(zod.string()),
   mapping_proposals: zod.array(
     zod.object({
@@ -81,6 +104,12 @@ export const PreviewDrsDailyResponse = zod.object({
         inserted: zod.number(),
         updated: zod.number(),
         unchanged: zod.number(),
+        confirmed_at: zod.coerce
+          .date()
+          .optional()
+          .describe(
+            "UTC instant of the first successful confirmation; unchanged on idempotent retry",
+          ),
       }),
       zod.null(),
     ])
@@ -120,9 +149,32 @@ export const GetDrsDailyStageResponse = zod.object({
       row: zod.number().nullable(),
       code: zod.string(),
       message: zod.string(),
+      product_name: zod.string().optional(),
+      ean: zod.string().optional(),
+      oem: zod.string().optional(),
+      kind: zod.enum(["identity", "parse"]).optional(),
+      candidates: zod
+        .array(
+          zod.object({
+            sku_id: zod.string(),
+            business_sku: zod.string().nullable(),
+            product_name: zod.string(),
+            ean: zod.string(),
+            oem: zod.string(),
+            import_source: zod.string().nullable(),
+            evidence: zod.array(zod.string()),
+          }),
+        )
+        .optional(),
     }),
   ),
   error_count: zod.number(),
+  metadata_version: zod
+    .number()
+    .optional()
+    .describe(
+      "Version 2 carries complete source identifiers and candidate evidence",
+    ),
   warnings: zod.array(zod.string()),
   mapping_proposals: zod.array(
     zod.object({
@@ -142,6 +194,12 @@ export const GetDrsDailyStageResponse = zod.object({
         inserted: zod.number(),
         updated: zod.number(),
         unchanged: zod.number(),
+        confirmed_at: zod.coerce
+          .date()
+          .optional()
+          .describe(
+            "UTC instant of the first successful confirmation; unchanged on idempotent retry",
+          ),
       }),
       zod.null(),
     ])
@@ -177,6 +235,12 @@ export const ConfirmDrsDailyResponse = zod.object({
   inserted: zod.number(),
   updated: zod.number(),
   unchanged: zod.number(),
+  confirmed_at: zod.coerce
+    .date()
+    .optional()
+    .describe(
+      "UTC instant of the first successful confirmation; unchanged on idempotent retry",
+    ),
 });
 
 export const ConfirmDrsDailyMappingsParams = zod.object({
@@ -197,6 +261,312 @@ export const ConfirmDrsDailyMappingsResponse = zod.object({
   sales_written: zod.number(),
   unresolved: zod.number(),
 });
+
+/**
+ * @summary List all unresolved product identities with source evidence and candidates
+ */
+export const GetDrsDailyUnresolvedParams = zod.object({
+  stage_id: zod.coerce.string(),
+});
+
+export const getDrsDailyUnresolvedQueryOffsetDefault = 0;
+export const getDrsDailyUnresolvedQueryOffsetMin = 0;
+
+export const getDrsDailyUnresolvedQueryLimitDefault = 50;
+export const getDrsDailyUnresolvedQueryLimitMax = 500;
+
+export const GetDrsDailyUnresolvedQueryParams = zod.object({
+  q: zod.coerce
+    .string()
+    .optional()
+    .describe(
+      "Filter unresolved rows by productcode, ProductName, EAN, OEM or message",
+    ),
+  offset: zod.coerce
+    .number()
+    .min(getDrsDailyUnresolvedQueryOffsetMin)
+    .default(getDrsDailyUnresolvedQueryOffsetDefault),
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(getDrsDailyUnresolvedQueryLimitMax)
+    .default(getDrsDailyUnresolvedQueryLimitDefault),
+});
+
+export const GetDrsDailyUnresolvedResponse = zod.object({
+  items: zod.array(
+    zod.object({
+      row: zod.number().nullable(),
+      code: zod.string(),
+      product_name: zod.string().optional(),
+      ean: zod.string().optional(),
+      oem: zod.string().optional(),
+      message: zod.string(),
+      kind: zod.enum(["identity", "parse"]).optional(),
+      candidates: zod
+        .array(
+          zod.object({
+            sku_id: zod.string(),
+            business_sku: zod.string().nullable(),
+            product_name: zod.string(),
+            ean: zod.string(),
+            oem: zod.string(),
+            import_source: zod.string().nullable(),
+            evidence: zod.array(zod.string()),
+          }),
+        )
+        .optional(),
+    }),
+  ),
+  total: zod.number(),
+  offset: zod.number(),
+  limit: zod.number(),
+  requires_fresh_upload: zod.boolean(),
+});
+
+/**
+ * @summary Export every unresolved row and candidate evidence as CSV
+ */
+export const ExportDrsDailyUnresolvedParams = zod.object({
+  stage_id: zod.coerce.string(),
+});
+
+/**
+ * @summary Search existing products in the authorized shop before linking
+ */
+export const SearchDrsDailyProductsParams = zod.object({
+  stage_id: zod.coerce.string(),
+});
+
+export const searchDrsDailyProductsQueryOffsetDefault = 0;
+export const searchDrsDailyProductsQueryOffsetMin = 0;
+
+export const searchDrsDailyProductsQueryLimitDefault = 50;
+export const searchDrsDailyProductsQueryLimitMax = 500;
+
+export const SearchDrsDailyProductsQueryParams = zod.object({
+  q: zod.coerce.string().optional(),
+  offset: zod.coerce
+    .number()
+    .min(searchDrsDailyProductsQueryOffsetMin)
+    .default(searchDrsDailyProductsQueryOffsetDefault),
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(searchDrsDailyProductsQueryLimitMax)
+    .default(searchDrsDailyProductsQueryLimitDefault),
+});
+
+export const SearchDrsDailyProductsResponse = zod.object({
+  items: zod.array(
+    zod.object({
+      sku_id: zod.string(),
+      business_sku: zod.string().nullable(),
+      product_name: zod.string(),
+      ean: zod.string(),
+      oem: zod.string(),
+      import_source: zod.string().nullable(),
+      evidence: zod.array(zod.string()),
+    }),
+  ),
+  total: zod.number(),
+  offset: zod.number(),
+  limit: zod.number(),
+});
+
+/**
+ * @summary Preview identity changes without writing products or sales
+ */
+export const PreviewDrsDailyResolutionParams = zod.object({
+  stage_id: zod.coerce.string(),
+});
+
+export const previewDrsDailyResolutionBodyActionsMax = 1000;
+
+export const PreviewDrsDailyResolutionBody = zod.object({
+  actions: zod
+    .array(
+      zod.object({
+        row: zod.number(),
+        action: zod.enum(["link", "create"]),
+        sku_id: zod
+          .string()
+          .optional()
+          .describe(
+            "Required for link, omitted for create; technical product identifier",
+          ),
+      }),
+    )
+    .min(1)
+    .max(previewDrsDailyResolutionBodyActionsMax),
+});
+
+export const PreviewDrsDailyResolutionResponse = zod.object({
+  resolution_id: zod.string(),
+  stage_id: zod.string(),
+  shop_id: zod.number(),
+  actions: zod.array(
+    zod.object({
+      row: zod.number(),
+      action: zod.enum(["link", "create"]),
+      sku_id: zod.string(),
+      code: zod.string(),
+      product_name: zod.string(),
+      ean: zod.string(),
+      oem: zod.string(),
+      target: zod.union([
+        zod.object({
+          sku_id: zod.string(),
+          business_sku: zod.string().nullable(),
+          product_name: zod.string(),
+          ean: zod.string(),
+          oem: zod.string(),
+          import_source: zod.string().nullable(),
+          evidence: zod.array(zod.string()),
+        }),
+        zod.null(),
+      ]),
+      candidates: zod.array(
+        zod.object({
+          sku_id: zod.string(),
+          business_sku: zod.string().nullable(),
+          product_name: zod.string(),
+          ean: zod.string(),
+          oem: zod.string(),
+          import_source: zod.string().nullable(),
+          evidence: zod.array(zod.string()),
+        }),
+      ),
+    }),
+  ),
+  products_created: zod.number(),
+  aliases_added: zod.number(),
+  sales_written: zod.literal(0),
+  requires_revalidation: zod.literal(true),
+  expires_at: zod.coerce.date(),
+});
+
+/**
+ * @summary Explicitly commit a reviewed identity proposal; sales are not imported
+ */
+export const ConfirmDrsDailyResolutionParams = zod.object({
+  stage_id: zod.coerce.string(),
+});
+
+export const ConfirmDrsDailyResolutionBody = zod.object({
+  resolution_id: zod.string(),
+  confirm: zod.literal(true),
+});
+
+export const ConfirmDrsDailyResolutionResponse = zod.object({
+  resolution_id: zod.string(),
+  status: zod.enum(["confirmed"]),
+  products_created: zod.number(),
+  aliases_added: zod.number(),
+  sales_written: zod.literal(0),
+  requires_revalidation: zod.literal(true),
+});
+
+/**
+ * @summary Validate the full original report again into a new immutable preview
+ */
+export const RevalidateDrsDailyParams = zod.object({
+  stage_id: zod.coerce.string(),
+});
+
+export const RevalidateDrsDailyResponse = zod
+  .object({
+    stage_id: zod.string(),
+    status: zod.enum(["ready", "blocked", "confirmed"]),
+    shop_id: zod.number(),
+    period_start: zod.coerce.date(),
+    period_end: zod.coerce.date(),
+    product_count: zod.number(),
+    fact_count: zod.number(),
+    totals: zod.object({
+      quantity: zod.number(),
+      revenue_excl_vat: zod.string(),
+      revenue_incl_vat: zod.string(),
+    }),
+    errors: zod.array(
+      zod.object({
+        row: zod.number().nullable(),
+        code: zod.string(),
+        message: zod.string(),
+        product_name: zod.string().optional(),
+        ean: zod.string().optional(),
+        oem: zod.string().optional(),
+        kind: zod.enum(["identity", "parse"]).optional(),
+        candidates: zod
+          .array(
+            zod.object({
+              sku_id: zod.string(),
+              business_sku: zod.string().nullable(),
+              product_name: zod.string(),
+              ean: zod.string(),
+              oem: zod.string(),
+              import_source: zod.string().nullable(),
+              evidence: zod.array(zod.string()),
+            }),
+          )
+          .optional(),
+      }),
+    ),
+    error_count: zod.number(),
+    metadata_version: zod
+      .number()
+      .optional()
+      .describe(
+        "Version 2 carries complete source identifiers and candidate evidence",
+      ),
+    warnings: zod.array(zod.string()),
+    mapping_proposals: zod.array(
+      zod.object({
+        code: zod.string(),
+        ean: zod.string(),
+        sku_id: zod.string(),
+      }),
+    ),
+    mapping_proposal_count: zod.number(),
+    sample: zod.array(zod.record(zod.string(), zod.unknown())),
+    expires_at: zod.string(),
+    result: zod
+      .union([
+        zod.object({
+          stage_id: zod.string(),
+          status: zod.enum(["confirmed"]),
+          inserted: zod.number(),
+          updated: zod.number(),
+          unchanged: zod.number(),
+          confirmed_at: zod.coerce
+            .date()
+            .optional()
+            .describe(
+              "UTC instant of the first successful confirmation; unchanged on idempotent retry",
+            ),
+        }),
+        zod.null(),
+      ])
+      .optional(),
+    mapping_result: zod
+      .union([
+        zod.object({
+          stage_id: zod.string(),
+          mapped: zod.number(),
+          sales_written: zod.number(),
+          unresolved: zod.number(),
+        }),
+        zod.null(),
+      ])
+      .optional(),
+  })
+  .and(
+    zod.object({
+      previous_stage_id: zod.string(),
+      previous_error_count: zod.number(),
+      resolved_error_count: zod.number(),
+    }),
+  );
 
 /**
  * @summary Health check
@@ -299,16 +669,26 @@ export const GetCurrentUserResponse = zod.object({
 /**
  * @summary Get dashboard KPI summary
  */
+export const getDashboardSummaryQueryShopIdDefault = 1;
+
+export const GetDashboardSummaryQueryParams = zod.object({
+  shop_id: zod.coerce.number().default(getDashboardSummaryQueryShopIdDefault),
+  hierarchy_node_ids: zod.coerce.string().optional(),
+  brands: zod.coerce.string().optional(),
+  statuses: zod.coerce.string().optional(),
+  sku_query: zod.coerce.string().optional(),
+});
+
 export const GetDashboardSummaryResponse = zod.object({
-  total_margin_uplift: zod.number(),
+  total_margin_uplift: zod.number().nullable(),
   total_recommendations: zod.number(),
   avg_confidence_score: zod.number(),
   safety_warnings_count: zod.number(),
   approved_count: zod.number(),
   rejected_count: zod.number(),
   pending_count: zod.number(),
-  estimated_revenue_impact: zod.number(),
-  estimated_margin_impact: zod.number(),
+  estimated_revenue_impact: zod.number().nullable(),
+  estimated_margin_impact: zod.number().nullable(),
   last_model_run: zod.string().nullish(),
   model_version: zod.string().nullish(),
   data_quality_score: zod.number(),
@@ -317,8 +697,112 @@ export const GetDashboardSummaryResponse = zod.object({
 });
 
 /**
+ * @summary Explain expected recommendation uplift separately from realized historical margin
+ */
+export const GetDrsMarginInsightQueryParams = zod.object({
+  shop_id: zod.coerce.number(),
+  hierarchy_node_ids: zod.coerce
+    .string()
+    .optional()
+    .describe("Comma-separated hierarchy node IDs; display filter only"),
+  brands: zod.coerce
+    .string()
+    .optional()
+    .describe("Comma-separated brands; display filter only"),
+  statuses: zod.coerce
+    .string()
+    .optional()
+    .describe("Comma-separated recommendation statuses; display filter only"),
+  sku_query: zod.coerce.string().optional(),
+  period_start: zod.date().optional(),
+  period_end: zod.date().optional(),
+  comparison_start: zod.date().optional(),
+  comparison_end: zod.date().optional(),
+});
+
+export const GetDrsMarginInsightResponse = zod.object({
+  shop_id: zod.number(),
+  source: zod.object({
+    status: zod.enum([
+      "none",
+      "blocked",
+      "preview",
+      "mappings_only",
+      "confirmed",
+    ]),
+    stage_id: zod.string().nullable(),
+    period_start: zod.coerce.date().nullable(),
+    period_end: zod.coerce.date().nullable(),
+    confirmed_at: zod.coerce.date().nullable(),
+    sales_rows: zod.number(),
+    source_version: zod.string().nullable(),
+    latest_attempt_status: zod.string().nullable(),
+  }),
+  run: zod.union([
+    zod.object({
+      id: zod.number(),
+      status: zod.enum(["running", "completed", "failed"]),
+      started_at: zod.coerce.date().nullable(),
+      completed_at: zod.coerce.date().nullable(),
+      error_message: zod.string().nullable(),
+      source_version: zod.string().nullable(),
+    }),
+    zod.null(),
+  ]),
+  expected: zod.object({
+    status: zod.enum(["unavailable", "stale", "fresh", "partial"]),
+    margin_uplift: zod.number().nullable(),
+    revenue: zod.number().nullable(),
+    margin: zod.number().nullable(),
+    horizon_days: zod.literal(1),
+    volume_period_start: zod.coerce.date().nullable(),
+    volume_period_end: zod.coerce.date().nullable(),
+    volume_days: zod.number().nullable(),
+    eligible_skus: zod.number(),
+    covered_skus: zod.number(),
+    missing_volume_skus: zod.number(),
+    missing_cost_skus: zod.number(),
+    preserved_decision_skus: zod.number(),
+    assumptions: zod.array(zod.string()),
+  }),
+  actual: zod.object({
+    period_start: zod.coerce.date().nullable(),
+    period_end: zod.coerce.date().nullable(),
+    comparison_start: zod.coerce.date().nullable(),
+    comparison_end: zod.coerce.date().nullable(),
+    revenue: zod.number().nullable(),
+    margin: zod.number().nullable(),
+    comparison_margin: zod.number().nullable(),
+    margin_change: zod.number().nullable(),
+    sales_rows: zod.number(),
+    missing_cost_rows: zod.number(),
+    comparison_sales_rows: zod.number(),
+    comparison_missing_cost_rows: zod.number(),
+    status: zod.enum(["complete", "incomplete"]),
+    explanation: zod.string(),
+  }),
+});
+
+/**
+ * @summary Queue whole-shop recalculation for latest confirmed daily sales
+ */
+export const RecalculateDrsMarginQueryParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+/**
  * @summary Margin uplift grouped by category
  */
+export const getMarginByCategoryQueryShopIdDefault = 1;
+
+export const GetMarginByCategoryQueryParams = zod.object({
+  shop_id: zod.coerce.number().default(getMarginByCategoryQueryShopIdDefault),
+  hierarchy_node_ids: zod.coerce.string().optional(),
+  brands: zod.coerce.string().optional(),
+  statuses: zod.coerce.string().optional(),
+  sku_query: zod.coerce.string().optional(),
+});
+
 export const GetMarginByCategoryResponseItem = zod.object({
   category: zod.string(),
   margin_uplift: zod.number(),

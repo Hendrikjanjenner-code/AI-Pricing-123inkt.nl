@@ -13,6 +13,9 @@ import { WidgetError } from "@/components/WidgetError";
 import { getAuthHeaders, useAuth } from "@/lib/auth";
 import { gebruikersPermissies } from "@/lib/route-registry";
 import { verwachteMargeverbetering } from "@/lib/dashboard-kpis";
+import { MarginInsightCard } from "@/components/margin/margin-insight-card";
+import { useDrsScope } from "@/hooks/use-drs-scope";
+import { dashboardScopeKey } from "@/hooks/use-margin-insight";
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 import { orderConnectors } from "@/lib/connector-order";
@@ -320,28 +323,33 @@ export default function Dashboard() {
   // dezelfde context; de server expandeert parent-selecties naar descendants.
   const globalFilters = useGlobalFilters();
   const filterQs = apiFilterParams(globalFilters);
+  // Expliciete, geautoriseerde winkel (default-sentinel via useDrsScope); keys per gebruiker/winkel.
+  const { shopId: dashShopId, userKey: dashUserKey } = useDrsScope();
+  const dashEnabled = magPricing && dashShopId !== undefined;
+  const dashQs = [`shop_id=${dashShopId ?? ""}`, filterQs].filter(Boolean).join("&");
   const dash = (path: string) => async () => {
-    const url = `${BASE}/api/dashboard/${path}${filterQs ? `?${filterQs}` : ""}`;
-    const resp = await fetch(url, { headers: getAuthHeaders() });
+    const resp = await fetch(`${BASE}/api/dashboard/${path}?${dashQs}`, { headers: getAuthHeaders() });
     if (!resp.ok) throw new Error(`Dashboard-API fout (${resp.status})`);
     return resp.json();
   };
+  const dk = (name: string) => [...dashboardScopeKey(dashUserKey, dashShopId), name, filterQs];
   const { data: summary, isLoading: loadingSummary, isError: summaryError } =
-    useQuery<any>({ queryKey: ["dashboard-summary", filterQs], queryFn: dash("summary"), enabled: magPricing });
+    useQuery<any>({ queryKey: dk("summary"), queryFn: dash("summary"), enabled: dashEnabled });
   const { data: marginData, isLoading: loadingMargin, isError: marginError } =
-    useQuery<any[]>({ queryKey: ["dashboard-margin-by-category", filterQs], queryFn: dash("charts/margin-by-category"), enabled: magPricing });
+    useQuery<any[]>({ queryKey: dk("margin-by-category"), queryFn: dash("charts/margin-by-category"), enabled: dashEnabled });
   const { data: recsData, isLoading: loadingRecs, isError: recsError } =
-    useQuery<any[]>({ queryKey: ["dashboard-recs-by-strategy", filterQs], queryFn: dash("charts/recs-by-strategy"), enabled: magPricing });
+    useQuery<any[]>({ queryKey: dk("recs-by-strategy"), queryFn: dash("charts/recs-by-strategy"), enabled: dashEnabled });
   const { data: confData, isLoading: loadingConf, isError: confError } =
-    useQuery<any[]>({ queryKey: ["dashboard-confidence-dist", filterQs], queryFn: dash("charts/confidence-distribution"), enabled: magPricing });
+    useQuery<any[]>({ queryKey: dk("confidence-dist"), queryFn: dash("charts/confidence-distribution"), enabled: dashEnabled });
   const { data: priceData, isLoading: loadingPrice, isError: priceError } =
-    useQuery<any[]>({ queryKey: ["dashboard-price-change-dist", filterQs], queryFn: dash("charts/price-change-distribution"), enabled: magPricing });
+    useQuery<any[]>({ queryKey: dk("price-change-dist"), queryFn: dash("charts/price-change-distribution"), enabled: dashEnabled });
 
   if (summaryError) {
     console.error("[dashboard] failed to load summary");
   }
 
-  const formatBedrag = (val: number) => new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(val);
+  // Monetaire samenvattingsvelden zijn nullable: ontbrekend is "Onbekend", nooit €0.
+  const formatBedrag = (val: number | null | undefined) => typeof val === 'number' && Number.isFinite(val) ? new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(val) : 'Onbekend';
   const formatGetal = (val: number) => new Intl.NumberFormat('nl-NL').format(val);
 
   const COLORS = ['hsl(var(--chart-1))', 'hsl(var(--chart-2))', 'hsl(var(--chart-3))', 'hsl(var(--chart-4))', 'hsl(var(--chart-5))'];
@@ -363,6 +371,8 @@ export default function Dashboard() {
 
       <NachtelijkeEnginesStrip />
 
+      {magPricing && <MarginInsightCard filterQs={filterQs} />}
+
       {!magPricing ? (
         <Card className="p-6">
           <p className="text-sm text-muted-foreground">
@@ -370,7 +380,7 @@ export default function Dashboard() {
             navigatie links voor de domeinen van jouw workspace.
           </p>
         </Card>
-      ) : loadingSummary ? (
+      ) : loadingSummary || dashShopId === undefined ? (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {[1,2,3,4].map(i => <Skeleton key={i} className="h-[120px] w-full" />)}
         </div>
@@ -396,8 +406,10 @@ export default function Dashboard() {
               <ArrowUpRight className="h-4 w-4 text-emerald-500" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-emerald-600">{formatBedrag(verwachteMargeverbetering(summary))}</div>
-              <p className="text-xs text-muted-foreground mt-1">Op basis van openstaande adviezen</p>
+              {(() => { const v = verwachteMargeverbetering(summary); return v === null
+                ? <div className="text-2xl font-bold text-muted-foreground" data-testid="text-kpi-uplift">Onbekend</div>
+                : <div className="text-2xl font-bold text-emerald-600" data-testid="text-kpi-uplift">{formatBedrag(v)}</div>; })()}
+              <p className="text-xs text-muted-foreground mt-1">Som advieseffecten van openstaande adviezen, geen gerealiseerde marge</p>
             </CardContent>
           </Card>
           <Card>

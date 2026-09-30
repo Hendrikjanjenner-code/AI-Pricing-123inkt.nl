@@ -41,13 +41,15 @@ def _current_price(context: dict) -> Optional[float]:
 
 def _cost_price(context: dict) -> Optional[float]:
     p = context["product"]
-    return float(p.cost_price) if p.cost_price else None
+    return float(p.cost_price) if p.cost_price is not None else None
 
 
 def _avg_daily_units(context: dict) -> float:
     sales = context["sales"]
     if sales.empty:
         return 0.0
+    if context.get("volume_days"):
+        return float(sales["units_sold"].sum()) / context["volume_days"]
     recent = sales.sort_values("date").tail(30)
     return float(recent["units_sold"].mean()) if not recent.empty else 0.0
 

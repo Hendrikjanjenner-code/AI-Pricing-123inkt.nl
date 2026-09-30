@@ -5,7 +5,7 @@
  * AI Pricing Decision Engine API
  * OpenAPI spec version: 0.1.0
  */
-import type { DrsDailyPreviewErrorsItem } from "./drsDailyPreviewErrorsItem";
+import type { DrsDailyError } from "./drsDailyError";
 import type { DrsDailyPreviewMappingProposalsItem } from "./drsDailyPreviewMappingProposalsItem";
 import type { DrsDailyPreviewSampleItem } from "./drsDailyPreviewSampleItem";
 import type { DrsDailyPreviewStatus } from "./drsDailyPreviewStatus";
@@ -22,8 +22,10 @@ export interface DrsDailyPreview {
   product_count: number;
   fact_count: number;
   totals: DrsDailyPreviewTotals;
-  errors: DrsDailyPreviewErrorsItem[];
+  errors: DrsDailyError[];
   error_count: number;
+  /** Version 2 carries complete source identifiers and candidate evidence */
+  metadata_version?: number;
   warnings: string[];
   mapping_proposals: DrsDailyPreviewMappingProposalsItem[];
   mapping_proposal_count: number;

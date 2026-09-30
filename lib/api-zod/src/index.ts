@@ -9,4 +9,6 @@ export {
   GetCopilotConversationParams,
   DeleteCopilotConversationParams,
   SendCopilotMessageParams,
+  GetDrsDailyUnresolvedParams,
+  SearchDrsDailyProductsParams,
 } from "./generated/api";

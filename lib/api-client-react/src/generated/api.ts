@@ -44,13 +44,23 @@ import type {
   Department,
   DepartmentListResponse,
   DepartmentUpdateRequest,
+  DrsApiError,
   DrsDailyConfirmation,
   DrsDailyPreview,
   DrsDailyResult,
+  DrsDailyRevalidation,
   DrsDailyTemplate,
   DrsDailyUpload,
   DrsMappingResult,
+  DrsMarginInsight,
+  DrsMarginRun,
+  DrsProductPage,
   DrsPushResult,
+  DrsResolutionConfirmation,
+  DrsResolutionImpact,
+  DrsResolutionInput,
+  DrsResolutionResult,
+  DrsUnresolvedPage,
   ErrorResponse,
   ExportHistoryResponse,
   ExportRecommendationsParams,
@@ -69,8 +79,12 @@ import type {
   GetCompetitorScoreDetailParams,
   GetCompetitorScoreRankingsParams,
   GetCopilotConversationParams,
+  GetDashboardSummaryParams,
   GetDataQualityOutliersParams,
+  GetDrsDailyUnresolvedParams,
+  GetDrsMarginInsightParams,
   GetExportHistoryParams,
+  GetMarginByCategoryParams,
   GetProductFilterProductsParams,
   GetProductFilterSubSubSubcategoriesParams,
   GetProductFilterSubSubcategoriesParams,
@@ -101,6 +115,7 @@ import type {
   ProductFilterResolveScopeResponse,
   ProductListResponse,
   PushRecommendationsToDrsParams,
+  RecalculateDrsMarginParams,
   Recommendation,
   RecommendationDetail,
   RecommendationListResponse,
@@ -109,6 +124,7 @@ import type {
   RolesMatrixUpdateRequest,
   RunCompetitorScores200,
   RunCompetitorScoresParams,
+  SearchDrsDailyProductsParams,
   SendCopilotMessageParams,
   Shop,
   ShopListResponse,
@@ -540,6 +556,607 @@ export const useConfirmDrsDailyMappings = <
 };
 
 /**
+ * @summary List all unresolved product identities with source evidence and candidates
+ */
+export const getGetDrsDailyUnresolvedUrl = (
+  stageId: string,
+  params?: GetDrsDailyUnresolvedParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/uploads/drs-daily/${stageId}/unresolved?${stringifiedParams}`
+    : `/api/uploads/drs-daily/${stageId}/unresolved`;
+};
+
+export const getDrsDailyUnresolved = async (
+  stageId: string,
+  params?: GetDrsDailyUnresolvedParams,
+  options?: RequestInit,
+): Promise<DrsUnresolvedPage> => {
+  return customFetch<DrsUnresolvedPage>(
+    getGetDrsDailyUnresolvedUrl(stageId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetDrsDailyUnresolvedQueryKey = (
+  stageId: string,
+  params?: GetDrsDailyUnresolvedParams,
+) => {
+  return [
+    `/api/uploads/drs-daily/${stageId}/unresolved`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetDrsDailyUnresolvedQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDrsDailyUnresolved>>,
+  TError = ErrorType<DrsApiError>,
+>(
+  stageId: string,
+  params?: GetDrsDailyUnresolvedParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDrsDailyUnresolved>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetDrsDailyUnresolvedQueryKey(stageId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDrsDailyUnresolved>>
+  > = ({ signal }) =>
+    getDrsDailyUnresolved(stageId, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!stageId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDrsDailyUnresolved>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDrsDailyUnresolvedQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDrsDailyUnresolved>>
+>;
+export type GetDrsDailyUnresolvedQueryError = ErrorType<DrsApiError>;
+
+/**
+ * @summary List all unresolved product identities with source evidence and candidates
+ */
+
+export function useGetDrsDailyUnresolved<
+  TData = Awaited<ReturnType<typeof getDrsDailyUnresolved>>,
+  TError = ErrorType<DrsApiError>,
+>(
+  stageId: string,
+  params?: GetDrsDailyUnresolvedParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDrsDailyUnresolved>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDrsDailyUnresolvedQueryOptions(
+    stageId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Export every unresolved row and candidate evidence as CSV
+ */
+export const getExportDrsDailyUnresolvedUrl = (stageId: string) => {
+  return `/api/uploads/drs-daily/${stageId}/unresolved/export`;
+};
+
+export const exportDrsDailyUnresolved = async (
+  stageId: string,
+  options?: RequestInit,
+): Promise<string> => {
+  return customFetch<string>(getExportDrsDailyUnresolvedUrl(stageId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getExportDrsDailyUnresolvedQueryKey = (stageId: string) => {
+  return [`/api/uploads/drs-daily/${stageId}/unresolved/export`] as const;
+};
+
+export const getExportDrsDailyUnresolvedQueryOptions = <
+  TData = Awaited<ReturnType<typeof exportDrsDailyUnresolved>>,
+  TError = ErrorType<DrsApiError>,
+>(
+  stageId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof exportDrsDailyUnresolved>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getExportDrsDailyUnresolvedQueryKey(stageId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof exportDrsDailyUnresolved>>
+  > = ({ signal }) =>
+    exportDrsDailyUnresolved(stageId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!stageId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof exportDrsDailyUnresolved>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ExportDrsDailyUnresolvedQueryResult = NonNullable<
+  Awaited<ReturnType<typeof exportDrsDailyUnresolved>>
+>;
+export type ExportDrsDailyUnresolvedQueryError = ErrorType<DrsApiError>;
+
+/**
+ * @summary Export every unresolved row and candidate evidence as CSV
+ */
+
+export function useExportDrsDailyUnresolved<
+  TData = Awaited<ReturnType<typeof exportDrsDailyUnresolved>>,
+  TError = ErrorType<DrsApiError>,
+>(
+  stageId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof exportDrsDailyUnresolved>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getExportDrsDailyUnresolvedQueryOptions(
+    stageId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Search existing products in the authorized shop before linking
+ */
+export const getSearchDrsDailyProductsUrl = (
+  stageId: string,
+  params?: SearchDrsDailyProductsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/uploads/drs-daily/${stageId}/products?${stringifiedParams}`
+    : `/api/uploads/drs-daily/${stageId}/products`;
+};
+
+export const searchDrsDailyProducts = async (
+  stageId: string,
+  params?: SearchDrsDailyProductsParams,
+  options?: RequestInit,
+): Promise<DrsProductPage> => {
+  return customFetch<DrsProductPage>(
+    getSearchDrsDailyProductsUrl(stageId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getSearchDrsDailyProductsQueryKey = (
+  stageId: string,
+  params?: SearchDrsDailyProductsParams,
+) => {
+  return [
+    `/api/uploads/drs-daily/${stageId}/products`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getSearchDrsDailyProductsQueryOptions = <
+  TData = Awaited<ReturnType<typeof searchDrsDailyProducts>>,
+  TError = ErrorType<DrsApiError>,
+>(
+  stageId: string,
+  params?: SearchDrsDailyProductsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof searchDrsDailyProducts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getSearchDrsDailyProductsQueryKey(stageId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof searchDrsDailyProducts>>
+  > = ({ signal }) =>
+    searchDrsDailyProducts(stageId, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!stageId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof searchDrsDailyProducts>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type SearchDrsDailyProductsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof searchDrsDailyProducts>>
+>;
+export type SearchDrsDailyProductsQueryError = ErrorType<DrsApiError>;
+
+/**
+ * @summary Search existing products in the authorized shop before linking
+ */
+
+export function useSearchDrsDailyProducts<
+  TData = Awaited<ReturnType<typeof searchDrsDailyProducts>>,
+  TError = ErrorType<DrsApiError>,
+>(
+  stageId: string,
+  params?: SearchDrsDailyProductsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof searchDrsDailyProducts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getSearchDrsDailyProductsQueryOptions(
+    stageId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Preview identity changes without writing products or sales
+ */
+export const getPreviewDrsDailyResolutionUrl = (stageId: string) => {
+  return `/api/uploads/drs-daily/${stageId}/resolution-preview`;
+};
+
+export const previewDrsDailyResolution = async (
+  stageId: string,
+  drsResolutionInput: DrsResolutionInput,
+  options?: RequestInit,
+): Promise<DrsResolutionImpact> => {
+  return customFetch<DrsResolutionImpact>(
+    getPreviewDrsDailyResolutionUrl(stageId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(drsResolutionInput),
+    },
+  );
+};
+
+export const getPreviewDrsDailyResolutionMutationOptions = <
+  TError = ErrorType<DrsApiError | void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewDrsDailyResolution>>,
+    TError,
+    { stageId: string; data: BodyType<DrsResolutionInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof previewDrsDailyResolution>>,
+  TError,
+  { stageId: string; data: BodyType<DrsResolutionInput> },
+  TContext
+> => {
+  const mutationKey = ["previewDrsDailyResolution"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof previewDrsDailyResolution>>,
+    { stageId: string; data: BodyType<DrsResolutionInput> }
+  > = (props) => {
+    const { stageId, data } = props ?? {};
+
+    return previewDrsDailyResolution(stageId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PreviewDrsDailyResolutionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof previewDrsDailyResolution>>
+>;
+export type PreviewDrsDailyResolutionMutationBody =
+  BodyType<DrsResolutionInput>;
+export type PreviewDrsDailyResolutionMutationError =
+  ErrorType<DrsApiError | void>;
+
+/**
+ * @summary Preview identity changes without writing products or sales
+ */
+export const usePreviewDrsDailyResolution = <
+  TError = ErrorType<DrsApiError | void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewDrsDailyResolution>>,
+    TError,
+    { stageId: string; data: BodyType<DrsResolutionInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof previewDrsDailyResolution>>,
+  TError,
+  { stageId: string; data: BodyType<DrsResolutionInput> },
+  TContext
+> => {
+  return useMutation(getPreviewDrsDailyResolutionMutationOptions(options));
+};
+
+/**
+ * @summary Explicitly commit a reviewed identity proposal; sales are not imported
+ */
+export const getConfirmDrsDailyResolutionUrl = (stageId: string) => {
+  return `/api/uploads/drs-daily/${stageId}/resolution-confirm`;
+};
+
+export const confirmDrsDailyResolution = async (
+  stageId: string,
+  drsResolutionConfirmation: DrsResolutionConfirmation,
+  options?: RequestInit,
+): Promise<DrsResolutionResult> => {
+  return customFetch<DrsResolutionResult>(
+    getConfirmDrsDailyResolutionUrl(stageId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(drsResolutionConfirmation),
+    },
+  );
+};
+
+export const getConfirmDrsDailyResolutionMutationOptions = <
+  TError = ErrorType<DrsApiError | void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmDrsDailyResolution>>,
+    TError,
+    { stageId: string; data: BodyType<DrsResolutionConfirmation> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof confirmDrsDailyResolution>>,
+  TError,
+  { stageId: string; data: BodyType<DrsResolutionConfirmation> },
+  TContext
+> => {
+  const mutationKey = ["confirmDrsDailyResolution"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof confirmDrsDailyResolution>>,
+    { stageId: string; data: BodyType<DrsResolutionConfirmation> }
+  > = (props) => {
+    const { stageId, data } = props ?? {};
+
+    return confirmDrsDailyResolution(stageId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ConfirmDrsDailyResolutionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof confirmDrsDailyResolution>>
+>;
+export type ConfirmDrsDailyResolutionMutationBody =
+  BodyType<DrsResolutionConfirmation>;
+export type ConfirmDrsDailyResolutionMutationError =
+  ErrorType<DrsApiError | void>;
+
+/**
+ * @summary Explicitly commit a reviewed identity proposal; sales are not imported
+ */
+export const useConfirmDrsDailyResolution = <
+  TError = ErrorType<DrsApiError | void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmDrsDailyResolution>>,
+    TError,
+    { stageId: string; data: BodyType<DrsResolutionConfirmation> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof confirmDrsDailyResolution>>,
+  TError,
+  { stageId: string; data: BodyType<DrsResolutionConfirmation> },
+  TContext
+> => {
+  return useMutation(getConfirmDrsDailyResolutionMutationOptions(options));
+};
+
+/**
+ * @summary Validate the full original report again into a new immutable preview
+ */
+export const getRevalidateDrsDailyUrl = (stageId: string) => {
+  return `/api/uploads/drs-daily/${stageId}/revalidate`;
+};
+
+export const revalidateDrsDaily = async (
+  stageId: string,
+  options?: RequestInit,
+): Promise<DrsDailyRevalidation> => {
+  return customFetch<DrsDailyRevalidation>(getRevalidateDrsDailyUrl(stageId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getRevalidateDrsDailyMutationOptions = <
+  TError = ErrorType<DrsApiError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof revalidateDrsDaily>>,
+    TError,
+    { stageId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof revalidateDrsDaily>>,
+  TError,
+  { stageId: string },
+  TContext
+> => {
+  const mutationKey = ["revalidateDrsDaily"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof revalidateDrsDaily>>,
+    { stageId: string }
+  > = (props) => {
+    const { stageId } = props ?? {};
+
+    return revalidateDrsDaily(stageId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RevalidateDrsDailyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof revalidateDrsDaily>>
+>;
+
+export type RevalidateDrsDailyMutationError = ErrorType<DrsApiError>;
+
+/**
+ * @summary Validate the full original report again into a new immutable preview
+ */
+export const useRevalidateDrsDaily = <
+  TError = ErrorType<DrsApiError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof revalidateDrsDaily>>,
+    TError,
+    { stageId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof revalidateDrsDaily>>,
+  TError,
+  { stageId: string },
+  TContext
+> => {
+  return useMutation(getRevalidateDrsDailyMutationOptions(options));
+};
+
+/**
  * @summary Health check
  */
 export const getHealthCheckUrl = () => {
@@ -857,41 +1474,63 @@ export function useGetCurrentUser<
 /**
  * @summary Get dashboard KPI summary
  */
-export const getGetDashboardSummaryUrl = () => {
-  return `/api/dashboard/summary`;
+export const getGetDashboardSummaryUrl = (
+  params?: GetDashboardSummaryParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/dashboard/summary?${stringifiedParams}`
+    : `/api/dashboard/summary`;
 };
 
 export const getDashboardSummary = async (
+  params?: GetDashboardSummaryParams,
   options?: RequestInit,
 ): Promise<DashboardSummary> => {
-  return customFetch<DashboardSummary>(getGetDashboardSummaryUrl(), {
+  return customFetch<DashboardSummary>(getGetDashboardSummaryUrl(params), {
     ...options,
     method: "GET",
   });
 };
 
-export const getGetDashboardSummaryQueryKey = () => {
-  return [`/api/dashboard/summary`] as const;
+export const getGetDashboardSummaryQueryKey = (
+  params?: GetDashboardSummaryParams,
+) => {
+  return [`/api/dashboard/summary`, ...(params ? [params] : [])] as const;
 };
 
 export const getGetDashboardSummaryQueryOptions = <
   TData = Awaited<ReturnType<typeof getDashboardSummary>>,
   TError = ErrorType<unknown>,
->(options?: {
-  query?: UseQueryOptions<
-    Awaited<ReturnType<typeof getDashboardSummary>>,
-    TError,
-    TData
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}) => {
+>(
+  params?: GetDashboardSummaryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDashboardSummary>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
   const { query: queryOptions, request: requestOptions } = options ?? {};
 
-  const queryKey = queryOptions?.queryKey ?? getGetDashboardSummaryQueryKey();
+  const queryKey =
+    queryOptions?.queryKey ?? getGetDashboardSummaryQueryKey(params);
 
   const queryFn: QueryFunction<
     Awaited<ReturnType<typeof getDashboardSummary>>
-  > = ({ signal }) => getDashboardSummary({ signal, ...requestOptions });
+  > = ({ signal }) =>
+    getDashboardSummary(params, { signal, ...requestOptions });
 
   return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
     Awaited<ReturnType<typeof getDashboardSummary>>,
@@ -912,15 +1551,18 @@ export type GetDashboardSummaryQueryError = ErrorType<unknown>;
 export function useGetDashboardSummary<
   TData = Awaited<ReturnType<typeof getDashboardSummary>>,
   TError = ErrorType<unknown>,
->(options?: {
-  query?: UseQueryOptions<
-    Awaited<ReturnType<typeof getDashboardSummary>>,
-    TError,
-    TData
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getGetDashboardSummaryQueryOptions(options);
+>(
+  params?: GetDashboardSummaryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDashboardSummary>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDashboardSummaryQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;
@@ -930,43 +1572,269 @@ export function useGetDashboardSummary<
 }
 
 /**
- * @summary Margin uplift grouped by category
+ * @summary Explain expected recommendation uplift separately from realized historical margin
  */
-export const getGetMarginByCategoryUrl = () => {
-  return `/api/dashboard/charts/margin-by-category`;
+export const getGetDrsMarginInsightUrl = (
+  params: GetDrsMarginInsightParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/dashboard/margin-insight?${stringifiedParams}`
+    : `/api/dashboard/margin-insight`;
 };
 
-export const getMarginByCategory = async (
+export const getDrsMarginInsight = async (
+  params: GetDrsMarginInsightParams,
   options?: RequestInit,
-): Promise<CategoryMarginItem[]> => {
-  return customFetch<CategoryMarginItem[]>(getGetMarginByCategoryUrl(), {
+): Promise<DrsMarginInsight> => {
+  return customFetch<DrsMarginInsight>(getGetDrsMarginInsightUrl(params), {
     ...options,
     method: "GET",
   });
 };
 
-export const getGetMarginByCategoryQueryKey = () => {
-  return [`/api/dashboard/charts/margin-by-category`] as const;
+export const getGetDrsMarginInsightQueryKey = (
+  params?: GetDrsMarginInsightParams,
+) => {
+  return [
+    `/api/dashboard/margin-insight`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetDrsMarginInsightQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDrsMarginInsight>>,
+  TError = ErrorType<DrsApiError | void>,
+>(
+  params: GetDrsMarginInsightParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDrsMarginInsight>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetDrsMarginInsightQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDrsMarginInsight>>
+  > = ({ signal }) =>
+    getDrsMarginInsight(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDrsMarginInsight>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDrsMarginInsightQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDrsMarginInsight>>
+>;
+export type GetDrsMarginInsightQueryError = ErrorType<DrsApiError | void>;
+
+/**
+ * @summary Explain expected recommendation uplift separately from realized historical margin
+ */
+
+export function useGetDrsMarginInsight<
+  TData = Awaited<ReturnType<typeof getDrsMarginInsight>>,
+  TError = ErrorType<DrsApiError | void>,
+>(
+  params: GetDrsMarginInsightParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDrsMarginInsight>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDrsMarginInsightQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Queue whole-shop recalculation for latest confirmed daily sales
+ */
+export const getRecalculateDrsMarginUrl = (
+  params: RecalculateDrsMarginParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/dashboard/margin-recalculate?${stringifiedParams}`
+    : `/api/dashboard/margin-recalculate`;
+};
+
+export const recalculateDrsMargin = async (
+  params: RecalculateDrsMarginParams,
+  options?: RequestInit,
+): Promise<DrsMarginRun> => {
+  return customFetch<DrsMarginRun>(getRecalculateDrsMarginUrl(params), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getRecalculateDrsMarginMutationOptions = <
+  TError = ErrorType<DrsApiError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recalculateDrsMargin>>,
+    TError,
+    { params: RecalculateDrsMarginParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof recalculateDrsMargin>>,
+  TError,
+  { params: RecalculateDrsMarginParams },
+  TContext
+> => {
+  const mutationKey = ["recalculateDrsMargin"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof recalculateDrsMargin>>,
+    { params: RecalculateDrsMarginParams }
+  > = (props) => {
+    const { params } = props ?? {};
+
+    return recalculateDrsMargin(params, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RecalculateDrsMarginMutationResult = NonNullable<
+  Awaited<ReturnType<typeof recalculateDrsMargin>>
+>;
+
+export type RecalculateDrsMarginMutationError = ErrorType<DrsApiError>;
+
+/**
+ * @summary Queue whole-shop recalculation for latest confirmed daily sales
+ */
+export const useRecalculateDrsMargin = <
+  TError = ErrorType<DrsApiError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof recalculateDrsMargin>>,
+    TError,
+    { params: RecalculateDrsMarginParams },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof recalculateDrsMargin>>,
+  TError,
+  { params: RecalculateDrsMarginParams },
+  TContext
+> => {
+  return useMutation(getRecalculateDrsMarginMutationOptions(options));
+};
+
+/**
+ * @summary Margin uplift grouped by category
+ */
+export const getGetMarginByCategoryUrl = (
+  params?: GetMarginByCategoryParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/dashboard/charts/margin-by-category?${stringifiedParams}`
+    : `/api/dashboard/charts/margin-by-category`;
+};
+
+export const getMarginByCategory = async (
+  params?: GetMarginByCategoryParams,
+  options?: RequestInit,
+): Promise<CategoryMarginItem[]> => {
+  return customFetch<CategoryMarginItem[]>(getGetMarginByCategoryUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetMarginByCategoryQueryKey = (
+  params?: GetMarginByCategoryParams,
+) => {
+  return [
+    `/api/dashboard/charts/margin-by-category`,
+    ...(params ? [params] : []),
+  ] as const;
 };
 
 export const getGetMarginByCategoryQueryOptions = <
   TData = Awaited<ReturnType<typeof getMarginByCategory>>,
   TError = ErrorType<unknown>,
->(options?: {
-  query?: UseQueryOptions<
-    Awaited<ReturnType<typeof getMarginByCategory>>,
-    TError,
-    TData
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}) => {
+>(
+  params?: GetMarginByCategoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getMarginByCategory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
   const { query: queryOptions, request: requestOptions } = options ?? {};
 
-  const queryKey = queryOptions?.queryKey ?? getGetMarginByCategoryQueryKey();
+  const queryKey =
+    queryOptions?.queryKey ?? getGetMarginByCategoryQueryKey(params);
 
   const queryFn: QueryFunction<
     Awaited<ReturnType<typeof getMarginByCategory>>
-  > = ({ signal }) => getMarginByCategory({ signal, ...requestOptions });
+  > = ({ signal }) =>
+    getMarginByCategory(params, { signal, ...requestOptions });
 
   return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
     Awaited<ReturnType<typeof getMarginByCategory>>,
@@ -987,15 +1855,18 @@ export type GetMarginByCategoryQueryError = ErrorType<unknown>;
 export function useGetMarginByCategory<
   TData = Awaited<ReturnType<typeof getMarginByCategory>>,
   TError = ErrorType<unknown>,
->(options?: {
-  query?: UseQueryOptions<
-    Awaited<ReturnType<typeof getMarginByCategory>>,
-    TError,
-    TData
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getGetMarginByCategoryQueryOptions(options);
+>(
+  params?: GetMarginByCategoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getMarginByCategory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetMarginByCategoryQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

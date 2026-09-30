@@ -7,15 +7,18 @@
  */
 
 export interface DashboardSummary {
-  total_margin_uplift: number;
+  /** @nullable */
+  total_margin_uplift: number | null;
   total_recommendations: number;
   avg_confidence_score: number;
   safety_warnings_count: number;
   approved_count: number;
   rejected_count: number;
   pending_count: number;
-  estimated_revenue_impact: number;
-  estimated_margin_impact: number;
+  /** @nullable */
+  estimated_revenue_impact: number | null;
+  /** @nullable */
+  estimated_margin_impact: number | null;
   /** @nullable */
   last_model_run?: string | null;
   /** @nullable */

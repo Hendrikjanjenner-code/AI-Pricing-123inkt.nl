@@ -8,6 +8,7 @@ For each SKU:
 4. Persist recommendations to fact_pricing_recommendation_daily
 """
 import logging
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -48,7 +49,8 @@ def _py(v):
 STRATEGY_LOOKBACK_DAYS = 30
 
 
-def run_pricing_engine(db: Session) -> tuple[int, int]:
+def run_pricing_engine(db: Session, *, shop_id=None, sales_period=None,
+                       model_version=MODEL_VERSION) -> tuple[int, int]:
     """
     Full model run: processes all active SKUs and writes recommendations.
     Returns (processed_count, skipped_count).
@@ -56,19 +58,21 @@ def run_pricing_engine(db: Session) -> tuple[int, int]:
     today = date.today()
     prof = RunProfiler("Pricing engine", logger)
 
-    products = prof.timed("load_products", lambda: db.query(models.DimProduct).filter(
-        models.DimProduct.lifecycle_status != "discontinued"
-    ).all())
+    product_query = _shop_query(db, models.DimProduct, shop_id).filter(
+        models.DimProduct.lifecycle_status != "discontinued")
+    if shop_id is not None:
+        product_query = product_query.with_for_update()
+    products = prof.timed("load_products", product_query.all)
 
     # Preload all fact data into DataFrames for speed
-    sales_df = prof.timed("load_sales", lambda: _load_sales(db))
-    price_df = prof.timed("load_prices", lambda: _load_prices(db))
-    comp_df = prof.timed("load_competitor_prices", lambda: _load_competitor_prices(db))
-    inventory_df = prof.timed("load_inventory", lambda: _load_inventory(db))
-    basket_df = prof.timed("load_basket_affinity", lambda: _load_basket_affinity(db))
-    substitution_map = prof.timed("load_substitutions", lambda: _load_substitutions(db))
+    sales_df = prof.timed("load_sales", lambda: _load_sales(db, shop_id, sales_period))
+    price_df = prof.timed("load_prices", lambda: _load_prices(db, shop_id))
+    comp_df = prof.timed("load_competitor_prices", lambda: _load_competitor_prices(db, shop_id))
+    inventory_df = prof.timed("load_inventory", lambda: _load_inventory(db, shop_id))
+    basket_df = prof.timed("load_basket_affinity", lambda: _load_basket_affinity(db, shop_id))
+    substitution_map = prof.timed("load_substitutions", lambda: _load_substitutions(db, shop_id))
     competitor_strategies = prof.timed("load_competitor_strategies",
-                                       lambda: _load_competitor_strategies(db))
+                                       lambda: _load_competitor_strategies(db, shop_id))
 
     # Pre-group per SKU into dicts for O(1) lookup. With tens of thousands of
     # products and hundreds of thousands of competitor rows, boolean-masking each
@@ -80,21 +84,41 @@ def run_pricing_engine(db: Session) -> tuple[int, int]:
     comp_by = {k: v for k, v in comp_df.groupby("sku_id")} if not comp_df.empty else {}
     inv_by = {k: v for k, v in inventory_df.groupby("sku_id")} if not inventory_df.empty else {}
     basket_by = {k: v for k, v in basket_df.groupby("sku_id_a")} if not basket_df.empty else {}
+    price_factors = {}
+    if sales_period:
+        # PriceShape stores current_price INCL VAT, DRS YTD EXCL VAT.
+        # Never mutate the ORM catalog to normalize strategy inputs.
+        normalized = []
+        for p in products:
+            factor = _drs_price_factor(p, sales_by.get(p.sku_id, empty_sales))
+            price_factors[p.sku_id] = factor
+            proxy = SimpleNamespace(**{c.key: getattr(p, c.key) for c in p.__table__.columns})
+            if factor and p.cost_price is not None:
+                proxy.cost_price = float(p.cost_price) * factor
+            normalized.append(proxy)
+        products = normalized
 
     # Verversingssemantiek: menselijke beslissingen (goedgekeurd/afgewezen) van
     # vandaag blijven behouden; openstaande (pending) aanbevelingen worden
     # opnieuw gegenereerd zodat een nieuwe modelrun na een feed-sync de laatste
     # prijzen weerspiegelt (delete-then-insert, net als de fact-tabellen).
-    existing_today = db.query(
-        models.FactPricingRecommendationDaily.sku_id,
-        models.FactPricingRecommendationDaily.approval_status,
-    ).filter(models.FactPricingRecommendationDaily.date == today).all()
-    locked = {row[0] for row in existing_today if row[1] != "pending"}
-    db.query(models.FactPricingRecommendationDaily).filter(
+    R = models.FactPricingRecommendationDaily
+    existing_q = _shop_query(db, R, shop_id)
+    if shop_id is None:
+        existing_q = existing_q.filter(R.date == today)
+    else:
+        existing_q = existing_q.with_for_update()
+    locked = {r.sku_id for r in existing_q.all()
+              if r.approval_status != "pending" or r.override_price is not None
+              or r.override_reason or r.source_decision_id is not None
+              or r.processing_status not in (None, "niet_verwerkt")}
+    _shop_query(db, R, shop_id).filter(
         models.FactPricingRecommendationDaily.date == today,
         models.FactPricingRecommendationDaily.approval_status == "pending",
+        ~R.sku_id.in_(locked),
     ).delete(synchronize_session=False)
-    db.commit()
+    if shop_id is None:
+        db.commit()
 
     all_products = {p.sku_id: p for p in products}
     rec_maps: list[dict] = []
@@ -109,6 +133,9 @@ def run_pricing_engine(db: Session) -> tuple[int, int]:
                     continue
 
                 sku_inv = inv_by.get(product.sku_id, empty_inv)
+                if sales_period and price_factors.get(product.sku_id) is None:
+                    skipped += 1
+                    continue  # unknown price VAT basis is not a valid margin input
                 context = {
                     "product": product,
                     "sales": sales_by.get(product.sku_id, empty_sales),
@@ -119,7 +146,30 @@ def run_pricing_engine(db: Session) -> tuple[int, int]:
                     "substitutions": substitution_map.get(product.sku_id, []),
                     "all_products": all_products,
                     "competitor_strategies": competitor_strategies,
+                    "volume_days": (sales_period[1] - sales_period[0]).days + 1 if sales_period else None,
                 }
+                if sales_period:
+                    factor = price_factors[product.sku_id]
+                    # Portfolio comparisons can cross DRS (net) and PriceShape
+                    # (gross) catalog items. Express substitutes in this advice's
+                    # own price basis, without changing persisted product fields.
+                    comparable = {}
+                    for sku in context["substitutions"]:
+                        other = all_products.get(sku)
+                        other_factor = price_factors.get(sku)
+                        if other and other_factor and other.current_price is not None:
+                            comparable[sku] = SimpleNamespace(
+                                current_price=float(other.current_price) / other_factor * factor)
+                    context["all_products"] = comparable
+                    competitors = context["competitors"]
+                    if not competitors.empty:
+                        vat = _observed_vat_factor(context["sales"])
+                        if vat:
+                            competitors = competitors[competitors["source"] == "priceshape"].copy()
+                            competitors["price"] = competitors["price"] / vat * factor
+                            context["competitors"] = competitors
+                        else:
+                            context["competitors"] = empty_comp
 
                 # Route to strategy
                 strategy = product.strategy_type or "MARGIN_OPTIMIZATION"
@@ -131,10 +181,24 @@ def run_pricing_engine(db: Session) -> tuple[int, int]:
 
                 # Apply safety rules
                 result = apply_safety_rules(product, result, sku_inv)
+                if sales_period:
+                    # Guardrails can alter the price. Estimate the FINAL advice,
+                    # using calendar days (including explicit zero-sales days).
+                    sales = context["sales"]
+                    factor = price_factors[product.sku_id]
+                    cost, current = product.cost_price, product.current_price
+                    if sales.empty or cost is None or current is None or float(cost) < 0 or sales["units_sold"].sum() < 0:
+                        result.update(expected_units=None, expected_revenue=None,
+                                      expected_margin=None, expected_margin_uplift=None)
+                    else:
+                        result.update(strategies._estimate_margin_uplift(
+                            float(cost) / factor, float(current) / factor, result["recommended_price"] / factor,
+                            strategies._avg_daily_units(context)))
 
                 rec_maps.append({
                     "date": today,
                     "sku_id": product.sku_id,
+                    "shop_id": product.shop_id,
                     "current_price": float(product.current_price) if product.current_price else None,
                     "recommended_price": _py(result["recommended_price"]),
                     "recommended_change_pct": _py(result["change_pct"]),
@@ -148,11 +212,13 @@ def run_pricing_engine(db: Session) -> tuple[int, int]:
                     "competitor_strategy_signal": result.get("competitor_strategy_signal"),
                     "safety_status": result.get("safety_status", "ok"),
                     "approval_status": "pending",
-                    "model_version": MODEL_VERSION,
+                    "model_version": model_version,
                 })
                 processed += 1
 
             except Exception:
+                if shop_id is not None:
+                    raise  # no silent partial success in an explicit DRS run
                 skipped += 1
                 continue
 
@@ -161,9 +227,15 @@ def run_pricing_engine(db: Session) -> tuple[int, int]:
     def _persist() -> None:
         for i in range(0, len(rec_maps), 5_000):
             db.bulk_insert_mappings(models.FactPricingRecommendationDaily, rec_maps[i:i + 5_000])
-        db.commit()
+        if shop_id is None:
+            db.commit()
+        else:
+            db.flush()
 
     prof.timed("persist", _persist)
+    if shop_id is not None:
+        # Caller publishes recommendations and durable run evidence atomically.
+        return processed, skipped
 
     # Publiceer gestandaardiseerde IntelligenceSignals (§7-§8)
     from engine.signal_emitters import emit_for_engine
@@ -197,22 +269,69 @@ def _run_strategy(strategy: str, context: dict) -> dict | None:
     return fn(context)
 
 
-def _load_sales(db: Session) -> pd.DataFrame:
-    rows = db.query(models.FactSalesDaily).all()
-    if not rows:
-        return pd.DataFrame(columns=["sku_id", "date", "units_sold", "revenue", "margin", "margin_pct"])
-    return pd.DataFrame([{
+def _shop_query(db, model, shop_id, sku_column=None):
+    q = db.query(model)
+    if shop_id is not None:
+        if hasattr(model, "shop_id"):
+            q = q.filter(model.shop_id == shop_id)
+        else:
+            col = sku_column if sku_column is not None else model.sku_id
+            q = q.filter(col.in_(db.query(models.DimProduct.sku_id).filter(
+                models.DimProduct.shop_id == shop_id)))
+    return q
+
+
+def _drs_price_factor(product, sales):
+    source = (product.import_source or "").lower()
+    if source == "drs":
+        return 1.0
+    return _observed_vat_factor(sales) if source == "priceshape" else None
+
+
+def _observed_vat_factor(sales):
+    if sales.empty or "revenue_incl_vat" not in sales or sales["revenue_incl_vat"].isna().any():
+        return None
+    net, gross = sales["revenue"].sum(), sales["revenue_incl_vat"].sum()
+    if net <= 0 or gross < net:
+        return None
+    factor = float(gross / net)
+    # Observed VAT conversion is an explicit forward-looking assumption.
+    return factor if 1 <= factor <= 1.3 else None
+
+
+def _load_sales(db: Session, shop_id=None, sales_period=None) -> pd.DataFrame:
+    q = _shop_query(db, models.FactSalesDaily, shop_id)
+    if sales_period:
+        q = q.filter(models.FactSalesDaily.date.between(*sales_period),
+                     models.FactSalesDaily.source == "DRS_DAILY")
+    rows = q.all()
+    data = [{
         "sku_id": r.sku_id,
         "date": r.date,
         "units_sold": r.units_sold or 0,
         "revenue": float(r.revenue) if r.revenue else 0,
+        "revenue_incl_vat": float(r.revenue_incl_vat) if r.revenue_incl_vat is not None else float("nan"),
         "margin": float(r.margin) if r.margin else 0,
         "margin_pct": float(r.margin_pct) if r.margin_pct else 0,
-    } for r in rows])
+    } for r in rows]
+    if sales_period:
+        from sqlalchemy import func
+        C = models.SalesDailyClaim
+        days = (sales_period[1] - sales_period[0]).days + 1
+        complete = {r[0] for r in db.query(C.sku_id).filter(
+            C.shop_id == shop_id, C.source == "DRS_DAILY", C.date.between(*sales_period)
+        ).group_by(C.sku_id).having(func.count(C.id) == days)}
+        data = [r for r in data if r["sku_id"] in complete]
+        present = {r["sku_id"] for r in data}
+        data.extend({"sku_id": sku, "date": sales_period[0], "units_sold": 0,
+                     "revenue": 0, "revenue_incl_vat": 0, "margin": None, "margin_pct": None}
+                    for sku in complete - present)
+    return pd.DataFrame(data, columns=["sku_id", "date", "units_sold", "revenue",
+                                      "revenue_incl_vat", "margin", "margin_pct"])
 
 
-def _load_prices(db: Session) -> pd.DataFrame:
-    rows = db.query(models.FactPriceDaily).all()
+def _load_prices(db: Session, shop_id=None) -> pd.DataFrame:
+    rows = _shop_query(db, models.FactPriceDaily, shop_id).all()
     if not rows:
         return pd.DataFrame(columns=["sku_id", "date", "price"])
     return pd.DataFrame([{
@@ -222,20 +341,21 @@ def _load_prices(db: Session) -> pd.DataFrame:
     } for r in rows])
 
 
-def _load_competitor_prices(db: Session) -> pd.DataFrame:
-    rows = db.query(models.FactCompetitorPriceDaily).all()
+def _load_competitor_prices(db: Session, shop_id=None) -> pd.DataFrame:
+    rows = _shop_query(db, models.FactCompetitorPriceDaily, shop_id).all()
     if not rows:
         return pd.DataFrame(columns=["sku_id", "date", "competitor_name", "price"])
     return pd.DataFrame([{
         "sku_id": r.sku_id,
         "date": r.date,
         "competitor_name": r.competitor_name,
+        "source": r.source,
         "price": float(r.price) if r.price else None,
     } for r in rows])
 
 
-def _load_inventory(db: Session) -> pd.DataFrame:
-    rows = db.query(models.FactInventoryDaily).all()
+def _load_inventory(db: Session, shop_id=None) -> pd.DataFrame:
+    rows = _shop_query(db, models.FactInventoryDaily, shop_id).all()
     if not rows:
         return pd.DataFrame(columns=["sku_id", "date", "stock_quantity", "days_of_stock"])
     return pd.DataFrame([{
@@ -246,8 +366,12 @@ def _load_inventory(db: Session) -> pd.DataFrame:
     } for r in rows])
 
 
-def _load_basket_affinity(db: Session) -> pd.DataFrame:
-    rows = db.query(models.FactBasketAffinity).all()
+def _load_basket_affinity(db: Session, shop_id=None) -> pd.DataFrame:
+    rows = _shop_query(db, models.FactBasketAffinity, shop_id,
+                       models.FactBasketAffinity.sku_id_a).all()
+    if shop_id is not None:
+        skus = {r[0] for r in db.query(models.DimProduct.sku_id).filter(models.DimProduct.shop_id == shop_id)}
+        rows = [r for r in rows if r.sku_id_b in skus]
     if not rows:
         return pd.DataFrame(columns=["sku_id_a", "sku_id_b", "affinity_score"])
     return pd.DataFrame([{
@@ -257,8 +381,12 @@ def _load_basket_affinity(db: Session) -> pd.DataFrame:
     } for r in rows])
 
 
-def _load_substitutions(db: Session) -> dict:
-    rows = db.query(models.MapSubstitution).all()
+def _load_substitutions(db: Session, shop_id=None) -> dict:
+    rows = _shop_query(db, models.MapSubstitution, shop_id,
+                       models.MapSubstitution.a_brand_sku).all()
+    if shop_id is not None:
+        skus = {r[0] for r in db.query(models.DimProduct.sku_id).filter(models.DimProduct.shop_id == shop_id)}
+        rows = [r for r in rows if r.private_label_sku in skus]
     result = {}
     for r in rows:
         result.setdefault(r.a_brand_sku, []).append(r.private_label_sku)
@@ -266,7 +394,7 @@ def _load_substitutions(db: Session) -> dict:
     return result
 
 
-def _load_competitor_strategies(db: Session) -> dict[str, dict]:
+def _load_competitor_strategies(db: Session, shop_id=None) -> dict[str, dict]:
     """
     Classificeer elke concurrent op basis van zijn prijshistorie van de
     afgelopen STRATEGY_LOOKBACK_DAYS dagen en geef een lookup terug van
@@ -275,7 +403,7 @@ def _load_competitor_strategies(db: Session) -> dict[str, dict]:
     """
     since = date.today() - timedelta(days=STRATEGY_LOOKBACK_DAYS)
     rows = (
-        db.query(models.FactCompetitorPriceDaily)
+        _shop_query(db, models.FactCompetitorPriceDaily, shop_id)
         .filter(models.FactCompetitorPriceDaily.date >= since)
         .all()
     )

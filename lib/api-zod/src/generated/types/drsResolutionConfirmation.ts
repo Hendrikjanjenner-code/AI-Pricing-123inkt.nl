@@ -6,9 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type DrsDailyPreviewErrorsItem = {
-  /** @nullable */
-  row: number | null;
-  code: string;
-  message: string;
-};
+export interface DrsResolutionConfirmation {
+  resolution_id: string;
+  confirm: boolean;
+}

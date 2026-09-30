@@ -5,11 +5,371 @@
  * AI Pricing Decision Engine API
  * OpenAPI spec version: 0.1.0
  */
+export interface DrsApiError {
+  detail: string;
+}
+
+export interface DrsProductCandidate {
+  sku_id: string;
+  /** @nullable */
+  business_sku: string | null;
+  product_name: string;
+  ean: string;
+  oem: string;
+  /** @nullable */
+  import_source: string | null;
+  evidence: string[];
+}
+
+export type DrsUnresolvedRowKind =
+  (typeof DrsUnresolvedRowKind)[keyof typeof DrsUnresolvedRowKind];
+
+export const DrsUnresolvedRowKind = {
+  identity: "identity",
+  parse: "parse",
+} as const;
+
+export interface DrsUnresolvedRow {
+  /** @nullable */
+  row: number | null;
+  code: string;
+  product_name?: string;
+  ean?: string;
+  oem?: string;
+  message: string;
+  kind?: DrsUnresolvedRowKind;
+  candidates?: DrsProductCandidate[];
+}
+
+export type DrsDailyErrorKind =
+  (typeof DrsDailyErrorKind)[keyof typeof DrsDailyErrorKind];
+
+export const DrsDailyErrorKind = {
+  identity: "identity",
+  parse: "parse",
+} as const;
+
+export interface DrsDailyError {
+  /** @nullable */
+  row: number | null;
+  code: string;
+  message: string;
+  product_name?: string;
+  ean?: string;
+  oem?: string;
+  kind?: DrsDailyErrorKind;
+  candidates?: DrsProductCandidate[];
+}
+
+export interface DrsUnresolvedPage {
+  items: DrsUnresolvedRow[];
+  total: number;
+  offset: number;
+  limit: number;
+  requires_fresh_upload: boolean;
+}
+
+export interface DrsProductPage {
+  items: DrsProductCandidate[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export type DrsResolutionActionAction =
+  (typeof DrsResolutionActionAction)[keyof typeof DrsResolutionActionAction];
+
+export const DrsResolutionActionAction = {
+  link: "link",
+  create: "create",
+} as const;
+
+export interface DrsResolutionAction {
+  row: number;
+  action: DrsResolutionActionAction;
+  /** Required for link, omitted for create; technical product identifier */
+  sku_id?: string;
+}
+
+export interface DrsResolutionInput {
+  /**
+   * @minItems 1
+   * @maxItems 1000
+   */
+  actions: DrsResolutionAction[];
+}
+
+export type DrsResolutionPlanAction =
+  (typeof DrsResolutionPlanAction)[keyof typeof DrsResolutionPlanAction];
+
+export const DrsResolutionPlanAction = {
+  link: "link",
+  create: "create",
+} as const;
+
+export interface DrsResolutionPlan {
+  row: number;
+  action: DrsResolutionPlanAction;
+  sku_id: string;
+  code: string;
+  product_name: string;
+  ean: string;
+  oem: string;
+  target: DrsProductCandidate | null;
+  candidates: DrsProductCandidate[];
+}
+
+export type DrsResolutionImpactSalesWritten =
+  (typeof DrsResolutionImpactSalesWritten)[keyof typeof DrsResolutionImpactSalesWritten];
+
+export const DrsResolutionImpactSalesWritten = {
+  NUMBER_0: 0,
+} as const;
+
+export interface DrsResolutionImpact {
+  resolution_id: string;
+  stage_id: string;
+  shop_id: number;
+  actions: DrsResolutionPlan[];
+  products_created: number;
+  aliases_added: number;
+  sales_written: DrsResolutionImpactSalesWritten;
+  requires_revalidation: boolean;
+  expires_at: string;
+}
+
+export interface DrsResolutionConfirmation {
+  resolution_id: string;
+  confirm: boolean;
+}
+
+export type DrsResolutionResultStatus =
+  (typeof DrsResolutionResultStatus)[keyof typeof DrsResolutionResultStatus];
+
+export const DrsResolutionResultStatus = {
+  confirmed: "confirmed",
+} as const;
+
+export type DrsResolutionResultSalesWritten =
+  (typeof DrsResolutionResultSalesWritten)[keyof typeof DrsResolutionResultSalesWritten];
+
+export const DrsResolutionResultSalesWritten = {
+  NUMBER_0: 0,
+} as const;
+
+export interface DrsResolutionResult {
+  resolution_id: string;
+  status: DrsResolutionResultStatus;
+  products_created: number;
+  aliases_added: number;
+  sales_written: DrsResolutionResultSalesWritten;
+  requires_revalidation: boolean;
+}
+
+export type DrsDailyPreviewStatus =
+  (typeof DrsDailyPreviewStatus)[keyof typeof DrsDailyPreviewStatus];
+
+export const DrsDailyPreviewStatus = {
+  ready: "ready",
+  blocked: "blocked",
+  confirmed: "confirmed",
+} as const;
+
+export type DrsDailyResultStatus =
+  (typeof DrsDailyResultStatus)[keyof typeof DrsDailyResultStatus];
+
+export const DrsDailyResultStatus = {
+  confirmed: "confirmed",
+} as const;
+
+export interface DrsDailyResult {
+  stage_id: string;
+  status: DrsDailyResultStatus;
+  inserted: number;
+  updated: number;
+  unchanged: number;
+  /** UTC instant of the first successful confirmation; unchanged on idempotent retry */
+  confirmed_at?: string;
+}
+
 export interface DrsMappingResult {
   stage_id: string;
   mapped: number;
   sales_written: number;
   unresolved: number;
+}
+
+export type DrsDailyPreviewTotals = {
+  quantity: number;
+  revenue_excl_vat: string;
+  revenue_incl_vat: string;
+};
+
+export type DrsDailyPreviewMappingProposalsItem = {
+  code: string;
+  ean: string;
+  sku_id: string;
+};
+
+export type DrsDailyPreviewSampleItem = { [key: string]: unknown };
+
+export interface DrsDailyPreview {
+  stage_id: string;
+  status: DrsDailyPreviewStatus;
+  shop_id: number;
+  period_start: string;
+  period_end: string;
+  product_count: number;
+  fact_count: number;
+  totals: DrsDailyPreviewTotals;
+  errors: DrsDailyError[];
+  error_count: number;
+  /** Version 2 carries complete source identifiers and candidate evidence */
+  metadata_version?: number;
+  warnings: string[];
+  mapping_proposals: DrsDailyPreviewMappingProposalsItem[];
+  mapping_proposal_count: number;
+  sample: DrsDailyPreviewSampleItem[];
+  expires_at: string;
+  result?: DrsDailyResult | null;
+  mapping_result?: DrsMappingResult | null;
+}
+
+export type DrsDailyRevalidation = DrsDailyPreview & {
+  previous_stage_id: string;
+  previous_error_count: number;
+  resolved_error_count: number;
+};
+
+export type DrsMarginSourceStatus =
+  (typeof DrsMarginSourceStatus)[keyof typeof DrsMarginSourceStatus];
+
+export const DrsMarginSourceStatus = {
+  none: "none",
+  blocked: "blocked",
+  preview: "preview",
+  mappings_only: "mappings_only",
+  confirmed: "confirmed",
+} as const;
+
+export interface DrsMarginSource {
+  status: DrsMarginSourceStatus;
+  /** @nullable */
+  stage_id: string | null;
+  /** @nullable */
+  period_start: string | null;
+  /** @nullable */
+  period_end: string | null;
+  /** @nullable */
+  confirmed_at: string | null;
+  sales_rows: number;
+  /** @nullable */
+  source_version: string | null;
+  /** @nullable */
+  latest_attempt_status: string | null;
+}
+
+export type DrsMarginRunStatus =
+  (typeof DrsMarginRunStatus)[keyof typeof DrsMarginRunStatus];
+
+export const DrsMarginRunStatus = {
+  running: "running",
+  completed: "completed",
+  failed: "failed",
+} as const;
+
+export interface DrsMarginRun {
+  id: number;
+  status: DrsMarginRunStatus;
+  /** @nullable */
+  started_at: string | null;
+  /** @nullable */
+  completed_at: string | null;
+  /** @nullable */
+  error_message: string | null;
+  /** @nullable */
+  source_version: string | null;
+}
+
+export type DrsExpectedMarginStatus =
+  (typeof DrsExpectedMarginStatus)[keyof typeof DrsExpectedMarginStatus];
+
+export const DrsExpectedMarginStatus = {
+  unavailable: "unavailable",
+  stale: "stale",
+  fresh: "fresh",
+  partial: "partial",
+} as const;
+
+export type DrsExpectedMarginHorizonDays =
+  (typeof DrsExpectedMarginHorizonDays)[keyof typeof DrsExpectedMarginHorizonDays];
+
+export const DrsExpectedMarginHorizonDays = {
+  NUMBER_1: 1,
+} as const;
+
+export interface DrsExpectedMargin {
+  status: DrsExpectedMarginStatus;
+  /** @nullable */
+  margin_uplift: number | null;
+  /** @nullable */
+  revenue: number | null;
+  /** @nullable */
+  margin: number | null;
+  horizon_days: DrsExpectedMarginHorizonDays;
+  /** @nullable */
+  volume_period_start: string | null;
+  /** @nullable */
+  volume_period_end: string | null;
+  /** @nullable */
+  volume_days: number | null;
+  eligible_skus: number;
+  covered_skus: number;
+  missing_volume_skus: number;
+  missing_cost_skus: number;
+  preserved_decision_skus: number;
+  assumptions: string[];
+}
+
+export type DrsActualMarginStatus =
+  (typeof DrsActualMarginStatus)[keyof typeof DrsActualMarginStatus];
+
+export const DrsActualMarginStatus = {
+  complete: "complete",
+  incomplete: "incomplete",
+} as const;
+
+export interface DrsActualMargin {
+  /** @nullable */
+  period_start: string | null;
+  /** @nullable */
+  period_end: string | null;
+  /** @nullable */
+  comparison_start: string | null;
+  /** @nullable */
+  comparison_end: string | null;
+  /** @nullable */
+  revenue: number | null;
+  /** @nullable */
+  margin: number | null;
+  /** @nullable */
+  comparison_margin: number | null;
+  /** @nullable */
+  margin_change: number | null;
+  sales_rows: number;
+  missing_cost_rows: number;
+  comparison_sales_rows: number;
+  comparison_missing_cost_rows: number;
+  status: DrsActualMarginStatus;
+  explanation: string;
+}
+
+export interface DrsMarginInsight {
+  shop_id: number;
+  source: DrsMarginSource;
+  run: DrsMarginRun | null;
+  expected: DrsExpectedMargin;
+  actual: DrsActualMargin;
 }
 
 export type DrsDailyTemplateMapping = { [key: string]: unknown };
@@ -39,71 +399,6 @@ export interface DrsDailyUpload {
 
 export interface DrsDailyConfirmation {
   confirm_mapping?: boolean;
-}
-
-export type DrsDailyResultStatus =
-  (typeof DrsDailyResultStatus)[keyof typeof DrsDailyResultStatus];
-
-export const DrsDailyResultStatus = {
-  confirmed: "confirmed",
-} as const;
-
-export interface DrsDailyResult {
-  stage_id: string;
-  status: DrsDailyResultStatus;
-  inserted: number;
-  updated: number;
-  unchanged: number;
-}
-
-export type DrsDailyPreviewStatus =
-  (typeof DrsDailyPreviewStatus)[keyof typeof DrsDailyPreviewStatus];
-
-export const DrsDailyPreviewStatus = {
-  ready: "ready",
-  blocked: "blocked",
-  confirmed: "confirmed",
-} as const;
-
-export type DrsDailyPreviewTotals = {
-  quantity: number;
-  revenue_excl_vat: string;
-  revenue_incl_vat: string;
-};
-
-export type DrsDailyPreviewErrorsItem = {
-  /** @nullable */
-  row: number | null;
-  code: string;
-  message: string;
-};
-
-export type DrsDailyPreviewMappingProposalsItem = {
-  code: string;
-  ean: string;
-  sku_id: string;
-};
-
-export type DrsDailyPreviewSampleItem = { [key: string]: unknown };
-
-export interface DrsDailyPreview {
-  stage_id: string;
-  status: DrsDailyPreviewStatus;
-  shop_id: number;
-  period_start: string;
-  period_end: string;
-  product_count: number;
-  fact_count: number;
-  totals: DrsDailyPreviewTotals;
-  errors: DrsDailyPreviewErrorsItem[];
-  error_count: number;
-  warnings: string[];
-  mapping_proposals: DrsDailyPreviewMappingProposalsItem[];
-  mapping_proposal_count: number;
-  sample: DrsDailyPreviewSampleItem[];
-  expires_at: string;
-  result?: DrsDailyResult | null;
-  mapping_result?: DrsMappingResult | null;
 }
 
 export interface ProductFilterNode {
@@ -780,15 +1075,18 @@ export interface BulkActionResult {
 }
 
 export interface DashboardSummary {
-  total_margin_uplift: number;
+  /** @nullable */
+  total_margin_uplift: number | null;
   total_recommendations: number;
   avg_confidence_score: number;
   safety_warnings_count: number;
   approved_count: number;
   rejected_count: number;
   pending_count: number;
-  estimated_revenue_impact: number;
-  estimated_margin_impact: number;
+  /** @nullable */
+  estimated_revenue_impact: number | null;
+  /** @nullable */
+  estimated_margin_impact: number | null;
   /** @nullable */
   last_model_run?: string | null;
   /** @nullable */
@@ -1204,6 +1502,76 @@ export interface CreateShopRequest {
   legal_entity?: string | null;
   channel?: string;
 }
+
+export type GetDrsDailyUnresolvedParams = {
+  /**
+   * Filter unresolved rows by productcode, ProductName, EAN, OEM or message
+   */
+  q?: string;
+  /**
+   * @minimum 0
+   */
+  offset?: number;
+  /**
+   * @minimum 1
+   * @maximum 500
+   */
+  limit?: number;
+};
+
+export type SearchDrsDailyProductsParams = {
+  q?: string;
+  /**
+   * @minimum 0
+   */
+  offset?: number;
+  /**
+   * @minimum 1
+   * @maximum 500
+   */
+  limit?: number;
+};
+
+export type GetDashboardSummaryParams = {
+  shop_id?: number;
+  hierarchy_node_ids?: string;
+  brands?: string;
+  statuses?: string;
+  sku_query?: string;
+};
+
+export type GetDrsMarginInsightParams = {
+  shop_id: number;
+  /**
+   * Comma-separated hierarchy node IDs; display filter only
+   */
+  hierarchy_node_ids?: string;
+  /**
+   * Comma-separated brands; display filter only
+   */
+  brands?: string;
+  /**
+   * Comma-separated recommendation statuses; display filter only
+   */
+  statuses?: string;
+  sku_query?: string;
+  period_start?: string;
+  period_end?: string;
+  comparison_start?: string;
+  comparison_end?: string;
+};
+
+export type RecalculateDrsMarginParams = {
+  shop_id: number;
+};
+
+export type GetMarginByCategoryParams = {
+  shop_id?: number;
+  hierarchy_node_ids?: string;
+  brands?: string;
+  statuses?: string;
+  sku_query?: string;
+};
 
 export type ListProductsParams = {
   identity_status?: ListProductsIdentityStatus;

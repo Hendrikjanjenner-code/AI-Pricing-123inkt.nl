@@ -1,23 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { verwachteMargeverbetering } from "./dashboard-kpis";
+import { verwachteMargeverbetering, verwachteOmzetImpact, verwachteMargeImpact } from "./dashboard-kpis";
 
 describe("verwachteMargeverbetering", () => {
   it("gebruikt total_margin_uplift, niet estimated_margin_impact", () => {
-    // Bewust uiteenlopende waarden: een verkeerde koppeling faalt zichtbaar.
-    const summary = {
-      total_margin_uplift: 1234.56,
-      estimated_margin_impact: 98765.43,
-    };
+    const summary = { total_margin_uplift: 1234.56, estimated_margin_impact: 98765.43 };
     expect(verwachteMargeverbetering(summary)).toBe(1234.56);
   });
 
-  it("toont €0 wanneer er geen uplift is, ook al is er wel totale marge", () => {
-    expect(
-      verwachteMargeverbetering({
-        total_margin_uplift: null,
-        estimated_margin_impact: 5000,
-      }),
-    ).toBe(0);
-    expect(verwachteMargeverbetering(undefined)).toBe(0);
+  it("geeft null (onbekend) bij ontbrekende uplift, nooit een misleidende nul", () => {
+    expect(verwachteMargeverbetering({ total_margin_uplift: null, estimated_margin_impact: 5000 })).toBeNull();
+    expect(verwachteMargeverbetering(undefined)).toBeNull();
+  });
+
+  it("behoudt een echte nul", () => {
+    expect(verwachteMargeverbetering({ total_margin_uplift: 0 })).toBe(0);
+  });
+});
+
+describe("nullable monetaire samenvatting", () => {
+  it("geeft null voor ontbrekende omzet/marge", () => {
+    expect(verwachteOmzetImpact({ estimated_revenue_impact: null })).toBeNull();
+    expect(verwachteMargeImpact(undefined)).toBeNull();
+    expect(verwachteMargeImpact({ estimated_margin_impact: 12.5 })).toBe(12.5);
   });
 });

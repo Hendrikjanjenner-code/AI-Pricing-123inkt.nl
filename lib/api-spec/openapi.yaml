@@ -137,6 +137,281 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DrsMappingResult"
+  /uploads/drs-daily/{stage_id}/unresolved:
+    get:
+      operationId: getDrsDailyUnresolved
+      tags: [uploads]
+      summary: List all unresolved product identities with source evidence and candidates
+      parameters:
+        - name: stage_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: q
+          in: query
+          description: Filter unresolved rows by productcode, ProductName, EAN, OEM or message
+          schema: { type: string }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+      responses:
+        "200":
+          description: Paginated unresolved rows; total covers the complete report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DrsUnresolvedPage"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "403":
+          description: Insufficient role or shop access
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "404":
+          description: Stage not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "409":
+          description: Searching an old preview with incomplete metadata requires a fresh upload
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "410":
+          description: Stage expired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+  /uploads/drs-daily/{stage_id}/unresolved/export:
+    get:
+      operationId: exportDrsDailyUnresolved
+      tags: [uploads]
+      summary: Export every unresolved row and candidate evidence as CSV
+      parameters:
+        - name: stage_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Complete CSV export with JSON-encoded candidate evidence
+          content:
+            text/csv:
+              schema: { type: string, description: UTF-8 CSV text with BOM }
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "403":
+          description: Insufficient role or shop access
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "404":
+          description: Stage not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "409":
+          description: Stage has incomplete historical error metadata; upload again
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "410":
+          description: Stage expired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+  /uploads/drs-daily/{stage_id}/products:
+    get:
+      operationId: searchDrsDailyProducts
+      tags: [uploads]
+      summary: Search existing products in the authorized shop before linking
+      parameters:
+        - name: stage_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+      responses:
+        "200":
+          description: Paginated shop-scoped product candidates
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsProductPage" }
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "403":
+          description: Insufficient role or shop access
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "404":
+          description: Stage not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "410":
+          description: Stage expired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+  /uploads/drs-daily/{stage_id}/resolution-preview:
+    post:
+      operationId: previewDrsDailyResolution
+      tags: [uploads]
+      summary: Preview identity changes without writing products or sales
+      parameters:
+        - name: stage_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DrsResolutionInput" }
+      responses:
+        "200":
+          description: Expiring server-side impact proposal; sales_written is always zero
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsResolutionImpact" }
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "403":
+          description: Insufficient role or shop access
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "404":
+          description: Stage or selected product not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "409":
+          description: Duplicate actions, EAN or SKU conflicts, stale stage, or missing source metadata
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "410":
+          description: Stage expired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "422":
+          description: Invalid action or input
+  /uploads/drs-daily/{stage_id}/resolution-confirm:
+    post:
+      operationId: confirmDrsDailyResolution
+      tags: [uploads]
+      summary: Explicitly commit a reviewed identity proposal; sales are not imported
+      parameters:
+        - name: stage_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DrsResolutionConfirmation" }
+      responses:
+        "200":
+          description: Idempotent confirmed repair; revalidation is still required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsResolutionResult" }
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "403":
+          description: Insufficient role or shop access
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "404":
+          description: Stage or proposal not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "409":
+          description: Explicit confirmation required; stale or concurrent proposal, or identity conflict
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "410":
+          description: Stage or proposal expired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "422":
+          description: Invalid input
+  /uploads/drs-daily/{stage_id}/revalidate:
+    post:
+      operationId: revalidateDrsDaily
+      tags: [uploads]
+      summary: Validate the full original report again into a new immutable preview
+      parameters:
+        - name: stage_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: New preview with resolved and remaining error counts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsDailyRevalidation" }
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "403":
+          description: Insufficient role or shop access
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "404":
+          description: Stage not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "409":
+          description: Original stage lacks complete source data; upload again
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "410":
+          description: Stage expired
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
   /healthz:
     get:
       operationId: healthCheck
@@ -212,6 +487,22 @@ paths:
       operationId: getDashboardSummary
       tags: [dashboard]
       summary: Get dashboard KPI summary
+      parameters:
+        - name: shop_id
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: hierarchy_node_ids
+          in: query
+          schema: { type: string }
+        - name: brands
+          in: query
+          schema: { type: string }
+        - name: statuses
+          in: query
+          schema: { type: string }
+        - name: sku_query
+          in: query
+          schema: { type: string }
       responses:
         "200":
           description: Dashboard summary
@@ -219,12 +510,124 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DashboardSummary"
+  /dashboard/margin-insight:
+    get:
+      operationId: getDrsMarginInsight
+      tags: [dashboard]
+      summary: Explain expected recommendation uplift separately from realized historical margin
+      parameters:
+        - name: shop_id
+          in: query
+          required: true
+          schema: { type: integer }
+        - name: hierarchy_node_ids
+          in: query
+          description: Comma-separated hierarchy node IDs; display filter only
+          schema: { type: string }
+        - name: brands
+          in: query
+          description: Comma-separated brands; display filter only
+          schema: { type: string }
+        - name: statuses
+          in: query
+          description: Comma-separated recommendation statuses; display filter only
+          schema: { type: string }
+        - name: sku_query
+          in: query
+          schema: { type: string }
+        - name: period_start
+          in: query
+          schema: { type: string, format: date }
+        - name: period_end
+          in: query
+          schema: { type: string, format: date }
+        - name: comparison_start
+          in: query
+          schema: { type: string, format: date }
+        - name: comparison_end
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Evidence, source freshness, coverage and cost limitations; missing margin is null, not zero
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsMarginInsight" }
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "403":
+          description: Insufficient role or shop access
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "404":
+          description: Shop not found or inaccessible
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "422":
+          description: Invalid date or filter
+  /dashboard/margin-recalculate:
+    post:
+      operationId: recalculateDrsMargin
+      tags: [dashboard]
+      summary: Queue whole-shop recalculation for latest confirmed daily sales
+      parameters:
+        - name: shop_id
+          in: query
+          required: true
+          schema: { type: integer }
+      responses:
+        "202":
+          description: Durable running or completed run for the same confirmed sales source
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsMarginRun" }
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "403":
+          description: Admin or pricing_manager role and shop access required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "404":
+          description: Shop not found or inaccessible
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
+        "409":
+          description: No confirmed daily sales available for this shop
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DrsApiError" }
 
   /dashboard/charts/margin-by-category:
     get:
       operationId: getMarginByCategory
       tags: [dashboard]
       summary: Margin uplift grouped by category
+      parameters:
+        - name: shop_id
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: hierarchy_node_ids
+          in: query
+          schema: { type: string }
+        - name: brands
+          in: query
+          schema: { type: string }
+        - name: statuses
+          in: query
+          schema: { type: string }
+        - name: sku_query
+          in: query
+          schema: { type: string }
       responses:
         "200":
           description: Margin by category
@@ -2047,6 +2450,221 @@ paths:
 
 components:
   schemas:
+    DrsApiError:
+      type: object
+      required: [detail]
+      properties:
+        detail: { type: string }
+    DrsProductCandidate:
+      type: object
+      required: [sku_id, business_sku, product_name, ean, oem, import_source, evidence]
+      properties:
+        sku_id: { type: string }
+        business_sku: { type: ["string", "null"] }
+        product_name: { type: string }
+        ean: { type: string }
+        oem: { type: string }
+        import_source: { type: ["string", "null"] }
+        evidence:
+          type: array
+          items: { type: string }
+    DrsUnresolvedRow:
+      type: object
+      required: [row, code, message]
+      properties:
+        row: { type: ["integer", "null"] }
+        code: { type: string }
+        product_name: { type: string }
+        ean: { type: string }
+        oem: { type: string }
+        message: { type: string }
+        kind: { type: string, enum: [identity, parse] }
+        candidates:
+          type: array
+          items: { $ref: "#/components/schemas/DrsProductCandidate" }
+    DrsDailyError:
+      type: object
+      required: [row, code, message]
+      properties:
+        row: { type: ["integer", "null"] }
+        code: { type: string }
+        message: { type: string }
+        product_name: { type: string }
+        ean: { type: string }
+        oem: { type: string }
+        kind: { type: string, enum: [identity, parse] }
+        candidates:
+          type: array
+          items: { $ref: "#/components/schemas/DrsProductCandidate" }
+    DrsUnresolvedPage:
+      type: object
+      required: [items, total, offset, limit, requires_fresh_upload]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/DrsUnresolvedRow" }
+        total: { type: integer }
+        offset: { type: integer }
+        limit: { type: integer }
+        requires_fresh_upload: { type: boolean }
+    DrsProductPage:
+      type: object
+      required: [items, total, offset, limit]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/DrsProductCandidate" }
+        total: { type: integer }
+        offset: { type: integer }
+        limit: { type: integer }
+    DrsResolutionAction:
+      type: object
+      required: [row, action]
+      properties:
+        row: { type: integer }
+        action: { type: string, enum: [link, create] }
+        sku_id:
+          type: string
+          description: Required for link, omitted for create; technical product identifier
+    DrsResolutionInput:
+      type: object
+      required: [actions]
+      properties:
+        actions:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items: { $ref: "#/components/schemas/DrsResolutionAction" }
+    DrsResolutionPlan:
+      type: object
+      required: [row, action, sku_id, code, product_name, ean, oem, target, candidates]
+      properties:
+        row: { type: integer }
+        action: { type: string, enum: [link, create] }
+        sku_id: { type: string }
+        code: { type: string }
+        product_name: { type: string }
+        ean: { type: string }
+        oem: { type: string }
+        target:
+          anyOf:
+            - $ref: "#/components/schemas/DrsProductCandidate"
+            - type: "null"
+        candidates:
+          type: array
+          items: { $ref: "#/components/schemas/DrsProductCandidate" }
+    DrsResolutionImpact:
+      type: object
+      required: [resolution_id, stage_id, shop_id, actions, products_created, aliases_added, sales_written, requires_revalidation, expires_at]
+      properties:
+        resolution_id: { type: string }
+        stage_id: { type: string }
+        shop_id: { type: integer }
+        actions:
+          type: array
+          items: { $ref: "#/components/schemas/DrsResolutionPlan" }
+        products_created: { type: integer }
+        aliases_added: { type: integer }
+        sales_written: { type: integer, enum: [0] }
+        requires_revalidation: { type: boolean, enum: [true] }
+        expires_at: { type: string, format: date-time }
+    DrsResolutionConfirmation:
+      type: object
+      required: [resolution_id, confirm]
+      properties:
+        resolution_id: { type: string }
+        confirm: { type: boolean, enum: [true] }
+    DrsResolutionResult:
+      type: object
+      required: [resolution_id, status, products_created, aliases_added, sales_written, requires_revalidation]
+      properties:
+        resolution_id: { type: string }
+        status: { type: string, enum: [confirmed] }
+        products_created: { type: integer }
+        aliases_added: { type: integer }
+        sales_written: { type: integer, enum: [0] }
+        requires_revalidation: { type: boolean, enum: [true] }
+    DrsDailyRevalidation:
+      allOf:
+        - $ref: "#/components/schemas/DrsDailyPreview"
+        - type: object
+          required: [previous_stage_id, previous_error_count, resolved_error_count]
+          properties:
+            previous_stage_id: { type: string }
+            previous_error_count: { type: integer }
+            resolved_error_count: { type: integer }
+    DrsMarginSource:
+      type: object
+      required: [status, stage_id, period_start, period_end, confirmed_at, sales_rows, source_version, latest_attempt_status]
+      properties:
+        status: { type: string, enum: [none, blocked, preview, mappings_only, confirmed] }
+        stage_id: { type: ["string", "null"] }
+        period_start: { type: ["string", "null"], format: date }
+        period_end: { type: ["string", "null"], format: date }
+        confirmed_at: { type: ["string", "null"], format: date-time }
+        sales_rows: { type: integer }
+        source_version: { type: ["string", "null"] }
+        latest_attempt_status: { type: ["string", "null"] }
+    DrsMarginRun:
+      type: object
+      required: [id, status, started_at, completed_at, error_message, source_version]
+      properties:
+        id: { type: integer }
+        status: { type: string, enum: [running, completed, failed] }
+        started_at: { type: ["string", "null"], format: date-time }
+        completed_at: { type: ["string", "null"], format: date-time }
+        error_message: { type: ["string", "null"] }
+        source_version: { type: ["string", "null"] }
+    DrsExpectedMargin:
+      type: object
+      required: [status, margin_uplift, revenue, margin, horizon_days, volume_period_start, volume_period_end, volume_days, eligible_skus, covered_skus, missing_volume_skus, missing_cost_skus, preserved_decision_skus, assumptions]
+      properties:
+        status: { type: string, enum: [unavailable, stale, fresh, partial] }
+        margin_uplift: { type: ["number", "null"] }
+        revenue: { type: ["number", "null"] }
+        margin: { type: ["number", "null"] }
+        horizon_days: { type: integer, enum: [1] }
+        volume_period_start: { type: ["string", "null"], format: date }
+        volume_period_end: { type: ["string", "null"], format: date }
+        volume_days: { type: ["integer", "null"] }
+        eligible_skus: { type: integer }
+        covered_skus: { type: integer }
+        missing_volume_skus: { type: integer }
+        missing_cost_skus: { type: integer }
+        preserved_decision_skus: { type: integer }
+        assumptions:
+          type: array
+          items: { type: string }
+    DrsActualMargin:
+      type: object
+      required: [period_start, period_end, comparison_start, comparison_end, revenue, margin, comparison_margin, margin_change, sales_rows, missing_cost_rows, comparison_sales_rows, comparison_missing_cost_rows, status, explanation]
+      properties:
+        period_start: { type: ["string", "null"], format: date }
+        period_end: { type: ["string", "null"], format: date }
+        comparison_start: { type: ["string", "null"], format: date }
+        comparison_end: { type: ["string", "null"], format: date }
+        revenue: { type: ["number", "null"] }
+        margin: { type: ["number", "null"] }
+        comparison_margin: { type: ["number", "null"] }
+        margin_change: { type: ["number", "null"] }
+        sales_rows: { type: integer }
+        missing_cost_rows: { type: integer }
+        comparison_sales_rows: { type: integer }
+        comparison_missing_cost_rows: { type: integer }
+        status: { type: string, enum: [complete, incomplete] }
+        explanation: { type: string }
+    DrsMarginInsight:
+      type: object
+      required: [shop_id, source, run, expected, actual]
+      properties:
+        shop_id: { type: integer }
+        source: { $ref: "#/components/schemas/DrsMarginSource" }
+        run:
+          anyOf:
+            - $ref: "#/components/schemas/DrsMarginRun"
+            - type: "null"
+        expected: { $ref: "#/components/schemas/DrsExpectedMargin" }
+        actual: { $ref: "#/components/schemas/DrsActualMargin" }
     DrsMappingResult:
       type: object
       required: [stage_id, mapped, sales_written, unresolved]
@@ -2090,6 +2708,10 @@ components:
         inserted: { type: integer }
         updated: { type: integer }
         unchanged: { type: integer }
+        confirmed_at:
+          type: string
+          format: date-time
+          description: UTC instant of the first successful confirmation; unchanged on idempotent retry
     DrsDailyPreview:
       type: object
       required: [stage_id, status, shop_id, period_start, period_end, product_count, fact_count, totals, errors, error_count, warnings, mapping_proposals, mapping_proposal_count, sample, expires_at]
@@ -2110,14 +2732,11 @@ components:
             revenue_incl_vat: { type: string }
         errors:
           type: array
-          items:
-            type: object
-            required: [row, code, message]
-            properties:
-              row: { type: [integer, "null"] }
-              code: { type: string }
-              message: { type: string }
+          items: { $ref: "#/components/schemas/DrsDailyError" }
         error_count: { type: integer }
+        metadata_version:
+          type: integer
+          description: Version 2 carries complete source identifiers and candidate evidence
         warnings:
           type: array
           items: { type: string }
@@ -3046,7 +3665,7 @@ components:
       type: object
       properties:
         total_margin_uplift:
-          type: number
+          type: ["number", "null"]
         total_recommendations:
           type: integer
         avg_confidence_score:
@@ -3060,9 +3679,9 @@ components:
         pending_count:
           type: integer
         estimated_revenue_impact:
-          type: number
+          type: ["number", "null"]
         estimated_margin_impact:
-          type: number
+          type: ["number", "null"]
         last_model_run:
           type: ["string", "null"]
         model_version:
