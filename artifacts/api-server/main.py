@@ -439,8 +439,8 @@ async def observability_middleware(request: Request, call_next):
         if path.startswith("/api") and path not in _METERING_EXCLUDE:
             module = _metering.module_from_path(path)
             _metering.track_request(module, duration_ms, status_code)
-            _actor_username, _actor_shop_id = _metering.actor_from_request(request)
-            _metering.record_usage(
+            _actor_username, _actor_shop_id = await asyncio.to_thread(_metering.actor_from_request, request)
+            await asyncio.to_thread(_metering.record_usage,
                 "api_request", module=module,
                 username=_actor_username, shop_id=_actor_shop_id,
                 correlation_id=correlation_id,
@@ -480,6 +480,14 @@ import jwt as _pyjwt
 from database import SessionLocal as _AuthzSessionLocal
 
 
+def _permission_denied(user_id, required):
+    """Own and close the synchronous session entirely off the event loop."""
+    with _AuthzSessionLocal() as db:
+        user = db.query(models.User).filter(models.User.id == user_id).first()
+        return bool(user and user.is_active and user.role != "admin"
+                    and required not in _authz.effective_permissions(db, user))
+
+
 @app.middleware("http")
 async def authz_middleware(request: Request, call_next):
     # View-permissie per padsegment; voor schrijfmethodes geldt daarnaast
@@ -497,19 +505,13 @@ async def authz_middleware(request: Request, call_next):
             except Exception:
                 user_id = None
             if user_id is not None:
-                db = _AuthzSessionLocal()
-                try:
-                    user = db.query(models.User).filter(models.User.id == user_id).first()
-                    if user and user.is_active and user.role != "admin":
-                        if required not in _authz.effective_permissions(db, user):
-                            return JSONResponse(
-                                status_code=403,
-                                content={"detail": f"Permissie '{required}' vereist",
-                                         "error_code": "PERMISSION_DENIED",
-                                         "required_permission": required},
-                            )
-                finally:
-                    db.close()
+                if await asyncio.to_thread(_permission_denied, user_id, required):
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": f"Permissie '{required}' vereist",
+                                 "error_code": "PERMISSION_DENIED",
+                                 "required_permission": required},
+                    )
     return await call_next(request)
 
 

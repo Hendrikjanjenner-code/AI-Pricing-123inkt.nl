@@ -169,6 +169,96 @@ def test_output_release_token_pause_and_last_good_snapshot(store):
         assert bad["status"] == "invalid" and p.current_version_id == staged["id"]
 
 
+def test_approval_only_feed_actions_match_middleware_and_real_access(store, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.responses import JSONResponse
+    from fastapi.testclient import TestClient
+    from routes import cost_priority
+    from authz import required_action_permission, required_permission_for_path
+
+    factory, _ = store
+    with factory() as db:
+        source = profile(db)
+        staged = api.test_stage(db, source, USER.username, cost_data())
+        api.activate(1, source.id, svc.VersionInput(version_id=staged["id"]), db, USER)
+        output = profile(db, "cost_output", {"complete_snapshot_confirmed": True})
+        version = api.build(1, output.id, svc.BuildInput(
+            source_profile_id=source.id, source_version_id=staged["id"]), db, USER)
+        output_id = output.id
+    permissions = {"pricing.view", "pricing.approve"}
+    monkeypatch.setattr(api, "access", cost_priority.access)
+    monkeypatch.setattr(cost_priority, "effective_permissions", lambda db, user: permissions)
+    monkeypatch.setattr(cost_priority, "user_allowed_shop_ids", lambda db, user: {1})
+    app = FastAPI()
+    app.include_router(api.router)
+    def session():
+        with factory() as db:
+            yield db
+    app.dependency_overrides[api.get_db] = session
+    app.dependency_overrides[api.get_current_user] = lambda: USER
+    @app.middleware("http")
+    async def permission_gate(request, call_next):
+        required = (required_action_permission(request.url.path, request.method)
+                    or required_permission_for_path(request.url.path))
+        if required and required not in permissions:
+            return JSONResponse({"required_permission": required}, status_code=403)
+        return await call_next(request)
+    base = f"/api/hub-feeds/1/profiles/{output_id}"
+    with TestClient(app) as client:
+        for action in ("activate", "release", "token"):
+            response = client.post(base + "/" + action, json={"version_id": version["id"]})
+            assert response.status_code == 200, response.text
+        # Pause is deliberately a proposal in the actual handler, not approval.
+        response = client.post(base + "/pause")
+        assert response.status_code == 403
+        assert response.json()["required_permission"] == "pricing.propose"
+        assert client.post(base + "/build", json={}).status_code == 403
+        permissions.clear()
+        permissions.update({"pricing.view", "pricing.propose"})
+        for action in ("activate", "release", "token"):
+            response = client.post(base + "/" + action, json={"version_id": version["id"]})
+            assert response.status_code == 403
+            assert response.json()["required_permission"] == "pricing.approve"
+        assert client.post(base + "/pause").status_code == 200
+        assert client.get(f"/api/hub-feeds/2/profiles/{output_id}/versions").status_code == 403
+
+
+@pytest.mark.parametrize("path,permission", [
+    ("hub-feeds/1/profiles/2/activate", "pricing.approve"),
+    ("hub-feeds/1/profiles/2/release", "pricing.approve"),
+    ("hub-feeds/1/profiles/2/token", "pricing.approve"),
+    ("hub-feeds/1/profiles/2/pause", "pricing.propose"),
+    ("hub-feeds/1/profiles/2/test", "pricing.propose"),
+    ("hub-feeds/1/profiles/2/upload", "pricing.propose"),
+    ("hub-feeds/1/profiles/2/build", "pricing.propose"),
+    ("channelmanager/printer/1/advice", "pricing.approve"),
+    ("channelmanager/printer/1/approve/2", "pricing.approve"),
+    ("channelmanager/printer/1/export/2", "pricing.approve"),
+    ("channelmanager/printer/1/readback/2", "pricing.approve"),
+    ("channelmanager/printer/1/config", "pricing.propose"),
+    ("channelmanager/printer/1/pre", "pricing.propose"),
+    ("channelmanager/printer/1/calculate", "pricing.propose"),
+    ("channelmanager/1/basis/2/approve", "pricing.approve"),
+    ("channelmanager/1/calculations/2/approve", "pricing.approve"),
+    ("channelmanager/1/calculations/2/export", "pricing.approve"),
+    ("channelmanager/1/exports/2/readback", "pricing.propose"),
+    ("channelmanager/1/config", "pricing.propose"),
+    ("channelmanager/1/basis", "pricing.propose"),
+    ("channelmanager/1/basis-csv", "pricing.propose"),
+    ("channelmanager/1/calculate", "pricing.propose"),
+    ("channelmanager/1/run", "pricing.propose"),
+    # Do not infer approval from incidental path text or extra segments.
+    ("hub-feeds/1/profiles/2/release/extra", "pricing.propose"),
+    ("channelmanager/printer/1/export", "pricing.propose"),
+    ("channelmanager/printer/1/approve/2/extra", "pricing.propose"),
+])
+def test_workflow_action_permission_registry(path, permission):
+    from authz import required_action_permission
+    assert required_action_permission("/api/" + path, "POST") == permission
+    assert required_action_permission("/api/" + path + "?note=approve", "post") == permission
+    assert required_action_permission("/api/" + path, "GET") is None
+
+
 def test_storage_unconfigured_explicit_failure(monkeypatch):
     monkeypatch.delenv("PRIVATE_OBJECT_DIR", raising=False)
     with pytest.raises(HTTPException) as e:

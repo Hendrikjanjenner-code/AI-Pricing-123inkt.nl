@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from fastapi.responses import JSONResponse
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -19,6 +20,7 @@ from services.printer_workflow import (
 from services.channelmanager import number
 from models import DimShop, AuditLog
 from channel_models import ChannelSnapshot
+from authz import required_action_permission, required_permission_for_path
 
 CONFIG = {"currency": "EUR", "price_basis": "gross", "vat_rate": ".21",
           "active": True, "mapping_confirmed": True, "shops": {"123inkt": 1, "Tonershop": 2}}
@@ -53,6 +55,17 @@ def client(monkeypatch):
     monkeypatch.setattr(api.storage, "get", lambda key: objects[key])
     app = FastAPI()
     app.include_router(api.router)
+    app.include_router(shared.router)
+    @app.middleware("http")
+    async def permission_gate(request, call_next):
+        # Exercise the same action-or-view decision as production middleware,
+        # without importing main or starting application services.
+        required = (required_action_permission(request.url.path, request.method)
+                    or required_permission_for_path(request.url.path))
+        with factory() as db:
+            if required and required not in shared.effective_permissions(db, None):
+                return JSONResponse({"required_permission": required}, status_code=403)
+        return await call_next(request)
     def session():
         with factory() as db:
             yield db
@@ -161,6 +174,56 @@ def test_permissions_mapping_and_config_guard(client, monkeypatch):
     assert client.get(BASE).status_code == 404
     assert client.get(BASE + f"/download/{exported['id']}").status_code == 404
     post(client, f"/readback/{exported['id']}", {"rows": PRE}, status=404)
+
+
+def test_legacy_readers_never_expose_printer_or_future_kinds(client, monkeypatch):
+    calc = setup(client)
+    approved = post(client, f"/approve/{calc['id']}")
+    exported = post(client, f"/export/{approved['id']}")
+    rows = [{"sku": r["sku"], "shop_id": r["shop_id"], "price": r["target_price"]}
+            for r in exported["data"]["rows"]]
+    post(client, f"/readback/{exported['id']}", {"rows": rows})
+    with client.factory() as db:
+        shared.add(db, SimpleNamespace(username="test"), 1, "future_kind", {"private": "hidden"})
+        db.commit()
+        records = [(r.id, r.kind) for r in db.query(ChannelSnapshot)]
+    assert {kind for _, kind in records} == {"printer_" + k for k in api.KINDS} | {"future_kind"}
+    # Owning the anchor shop does not imply access to its mapped target shops.
+    monkeypatch.setattr(shared, "user_allowed_shop_ids", lambda db, user: {1})
+    for ident, kind in records:
+        response = client.get(f"/api/channelmanager/1/records/{ident}")
+        assert response.status_code == 404, (kind, response.text)
+        assert client.get(f"/api/channelmanager/1/history?kind={kind}").status_code == 422
+    for kind in shared.LEGACY_KINDS:
+        assert client.get(f"/api/channelmanager/1/history?kind={kind}").json()["items"] == []
+    overview = client.get("/api/channelmanager/1/overview").json()
+    assert overview["config"] is overview["basis"] is overview["last_run"] is None
+    # Even unrestricted readers must use the dedicated printer workflow.
+    monkeypatch.setattr(shared, "user_allowed_shop_ids", lambda db, user: None)
+    for ident, _ in records:
+        assert client.get(f"/api/channelmanager/1/records/{ident}").status_code == 404
+
+
+def test_approval_only_user_passes_middleware_and_printer_handlers(client, monkeypatch):
+    calc = setup(client)
+    monkeypatch.setattr(shared, "effective_permissions",
+                        lambda db, user: {"pricing.view", "pricing.approve"})
+    approved = post(client, f"/approve/{calc['id']}")
+    exported = post(client, f"/export/{approved['id']}")
+    rows = [{"sku": r["sku"], "shop_id": r["shop_id"], "price": r["target_price"]}
+            for r in exported["data"]["rows"]]
+    assert post(client, f"/readback/{exported['id']}", {"rows": rows})["status"] == "confirmed"
+    assert client.get(BASE + f"/download/{exported['id']}").status_code == 200
+    post(client, "/advice", {"profile_id": 3, "version_id": 8, "semantics_confirmed": True})
+    for path, body in [("/pre", {"rows": PRE}), ("/calculate", {"advice_snapshot_id": 1})]:
+        response = post(client, path, body, status=403)
+        assert response["required_permission"] == "pricing.propose"
+    # Approval is still required; proposal-only users cannot perform these actions.
+    monkeypatch.setattr(shared, "effective_permissions",
+                        lambda db, user: {"pricing.view", "pricing.propose"})
+    for path in ("/advice", f"/approve/{calc['id']}", f"/export/{approved['id']}",
+                 f"/readback/{exported['id']}"):
+        assert post(client, path, status=403)["required_permission"] == "pricing.approve"
 
 
 def test_latest_not_lost_by_history_pagination(client):

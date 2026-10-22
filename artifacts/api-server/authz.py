@@ -388,8 +388,26 @@ def required_action_permission(path: str, method: str) -> str | None:
     rest = path[5:].split("?", 1)[0]
     segment = rest.split("/", 1)[0]
     lower = rest.lower()
-    if segment == "channelmanager" and lower.endswith("/export"):
-        return "pricing.approve"
+    parts = rest.rstrip("/").split("/")
+    # These workflows use explicit handler capabilities, not substring hints.
+    # In particular pause and legacy readback are proposals, while printer
+    # advice and printer readback require approval.
+    if segment == "hub-feeds":
+        if (method.upper() == "POST" and len(parts) == 5 and parts[2] == "profiles"
+                and parts[4] in {"activate", "release", "token"}):
+            return "pricing.approve"
+        return WRITE_PERMISSIONS[segment]
+    if segment == "channelmanager":
+        if method.upper() == "POST":
+            if len(parts) >= 2 and parts[1] == "printer":
+                if ((len(parts) == 4 and parts[3] == "advice")
+                        or (len(parts) == 5 and parts[3] in {"approve", "export", "readback"})):
+                    return "pricing.approve"
+            elif (len(parts) == 5 and
+                  ((parts[2] == "basis" and parts[4] == "approve")
+                   or (parts[2] == "calculations" and parts[4] in {"approve", "export"}))):
+                return "pricing.approve"
+        return WRITE_PERMISSIONS[segment]
     if segment in APPROVE_PERMISSIONS and any(h in lower for h in _APPROVE_HINTS):
         return APPROVE_PERMISSIONS[segment]
     return WRITE_PERMISSIONS.get(segment)

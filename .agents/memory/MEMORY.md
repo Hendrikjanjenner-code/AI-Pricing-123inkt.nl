@@ -84,3 +84,4 @@
 - [Pricing Hub kostprijsprioriteiten](pricing-hub-cost-priorities.md) — gebruiker bevestigt exacte Excel-default inclusief marktprijs-terugval; volgorde instelbaar met drag-and-drop.
 - [Channelmanager voorlopige koppelingen](channelmanager-provisional-contracts.md) — gebruiker wil volledige interne keten nu; ontbrekende bestanden later via instelbare mappings en regels aansluiten.
 - [Generieke JSX en preview](jsx-generic-preview-transform.md) — expliciete JSX-typeargumenten kunnen na metadata-injectie breken ondanks geslaagde typecheck; laat props het type bepalen.
+- [Async middleware en DB-pool](async-db-pool-starvation.md) — synchrone DB-wachttijd blokkeert cleanup op de eventloop; offload ook metering-lookups met eigen sessies.

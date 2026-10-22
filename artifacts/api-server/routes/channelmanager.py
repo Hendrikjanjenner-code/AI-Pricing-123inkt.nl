@@ -18,6 +18,7 @@ from services.channelmanager import (Strict, Semantics, CSVSettings, ChannelConf
                                      calculate, parse_csv, export_csv, number)
 
 router = APIRouter(prefix="/api/channelmanager", tags=["channelmanager"])
+LEGACY_KINDS = ("config", "basis", "calculation", "export", "readback", "run")
 
 
 class Notes(Strict):
@@ -205,6 +206,10 @@ def history(shop_id: int, kind: str = Query(pattern="^(config|basis|calculation|
 def record(shop_id: int, record_id: int, db: Session = Depends(get_db), user=Depends(get_current_user)):
     access(db, user, shop_id)
     result = get_record(db, shop_id, record_id)
+    # Printer snapshots have their own historical mapping / target-shop checks.
+    # Never expose them (or future snapshot kinds) through this legacy reader.
+    if result.kind not in LEGACY_KINDS:
+        raise HTTPException(404, "Record not found")
     reference_access(db, user, result)
     return dump(result)
 
