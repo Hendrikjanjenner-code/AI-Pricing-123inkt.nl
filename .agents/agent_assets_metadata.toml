@@ -49,3 +49,17 @@ uri = "file://.local/outputs/AI-Pricing---Commercial-Intelligence-Platform---Kic
 type = "pdf"
 title = "AI Pricing & Commercial Intelligence Platform — Kick-off.pdf"
 logical_id = "b2b13471-09bc-459c-be5f-5074b12d225c"
+
+[[outputs]]
+id = "UWFgvWwuXweM7YuhfjP_G"
+uri = "file://generated-artifacts/priceshape-koppelplan/Koppelplan_DRS_Pricing_Hub_PriceShape_Channelmanager.pdf"
+type = "pdf"
+title = "Koppelplan DRS → Pricing Hub → PriceShape → Channelmanager"
+description = "Downloadbaar conceptplan van 4 pagina’s met gegevensstromen, kostprijsregels, CSV/API-koppelingen, goedkeuringen, implementatiestappen en nog te bevestigen afspraken."
+logical_id = "3fd515a4-085b-41cb-9f11-4881832218ac"
+content_hash = "sha256:625e3355ceb7e21c776339fc9659c07c9e4c95e4216f98e5366a91e151f04437"
+size = 91077
+mtime_ms = 1792671258562
+storage_uri = "gcs://replit-rams-assets-worf/rams/assets/repl:c5358af1-c6fb-4c89-bfc3-9b5b66a6ff49/3fd515a4-085b-41cb-9f11-4881832218ac/aee4a3b6-87d9-44a5-a4ce-aa7a5e2fe19a"
+storage_version_token = "1792671304197217"
+content_type = "application/pdf"
