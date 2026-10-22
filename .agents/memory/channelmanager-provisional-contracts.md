@@ -14,3 +14,9 @@ PriceShape currently receives an input CSV from DRS. The user states that PriceS
 **Why:** The user described the existing operational feed when asking how to connect Pricing Hub.
 
 **How to apply:** Treat outbound DRS/product input and inbound PriceShape market data/advice as separate directions. Prefer preserving the current CSV contract while introducing Hub-selected costs, pending verification of the actual feed schema and API documentation.
+
+The user wants DRS cost inputs routed through Pricing Hub, a Hub-generated CSV for PriceShape, a persistent product reference and separate PriceShape advice input for Channelmanager, and downloadable printer-price-adjustment workbooks. Writing prices back to DRS is deferred until the organization is ready.
+
+**Why:** The user specified this operational sequence when supplying the two current input feeds and printer workbook.
+
+**How to apply:** Keep uploads unchanged and create new exports. Connections must be explicitly activated before live processing; attaching a sample or saving settings is not activation. Keep the existing competitor feed independent and unchanged. Missing external fields remain configurable and unverified rather than invented.
