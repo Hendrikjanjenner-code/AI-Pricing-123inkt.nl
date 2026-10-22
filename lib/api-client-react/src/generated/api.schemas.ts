@@ -5,6 +5,195 @@
  * AI Pricing Decision Engine API
  * OpenAPI spec version: 0.1.0
  */
+export interface PrinterWorkflowAdviceInput {
+  /**
+   * @minLength 1
+   * @maxLength 2000
+   */
+  notes: string;
+  /** @exclusiveMinimum 0 */
+  profile_id: number;
+  /** @exclusiveMinimum 0 */
+  version_id: number;
+  semantics_confirmed?: boolean;
+}
+
+export interface PrinterWorkflowApproveInput {
+  /**
+   * @minLength 1
+   * @maxLength 2000
+   */
+  notes: string;
+  acknowledge_warnings?: boolean;
+}
+
+export interface PrinterWorkflowCalculateInput {
+  /**
+   * @minLength 1
+   * @maxLength 2000
+   */
+  notes: string;
+  /** @exclusiveMinimum 0 */
+  advice_snapshot_id: number;
+}
+
+export interface PrinterWorkflowConditionalRule {
+  threshold?: string;
+  lower_offset: string;
+  upper_offset: string;
+  multiplier?: string;
+  round_inner_integer?: boolean;
+  lower_tail?: string;
+  upper_tail?: string;
+}
+
+export type PrinterWorkflowPrinterConfigPriceBasis =
+  (typeof PrinterWorkflowPrinterConfigPriceBasis)[keyof typeof PrinterWorkflowPrinterConfigPriceBasis];
+
+export const PrinterWorkflowPrinterConfigPriceBasis = {
+  net: "net",
+  gross: "gross",
+} as const;
+
+export type PrinterWorkflowPrinterConfigIdTransform =
+  (typeof PrinterWorkflowPrinterConfigIdTransform)[keyof typeof PrinterWorkflowPrinterConfigIdTransform];
+
+export const PrinterWorkflowPrinterConfigIdTransform = {
+  exact: "exact",
+  nl_six_digits: "nl_six_digits",
+} as const;
+
+export type PrinterWorkflowPrinterConfigShops = { [key: string]: number };
+
+export type PrinterWorkflowPrinterConfigRules = {
+  [key: string]: PrinterWorkflowConditionalRule;
+};
+
+export type PrinterWorkflowPrinterConfigExportColumns = {
+  [key: string]: "sku" | "shop_id" | "label" | "target_price";
+};
+
+export interface PrinterWorkflowPrinterConfig {
+  /** @pattern ^[A-Z]{3}$ */
+  currency: string;
+  price_basis: PrinterWorkflowPrinterConfigPriceBasis;
+  vat_rate: string;
+  active?: boolean;
+  mapping_confirmed?: boolean;
+  shops: PrinterWorkflowPrinterConfigShops;
+  id_transform?: PrinterWorkflowPrinterConfigIdTransform;
+  transformation_confirmed?: boolean;
+  rules?: PrinterWorkflowPrinterConfigRules;
+  export_columns?: PrinterWorkflowPrinterConfigExportColumns;
+}
+
+export interface PrinterWorkflowConfigInput {
+  /**
+   * @minLength 1
+   * @maxLength 2000
+   */
+  notes: string;
+  /** @minimum 0 */
+  expected_revision: number;
+  config: PrinterWorkflowPrinterConfig;
+}
+
+export type PrinterWorkflowValidationErrorCtx = { [key: string]: unknown };
+
+export interface PrinterWorkflowValidationError {
+  loc: (string | number)[];
+  msg: string;
+  type: string;
+  input?: unknown;
+  ctx?: PrinterWorkflowValidationErrorCtx;
+}
+
+export interface PrinterWorkflowHTTPValidationError {
+  detail?: PrinterWorkflowValidationError[];
+}
+
+export interface PrinterWorkflowNotes {
+  /**
+   * @minLength 1
+   * @maxLength 2000
+   */
+  notes: string;
+}
+
+export interface PrinterWorkflowPriceRow {
+  /**
+   * @minLength 1
+   * @maxLength 500
+   */
+  sku: string;
+  /** @exclusiveMinimum 0 */
+  shop_id: number;
+  price: string;
+}
+
+export interface PrinterWorkflowPricesInput {
+  /**
+   * @minLength 1
+   * @maxLength 2000
+   */
+  notes: string;
+  /**
+   * @minItems 1
+   * @maxItems 300000
+   */
+  rows: PrinterWorkflowPriceRow[];
+}
+
+export interface HubFeedsBodyUploadApiHubFeedsShopIdProfilesProfileIdUploadPost {
+  file: Blob;
+}
+
+export interface HubFeedsBuildInput {
+  source_profile_id: number;
+  source_version_id: number;
+}
+
+export type HubFeedsValidationErrorCtx = { [key: string]: unknown };
+
+export interface HubFeedsValidationError {
+  loc: (string | number)[];
+  msg: string;
+  type: string;
+  input?: unknown;
+  ctx?: HubFeedsValidationErrorCtx;
+}
+
+export interface HubFeedsHTTPValidationError {
+  detail?: HubFeedsValidationError[];
+}
+
+export type HubFeedsProfileInputPurpose =
+  (typeof HubFeedsProfileInputPurpose)[keyof typeof HubFeedsProfileInputPurpose];
+
+export const HubFeedsProfileInputPurpose = {
+  cost: "cost",
+  products: "products",
+  advice: "advice",
+  cost_output: "cost_output",
+} as const;
+
+export type HubFeedsProfileInputConfig = { [key: string]: unknown };
+
+export interface HubFeedsProfileInput {
+  /**
+   * @minLength 1
+   * @maxLength 120
+   */
+  name: string;
+  purpose: HubFeedsProfileInputPurpose;
+  config?: HubFeedsProfileInputConfig;
+  base_revision?: number | null;
+}
+
+export interface HubFeedsVersionInput {
+  version_id: number;
+}
+
 export type ChannelBasisInputPriceBasis =
   (typeof ChannelBasisInputPriceBasis)[keyof typeof ChannelBasisInputPriceBasis];
 
@@ -1892,6 +2081,20 @@ export interface CreateShopRequest {
   legal_entity?: string | null;
   channel?: string;
 }
+
+export type PrinterWorkflowOverviewParams = {
+  before_id?: number | null;
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  limit?: number;
+};
+
+export type HubFeedsCompareParams = {
+  cost_profile_id: number;
+  products_profile_id: number;
+};
 
 export type ChannelHistoryParams = {
   /**

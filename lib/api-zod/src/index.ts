@@ -4,6 +4,8 @@ export * from "./generated/types";
 // path-parameters en het type voor de query-parameters van hetzelfde endpoint
 // (orval genereert beide als "<OperationId>Params").
 export {
+  PrinterWorkflowOverviewParams,
+  HubFeedsCompareParams,
   ChannelHistoryParams,
   GetCompetitorScoreDetailParams,
   GetCompetitorFullProfileParams,

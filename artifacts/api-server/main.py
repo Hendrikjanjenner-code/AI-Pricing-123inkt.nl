@@ -135,6 +135,7 @@ async def lifespan(app: FastAPI):
     _schedule_hierarchy_seed = False
     hierarchy_seed_task = None
     channelmanager_task = None
+    hub_feeds_task = None
     try:
         # De DDL/seed-stappen (1 t/m 4) zijn idempotent maar niet gratis:
         # elke run kost ~1-2s aan schema-introspectie. In productie start het
@@ -350,6 +351,9 @@ async def lifespan(app: FastAPI):
             startup_state["hierarchy_seed_status"] = "skipped"
 
         from scheduled_channelmanager import scheduler_loop, disabled as channelmanager_disabled
+        from scheduled_hub_feeds import scheduler_loop as hub_feeds_loop, disabled as hub_feeds_disabled
+        if not hub_feeds_disabled():
+            hub_feeds_task = asyncio.create_task(hub_feeds_loop())
         if not channelmanager_disabled():
             channelmanager_task = asyncio.create_task(scheduler_loop())
             logger.info("Startup: Channelmanager preview scheduler started (shops opt in individually).")
@@ -379,7 +383,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        for _bg_task in (health_monitor_task, feed_sync_task, ai_key_monitor_task, dq_scan_task, budget_cleanup_task, hierarchy_seed_task, channelmanager_task):
+        for _bg_task in (health_monitor_task, feed_sync_task, ai_key_monitor_task, dq_scan_task, budget_cleanup_task, hierarchy_seed_task, channelmanager_task, hub_feeds_task):
             if _bg_task is not None:
                 _bg_task.cancel()
                 try:
@@ -680,6 +684,10 @@ from routes import cost_priority
 app.include_router(cost_priority.router)
 from routes import channelmanager
 app.include_router(channelmanager.router)
+from routes import hub_feeds
+app.include_router(hub_feeds.router)
+from routes import printer_workflow
+app.include_router(printer_workflow.router)
 app.include_router(procurement.router)
 app.include_router(economic.router)
 app.include_router(reporting.router)

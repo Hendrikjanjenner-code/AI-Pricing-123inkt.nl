@@ -8,6 +8,481 @@
 import * as zod from "zod";
 
 /**
+ * @summary Overview
+ */
+export const PrinterWorkflowOverviewParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const printerWorkflowOverviewQueryBeforeIdOneExclusiveMin = 0;
+
+export const printerWorkflowOverviewQueryLimitDefault = 50;
+export const printerWorkflowOverviewQueryLimitMax = 100;
+
+export const PrinterWorkflowOverviewQueryParams = zod.object({
+  before_id: zod
+    .union([
+      zod.coerce
+        .number()
+        .gt(printerWorkflowOverviewQueryBeforeIdOneExclusiveMin),
+      zod.null(),
+    ])
+    .optional(),
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(printerWorkflowOverviewQueryLimitMax)
+    .default(printerWorkflowOverviewQueryLimitDefault),
+});
+
+export const PrinterWorkflowOverviewResponse = zod.unknown();
+
+/**
+ * @summary Configure
+ */
+export const PrinterWorkflowConfigureParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const printerWorkflowConfigureBodyNotesMax = 2000;
+
+export const printerWorkflowConfigureBodyExpectedRevisionMin = 0;
+
+export const printerWorkflowConfigureBodyConfigCurrencyRegExp = new RegExp(
+  "^[A-Z]{3}$",
+);
+export const printerWorkflowConfigureBodyConfigActiveDefault = false;
+export const printerWorkflowConfigureBodyConfigMappingConfirmedDefault = false;
+export const printerWorkflowConfigureBodyConfigIdTransformDefault = `exact`;
+export const printerWorkflowConfigureBodyConfigTransformationConfirmedDefault = false;
+export const printerWorkflowConfigureBodyConfigRulesThresholdDefault = `50`;
+export const printerWorkflowConfigureBodyConfigRulesMultiplierDefault = `1`;
+export const printerWorkflowConfigureBodyConfigRulesRoundInnerIntegerDefault = false;
+export const printerWorkflowConfigureBodyConfigRulesLowerTailDefault = `0`;
+export const printerWorkflowConfigureBodyConfigRulesUpperTailDefault = `0`;
+
+export const PrinterWorkflowConfigureBody = zod.object({
+  notes: zod.string().min(1).max(printerWorkflowConfigureBodyNotesMax),
+  expected_revision: zod
+    .number()
+    .min(printerWorkflowConfigureBodyExpectedRevisionMin),
+  config: zod.object({
+    currency: zod
+      .string()
+      .regex(printerWorkflowConfigureBodyConfigCurrencyRegExp),
+    price_basis: zod.enum(["net", "gross"]),
+    vat_rate: zod.string(),
+    active: zod
+      .boolean()
+      .default(printerWorkflowConfigureBodyConfigActiveDefault),
+    mapping_confirmed: zod
+      .boolean()
+      .default(printerWorkflowConfigureBodyConfigMappingConfirmedDefault),
+    shops: zod.record(zod.string(), zod.number()),
+    id_transform: zod
+      .enum(["exact", "nl_six_digits"])
+      .default(printerWorkflowConfigureBodyConfigIdTransformDefault),
+    transformation_confirmed: zod
+      .boolean()
+      .default(
+        printerWorkflowConfigureBodyConfigTransformationConfirmedDefault,
+      ),
+    rules: zod
+      .record(
+        zod.string(),
+        zod.object({
+          threshold: zod
+            .string()
+            .default(printerWorkflowConfigureBodyConfigRulesThresholdDefault),
+          lower_offset: zod.string(),
+          upper_offset: zod.string(),
+          multiplier: zod
+            .string()
+            .default(printerWorkflowConfigureBodyConfigRulesMultiplierDefault),
+          round_inner_integer: zod
+            .boolean()
+            .default(
+              printerWorkflowConfigureBodyConfigRulesRoundInnerIntegerDefault,
+            ),
+          lower_tail: zod
+            .string()
+            .default(printerWorkflowConfigureBodyConfigRulesLowerTailDefault),
+          upper_tail: zod
+            .string()
+            .default(printerWorkflowConfigureBodyConfigRulesUpperTailDefault),
+        }),
+      )
+      .optional(),
+    export_columns: zod
+      .record(
+        zod.string(),
+        zod.enum(["sku", "shop_id", "label", "target_price"]),
+      )
+      .optional(),
+  }),
+});
+
+export const PrinterWorkflowConfigureResponse = zod.unknown();
+
+/**
+ * @summary Import Pre
+ */
+export const PrinterWorkflowImportPreParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const printerWorkflowImportPreBodyNotesMax = 2000;
+
+export const printerWorkflowImportPreBodyRowsItemSkuMax = 500;
+
+export const printerWorkflowImportPreBodyRowsItemShopIdExclusiveMin = 0;
+
+export const printerWorkflowImportPreBodyRowsMax = 300000;
+
+export const PrinterWorkflowImportPreBody = zod.object({
+  notes: zod.string().min(1).max(printerWorkflowImportPreBodyNotesMax),
+  rows: zod
+    .array(
+      zod.object({
+        sku: zod
+          .string()
+          .min(1)
+          .max(printerWorkflowImportPreBodyRowsItemSkuMax),
+        shop_id: zod
+          .number()
+          .gt(printerWorkflowImportPreBodyRowsItemShopIdExclusiveMin),
+        price: zod.string(),
+      }),
+    )
+    .min(1)
+    .max(printerWorkflowImportPreBodyRowsMax),
+});
+
+export const PrinterWorkflowImportPreResponse = zod.unknown();
+
+/**
+ * @summary Approve Advice
+ */
+export const PrinterWorkflowApproveAdviceParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const printerWorkflowApproveAdviceBodyNotesMax = 2000;
+
+export const printerWorkflowApproveAdviceBodyProfileIdExclusiveMin = 0;
+
+export const printerWorkflowApproveAdviceBodyVersionIdExclusiveMin = 0;
+
+export const printerWorkflowApproveAdviceBodySemanticsConfirmedDefault = false;
+
+export const PrinterWorkflowApproveAdviceBody = zod.object({
+  notes: zod.string().min(1).max(printerWorkflowApproveAdviceBodyNotesMax),
+  profile_id: zod
+    .number()
+    .gt(printerWorkflowApproveAdviceBodyProfileIdExclusiveMin),
+  version_id: zod
+    .number()
+    .gt(printerWorkflowApproveAdviceBodyVersionIdExclusiveMin),
+  semantics_confirmed: zod
+    .boolean()
+    .default(printerWorkflowApproveAdviceBodySemanticsConfirmedDefault),
+});
+
+export const PrinterWorkflowApproveAdviceResponse = zod.unknown();
+
+/**
+ * @summary Run Calculation
+ */
+export const PrinterWorkflowRunCalculationParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const printerWorkflowRunCalculationBodyNotesMax = 2000;
+
+export const printerWorkflowRunCalculationBodyAdviceSnapshotIdExclusiveMin = 0;
+
+export const PrinterWorkflowRunCalculationBody = zod.object({
+  notes: zod.string().min(1).max(printerWorkflowRunCalculationBodyNotesMax),
+  advice_snapshot_id: zod
+    .number()
+    .gt(printerWorkflowRunCalculationBodyAdviceSnapshotIdExclusiveMin),
+});
+
+export const PrinterWorkflowRunCalculationResponse = zod.unknown();
+
+/**
+ * @summary Approve
+ */
+export const PrinterWorkflowApproveParams = zod.object({
+  shop_id: zod.coerce.number(),
+  calculation_id: zod.coerce.number(),
+});
+
+export const printerWorkflowApproveBodyNotesMax = 2000;
+
+export const printerWorkflowApproveBodyAcknowledgeWarningsDefault = false;
+
+export const PrinterWorkflowApproveBody = zod.object({
+  notes: zod.string().min(1).max(printerWorkflowApproveBodyNotesMax),
+  acknowledge_warnings: zod
+    .boolean()
+    .default(printerWorkflowApproveBodyAcknowledgeWarningsDefault),
+});
+
+export const PrinterWorkflowApproveResponse = zod.unknown();
+
+/**
+ * @summary Export
+ */
+export const PrinterWorkflowExportParams = zod.object({
+  shop_id: zod.coerce.number(),
+  approval_id: zod.coerce.number(),
+});
+
+export const printerWorkflowExportBodyNotesMax = 2000;
+
+export const PrinterWorkflowExportBody = zod.object({
+  notes: zod.string().min(1).max(printerWorkflowExportBodyNotesMax),
+});
+
+export const PrinterWorkflowExportResponse = zod.unknown();
+
+/**
+ * @summary Download
+ */
+export const PrinterWorkflowDownloadParams = zod.object({
+  shop_id: zod.coerce.number(),
+  export_id: zod.coerce.number(),
+});
+
+/**
+ * @summary Readback
+ */
+export const PrinterWorkflowReadbackParams = zod.object({
+  shop_id: zod.coerce.number(),
+  export_id: zod.coerce.number(),
+});
+
+export const printerWorkflowReadbackBodyNotesMax = 2000;
+
+export const printerWorkflowReadbackBodyRowsItemSkuMax = 500;
+
+export const printerWorkflowReadbackBodyRowsItemShopIdExclusiveMin = 0;
+
+export const printerWorkflowReadbackBodyRowsMax = 300000;
+
+export const PrinterWorkflowReadbackBody = zod.object({
+  notes: zod.string().min(1).max(printerWorkflowReadbackBodyNotesMax),
+  rows: zod
+    .array(
+      zod.object({
+        sku: zod.string().min(1).max(printerWorkflowReadbackBodyRowsItemSkuMax),
+        shop_id: zod
+          .number()
+          .gt(printerWorkflowReadbackBodyRowsItemShopIdExclusiveMin),
+        price: zod.string(),
+      }),
+    )
+    .min(1)
+    .max(printerWorkflowReadbackBodyRowsMax),
+});
+
+export const PrinterWorkflowReadbackResponse = zod.unknown();
+
+/**
+ * @summary Download Readback
+ */
+export const PrinterWorkflowDownloadReadbackParams = zod.object({
+  shop_id: zod.coerce.number(),
+  readback_id: zod.coerce.number(),
+});
+
+/**
+ * @summary Profiles
+ */
+export const HubFeedsProfilesParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const HubFeedsProfilesResponse = zod.unknown();
+
+/**
+ * @summary Create
+ */
+export const HubFeedsCreateParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const hubFeedsCreateBodyNameMax = 120;
+
+export const HubFeedsCreateBody = zod.object({
+  name: zod.string().min(1).max(hubFeedsCreateBodyNameMax),
+  purpose: zod.enum(["cost", "products", "advice", "cost_output"]),
+  config: zod.record(zod.string(), zod.unknown()).optional(),
+  base_revision: zod.union([zod.number(), zod.null()]).optional(),
+});
+
+export const HubFeedsCreateResponse = zod.unknown();
+
+/**
+ * @summary Update
+ */
+export const HubFeedsUpdateParams = zod.object({
+  shop_id: zod.coerce.number(),
+  profile_id: zod.coerce.number(),
+});
+
+export const hubFeedsUpdateBodyNameMax = 120;
+
+export const HubFeedsUpdateBody = zod.object({
+  name: zod.string().min(1).max(hubFeedsUpdateBodyNameMax),
+  purpose: zod.enum(["cost", "products", "advice", "cost_output"]),
+  config: zod.record(zod.string(), zod.unknown()).optional(),
+  base_revision: zod.union([zod.number(), zod.null()]).optional(),
+});
+
+export const HubFeedsUpdateResponse = zod.unknown();
+
+/**
+ * @summary Upload
+ */
+export const HubFeedsUploadParams = zod.object({
+  shop_id: zod.coerce.number(),
+  profile_id: zod.coerce.number(),
+});
+
+export const HubFeedsUploadBody = zod.object({
+  file: zod.instanceof(File),
+});
+
+export const HubFeedsUploadResponse = zod.unknown();
+
+/**
+ * @summary Test Url
+ */
+export const HubFeedsTestUrlParams = zod.object({
+  shop_id: zod.coerce.number(),
+  profile_id: zod.coerce.number(),
+});
+
+export const HubFeedsTestUrlResponse = zod.unknown();
+
+/**
+ * @summary Activate
+ */
+export const HubFeedsActivateParams = zod.object({
+  shop_id: zod.coerce.number(),
+  profile_id: zod.coerce.number(),
+});
+
+export const HubFeedsActivateBody = zod.object({
+  version_id: zod.number(),
+});
+
+export const HubFeedsActivateResponse = zod.unknown();
+
+/**
+ * @summary Pause
+ */
+export const HubFeedsPauseParams = zod.object({
+  shop_id: zod.coerce.number(),
+  profile_id: zod.coerce.number(),
+});
+
+export const HubFeedsPauseResponse = zod.unknown();
+
+/**
+ * @summary Versions
+ */
+export const HubFeedsVersionsParams = zod.object({
+  shop_id: zod.coerce.number(),
+  profile_id: zod.coerce.number(),
+});
+
+export const HubFeedsVersionsResponse = zod.unknown();
+
+/**
+ * @summary Version
+ */
+export const HubFeedsVersionParams = zod.object({
+  shop_id: zod.coerce.number(),
+  profile_id: zod.coerce.number(),
+  version_id: zod.coerce.number(),
+});
+
+export const HubFeedsVersionResponse = zod.unknown();
+
+/**
+ * @summary Download
+ */
+export const HubFeedsDownloadParams = zod.object({
+  shop_id: zod.coerce.number(),
+  profile_id: zod.coerce.number(),
+  version_id: zod.coerce.number(),
+});
+
+/**
+ * @summary Build
+ */
+export const HubFeedsBuildParams = zod.object({
+  shop_id: zod.coerce.number(),
+  profile_id: zod.coerce.number(),
+});
+
+export const HubFeedsBuildBody = zod.object({
+  source_profile_id: zod.number(),
+  source_version_id: zod.number(),
+});
+
+export const HubFeedsBuildResponse = zod.unknown();
+
+/**
+ * @summary Release
+ */
+export const HubFeedsReleaseParams = zod.object({
+  shop_id: zod.coerce.number(),
+  profile_id: zod.coerce.number(),
+});
+
+export const HubFeedsReleaseBody = zod.object({
+  version_id: zod.number(),
+});
+
+export const HubFeedsReleaseResponse = zod.unknown();
+
+/**
+ * @summary Rotate Token
+ */
+export const HubFeedsRotateTokenParams = zod.object({
+  shop_id: zod.coerce.number(),
+  profile_id: zod.coerce.number(),
+});
+
+export const HubFeedsRotateTokenResponse = zod.unknown();
+
+/**
+ * @summary Feed
+ */
+export const HubFeedsFeedParams = zod.object({
+  shop_id: zod.coerce.number(),
+  profile_id: zod.coerce.number(),
+});
+
+/**
+ * @summary Compare
+ */
+export const HubFeedsCompareParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const HubFeedsCompareQueryParams = zod.object({
+  cost_profile_id: zod.coerce.number(),
+  products_profile_id: zod.coerce.number(),
+});
+
+export const HubFeedsCompareResponse = zod.unknown();
+
+/**
  * @summary Shops
  */
 export const ChannelShopsResponse = zod.unknown();

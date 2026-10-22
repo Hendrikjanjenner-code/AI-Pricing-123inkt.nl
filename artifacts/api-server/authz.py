@@ -59,6 +59,7 @@ ROUTE_PERMISSIONS: dict[str, str] = {
     # Pricing
     "recommendations": "pricing.view",
     "cost-priority": "pricing.view",
+    "hub-feeds": "pricing.view",
     "channelmanager": "pricing.view",
     "elasticiteit": "pricing.view",
     "break-even": "pricing.view",
@@ -350,6 +351,7 @@ _APPROVE_HINTS = ("approve", "reject", "decision", "override", "goedkeur", "afwi
 
 # Segment → default schrijf-permissie.
 WRITE_PERMISSIONS: dict[str, str] = {
+    "hub-feeds": "pricing.propose",
     "channelmanager": "pricing.propose",
     "recommendations": "pricing.propose",
     "recommendation": "pricing.propose",

@@ -18,6 +18,7 @@ import type { InputMode } from "@/components/pricing-hub/PreviewInput";
 import { PreviewResults } from "@/components/pricing-hub/PreviewResults";
 import { HistoryPanel } from "@/components/pricing-hub/HistoryPanel";
 import { Explainer } from "@/components/pricing-hub/Explainer";
+import { FeedProfilesPanel } from "@/components/feeds/FeedProfilesPanel";
 import {
   describeApiError, emptyManualRow, manualRowsError, previewFingerprint, rulesEqual, sourcesOf, toScenarioRows,
 } from "@/lib/cost-priority/model";
@@ -65,8 +66,27 @@ export default function PricingHub() {
   return (
     <Shell shopName={shop?.name}>
       {shopPicker}
-      <CostPriorityWorkspace key={scopeToken ?? "x"} shopId={shopId} userKey={userKey} scopeToken={scopeToken} isCurrent={isCurrent} />
+      <HubTabs key={scopeToken ?? "x"} shopId={shopId} userKey={userKey} scopeToken={scopeToken} isCurrent={isCurrent} />
     </Shell>
+  );
+}
+
+function HubTabs(props: { shopId: number; userKey: string; scopeToken: string | null; isCurrent: (t: string | null) => boolean }) {
+  const [tab, setTab] = useState<"rules" | "feeds">("rules");
+  return (
+    <div className="space-y-4">
+      <div className="inline-flex rounded-lg border bg-muted/40 p-1" role="tablist">
+        {([["rules", "Kostprioriteit"], ["feeds", "Kostbronnen & costfeed"]] as const).map(([id, label]) => (
+          <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} data-testid={`tab-hub-${id}`}
+            className={`rounded-md px-4 py-1.5 text-sm transition-colors ${tab === id ? "bg-card font-medium shadow-sm" : "text-muted-foreground hover:bg-card/60"}`}>{label}</button>
+        ))}
+      </div>
+      {tab === "rules" ? <CostPriorityWorkspace {...props} /> : props.scopeToken && (
+        <FeedProfilesPanel scope={{ shopId: props.shopId, userKey: props.userKey, scopeToken: props.scopeToken, isCurrent: props.isCurrent }}
+          purposes={["cost", "cost_output", "products", "advice"]} title="Kostbronnen, productreferentie en costfeed"
+          intro="DRS-kostbronnen met expliciete kolom-, type- en btw-mapping. Een upload of test gaat naar staging; activering, preview-bouw en vrijgave van de costfeed zijn aparte, expliciete stappen." />
+      )}
+    </div>
   );
 }
 

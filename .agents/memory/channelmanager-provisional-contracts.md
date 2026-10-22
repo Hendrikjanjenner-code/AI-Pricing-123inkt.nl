@@ -20,3 +20,15 @@ The user wants DRS cost inputs routed through Pricing Hub, a Hub-generated CSV f
 **Why:** The user specified this operational sequence when supplying the two current input feeds and printer workbook.
 
 **How to apply:** Keep uploads unchanged and create new exports. Connections must be explicitly activated before live processing; attaching a sample or saving settings is not activation. Keep the existing competitor feed independent and unchanged. Missing external fields remain configurable and unverified rather than invented.
+
+The supplied Product feed is a product/current-sale-price reference, not a verified PriceShape advice export. The supplied CostPrice sample contains final costs, not all purchase-price sources. The printer workbook's pre/post sheets are empty, so its lookup columns are provisional, not a verified DRS import contract.
+
+**Why:** Treating these samples as complete operational contracts would silently substitute current prices for advice or invent missing purchase costs.
+
+**How to apply:** Require a separately mapped advice source and an enriched cost source for actual calculations. Keep the original reference files importable without claiming they supply those missing fields. Confirm PriceShape's supported machine-feed authentication before treating a generated private feed URL as an operational external connection.
+
+Readback accepts a full post-change price snapshot, but asserts only the non-suppressed targets of the exact exported workbook. Unchanged products outside that export are informational, not mismatches.
+
+**Why:** A full DRS readback naturally contains unchanged products and zero-price channels that were deliberately excluded from the export.
+
+**How to apply:** Missing or different exported targets must block confirmation; unrelated rows must not. Shop authorization and numeric validation still apply to the entire input.

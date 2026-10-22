@@ -108,6 +108,12 @@ import type {
   GetProductFilterSubSubcategoriesParams,
   GetProductFilterSubcategoriesParams,
   HealthStatus,
+  HubFeedsBodyUploadApiHubFeedsShopIdProfilesProfileIdUploadPost,
+  HubFeedsBuildInput,
+  HubFeedsCompareParams,
+  HubFeedsHTTPValidationError,
+  HubFeedsProfileInput,
+  HubFeedsVersionInput,
   ImportJob,
   IntelligenceSignal,
   ListAuthzPermissions200,
@@ -126,6 +132,14 @@ import type {
   OutlierReconciliation,
   OverrideRequest,
   PriceChangeBucket,
+  PrinterWorkflowAdviceInput,
+  PrinterWorkflowApproveInput,
+  PrinterWorkflowCalculateInput,
+  PrinterWorkflowConfigInput,
+  PrinterWorkflowHTTPValidationError,
+  PrinterWorkflowNotes,
+  PrinterWorkflowOverviewParams,
+  PrinterWorkflowPricesInput,
   Product,
   ProductFilterNodeList,
   ProductFilterProductList,
@@ -168,6 +182,2470 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+/**
+ * @summary Overview
+ */
+export const getPrinterWorkflowOverviewUrl = (
+  shopId: number,
+  params?: PrinterWorkflowOverviewParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/channelmanager/printer/${shopId}?${stringifiedParams}`
+    : `/api/channelmanager/printer/${shopId}`;
+};
+
+export const printerWorkflowOverview = async (
+  shopId: number,
+  params?: PrinterWorkflowOverviewParams,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getPrinterWorkflowOverviewUrl(shopId, params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getPrinterWorkflowOverviewQueryKey = (
+  shopId: number,
+  params?: PrinterWorkflowOverviewParams,
+) => {
+  return [
+    `/api/channelmanager/printer/${shopId}`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getPrinterWorkflowOverviewQueryOptions = <
+  TData = Awaited<ReturnType<typeof printerWorkflowOverview>>,
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+>(
+  shopId: number,
+  params?: PrinterWorkflowOverviewParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof printerWorkflowOverview>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getPrinterWorkflowOverviewQueryKey(shopId, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof printerWorkflowOverview>>
+  > = ({ signal }) =>
+    printerWorkflowOverview(shopId, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!shopId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof printerWorkflowOverview>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type PrinterWorkflowOverviewQueryResult = NonNullable<
+  Awaited<ReturnType<typeof printerWorkflowOverview>>
+>;
+export type PrinterWorkflowOverviewQueryError =
+  ErrorType<PrinterWorkflowHTTPValidationError>;
+
+/**
+ * @summary Overview
+ */
+
+export function usePrinterWorkflowOverview<
+  TData = Awaited<ReturnType<typeof printerWorkflowOverview>>,
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+>(
+  shopId: number,
+  params?: PrinterWorkflowOverviewParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof printerWorkflowOverview>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getPrinterWorkflowOverviewQueryOptions(
+    shopId,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Configure
+ */
+export const getPrinterWorkflowConfigureUrl = (shopId: number) => {
+  return `/api/channelmanager/printer/${shopId}/config`;
+};
+
+export const printerWorkflowConfigure = async (
+  shopId: number,
+  printerWorkflowConfigInput: PrinterWorkflowConfigInput,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getPrinterWorkflowConfigureUrl(shopId), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(printerWorkflowConfigInput),
+  });
+};
+
+export const getPrinterWorkflowConfigureMutationOptions = <
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof printerWorkflowConfigure>>,
+    TError,
+    { shopId: number; data: BodyType<PrinterWorkflowConfigInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof printerWorkflowConfigure>>,
+  TError,
+  { shopId: number; data: BodyType<PrinterWorkflowConfigInput> },
+  TContext
+> => {
+  const mutationKey = ["printerWorkflowConfigure"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof printerWorkflowConfigure>>,
+    { shopId: number; data: BodyType<PrinterWorkflowConfigInput> }
+  > = (props) => {
+    const { shopId, data } = props ?? {};
+
+    return printerWorkflowConfigure(shopId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PrinterWorkflowConfigureMutationResult = NonNullable<
+  Awaited<ReturnType<typeof printerWorkflowConfigure>>
+>;
+export type PrinterWorkflowConfigureMutationBody =
+  BodyType<PrinterWorkflowConfigInput>;
+export type PrinterWorkflowConfigureMutationError =
+  ErrorType<PrinterWorkflowHTTPValidationError>;
+
+/**
+ * @summary Configure
+ */
+export const usePrinterWorkflowConfigure = <
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof printerWorkflowConfigure>>,
+    TError,
+    { shopId: number; data: BodyType<PrinterWorkflowConfigInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof printerWorkflowConfigure>>,
+  TError,
+  { shopId: number; data: BodyType<PrinterWorkflowConfigInput> },
+  TContext
+> => {
+  return useMutation(getPrinterWorkflowConfigureMutationOptions(options));
+};
+
+/**
+ * @summary Import Pre
+ */
+export const getPrinterWorkflowImportPreUrl = (shopId: number) => {
+  return `/api/channelmanager/printer/${shopId}/pre`;
+};
+
+export const printerWorkflowImportPre = async (
+  shopId: number,
+  printerWorkflowPricesInput: PrinterWorkflowPricesInput,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getPrinterWorkflowImportPreUrl(shopId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(printerWorkflowPricesInput),
+  });
+};
+
+export const getPrinterWorkflowImportPreMutationOptions = <
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof printerWorkflowImportPre>>,
+    TError,
+    { shopId: number; data: BodyType<PrinterWorkflowPricesInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof printerWorkflowImportPre>>,
+  TError,
+  { shopId: number; data: BodyType<PrinterWorkflowPricesInput> },
+  TContext
+> => {
+  const mutationKey = ["printerWorkflowImportPre"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof printerWorkflowImportPre>>,
+    { shopId: number; data: BodyType<PrinterWorkflowPricesInput> }
+  > = (props) => {
+    const { shopId, data } = props ?? {};
+
+    return printerWorkflowImportPre(shopId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PrinterWorkflowImportPreMutationResult = NonNullable<
+  Awaited<ReturnType<typeof printerWorkflowImportPre>>
+>;
+export type PrinterWorkflowImportPreMutationBody =
+  BodyType<PrinterWorkflowPricesInput>;
+export type PrinterWorkflowImportPreMutationError =
+  ErrorType<PrinterWorkflowHTTPValidationError>;
+
+/**
+ * @summary Import Pre
+ */
+export const usePrinterWorkflowImportPre = <
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof printerWorkflowImportPre>>,
+    TError,
+    { shopId: number; data: BodyType<PrinterWorkflowPricesInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof printerWorkflowImportPre>>,
+  TError,
+  { shopId: number; data: BodyType<PrinterWorkflowPricesInput> },
+  TContext
+> => {
+  return useMutation(getPrinterWorkflowImportPreMutationOptions(options));
+};
+
+/**
+ * @summary Approve Advice
+ */
+export const getPrinterWorkflowApproveAdviceUrl = (shopId: number) => {
+  return `/api/channelmanager/printer/${shopId}/advice`;
+};
+
+export const printerWorkflowApproveAdvice = async (
+  shopId: number,
+  printerWorkflowAdviceInput: PrinterWorkflowAdviceInput,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getPrinterWorkflowApproveAdviceUrl(shopId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(printerWorkflowAdviceInput),
+  });
+};
+
+export const getPrinterWorkflowApproveAdviceMutationOptions = <
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof printerWorkflowApproveAdvice>>,
+    TError,
+    { shopId: number; data: BodyType<PrinterWorkflowAdviceInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof printerWorkflowApproveAdvice>>,
+  TError,
+  { shopId: number; data: BodyType<PrinterWorkflowAdviceInput> },
+  TContext
+> => {
+  const mutationKey = ["printerWorkflowApproveAdvice"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof printerWorkflowApproveAdvice>>,
+    { shopId: number; data: BodyType<PrinterWorkflowAdviceInput> }
+  > = (props) => {
+    const { shopId, data } = props ?? {};
+
+    return printerWorkflowApproveAdvice(shopId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PrinterWorkflowApproveAdviceMutationResult = NonNullable<
+  Awaited<ReturnType<typeof printerWorkflowApproveAdvice>>
+>;
+export type PrinterWorkflowApproveAdviceMutationBody =
+  BodyType<PrinterWorkflowAdviceInput>;
+export type PrinterWorkflowApproveAdviceMutationError =
+  ErrorType<PrinterWorkflowHTTPValidationError>;
+
+/**
+ * @summary Approve Advice
+ */
+export const usePrinterWorkflowApproveAdvice = <
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof printerWorkflowApproveAdvice>>,
+    TError,
+    { shopId: number; data: BodyType<PrinterWorkflowAdviceInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof printerWorkflowApproveAdvice>>,
+  TError,
+  { shopId: number; data: BodyType<PrinterWorkflowAdviceInput> },
+  TContext
+> => {
+  return useMutation(getPrinterWorkflowApproveAdviceMutationOptions(options));
+};
+
+/**
+ * @summary Run Calculation
+ */
+export const getPrinterWorkflowRunCalculationUrl = (shopId: number) => {
+  return `/api/channelmanager/printer/${shopId}/calculate`;
+};
+
+export const printerWorkflowRunCalculation = async (
+  shopId: number,
+  printerWorkflowCalculateInput: PrinterWorkflowCalculateInput,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getPrinterWorkflowRunCalculationUrl(shopId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(printerWorkflowCalculateInput),
+  });
+};
+
+export const getPrinterWorkflowRunCalculationMutationOptions = <
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof printerWorkflowRunCalculation>>,
+    TError,
+    { shopId: number; data: BodyType<PrinterWorkflowCalculateInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof printerWorkflowRunCalculation>>,
+  TError,
+  { shopId: number; data: BodyType<PrinterWorkflowCalculateInput> },
+  TContext
+> => {
+  const mutationKey = ["printerWorkflowRunCalculation"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof printerWorkflowRunCalculation>>,
+    { shopId: number; data: BodyType<PrinterWorkflowCalculateInput> }
+  > = (props) => {
+    const { shopId, data } = props ?? {};
+
+    return printerWorkflowRunCalculation(shopId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PrinterWorkflowRunCalculationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof printerWorkflowRunCalculation>>
+>;
+export type PrinterWorkflowRunCalculationMutationBody =
+  BodyType<PrinterWorkflowCalculateInput>;
+export type PrinterWorkflowRunCalculationMutationError =
+  ErrorType<PrinterWorkflowHTTPValidationError>;
+
+/**
+ * @summary Run Calculation
+ */
+export const usePrinterWorkflowRunCalculation = <
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof printerWorkflowRunCalculation>>,
+    TError,
+    { shopId: number; data: BodyType<PrinterWorkflowCalculateInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof printerWorkflowRunCalculation>>,
+  TError,
+  { shopId: number; data: BodyType<PrinterWorkflowCalculateInput> },
+  TContext
+> => {
+  return useMutation(getPrinterWorkflowRunCalculationMutationOptions(options));
+};
+
+/**
+ * @summary Approve
+ */
+export const getPrinterWorkflowApproveUrl = (
+  shopId: number,
+  calculationId: number,
+) => {
+  return `/api/channelmanager/printer/${shopId}/approve/${calculationId}`;
+};
+
+export const printerWorkflowApprove = async (
+  shopId: number,
+  calculationId: number,
+  printerWorkflowApproveInput: PrinterWorkflowApproveInput,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(
+    getPrinterWorkflowApproveUrl(shopId, calculationId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(printerWorkflowApproveInput),
+    },
+  );
+};
+
+export const getPrinterWorkflowApproveMutationOptions = <
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof printerWorkflowApprove>>,
+    TError,
+    {
+      shopId: number;
+      calculationId: number;
+      data: BodyType<PrinterWorkflowApproveInput>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof printerWorkflowApprove>>,
+  TError,
+  {
+    shopId: number;
+    calculationId: number;
+    data: BodyType<PrinterWorkflowApproveInput>;
+  },
+  TContext
+> => {
+  const mutationKey = ["printerWorkflowApprove"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof printerWorkflowApprove>>,
+    {
+      shopId: number;
+      calculationId: number;
+      data: BodyType<PrinterWorkflowApproveInput>;
+    }
+  > = (props) => {
+    const { shopId, calculationId, data } = props ?? {};
+
+    return printerWorkflowApprove(shopId, calculationId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PrinterWorkflowApproveMutationResult = NonNullable<
+  Awaited<ReturnType<typeof printerWorkflowApprove>>
+>;
+export type PrinterWorkflowApproveMutationBody =
+  BodyType<PrinterWorkflowApproveInput>;
+export type PrinterWorkflowApproveMutationError =
+  ErrorType<PrinterWorkflowHTTPValidationError>;
+
+/**
+ * @summary Approve
+ */
+export const usePrinterWorkflowApprove = <
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof printerWorkflowApprove>>,
+    TError,
+    {
+      shopId: number;
+      calculationId: number;
+      data: BodyType<PrinterWorkflowApproveInput>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof printerWorkflowApprove>>,
+  TError,
+  {
+    shopId: number;
+    calculationId: number;
+    data: BodyType<PrinterWorkflowApproveInput>;
+  },
+  TContext
+> => {
+  return useMutation(getPrinterWorkflowApproveMutationOptions(options));
+};
+
+/**
+ * @summary Export
+ */
+export const getPrinterWorkflowExportUrl = (
+  shopId: number,
+  approvalId: number,
+) => {
+  return `/api/channelmanager/printer/${shopId}/export/${approvalId}`;
+};
+
+export const printerWorkflowExport = async (
+  shopId: number,
+  approvalId: number,
+  printerWorkflowNotes: PrinterWorkflowNotes,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getPrinterWorkflowExportUrl(shopId, approvalId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(printerWorkflowNotes),
+  });
+};
+
+export const getPrinterWorkflowExportMutationOptions = <
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof printerWorkflowExport>>,
+    TError,
+    {
+      shopId: number;
+      approvalId: number;
+      data: BodyType<PrinterWorkflowNotes>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof printerWorkflowExport>>,
+  TError,
+  { shopId: number; approvalId: number; data: BodyType<PrinterWorkflowNotes> },
+  TContext
+> => {
+  const mutationKey = ["printerWorkflowExport"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof printerWorkflowExport>>,
+    { shopId: number; approvalId: number; data: BodyType<PrinterWorkflowNotes> }
+  > = (props) => {
+    const { shopId, approvalId, data } = props ?? {};
+
+    return printerWorkflowExport(shopId, approvalId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PrinterWorkflowExportMutationResult = NonNullable<
+  Awaited<ReturnType<typeof printerWorkflowExport>>
+>;
+export type PrinterWorkflowExportMutationBody = BodyType<PrinterWorkflowNotes>;
+export type PrinterWorkflowExportMutationError =
+  ErrorType<PrinterWorkflowHTTPValidationError>;
+
+/**
+ * @summary Export
+ */
+export const usePrinterWorkflowExport = <
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof printerWorkflowExport>>,
+    TError,
+    {
+      shopId: number;
+      approvalId: number;
+      data: BodyType<PrinterWorkflowNotes>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof printerWorkflowExport>>,
+  TError,
+  { shopId: number; approvalId: number; data: BodyType<PrinterWorkflowNotes> },
+  TContext
+> => {
+  return useMutation(getPrinterWorkflowExportMutationOptions(options));
+};
+
+/**
+ * @summary Download
+ */
+export const getPrinterWorkflowDownloadUrl = (
+  shopId: number,
+  exportId: number,
+) => {
+  return `/api/channelmanager/printer/${shopId}/download/${exportId}`;
+};
+
+export const printerWorkflowDownload = async (
+  shopId: number,
+  exportId: number,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getPrinterWorkflowDownloadUrl(shopId, exportId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getPrinterWorkflowDownloadQueryKey = (
+  shopId: number,
+  exportId: number,
+) => {
+  return [
+    `/api/channelmanager/printer/${shopId}/download/${exportId}`,
+  ] as const;
+};
+
+export const getPrinterWorkflowDownloadQueryOptions = <
+  TData = Awaited<ReturnType<typeof printerWorkflowDownload>>,
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+>(
+  shopId: number,
+  exportId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof printerWorkflowDownload>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getPrinterWorkflowDownloadQueryKey(shopId, exportId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof printerWorkflowDownload>>
+  > = ({ signal }) =>
+    printerWorkflowDownload(shopId, exportId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(shopId && exportId),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof printerWorkflowDownload>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type PrinterWorkflowDownloadQueryResult = NonNullable<
+  Awaited<ReturnType<typeof printerWorkflowDownload>>
+>;
+export type PrinterWorkflowDownloadQueryError =
+  ErrorType<PrinterWorkflowHTTPValidationError>;
+
+/**
+ * @summary Download
+ */
+
+export function usePrinterWorkflowDownload<
+  TData = Awaited<ReturnType<typeof printerWorkflowDownload>>,
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+>(
+  shopId: number,
+  exportId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof printerWorkflowDownload>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getPrinterWorkflowDownloadQueryOptions(
+    shopId,
+    exportId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Readback
+ */
+export const getPrinterWorkflowReadbackUrl = (
+  shopId: number,
+  exportId: number,
+) => {
+  return `/api/channelmanager/printer/${shopId}/readback/${exportId}`;
+};
+
+export const printerWorkflowReadback = async (
+  shopId: number,
+  exportId: number,
+  printerWorkflowPricesInput: PrinterWorkflowPricesInput,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getPrinterWorkflowReadbackUrl(shopId, exportId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(printerWorkflowPricesInput),
+  });
+};
+
+export const getPrinterWorkflowReadbackMutationOptions = <
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof printerWorkflowReadback>>,
+    TError,
+    {
+      shopId: number;
+      exportId: number;
+      data: BodyType<PrinterWorkflowPricesInput>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof printerWorkflowReadback>>,
+  TError,
+  {
+    shopId: number;
+    exportId: number;
+    data: BodyType<PrinterWorkflowPricesInput>;
+  },
+  TContext
+> => {
+  const mutationKey = ["printerWorkflowReadback"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof printerWorkflowReadback>>,
+    {
+      shopId: number;
+      exportId: number;
+      data: BodyType<PrinterWorkflowPricesInput>;
+    }
+  > = (props) => {
+    const { shopId, exportId, data } = props ?? {};
+
+    return printerWorkflowReadback(shopId, exportId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PrinterWorkflowReadbackMutationResult = NonNullable<
+  Awaited<ReturnType<typeof printerWorkflowReadback>>
+>;
+export type PrinterWorkflowReadbackMutationBody =
+  BodyType<PrinterWorkflowPricesInput>;
+export type PrinterWorkflowReadbackMutationError =
+  ErrorType<PrinterWorkflowHTTPValidationError>;
+
+/**
+ * @summary Readback
+ */
+export const usePrinterWorkflowReadback = <
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof printerWorkflowReadback>>,
+    TError,
+    {
+      shopId: number;
+      exportId: number;
+      data: BodyType<PrinterWorkflowPricesInput>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof printerWorkflowReadback>>,
+  TError,
+  {
+    shopId: number;
+    exportId: number;
+    data: BodyType<PrinterWorkflowPricesInput>;
+  },
+  TContext
+> => {
+  return useMutation(getPrinterWorkflowReadbackMutationOptions(options));
+};
+
+/**
+ * @summary Download Readback
+ */
+export const getPrinterWorkflowDownloadReadbackUrl = (
+  shopId: number,
+  readbackId: number,
+) => {
+  return `/api/channelmanager/printer/${shopId}/readback/${readbackId}/download`;
+};
+
+export const printerWorkflowDownloadReadback = async (
+  shopId: number,
+  readbackId: number,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(
+    getPrinterWorkflowDownloadReadbackUrl(shopId, readbackId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getPrinterWorkflowDownloadReadbackQueryKey = (
+  shopId: number,
+  readbackId: number,
+) => {
+  return [
+    `/api/channelmanager/printer/${shopId}/readback/${readbackId}/download`,
+  ] as const;
+};
+
+export const getPrinterWorkflowDownloadReadbackQueryOptions = <
+  TData = Awaited<ReturnType<typeof printerWorkflowDownloadReadback>>,
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+>(
+  shopId: number,
+  readbackId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof printerWorkflowDownloadReadback>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getPrinterWorkflowDownloadReadbackQueryKey(shopId, readbackId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof printerWorkflowDownloadReadback>>
+  > = ({ signal }) =>
+    printerWorkflowDownloadReadback(shopId, readbackId, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(shopId && readbackId),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof printerWorkflowDownloadReadback>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type PrinterWorkflowDownloadReadbackQueryResult = NonNullable<
+  Awaited<ReturnType<typeof printerWorkflowDownloadReadback>>
+>;
+export type PrinterWorkflowDownloadReadbackQueryError =
+  ErrorType<PrinterWorkflowHTTPValidationError>;
+
+/**
+ * @summary Download Readback
+ */
+
+export function usePrinterWorkflowDownloadReadback<
+  TData = Awaited<ReturnType<typeof printerWorkflowDownloadReadback>>,
+  TError = ErrorType<PrinterWorkflowHTTPValidationError>,
+>(
+  shopId: number,
+  readbackId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof printerWorkflowDownloadReadback>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getPrinterWorkflowDownloadReadbackQueryOptions(
+    shopId,
+    readbackId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Profiles
+ */
+export const getHubFeedsProfilesUrl = (shopId: number) => {
+  return `/api/hub-feeds/${shopId}/profiles`;
+};
+
+export const hubFeedsProfiles = async (
+  shopId: number,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getHubFeedsProfilesUrl(shopId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getHubFeedsProfilesQueryKey = (shopId: number) => {
+  return [`/api/hub-feeds/${shopId}/profiles`] as const;
+};
+
+export const getHubFeedsProfilesQueryOptions = <
+  TData = Awaited<ReturnType<typeof hubFeedsProfiles>>,
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+>(
+  shopId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof hubFeedsProfiles>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getHubFeedsProfilesQueryKey(shopId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof hubFeedsProfiles>>
+  > = ({ signal }) => hubFeedsProfiles(shopId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!shopId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof hubFeedsProfiles>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type HubFeedsProfilesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof hubFeedsProfiles>>
+>;
+export type HubFeedsProfilesQueryError = ErrorType<HubFeedsHTTPValidationError>;
+
+/**
+ * @summary Profiles
+ */
+
+export function useHubFeedsProfiles<
+  TData = Awaited<ReturnType<typeof hubFeedsProfiles>>,
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+>(
+  shopId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof hubFeedsProfiles>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getHubFeedsProfilesQueryOptions(shopId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create
+ */
+export const getHubFeedsCreateUrl = (shopId: number) => {
+  return `/api/hub-feeds/${shopId}/profiles`;
+};
+
+export const hubFeedsCreate = async (
+  shopId: number,
+  hubFeedsProfileInput: HubFeedsProfileInput,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getHubFeedsCreateUrl(shopId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(hubFeedsProfileInput),
+  });
+};
+
+export const getHubFeedsCreateMutationOptions = <
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof hubFeedsCreate>>,
+    TError,
+    { shopId: number; data: BodyType<HubFeedsProfileInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof hubFeedsCreate>>,
+  TError,
+  { shopId: number; data: BodyType<HubFeedsProfileInput> },
+  TContext
+> => {
+  const mutationKey = ["hubFeedsCreate"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof hubFeedsCreate>>,
+    { shopId: number; data: BodyType<HubFeedsProfileInput> }
+  > = (props) => {
+    const { shopId, data } = props ?? {};
+
+    return hubFeedsCreate(shopId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type HubFeedsCreateMutationResult = NonNullable<
+  Awaited<ReturnType<typeof hubFeedsCreate>>
+>;
+export type HubFeedsCreateMutationBody = BodyType<HubFeedsProfileInput>;
+export type HubFeedsCreateMutationError =
+  ErrorType<HubFeedsHTTPValidationError>;
+
+/**
+ * @summary Create
+ */
+export const useHubFeedsCreate = <
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof hubFeedsCreate>>,
+    TError,
+    { shopId: number; data: BodyType<HubFeedsProfileInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof hubFeedsCreate>>,
+  TError,
+  { shopId: number; data: BodyType<HubFeedsProfileInput> },
+  TContext
+> => {
+  return useMutation(getHubFeedsCreateMutationOptions(options));
+};
+
+/**
+ * @summary Update
+ */
+export const getHubFeedsUpdateUrl = (shopId: number, profileId: number) => {
+  return `/api/hub-feeds/${shopId}/profiles/${profileId}`;
+};
+
+export const hubFeedsUpdate = async (
+  shopId: number,
+  profileId: number,
+  hubFeedsProfileInput: HubFeedsProfileInput,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getHubFeedsUpdateUrl(shopId, profileId), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(hubFeedsProfileInput),
+  });
+};
+
+export const getHubFeedsUpdateMutationOptions = <
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof hubFeedsUpdate>>,
+    TError,
+    { shopId: number; profileId: number; data: BodyType<HubFeedsProfileInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof hubFeedsUpdate>>,
+  TError,
+  { shopId: number; profileId: number; data: BodyType<HubFeedsProfileInput> },
+  TContext
+> => {
+  const mutationKey = ["hubFeedsUpdate"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof hubFeedsUpdate>>,
+    { shopId: number; profileId: number; data: BodyType<HubFeedsProfileInput> }
+  > = (props) => {
+    const { shopId, profileId, data } = props ?? {};
+
+    return hubFeedsUpdate(shopId, profileId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type HubFeedsUpdateMutationResult = NonNullable<
+  Awaited<ReturnType<typeof hubFeedsUpdate>>
+>;
+export type HubFeedsUpdateMutationBody = BodyType<HubFeedsProfileInput>;
+export type HubFeedsUpdateMutationError =
+  ErrorType<HubFeedsHTTPValidationError>;
+
+/**
+ * @summary Update
+ */
+export const useHubFeedsUpdate = <
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof hubFeedsUpdate>>,
+    TError,
+    { shopId: number; profileId: number; data: BodyType<HubFeedsProfileInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof hubFeedsUpdate>>,
+  TError,
+  { shopId: number; profileId: number; data: BodyType<HubFeedsProfileInput> },
+  TContext
+> => {
+  return useMutation(getHubFeedsUpdateMutationOptions(options));
+};
+
+/**
+ * @summary Upload
+ */
+export const getHubFeedsUploadUrl = (shopId: number, profileId: number) => {
+  return `/api/hub-feeds/${shopId}/profiles/${profileId}/upload`;
+};
+
+export const hubFeedsUpload = async (
+  shopId: number,
+  profileId: number,
+  hubFeedsBodyUploadApiHubFeedsShopIdProfilesProfileIdUploadPost: HubFeedsBodyUploadApiHubFeedsShopIdProfilesProfileIdUploadPost,
+  options?: RequestInit,
+): Promise<unknown> => {
+  const formData = new FormData();
+  formData.append(
+    `file`,
+    hubFeedsBodyUploadApiHubFeedsShopIdProfilesProfileIdUploadPost.file,
+  );
+
+  return customFetch<unknown>(getHubFeedsUploadUrl(shopId, profileId), {
+    ...options,
+    method: "POST",
+    body: formData,
+  });
+};
+
+export const getHubFeedsUploadMutationOptions = <
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof hubFeedsUpload>>,
+    TError,
+    {
+      shopId: number;
+      profileId: number;
+      data: BodyType<HubFeedsBodyUploadApiHubFeedsShopIdProfilesProfileIdUploadPost>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof hubFeedsUpload>>,
+  TError,
+  {
+    shopId: number;
+    profileId: number;
+    data: BodyType<HubFeedsBodyUploadApiHubFeedsShopIdProfilesProfileIdUploadPost>;
+  },
+  TContext
+> => {
+  const mutationKey = ["hubFeedsUpload"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof hubFeedsUpload>>,
+    {
+      shopId: number;
+      profileId: number;
+      data: BodyType<HubFeedsBodyUploadApiHubFeedsShopIdProfilesProfileIdUploadPost>;
+    }
+  > = (props) => {
+    const { shopId, profileId, data } = props ?? {};
+
+    return hubFeedsUpload(shopId, profileId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type HubFeedsUploadMutationResult = NonNullable<
+  Awaited<ReturnType<typeof hubFeedsUpload>>
+>;
+export type HubFeedsUploadMutationBody =
+  BodyType<HubFeedsBodyUploadApiHubFeedsShopIdProfilesProfileIdUploadPost>;
+export type HubFeedsUploadMutationError =
+  ErrorType<HubFeedsHTTPValidationError>;
+
+/**
+ * @summary Upload
+ */
+export const useHubFeedsUpload = <
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof hubFeedsUpload>>,
+    TError,
+    {
+      shopId: number;
+      profileId: number;
+      data: BodyType<HubFeedsBodyUploadApiHubFeedsShopIdProfilesProfileIdUploadPost>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof hubFeedsUpload>>,
+  TError,
+  {
+    shopId: number;
+    profileId: number;
+    data: BodyType<HubFeedsBodyUploadApiHubFeedsShopIdProfilesProfileIdUploadPost>;
+  },
+  TContext
+> => {
+  return useMutation(getHubFeedsUploadMutationOptions(options));
+};
+
+/**
+ * @summary Test Url
+ */
+export const getHubFeedsTestUrlUrl = (shopId: number, profileId: number) => {
+  return `/api/hub-feeds/${shopId}/profiles/${profileId}/test`;
+};
+
+export const hubFeedsTestUrl = async (
+  shopId: number,
+  profileId: number,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getHubFeedsTestUrlUrl(shopId, profileId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getHubFeedsTestUrlMutationOptions = <
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof hubFeedsTestUrl>>,
+    TError,
+    { shopId: number; profileId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof hubFeedsTestUrl>>,
+  TError,
+  { shopId: number; profileId: number },
+  TContext
+> => {
+  const mutationKey = ["hubFeedsTestUrl"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof hubFeedsTestUrl>>,
+    { shopId: number; profileId: number }
+  > = (props) => {
+    const { shopId, profileId } = props ?? {};
+
+    return hubFeedsTestUrl(shopId, profileId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type HubFeedsTestUrlMutationResult = NonNullable<
+  Awaited<ReturnType<typeof hubFeedsTestUrl>>
+>;
+
+export type HubFeedsTestUrlMutationError =
+  ErrorType<HubFeedsHTTPValidationError>;
+
+/**
+ * @summary Test Url
+ */
+export const useHubFeedsTestUrl = <
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof hubFeedsTestUrl>>,
+    TError,
+    { shopId: number; profileId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof hubFeedsTestUrl>>,
+  TError,
+  { shopId: number; profileId: number },
+  TContext
+> => {
+  return useMutation(getHubFeedsTestUrlMutationOptions(options));
+};
+
+/**
+ * @summary Activate
+ */
+export const getHubFeedsActivateUrl = (shopId: number, profileId: number) => {
+  return `/api/hub-feeds/${shopId}/profiles/${profileId}/activate`;
+};
+
+export const hubFeedsActivate = async (
+  shopId: number,
+  profileId: number,
+  hubFeedsVersionInput: HubFeedsVersionInput,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getHubFeedsActivateUrl(shopId, profileId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(hubFeedsVersionInput),
+  });
+};
+
+export const getHubFeedsActivateMutationOptions = <
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof hubFeedsActivate>>,
+    TError,
+    { shopId: number; profileId: number; data: BodyType<HubFeedsVersionInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof hubFeedsActivate>>,
+  TError,
+  { shopId: number; profileId: number; data: BodyType<HubFeedsVersionInput> },
+  TContext
+> => {
+  const mutationKey = ["hubFeedsActivate"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof hubFeedsActivate>>,
+    { shopId: number; profileId: number; data: BodyType<HubFeedsVersionInput> }
+  > = (props) => {
+    const { shopId, profileId, data } = props ?? {};
+
+    return hubFeedsActivate(shopId, profileId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type HubFeedsActivateMutationResult = NonNullable<
+  Awaited<ReturnType<typeof hubFeedsActivate>>
+>;
+export type HubFeedsActivateMutationBody = BodyType<HubFeedsVersionInput>;
+export type HubFeedsActivateMutationError =
+  ErrorType<HubFeedsHTTPValidationError>;
+
+/**
+ * @summary Activate
+ */
+export const useHubFeedsActivate = <
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof hubFeedsActivate>>,
+    TError,
+    { shopId: number; profileId: number; data: BodyType<HubFeedsVersionInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof hubFeedsActivate>>,
+  TError,
+  { shopId: number; profileId: number; data: BodyType<HubFeedsVersionInput> },
+  TContext
+> => {
+  return useMutation(getHubFeedsActivateMutationOptions(options));
+};
+
+/**
+ * @summary Pause
+ */
+export const getHubFeedsPauseUrl = (shopId: number, profileId: number) => {
+  return `/api/hub-feeds/${shopId}/profiles/${profileId}/pause`;
+};
+
+export const hubFeedsPause = async (
+  shopId: number,
+  profileId: number,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getHubFeedsPauseUrl(shopId, profileId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getHubFeedsPauseMutationOptions = <
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof hubFeedsPause>>,
+    TError,
+    { shopId: number; profileId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof hubFeedsPause>>,
+  TError,
+  { shopId: number; profileId: number },
+  TContext
+> => {
+  const mutationKey = ["hubFeedsPause"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof hubFeedsPause>>,
+    { shopId: number; profileId: number }
+  > = (props) => {
+    const { shopId, profileId } = props ?? {};
+
+    return hubFeedsPause(shopId, profileId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type HubFeedsPauseMutationResult = NonNullable<
+  Awaited<ReturnType<typeof hubFeedsPause>>
+>;
+
+export type HubFeedsPauseMutationError = ErrorType<HubFeedsHTTPValidationError>;
+
+/**
+ * @summary Pause
+ */
+export const useHubFeedsPause = <
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof hubFeedsPause>>,
+    TError,
+    { shopId: number; profileId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof hubFeedsPause>>,
+  TError,
+  { shopId: number; profileId: number },
+  TContext
+> => {
+  return useMutation(getHubFeedsPauseMutationOptions(options));
+};
+
+/**
+ * @summary Versions
+ */
+export const getHubFeedsVersionsUrl = (shopId: number, profileId: number) => {
+  return `/api/hub-feeds/${shopId}/profiles/${profileId}/versions`;
+};
+
+export const hubFeedsVersions = async (
+  shopId: number,
+  profileId: number,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getHubFeedsVersionsUrl(shopId, profileId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getHubFeedsVersionsQueryKey = (
+  shopId: number,
+  profileId: number,
+) => {
+  return [`/api/hub-feeds/${shopId}/profiles/${profileId}/versions`] as const;
+};
+
+export const getHubFeedsVersionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof hubFeedsVersions>>,
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+>(
+  shopId: number,
+  profileId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof hubFeedsVersions>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getHubFeedsVersionsQueryKey(shopId, profileId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof hubFeedsVersions>>
+  > = ({ signal }) =>
+    hubFeedsVersions(shopId, profileId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(shopId && profileId),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof hubFeedsVersions>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type HubFeedsVersionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof hubFeedsVersions>>
+>;
+export type HubFeedsVersionsQueryError = ErrorType<HubFeedsHTTPValidationError>;
+
+/**
+ * @summary Versions
+ */
+
+export function useHubFeedsVersions<
+  TData = Awaited<ReturnType<typeof hubFeedsVersions>>,
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+>(
+  shopId: number,
+  profileId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof hubFeedsVersions>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getHubFeedsVersionsQueryOptions(
+    shopId,
+    profileId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Version
+ */
+export const getHubFeedsVersionUrl = (
+  shopId: number,
+  profileId: number,
+  versionId: number,
+) => {
+  return `/api/hub-feeds/${shopId}/profiles/${profileId}/versions/${versionId}`;
+};
+
+export const hubFeedsVersion = async (
+  shopId: number,
+  profileId: number,
+  versionId: number,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(
+    getHubFeedsVersionUrl(shopId, profileId, versionId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getHubFeedsVersionQueryKey = (
+  shopId: number,
+  profileId: number,
+  versionId: number,
+) => {
+  return [
+    `/api/hub-feeds/${shopId}/profiles/${profileId}/versions/${versionId}`,
+  ] as const;
+};
+
+export const getHubFeedsVersionQueryOptions = <
+  TData = Awaited<ReturnType<typeof hubFeedsVersion>>,
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+>(
+  shopId: number,
+  profileId: number,
+  versionId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof hubFeedsVersion>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getHubFeedsVersionQueryKey(shopId, profileId, versionId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof hubFeedsVersion>>> = ({
+    signal,
+  }) =>
+    hubFeedsVersion(shopId, profileId, versionId, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(shopId && profileId && versionId),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof hubFeedsVersion>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type HubFeedsVersionQueryResult = NonNullable<
+  Awaited<ReturnType<typeof hubFeedsVersion>>
+>;
+export type HubFeedsVersionQueryError = ErrorType<HubFeedsHTTPValidationError>;
+
+/**
+ * @summary Version
+ */
+
+export function useHubFeedsVersion<
+  TData = Awaited<ReturnType<typeof hubFeedsVersion>>,
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+>(
+  shopId: number,
+  profileId: number,
+  versionId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof hubFeedsVersion>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getHubFeedsVersionQueryOptions(
+    shopId,
+    profileId,
+    versionId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Download
+ */
+export const getHubFeedsDownloadUrl = (
+  shopId: number,
+  profileId: number,
+  versionId: number,
+) => {
+  return `/api/hub-feeds/${shopId}/profiles/${profileId}/versions/${versionId}/download`;
+};
+
+export const hubFeedsDownload = async (
+  shopId: number,
+  profileId: number,
+  versionId: number,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(
+    getHubFeedsDownloadUrl(shopId, profileId, versionId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getHubFeedsDownloadQueryKey = (
+  shopId: number,
+  profileId: number,
+  versionId: number,
+) => {
+  return [
+    `/api/hub-feeds/${shopId}/profiles/${profileId}/versions/${versionId}/download`,
+  ] as const;
+};
+
+export const getHubFeedsDownloadQueryOptions = <
+  TData = Awaited<ReturnType<typeof hubFeedsDownload>>,
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+>(
+  shopId: number,
+  profileId: number,
+  versionId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof hubFeedsDownload>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getHubFeedsDownloadQueryKey(shopId, profileId, versionId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof hubFeedsDownload>>
+  > = ({ signal }) =>
+    hubFeedsDownload(shopId, profileId, versionId, {
+      signal,
+      ...requestOptions,
+    });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(shopId && profileId && versionId),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof hubFeedsDownload>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type HubFeedsDownloadQueryResult = NonNullable<
+  Awaited<ReturnType<typeof hubFeedsDownload>>
+>;
+export type HubFeedsDownloadQueryError = ErrorType<HubFeedsHTTPValidationError>;
+
+/**
+ * @summary Download
+ */
+
+export function useHubFeedsDownload<
+  TData = Awaited<ReturnType<typeof hubFeedsDownload>>,
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+>(
+  shopId: number,
+  profileId: number,
+  versionId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof hubFeedsDownload>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getHubFeedsDownloadQueryOptions(
+    shopId,
+    profileId,
+    versionId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Build
+ */
+export const getHubFeedsBuildUrl = (shopId: number, profileId: number) => {
+  return `/api/hub-feeds/${shopId}/profiles/${profileId}/build`;
+};
+
+export const hubFeedsBuild = async (
+  shopId: number,
+  profileId: number,
+  hubFeedsBuildInput: HubFeedsBuildInput,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getHubFeedsBuildUrl(shopId, profileId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(hubFeedsBuildInput),
+  });
+};
+
+export const getHubFeedsBuildMutationOptions = <
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof hubFeedsBuild>>,
+    TError,
+    { shopId: number; profileId: number; data: BodyType<HubFeedsBuildInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof hubFeedsBuild>>,
+  TError,
+  { shopId: number; profileId: number; data: BodyType<HubFeedsBuildInput> },
+  TContext
+> => {
+  const mutationKey = ["hubFeedsBuild"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof hubFeedsBuild>>,
+    { shopId: number; profileId: number; data: BodyType<HubFeedsBuildInput> }
+  > = (props) => {
+    const { shopId, profileId, data } = props ?? {};
+
+    return hubFeedsBuild(shopId, profileId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type HubFeedsBuildMutationResult = NonNullable<
+  Awaited<ReturnType<typeof hubFeedsBuild>>
+>;
+export type HubFeedsBuildMutationBody = BodyType<HubFeedsBuildInput>;
+export type HubFeedsBuildMutationError = ErrorType<HubFeedsHTTPValidationError>;
+
+/**
+ * @summary Build
+ */
+export const useHubFeedsBuild = <
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof hubFeedsBuild>>,
+    TError,
+    { shopId: number; profileId: number; data: BodyType<HubFeedsBuildInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof hubFeedsBuild>>,
+  TError,
+  { shopId: number; profileId: number; data: BodyType<HubFeedsBuildInput> },
+  TContext
+> => {
+  return useMutation(getHubFeedsBuildMutationOptions(options));
+};
+
+/**
+ * @summary Release
+ */
+export const getHubFeedsReleaseUrl = (shopId: number, profileId: number) => {
+  return `/api/hub-feeds/${shopId}/profiles/${profileId}/release`;
+};
+
+export const hubFeedsRelease = async (
+  shopId: number,
+  profileId: number,
+  hubFeedsVersionInput: HubFeedsVersionInput,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getHubFeedsReleaseUrl(shopId, profileId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(hubFeedsVersionInput),
+  });
+};
+
+export const getHubFeedsReleaseMutationOptions = <
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof hubFeedsRelease>>,
+    TError,
+    { shopId: number; profileId: number; data: BodyType<HubFeedsVersionInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof hubFeedsRelease>>,
+  TError,
+  { shopId: number; profileId: number; data: BodyType<HubFeedsVersionInput> },
+  TContext
+> => {
+  const mutationKey = ["hubFeedsRelease"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof hubFeedsRelease>>,
+    { shopId: number; profileId: number; data: BodyType<HubFeedsVersionInput> }
+  > = (props) => {
+    const { shopId, profileId, data } = props ?? {};
+
+    return hubFeedsRelease(shopId, profileId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type HubFeedsReleaseMutationResult = NonNullable<
+  Awaited<ReturnType<typeof hubFeedsRelease>>
+>;
+export type HubFeedsReleaseMutationBody = BodyType<HubFeedsVersionInput>;
+export type HubFeedsReleaseMutationError =
+  ErrorType<HubFeedsHTTPValidationError>;
+
+/**
+ * @summary Release
+ */
+export const useHubFeedsRelease = <
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof hubFeedsRelease>>,
+    TError,
+    { shopId: number; profileId: number; data: BodyType<HubFeedsVersionInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof hubFeedsRelease>>,
+  TError,
+  { shopId: number; profileId: number; data: BodyType<HubFeedsVersionInput> },
+  TContext
+> => {
+  return useMutation(getHubFeedsReleaseMutationOptions(options));
+};
+
+/**
+ * @summary Rotate Token
+ */
+export const getHubFeedsRotateTokenUrl = (
+  shopId: number,
+  profileId: number,
+) => {
+  return `/api/hub-feeds/${shopId}/profiles/${profileId}/token`;
+};
+
+export const hubFeedsRotateToken = async (
+  shopId: number,
+  profileId: number,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getHubFeedsRotateTokenUrl(shopId, profileId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getHubFeedsRotateTokenMutationOptions = <
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof hubFeedsRotateToken>>,
+    TError,
+    { shopId: number; profileId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof hubFeedsRotateToken>>,
+  TError,
+  { shopId: number; profileId: number },
+  TContext
+> => {
+  const mutationKey = ["hubFeedsRotateToken"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof hubFeedsRotateToken>>,
+    { shopId: number; profileId: number }
+  > = (props) => {
+    const { shopId, profileId } = props ?? {};
+
+    return hubFeedsRotateToken(shopId, profileId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type HubFeedsRotateTokenMutationResult = NonNullable<
+  Awaited<ReturnType<typeof hubFeedsRotateToken>>
+>;
+
+export type HubFeedsRotateTokenMutationError =
+  ErrorType<HubFeedsHTTPValidationError>;
+
+/**
+ * @summary Rotate Token
+ */
+export const useHubFeedsRotateToken = <
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof hubFeedsRotateToken>>,
+    TError,
+    { shopId: number; profileId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof hubFeedsRotateToken>>,
+  TError,
+  { shopId: number; profileId: number },
+  TContext
+> => {
+  return useMutation(getHubFeedsRotateTokenMutationOptions(options));
+};
+
+/**
+ * @summary Feed
+ */
+export const getHubFeedsFeedUrl = (shopId: number, profileId: number) => {
+  return `/api/hub-feeds/${shopId}/profiles/${profileId}/feed`;
+};
+
+export const hubFeedsFeed = async (
+  shopId: number,
+  profileId: number,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getHubFeedsFeedUrl(shopId, profileId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getHubFeedsFeedQueryKey = (shopId: number, profileId: number) => {
+  return [`/api/hub-feeds/${shopId}/profiles/${profileId}/feed`] as const;
+};
+
+export const getHubFeedsFeedQueryOptions = <
+  TData = Awaited<ReturnType<typeof hubFeedsFeed>>,
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+>(
+  shopId: number,
+  profileId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof hubFeedsFeed>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getHubFeedsFeedQueryKey(shopId, profileId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof hubFeedsFeed>>> = ({
+    signal,
+  }) => hubFeedsFeed(shopId, profileId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(shopId && profileId),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof hubFeedsFeed>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type HubFeedsFeedQueryResult = NonNullable<
+  Awaited<ReturnType<typeof hubFeedsFeed>>
+>;
+export type HubFeedsFeedQueryError = ErrorType<HubFeedsHTTPValidationError>;
+
+/**
+ * @summary Feed
+ */
+
+export function useHubFeedsFeed<
+  TData = Awaited<ReturnType<typeof hubFeedsFeed>>,
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+>(
+  shopId: number,
+  profileId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof hubFeedsFeed>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getHubFeedsFeedQueryOptions(shopId, profileId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Compare
+ */
+export const getHubFeedsCompareUrl = (
+  shopId: number,
+  params: HubFeedsCompareParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/hub-feeds/${shopId}/compare?${stringifiedParams}`
+    : `/api/hub-feeds/${shopId}/compare`;
+};
+
+export const hubFeedsCompare = async (
+  shopId: number,
+  params: HubFeedsCompareParams,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getHubFeedsCompareUrl(shopId, params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getHubFeedsCompareQueryKey = (
+  shopId: number,
+  params?: HubFeedsCompareParams,
+) => {
+  return [
+    `/api/hub-feeds/${shopId}/compare`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getHubFeedsCompareQueryOptions = <
+  TData = Awaited<ReturnType<typeof hubFeedsCompare>>,
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+>(
+  shopId: number,
+  params: HubFeedsCompareParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof hubFeedsCompare>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getHubFeedsCompareQueryKey(shopId, params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof hubFeedsCompare>>> = ({
+    signal,
+  }) => hubFeedsCompare(shopId, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!shopId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof hubFeedsCompare>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type HubFeedsCompareQueryResult = NonNullable<
+  Awaited<ReturnType<typeof hubFeedsCompare>>
+>;
+export type HubFeedsCompareQueryError = ErrorType<HubFeedsHTTPValidationError>;
+
+/**
+ * @summary Compare
+ */
+
+export function useHubFeedsCompare<
+  TData = Awaited<ReturnType<typeof hubFeedsCompare>>,
+  TError = ErrorType<HubFeedsHTTPValidationError>,
+>(
+  shopId: number,
+  params: HubFeedsCompareParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof hubFeedsCompare>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getHubFeedsCompareQueryOptions(shopId, params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary Shops

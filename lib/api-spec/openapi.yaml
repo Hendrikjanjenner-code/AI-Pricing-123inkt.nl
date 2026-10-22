@@ -43,6 +43,914 @@ tags:
     description: Commercial AI Copilot (AI Gateway)
 
 paths:
+  # PRINTERWORKFLOW PATHS BEGIN
+  /channelmanager/printer/{shop_id}:
+    get:
+      tags:
+      - printer-workflow
+      summary: Overview
+      operationId: printerWorkflowOverview
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: before_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            exclusiveMinimum: 0
+          - type: 'null'
+          title: Before Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 50
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrinterWorkflowHTTPValidationError'
+  /channelmanager/printer/{shop_id}/config:
+    put:
+      tags:
+      - printer-workflow
+      summary: Configure
+      operationId: printerWorkflowConfigure
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrinterWorkflowConfigInput'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrinterWorkflowHTTPValidationError'
+  /channelmanager/printer/{shop_id}/pre:
+    post:
+      tags:
+      - printer-workflow
+      summary: Import Pre
+      operationId: printerWorkflowImportPre
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrinterWorkflowPricesInput'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrinterWorkflowHTTPValidationError'
+  /channelmanager/printer/{shop_id}/advice:
+    post:
+      tags:
+      - printer-workflow
+      summary: Approve Advice
+      operationId: printerWorkflowApproveAdvice
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrinterWorkflowAdviceInput'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrinterWorkflowHTTPValidationError'
+  /channelmanager/printer/{shop_id}/calculate:
+    post:
+      tags:
+      - printer-workflow
+      summary: Run Calculation
+      operationId: printerWorkflowRunCalculation
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrinterWorkflowCalculateInput'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrinterWorkflowHTTPValidationError'
+  /channelmanager/printer/{shop_id}/approve/{calculation_id}:
+    post:
+      tags:
+      - printer-workflow
+      summary: Approve
+      operationId: printerWorkflowApprove
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: calculation_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Calculation Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrinterWorkflowApproveInput'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrinterWorkflowHTTPValidationError'
+  /channelmanager/printer/{shop_id}/export/{approval_id}:
+    post:
+      tags:
+      - printer-workflow
+      summary: Export
+      operationId: printerWorkflowExport
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: approval_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Approval Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrinterWorkflowNotes'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrinterWorkflowHTTPValidationError'
+  /channelmanager/printer/{shop_id}/download/{export_id}:
+    get:
+      tags:
+      - printer-workflow
+      summary: Download
+      operationId: printerWorkflowDownload
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: export_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Export Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrinterWorkflowHTTPValidationError'
+  /channelmanager/printer/{shop_id}/readback/{export_id}:
+    post:
+      tags:
+      - printer-workflow
+      summary: Readback
+      operationId: printerWorkflowReadback
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: export_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Export Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrinterWorkflowPricesInput'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrinterWorkflowHTTPValidationError'
+  /channelmanager/printer/{shop_id}/readback/{readback_id}/download:
+    get:
+      tags:
+      - printer-workflow
+      summary: Download Readback
+      operationId: printerWorkflowDownloadReadback
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: readback_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Readback Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrinterWorkflowHTTPValidationError'
+  # PRINTERWORKFLOW PATHS END
+  # HUBFEEDS PATHS BEGIN
+  /hub-feeds/{shop_id}/profiles:
+    get:
+      tags:
+      - hub-feeds
+      summary: Profiles
+      operationId: hubFeedsProfiles
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HubFeedsHTTPValidationError'
+    post:
+      tags:
+      - hub-feeds
+      summary: Create
+      operationId: hubFeedsCreate
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HubFeedsProfileInput'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HubFeedsHTTPValidationError'
+  /hub-feeds/{shop_id}/profiles/{profile_id}:
+    put:
+      tags:
+      - hub-feeds
+      summary: Update
+      operationId: hubFeedsUpdate
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: profile_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Profile Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HubFeedsProfileInput'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HubFeedsHTTPValidationError'
+  /hub-feeds/{shop_id}/profiles/{profile_id}/upload:
+    post:
+      tags:
+      - hub-feeds
+      summary: Upload
+      operationId: hubFeedsUpload
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: profile_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Profile Id
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/HubFeedsBody_upload_api_hub_feeds__shop_id__profiles__profile_id__upload_post'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HubFeedsHTTPValidationError'
+  /hub-feeds/{shop_id}/profiles/{profile_id}/test:
+    post:
+      tags:
+      - hub-feeds
+      summary: Test Url
+      operationId: hubFeedsTestUrl
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: profile_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Profile Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HubFeedsHTTPValidationError'
+  /hub-feeds/{shop_id}/profiles/{profile_id}/activate:
+    post:
+      tags:
+      - hub-feeds
+      summary: Activate
+      operationId: hubFeedsActivate
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: profile_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Profile Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HubFeedsVersionInput'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HubFeedsHTTPValidationError'
+  /hub-feeds/{shop_id}/profiles/{profile_id}/pause:
+    post:
+      tags:
+      - hub-feeds
+      summary: Pause
+      operationId: hubFeedsPause
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: profile_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Profile Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HubFeedsHTTPValidationError'
+  /hub-feeds/{shop_id}/profiles/{profile_id}/versions:
+    get:
+      tags:
+      - hub-feeds
+      summary: Versions
+      operationId: hubFeedsVersions
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: profile_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Profile Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HubFeedsHTTPValidationError'
+  /hub-feeds/{shop_id}/profiles/{profile_id}/versions/{version_id}:
+    get:
+      tags:
+      - hub-feeds
+      summary: Version
+      operationId: hubFeedsVersion
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: profile_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Profile Id
+      - name: version_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Version Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HubFeedsHTTPValidationError'
+  /hub-feeds/{shop_id}/profiles/{profile_id}/versions/{version_id}/download:
+    get:
+      tags:
+      - hub-feeds
+      summary: Download
+      operationId: hubFeedsDownload
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: profile_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Profile Id
+      - name: version_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Version Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HubFeedsHTTPValidationError'
+  /hub-feeds/{shop_id}/profiles/{profile_id}/build:
+    post:
+      tags:
+      - hub-feeds
+      summary: Build
+      operationId: hubFeedsBuild
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: profile_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Profile Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HubFeedsBuildInput'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HubFeedsHTTPValidationError'
+  /hub-feeds/{shop_id}/profiles/{profile_id}/release:
+    post:
+      tags:
+      - hub-feeds
+      summary: Release
+      operationId: hubFeedsRelease
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: profile_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Profile Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HubFeedsVersionInput'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HubFeedsHTTPValidationError'
+  /hub-feeds/{shop_id}/profiles/{profile_id}/token:
+    post:
+      tags:
+      - hub-feeds
+      summary: Rotate Token
+      operationId: hubFeedsRotateToken
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: profile_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Profile Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HubFeedsHTTPValidationError'
+  /hub-feeds/{shop_id}/profiles/{profile_id}/feed:
+    get:
+      tags:
+      - hub-feeds
+      summary: Feed
+      operationId: hubFeedsFeed
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: profile_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Profile Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HubFeedsHTTPValidationError'
+  /hub-feeds/{shop_id}/compare:
+    get:
+      tags:
+      - hub-feeds
+      summary: Compare
+      operationId: hubFeedsCompare
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: cost_profile_id
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: Cost Profile Id
+      - name: products_profile_id
+        in: query
+        required: true
+        schema:
+          type: integer
+          title: Products Profile Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HubFeedsHTTPValidationError'
+  # HUBFEEDS PATHS END
   # CHANNELMANAGER PATHS BEGIN
   /channelmanager/shops/available:
     get:
@@ -3036,6 +3944,372 @@ components:
       required: true
       schema: {type: integer}
   schemas:
+    # PRINTERWORKFLOW SCHEMAS BEGIN
+    PrinterWorkflowAdviceInput:
+      properties:
+        notes:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Notes
+        profile_id:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Profile Id
+        version_id:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Version Id
+        semantics_confirmed:
+          type: boolean
+          title: Semantics Confirmed
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - notes
+      - profile_id
+      - version_id
+      title: AdviceInput
+    PrinterWorkflowApproveInput:
+      properties:
+        notes:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Notes
+        acknowledge_warnings:
+          type: boolean
+          title: Acknowledge Warnings
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - notes
+      title: ApproveInput
+    PrinterWorkflowCalculateInput:
+      properties:
+        notes:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Notes
+        advice_snapshot_id:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Advice Snapshot Id
+      additionalProperties: false
+      type: object
+      required:
+      - notes
+      - advice_snapshot_id
+      title: CalculateInput
+    PrinterWorkflowConditionalRule:
+      properties:
+        threshold:
+          type: string
+          title: Threshold
+          default: '50'
+        lower_offset:
+          type: string
+          title: Lower Offset
+        upper_offset:
+          type: string
+          title: Upper Offset
+        multiplier:
+          type: string
+          title: Multiplier
+          default: '1'
+        round_inner_integer:
+          type: boolean
+          title: Round Inner Integer
+          default: false
+        lower_tail:
+          type: string
+          title: Lower Tail
+          default: '0'
+        upper_tail:
+          type: string
+          title: Upper Tail
+          default: '0'
+      additionalProperties: false
+      type: object
+      required:
+      - lower_offset
+      - upper_offset
+      title: ConditionalRule
+    PrinterWorkflowConfigInput:
+      properties:
+        notes:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Notes
+        expected_revision:
+          type: integer
+          minimum: 0.0
+          title: Expected Revision
+        config:
+          $ref: '#/components/schemas/PrinterWorkflowPrinterConfig'
+      additionalProperties: false
+      type: object
+      required:
+      - notes
+      - expected_revision
+      - config
+      title: ConfigInput
+    PrinterWorkflowHTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/PrinterWorkflowValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    PrinterWorkflowNotes:
+      properties:
+        notes:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Notes
+      additionalProperties: false
+      type: object
+      required:
+      - notes
+      title: Notes
+    PrinterWorkflowPriceRow:
+      properties:
+        sku:
+          type: string
+          maxLength: 500
+          minLength: 1
+          title: Sku
+        shop_id:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Shop Id
+        price:
+          type: string
+          title: Price
+      additionalProperties: false
+      type: object
+      required:
+      - sku
+      - shop_id
+      - price
+      title: PriceRow
+    PrinterWorkflowPricesInput:
+      properties:
+        notes:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Notes
+        rows:
+          items:
+            $ref: '#/components/schemas/PrinterWorkflowPriceRow'
+          type: array
+          maxItems: 300000
+          minItems: 1
+          title: Rows
+      additionalProperties: false
+      type: object
+      required:
+      - notes
+      - rows
+      title: PricesInput
+    PrinterWorkflowPrinterConfig:
+      properties:
+        currency:
+          type: string
+          pattern: ^[A-Z]{3}$
+          title: Currency
+        price_basis:
+          type: string
+          enum:
+          - net
+          - gross
+          title: Price Basis
+        vat_rate:
+          type: string
+          title: Vat Rate
+        active:
+          type: boolean
+          title: Active
+          default: false
+        mapping_confirmed:
+          type: boolean
+          title: Mapping Confirmed
+          default: false
+        shops:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Shops
+        id_transform:
+          type: string
+          enum:
+          - exact
+          - nl_six_digits
+          title: Id Transform
+          default: exact
+        transformation_confirmed:
+          type: boolean
+          title: Transformation Confirmed
+          default: false
+        rules:
+          additionalProperties:
+            $ref: '#/components/schemas/PrinterWorkflowConditionalRule'
+          type: object
+          title: Rules
+        export_columns:
+          additionalProperties:
+            type: string
+            enum:
+            - sku
+            - shop_id
+            - label
+            - target_price
+          type: object
+          title: Export Columns
+      additionalProperties: false
+      type: object
+      required:
+      - currency
+      - price_basis
+      - vat_rate
+      - shops
+      title: PrinterConfig
+    PrinterWorkflowValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    # PRINTERWORKFLOW SCHEMAS END
+    # HUBFEEDS SCHEMAS BEGIN
+    HubFeedsBody_upload_api_hub_feeds__shop_id__profiles__profile_id__upload_post:
+      properties:
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+      - file
+      title: Body_upload_api_hub_feeds__shop_id__profiles__profile_id__upload_post
+    HubFeedsBuildInput:
+      properties:
+        source_profile_id:
+          type: integer
+          title: Source Profile Id
+        source_version_id:
+          type: integer
+          title: Source Version Id
+      additionalProperties: false
+      type: object
+      required:
+      - source_profile_id
+      - source_version_id
+      title: BuildInput
+    HubFeedsHTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/HubFeedsValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    HubFeedsProfileInput:
+      properties:
+        name:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Name
+        purpose:
+          type: string
+          enum:
+          - cost
+          - products
+          - advice
+          - cost_output
+          title: Purpose
+        config:
+          additionalProperties: true
+          type: object
+          title: Config
+        base_revision:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Base Revision
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      - purpose
+      title: ProfileInput
+    HubFeedsValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    HubFeedsVersionInput:
+      properties:
+        version_id:
+          type: integer
+          title: Version Id
+      additionalProperties: false
+      type: object
+      required:
+      - version_id
+      title: VersionInput
+    # HUBFEEDS SCHEMAS END
     # CHANNELMANAGER SCHEMAS BEGIN
     ChannelBasisInput:
       properties:

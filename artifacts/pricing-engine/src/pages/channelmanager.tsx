@@ -14,13 +14,17 @@ import { ConfigPanel } from "@/components/channelmanager/ConfigPanel";
 import { BasisPanel } from "@/components/channelmanager/BasisPanel";
 import { CalcPanel } from "@/components/channelmanager/CalcPanel";
 import { ExportPanel } from "@/components/channelmanager/ExportPanel";
+import { FeedProfilesPanel } from "@/components/feeds/FeedProfilesPanel";
+import { PrinterPanel } from "@/components/feeds/PrinterPanel";
 
-type Tab = "regels" | "basis" | "proef" | "export";
+type Tab = "regels" | "basis" | "proef" | "export" | "feeds" | "printer";
 const TABS: { id: Tab; label: string; sub: string }[] = [
   { id: "regels", label: "Shops & regels", sub: "Configuratie per winkel" },
   { id: "basis", label: "Basisprijzen", sub: "Import en goedkeuring" },
   { id: "proef", label: "Proefberekeningen", sub: "Rekenen en goedkeuren" },
   { id: "export", label: "Exports & DRS", sub: "Download en terugmelding" },
+  { id: "feeds", label: "Feeds & koppelingen", sub: "Product, advies, kosten" },
+  { id: "printer", label: "Printer-werkboek", sub: "Advies naar shopprijzen" },
 ];
 const COUNT_NL: Record<(typeof COUNT_KEYS)[number], string> = {
   basis: "Basisversies", calculation: "Berekeningen", export: "Exports", readback: "Terugmeldingen", run: "Runs",
@@ -75,7 +79,7 @@ function ShopWorkspace({ scope, shops, tab, setTab, exportFocus, onExported }: {
   return (
     <div className="space-y-5">
       <Summary scope={scope} ov={ov} onRefresh={() => q.refetch()} refreshing={q.isFetching} />
-      <nav className="grid grid-cols-2 md:grid-cols-4 gap-1 rounded-lg border bg-muted/40 p-1" role="tablist">
+      <nav className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-1 rounded-lg border bg-muted/40 p-1" role="tablist">
         {TABS.map((t, i) => (
           <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)} data-testid={`tab-${t.id}`}
             className={`rounded-md px-3 py-2 text-left transition-colors ${tab === t.id ? "bg-card shadow-sm" : "hover:bg-card/60"}`}>
@@ -89,6 +93,9 @@ function ShopWorkspace({ scope, shops, tab, setTab, exportFocus, onExported }: {
       {tab === "basis" && <BasisPanel scope={scope} overview={ov} canPropose={ov.can_propose} canApprove={ov.can_approve} />}
       {tab === "proef" && <CalcPanel scope={scope} overview={ov} shops={shops} canPropose={ov.can_propose} canApprove={ov.can_approve} canExport={ov.can_export} onExported={onExported} />}
       {tab === "export" && <ExportPanel scope={scope} overview={ov} canPropose={ov.can_propose} canExport={ov.can_export} focusId={exportFocus} />}
+      {tab === "feeds" && <FeedProfilesPanel scope={scope} purposes={["products", "advice", "cost", "cost_output"]} title="Feeds & koppelingen"
+        intro="Productreferentie en PriceShape-adviezen als afzonderlijke inputs, plus de Hub-kostketen. Alles start uit; opslaan of uploaden activeert niets. De concurrentiefeed blijft ongewijzigd." />}
+      {tab === "printer" && <PrinterPanel scope={scope} shops={shops} canPropose={ov.can_propose} canApprove={ov.can_approve} />}
     </div>
   );
 }
