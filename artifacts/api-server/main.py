@@ -134,6 +134,7 @@ async def lifespan(app: FastAPI):
     global _db_bootstrap_done
     _schedule_hierarchy_seed = False
     hierarchy_seed_task = None
+    channelmanager_task = None
     try:
         # De DDL/seed-stappen (1 t/m 4) zijn idempotent maar niet gratis:
         # elke run kost ~1-2s aan schema-introspectie. In productie start het
@@ -348,6 +349,11 @@ async def lifespan(app: FastAPI):
         else:
             startup_state["hierarchy_seed_status"] = "skipped"
 
+        from scheduled_channelmanager import scheduler_loop, disabled as channelmanager_disabled
+        if not channelmanager_disabled():
+            channelmanager_task = asyncio.create_task(scheduler_loop())
+            logger.info("Startup: Channelmanager preview scheduler started (shops opt in individually).")
+
         startup_state["backend_status"] = "running"
         startup_state["started_at"] = datetime.now(timezone.utc).isoformat()
         logger.info("Startup: backend started successfully.")
@@ -373,7 +379,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        for _bg_task in (health_monitor_task, feed_sync_task, ai_key_monitor_task, dq_scan_task, budget_cleanup_task, hierarchy_seed_task):
+        for _bg_task in (health_monitor_task, feed_sync_task, ai_key_monitor_task, dq_scan_task, budget_cleanup_task, hierarchy_seed_task, channelmanager_task):
             if _bg_task is not None:
                 _bg_task.cancel()
                 try:
@@ -672,6 +678,8 @@ app.include_router(search_demand.router)
 app.include_router(cost.router)
 from routes import cost_priority
 app.include_router(cost_priority.router)
+from routes import channelmanager
+app.include_router(channelmanager.router)
 app.include_router(procurement.router)
 app.include_router(economic.router)
 app.include_router(reporting.router)

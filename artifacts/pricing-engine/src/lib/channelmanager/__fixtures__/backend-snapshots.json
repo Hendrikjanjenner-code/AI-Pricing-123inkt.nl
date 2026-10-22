@@ -1,0 +1,933 @@
+{
+  "overview_empty": {
+    "config": null,
+    "basis": null,
+    "last_run": null,
+    "history_limit": 50,
+    "external_formats": "provisional_unconfirmed",
+    "schedule_timezone": "UTC",
+    "can_propose": true,
+    "can_approve": true,
+    "can_export": true,
+    "queues": {
+      "staged": 0,
+      "preview": 0,
+      "approved": 0,
+      "exported": 0,
+      "partial": 0,
+      "failed": 0,
+      "running": 0
+    },
+    "counts": {
+      "basis": 0,
+      "calculation": 0,
+      "export": 0,
+      "readback": 0,
+      "run": 0
+    },
+    "scheduler": {
+      "running": false,
+      "available": false,
+      "disabled": true,
+      "mode": "in_process_reserved_vm",
+      "poll_interval_seconds": 60,
+      "timezone": "UTC",
+      "reason": "disabled_by_environment_or_tests",
+      "last_poll_at": null,
+      "last_error": null
+    }
+  },
+  "error_422_config": {
+    "detail": [
+      {
+        "type": "value_error",
+        "loc": [
+          "body",
+          "config"
+        ],
+        "msg": "Value error, VAT must be an explicit fraction between 0 and 1",
+        "input": {
+          "currency": "EUR",
+          "price_basis": "gross",
+          "vat_rate": "2",
+          "rule": {
+            "kind": "fixed",
+            "value": "-1"
+          },
+          "min_margin": "0.1",
+          "export_columns": {
+            "sku": "sku",
+            "price": "target_price",
+            "name": "name"
+          },
+          "delimiter": ";",
+          "decimal": ","
+        },
+        "ctx": {
+          "error": {}
+        }
+      }
+    ]
+  },
+  "config": {
+    "id": 1,
+    "shop_id": 1,
+    "kind": "config",
+    "revision": 1,
+    "status": "active",
+    "created_at": "2026-10-22T11:18:30.284937Z",
+    "created_by": "manager",
+    "data": {
+      "notes": "review",
+      "expected_revision": 0,
+      "config": {
+        "currency": "EUR",
+        "price_basis": "gross",
+        "vat_rate": "0.21",
+        "rule": {
+          "kind": "fixed",
+          "value": "-1"
+        },
+        "category_overrides": {},
+        "sku_overrides": {},
+        "precision": 2,
+        "increment": "0.01",
+        "rounding": "HALF_UP",
+        "min_price": null,
+        "min_margin": "0.1",
+        "max_change_absolute": null,
+        "max_change_percent": null,
+        "readback_tolerance": "0",
+        "export_columns": {
+          "sku": "sku",
+          "price": "target_price",
+          "name": "name"
+        },
+        "delimiter": ";",
+        "decimal": ",",
+        "schedule_enabled": false,
+        "schedule_source_shop_id": null,
+        "schedule_hour_utc": 2
+      },
+      "external_formats": "provisional_unconfirmed"
+    }
+  },
+  "error_409_config": {
+    "detail": "Configuration revision changed"
+  },
+  "basis_staged": {
+    "id": 2,
+    "shop_id": 1,
+    "kind": "basis",
+    "revision": 1,
+    "status": "staged",
+    "created_at": "2026-10-22T11:18:30.302489Z",
+    "created_by": "manager",
+    "data": {
+      "currency": "EUR",
+      "price_basis": "gross",
+      "vat_rate": "0.21",
+      "cost_basis": "net",
+      "provenance": "manual_csv",
+      "notes": "fixture",
+      "rows": [
+        {
+          "sku": "A-1",
+          "name": "Een",
+          "category": "Print",
+          "base_price": "12.10",
+          "cost": "5",
+          "current_price": "12.10"
+        },
+        {
+          "sku": "A-2",
+          "name": "Twee",
+          "category": "Print",
+          "base_price": "2.00",
+          "cost": "1.90",
+          "current_price": null
+        }
+      ],
+      "external_formats": "provisional_unconfirmed"
+    }
+  },
+  "basis_approved": {
+    "id": 2,
+    "shop_id": 1,
+    "kind": "basis",
+    "revision": 1,
+    "status": "approved",
+    "created_at": "2026-10-22T11:18:30.302489Z",
+    "created_by": "manager",
+    "data": {
+      "currency": "EUR",
+      "price_basis": "gross",
+      "vat_rate": "0.21",
+      "cost_basis": "net",
+      "provenance": "manual_csv",
+      "notes": "fixture",
+      "rows": [
+        {
+          "sku": "A-1",
+          "name": "Een",
+          "category": "Print",
+          "base_price": "12.10",
+          "cost": "5",
+          "current_price": "12.10"
+        },
+        {
+          "sku": "A-2",
+          "name": "Twee",
+          "category": "Print",
+          "base_price": "2.00",
+          "cost": "1.90",
+          "current_price": null
+        }
+      ],
+      "external_formats": "provisional_unconfirmed",
+      "approval": {
+        "by": "manager",
+        "notes": "ok",
+        "at": "2026-10-22T11:18:30.312013+00:00"
+      }
+    }
+  },
+  "calc_blocked": {
+    "id": 3,
+    "shop_id": 1,
+    "kind": "calculation",
+    "revision": 1,
+    "status": "preview",
+    "created_at": "2026-10-22T11:18:30.325586Z",
+    "created_by": "manager",
+    "data": {
+      "source_shop_id": 1,
+      "basis_id": 2,
+      "config_id": 1,
+      "config": {
+        "currency": "EUR",
+        "price_basis": "gross",
+        "vat_rate": "0.21",
+        "rule": {
+          "kind": "fixed",
+          "value": "-1"
+        },
+        "category_overrides": {},
+        "sku_overrides": {},
+        "precision": 2,
+        "increment": "0.01",
+        "rounding": "HALF_UP",
+        "min_price": null,
+        "min_margin": "0.1",
+        "max_change_absolute": null,
+        "max_change_percent": null,
+        "readback_tolerance": "0",
+        "export_columns": {
+          "sku": "sku",
+          "price": "target_price",
+          "name": "name"
+        },
+        "delimiter": ";",
+        "decimal": ",",
+        "schedule_enabled": false,
+        "schedule_source_shop_id": null,
+        "schedule_hour_utc": 2
+      },
+      "rows": [
+        {
+          "sku": "A-1",
+          "name": "Een",
+          "category": "Print",
+          "base_price": "12.10",
+          "cost": "5",
+          "current_price": "12.10",
+          "rule_source": "shop",
+          "rule": {
+            "kind": "fixed",
+            "value": "-1"
+          },
+          "target_price": "11.10",
+          "current_delta": "-1.00",
+          "net_margin": "0.4549549549549549549549549549",
+          "errors": []
+        },
+        {
+          "sku": "A-2",
+          "name": "Twee",
+          "category": "Print",
+          "base_price": "2.00",
+          "cost": "1.90",
+          "current_price": null,
+          "rule_source": "shop",
+          "rule": {
+            "kind": "fixed",
+            "value": "-1"
+          },
+          "target_price": "1.00",
+          "current_delta": null,
+          "net_margin": "-1.299000000000000000000000000",
+          "errors": [
+            "Missing cost or below minimum net margin"
+          ]
+        }
+      ],
+      "current_price_note": "Current prices supplied explicitly in this shop's approved basis.",
+      "cost_provenance": {
+        "source_shop_id": 1,
+        "basis_id": 2,
+        "provenance": "manual_csv",
+        "cost_basis": "net",
+        "note": "Explicit imported source costs; not inferred historical or destination-specific purchase costs."
+      },
+      "export_schema": {
+        "sku": "sku",
+        "price": "target_price",
+        "name": "name"
+      },
+      "csv_preview": null,
+      "blocked_rows": 1,
+      "external_formats": "provisional_unconfirmed"
+    }
+  },
+  "calc_preview": {
+    "id": 5,
+    "shop_id": 1,
+    "kind": "calculation",
+    "revision": 2,
+    "status": "preview",
+    "created_at": "2026-10-22T11:18:30.349789Z",
+    "created_by": "manager",
+    "data": {
+      "source_shop_id": 1,
+      "basis_id": 4,
+      "config_id": 1,
+      "config": {
+        "currency": "EUR",
+        "price_basis": "gross",
+        "vat_rate": "0.21",
+        "rule": {
+          "kind": "fixed",
+          "value": "-1"
+        },
+        "category_overrides": {},
+        "sku_overrides": {},
+        "precision": 2,
+        "increment": "0.01",
+        "rounding": "HALF_UP",
+        "min_price": null,
+        "min_margin": "0.1",
+        "max_change_absolute": null,
+        "max_change_percent": null,
+        "readback_tolerance": "0",
+        "export_columns": {
+          "sku": "sku",
+          "price": "target_price",
+          "name": "name"
+        },
+        "delimiter": ";",
+        "decimal": ",",
+        "schedule_enabled": false,
+        "schedule_source_shop_id": null,
+        "schedule_hour_utc": 2
+      },
+      "rows": [
+        {
+          "sku": "A-1",
+          "name": "Een",
+          "category": "Print",
+          "base_price": "12.10",
+          "cost": "5",
+          "current_price": "12.10",
+          "rule_source": "shop",
+          "rule": {
+            "kind": "fixed",
+            "value": "-1"
+          },
+          "target_price": "11.10",
+          "current_delta": "-1.00",
+          "net_margin": "0.4549549549549549549549549549",
+          "errors": []
+        }
+      ],
+      "current_price_note": "Current prices supplied explicitly in this shop's approved basis.",
+      "cost_provenance": {
+        "source_shop_id": 1,
+        "basis_id": 4,
+        "provenance": "manual_csv",
+        "cost_basis": "net",
+        "note": "Explicit imported source costs; not inferred historical or destination-specific purchase costs."
+      },
+      "export_schema": {
+        "sku": "sku",
+        "price": "target_price",
+        "name": "name"
+      },
+      "csv_preview": "sku;price;name\r\nA-1;11,10;Een\r\n",
+      "blocked_rows": 0,
+      "external_formats": "provisional_unconfirmed"
+    }
+  },
+  "calc_cross_shop": {
+    "id": 7,
+    "shop_id": 2,
+    "kind": "calculation",
+    "revision": 1,
+    "status": "preview",
+    "created_at": "2026-10-22T11:18:30.364900Z",
+    "created_by": "manager",
+    "data": {
+      "source_shop_id": 1,
+      "basis_id": 4,
+      "config_id": 6,
+      "config": {
+        "currency": "EUR",
+        "price_basis": "gross",
+        "vat_rate": "0.21",
+        "rule": {
+          "kind": "fixed",
+          "value": "-1"
+        },
+        "category_overrides": {},
+        "sku_overrides": {},
+        "precision": 2,
+        "increment": "0.01",
+        "rounding": "HALF_UP",
+        "min_price": null,
+        "min_margin": "0.1",
+        "max_change_absolute": null,
+        "max_change_percent": null,
+        "readback_tolerance": "0",
+        "export_columns": {
+          "sku": "sku",
+          "price": "target_price",
+          "name": "name"
+        },
+        "delimiter": ";",
+        "decimal": ",",
+        "schedule_enabled": false,
+        "schedule_source_shop_id": null,
+        "schedule_hour_utc": 2
+      },
+      "rows": [
+        {
+          "sku": "A-1",
+          "name": "Een",
+          "category": "Print",
+          "base_price": "12.10",
+          "cost": "5",
+          "current_price": null,
+          "source_current_price": "12.10",
+          "rule_source": "shop",
+          "rule": {
+            "kind": "fixed",
+            "value": "-1"
+          },
+          "target_price": "11.10",
+          "current_delta": null,
+          "net_margin": "0.4549549549549549549549549549",
+          "errors": []
+        }
+      ],
+      "current_price_note": "Destination current price unavailable; source current prices are not destination actuals.",
+      "cost_provenance": {
+        "source_shop_id": 1,
+        "basis_id": 4,
+        "provenance": "manual_csv",
+        "cost_basis": "net",
+        "note": "Explicit imported source costs; not inferred historical or destination-specific purchase costs."
+      },
+      "export_schema": {
+        "sku": "sku",
+        "price": "target_price",
+        "name": "name"
+      },
+      "csv_preview": "sku;price;name\r\nA-1;11,10;Een\r\n",
+      "blocked_rows": 0,
+      "external_formats": "provisional_unconfirmed"
+    }
+  },
+  "calc_approved": {
+    "id": 5,
+    "shop_id": 1,
+    "kind": "calculation",
+    "revision": 2,
+    "status": "approved",
+    "created_at": "2026-10-22T11:18:30.349789Z",
+    "created_by": "manager",
+    "data": {
+      "source_shop_id": 1,
+      "basis_id": 4,
+      "config_id": 1,
+      "config": {
+        "currency": "EUR",
+        "price_basis": "gross",
+        "vat_rate": "0.21",
+        "rule": {
+          "kind": "fixed",
+          "value": "-1"
+        },
+        "category_overrides": {},
+        "sku_overrides": {},
+        "precision": 2,
+        "increment": "0.01",
+        "rounding": "HALF_UP",
+        "min_price": null,
+        "min_margin": "0.1",
+        "max_change_absolute": null,
+        "max_change_percent": null,
+        "readback_tolerance": "0",
+        "export_columns": {
+          "sku": "sku",
+          "price": "target_price",
+          "name": "name"
+        },
+        "delimiter": ";",
+        "decimal": ",",
+        "schedule_enabled": false,
+        "schedule_source_shop_id": null,
+        "schedule_hour_utc": 2
+      },
+      "rows": [
+        {
+          "sku": "A-1",
+          "name": "Een",
+          "category": "Print",
+          "base_price": "12.10",
+          "cost": "5",
+          "current_price": "12.10",
+          "rule_source": "shop",
+          "rule": {
+            "kind": "fixed",
+            "value": "-1"
+          },
+          "target_price": "11.10",
+          "current_delta": "-1.00",
+          "net_margin": "0.4549549549549549549549549549",
+          "errors": []
+        }
+      ],
+      "current_price_note": "Current prices supplied explicitly in this shop's approved basis.",
+      "cost_provenance": {
+        "source_shop_id": 1,
+        "basis_id": 4,
+        "provenance": "manual_csv",
+        "cost_basis": "net",
+        "note": "Explicit imported source costs; not inferred historical or destination-specific purchase costs."
+      },
+      "export_schema": {
+        "sku": "sku",
+        "price": "target_price",
+        "name": "name"
+      },
+      "csv_preview": "sku;price;name\r\nA-1;11,10;Een\r\n",
+      "blocked_rows": 0,
+      "external_formats": "provisional_unconfirmed",
+      "approval": {
+        "by": "manager",
+        "notes": "ok",
+        "at": "2026-10-22T11:18:30.372557+00:00"
+      }
+    }
+  },
+  "export": {
+    "id": 8,
+    "shop_id": 1,
+    "kind": "export",
+    "revision": 1,
+    "status": "exported",
+    "created_at": "2026-10-22T11:18:30.383011Z",
+    "created_by": "manager",
+    "data": {
+      "source_shop_id": 1,
+      "basis_id": 4,
+      "config_id": 1,
+      "config": {
+        "currency": "EUR",
+        "price_basis": "gross",
+        "vat_rate": "0.21",
+        "rule": {
+          "kind": "fixed",
+          "value": "-1"
+        },
+        "category_overrides": {},
+        "sku_overrides": {},
+        "precision": 2,
+        "increment": "0.01",
+        "rounding": "HALF_UP",
+        "min_price": null,
+        "min_margin": "0.1",
+        "max_change_absolute": null,
+        "max_change_percent": null,
+        "readback_tolerance": "0",
+        "export_columns": {
+          "sku": "sku",
+          "price": "target_price",
+          "name": "name"
+        },
+        "delimiter": ";",
+        "decimal": ",",
+        "schedule_enabled": false,
+        "schedule_source_shop_id": null,
+        "schedule_hour_utc": 2
+      },
+      "rows": [
+        {
+          "sku": "A-1",
+          "name": "Een",
+          "category": "Print",
+          "base_price": "12.10",
+          "cost": "5",
+          "current_price": "12.10",
+          "rule_source": "shop",
+          "rule": {
+            "kind": "fixed",
+            "value": "-1"
+          },
+          "target_price": "11.10",
+          "current_delta": "-1.00",
+          "net_margin": "0.4549549549549549549549549549",
+          "errors": []
+        }
+      ],
+      "current_price_note": "Current prices supplied explicitly in this shop's approved basis.",
+      "cost_provenance": {
+        "source_shop_id": 1,
+        "basis_id": 4,
+        "provenance": "manual_csv",
+        "cost_basis": "net",
+        "note": "Explicit imported source costs; not inferred historical or destination-specific purchase costs."
+      },
+      "export_schema": {
+        "sku": "sku",
+        "price": "target_price",
+        "name": "name"
+      },
+      "csv_preview": "sku;price;name\r\nA-1;11,10;Een\r\n",
+      "blocked_rows": 0,
+      "external_formats": "provisional_unconfirmed",
+      "approval": {
+        "by": "manager",
+        "notes": "ok",
+        "at": "2026-10-22T11:18:30.372557+00:00"
+      },
+      "calculation_id": 5,
+      "notes": "exp",
+      "csv": "sku;price;name\r\nA-1;11,10;Een\r\n",
+      "schema": {
+        "sku": "sku",
+        "price": "target_price",
+        "name": "name"
+      },
+      "fingerprint": "0978b69c598bf56b0dde6277d889e0d74bc3d042d35ebd8bf7b442e8f57e7aaa",
+      "processed": false
+    }
+  },
+  "readback_matched": {
+    "id": 9,
+    "shop_id": 1,
+    "kind": "readback",
+    "revision": 1,
+    "status": "matched",
+    "created_at": "2026-10-22T11:18:30.394798Z",
+    "created_by": "manager",
+    "data": {
+      "export_id": 8,
+      "source_shop_id": 1,
+      "fingerprint": "0978b69c598bf56b0dde6277d889e0d74bc3d042d35ebd8bf7b442e8f57e7aaa",
+      "rows": [
+        {
+          "sku": "A-1",
+          "target_price": "11.10",
+          "actual_price": "11.10",
+          "matched": true
+        }
+      ],
+      "received_rows": [
+        {
+          "sku": "A-1",
+          "actual_price": "11.10"
+        }
+      ],
+      "missing": [],
+      "unexpected": [],
+      "duplicates": [],
+      "matched_count": 1,
+      "processed": true,
+      "external_formats": "provisional_unconfirmed"
+    }
+  },
+  "readback_partial": {
+    "id": 10,
+    "shop_id": 1,
+    "kind": "readback",
+    "revision": 2,
+    "status": "partial",
+    "created_at": "2026-10-22T11:18:30.402709Z",
+    "created_by": "manager",
+    "data": {
+      "export_id": 8,
+      "source_shop_id": 1,
+      "fingerprint": "0978b69c598bf56b0dde6277d889e0d74bc3d042d35ebd8bf7b442e8f57e7aaa",
+      "rows": [
+        {
+          "sku": "A-1",
+          "target_price": "11.10",
+          "actual_price": "1.00",
+          "matched": false
+        }
+      ],
+      "received_rows": [
+        {
+          "sku": "A-1",
+          "actual_price": "1.00"
+        },
+        {
+          "sku": "ZZ",
+          "actual_price": "2.00"
+        },
+        {
+          "sku": "ZZ",
+          "actual_price": "2.00"
+        }
+      ],
+      "missing": [],
+      "unexpected": [
+        "ZZ"
+      ],
+      "duplicates": [
+        "ZZ"
+      ],
+      "matched_count": 0,
+      "processed": false,
+      "external_formats": "provisional_unconfirmed"
+    }
+  },
+  "run": {
+    "id": 11,
+    "shop_id": 1,
+    "kind": "run",
+    "revision": 1,
+    "status": "success",
+    "created_at": "2026-10-22T11:18:30.410258Z",
+    "created_by": "manager",
+    "data": {
+      "source_shop_id": 1,
+      "timezone": "UTC",
+      "started_at": "2026-10-22T11:18:30.409660+00:00",
+      "external_formats": "provisional_unconfirmed",
+      "calculation_id": 12,
+      "finished_at": "2026-10-22T11:18:30.415839+00:00"
+    }
+  },
+  "history_calc": {
+    "items": [
+      {
+        "id": 12,
+        "shop_id": 1,
+        "kind": "calculation",
+        "revision": 3,
+        "status": "preview",
+        "created_at": "2026-10-22T11:18:30.413884Z",
+        "created_by": "manager",
+        "data": {
+          "source_shop_id": 1,
+          "basis_id": 4,
+          "config_id": 1,
+          "config": {
+            "currency": "EUR",
+            "price_basis": "gross",
+            "vat_rate": "0.21",
+            "rule": {
+              "kind": "fixed",
+              "value": "-1"
+            },
+            "category_overrides": {},
+            "sku_overrides": {},
+            "precision": 2,
+            "increment": "0.01",
+            "rounding": "HALF_UP",
+            "min_price": null,
+            "min_margin": "0.1",
+            "max_change_absolute": null,
+            "max_change_percent": null,
+            "readback_tolerance": "0",
+            "export_columns": {
+              "sku": "sku",
+              "price": "target_price",
+              "name": "name"
+            },
+            "delimiter": ";",
+            "decimal": ",",
+            "schedule_enabled": false,
+            "schedule_source_shop_id": null,
+            "schedule_hour_utc": 2
+          },
+          "rows": [
+            {
+              "sku": "A-1",
+              "name": "Een",
+              "category": "Print",
+              "base_price": "12.10",
+              "cost": "5",
+              "current_price": "12.10",
+              "rule_source": "shop",
+              "rule": {
+                "kind": "fixed",
+                "value": "-1"
+              },
+              "target_price": "11.10",
+              "current_delta": "-1.00",
+              "net_margin": "0.4549549549549549549549549549",
+              "errors": []
+            }
+          ],
+          "current_price_note": "Current prices supplied explicitly in this shop's approved basis.",
+          "cost_provenance": {
+            "source_shop_id": 1,
+            "basis_id": 4,
+            "provenance": "manual_csv",
+            "cost_basis": "net",
+            "note": "Explicit imported source costs; not inferred historical or destination-specific purchase costs."
+          },
+          "export_schema": {
+            "sku": "sku",
+            "price": "target_price",
+            "name": "name"
+          },
+          "csv_preview": "sku;price;name\r\nA-1;11,10;Een\r\n",
+          "blocked_rows": 0,
+          "external_formats": "provisional_unconfirmed"
+        }
+      }
+    ],
+    "has_more": true
+  },
+  "overview_full": {
+    "config": {
+      "id": 1,
+      "shop_id": 1,
+      "kind": "config",
+      "revision": 1,
+      "status": "active",
+      "created_at": "2026-10-22T11:18:30.284937Z",
+      "created_by": "manager",
+      "data": {
+        "notes": "review",
+        "expected_revision": 0,
+        "config": {
+          "currency": "EUR",
+          "price_basis": "gross",
+          "vat_rate": "0.21",
+          "rule": {
+            "kind": "fixed",
+            "value": "-1"
+          },
+          "category_overrides": {},
+          "sku_overrides": {},
+          "precision": 2,
+          "increment": "0.01",
+          "rounding": "HALF_UP",
+          "min_price": null,
+          "min_margin": "0.1",
+          "max_change_absolute": null,
+          "max_change_percent": null,
+          "readback_tolerance": "0",
+          "export_columns": {
+            "sku": "sku",
+            "price": "target_price",
+            "name": "name"
+          },
+          "delimiter": ";",
+          "decimal": ",",
+          "schedule_enabled": false,
+          "schedule_source_shop_id": null,
+          "schedule_hour_utc": 2
+        },
+        "external_formats": "provisional_unconfirmed"
+      }
+    },
+    "basis": {
+      "id": 4,
+      "shop_id": 1,
+      "kind": "basis",
+      "revision": 2,
+      "status": "approved",
+      "created_at": "2026-10-22T11:18:30.334070Z",
+      "created_by": "manager",
+      "data": {
+        "currency": "EUR",
+        "price_basis": "gross",
+        "vat_rate": "0.21",
+        "cost_basis": "net",
+        "provenance": "manual_csv",
+        "notes": "fixture",
+        "rows": [
+          {
+            "sku": "A-1",
+            "name": "Een",
+            "category": "Print",
+            "base_price": "12.10",
+            "cost": "5",
+            "current_price": "12.10"
+          }
+        ],
+        "external_formats": "provisional_unconfirmed",
+        "approval": {
+          "by": "manager",
+          "notes": "ok",
+          "at": "2026-10-22T11:18:30.341370+00:00"
+        }
+      }
+    },
+    "last_run": {
+      "id": 11,
+      "shop_id": 1,
+      "kind": "run",
+      "revision": 1,
+      "status": "success",
+      "created_at": "2026-10-22T11:18:30.410258Z",
+      "created_by": "manager",
+      "data": {
+        "source_shop_id": 1,
+        "timezone": "UTC",
+        "started_at": "2026-10-22T11:18:30.409660+00:00",
+        "external_formats": "provisional_unconfirmed",
+        "calculation_id": 12,
+        "finished_at": "2026-10-22T11:18:30.415839+00:00"
+      }
+    },
+    "history_limit": 50,
+    "external_formats": "provisional_unconfirmed",
+    "schedule_timezone": "UTC",
+    "can_propose": true,
+    "can_approve": true,
+    "can_export": true,
+    "queues": {
+      "staged": 0,
+      "preview": 2,
+      "approved": 3,
+      "exported": 1,
+      "partial": 1,
+      "failed": 0,
+      "running": 0
+    },
+    "counts": {
+      "basis": 2,
+      "calculation": 3,
+      "export": 1,
+      "readback": 2,
+      "run": 1
+    },
+    "scheduler": {
+      "running": false,
+      "available": false,
+      "disabled": true,
+      "mode": "in_process_reserved_vm",
+      "poll_interval_seconds": 60,
+      "timezone": "UTC",
+      "reason": "disabled_by_environment_or_tests",
+      "last_poll_at": null,
+      "last_error": null
+    }
+  }
+}

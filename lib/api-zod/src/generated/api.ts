@@ -7,6 +7,498 @@
  */
 import * as zod from "zod";
 
+/**
+ * @summary Shops
+ */
+export const ChannelShopsResponse = zod.unknown();
+
+/**
+ * @summary Overview
+ */
+export const ChannelOverviewParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const ChannelOverviewResponse = zod.object({
+  config: zod.union([
+    zod.object({
+      id: zod.number(),
+      shop_id: zod.number(),
+      kind: zod.string(),
+      revision: zod.number(),
+      status: zod.string(),
+      created_at: zod.string(),
+      created_by: zod.string(),
+      data: zod.record(zod.string(), zod.unknown()),
+    }),
+    zod.null(),
+  ]),
+  basis: zod.union([
+    zod.object({
+      id: zod.number(),
+      shop_id: zod.number(),
+      kind: zod.string(),
+      revision: zod.number(),
+      status: zod.string(),
+      created_at: zod.string(),
+      created_by: zod.string(),
+      data: zod.record(zod.string(), zod.unknown()),
+    }),
+    zod.null(),
+  ]),
+  last_run: zod.union([
+    zod.object({
+      id: zod.number(),
+      shop_id: zod.number(),
+      kind: zod.string(),
+      revision: zod.number(),
+      status: zod.string(),
+      created_at: zod.string(),
+      created_by: zod.string(),
+      data: zod.record(zod.string(), zod.unknown()),
+    }),
+    zod.null(),
+  ]),
+  history_limit: zod.number(),
+  external_formats: zod.string(),
+  schedule_timezone: zod.string(),
+  can_propose: zod.boolean(),
+  can_approve: zod.boolean(),
+  can_export: zod.boolean(),
+  queues: zod.record(zod.string(), zod.number()),
+  counts: zod.record(zod.string(), zod.number()),
+  scheduler: zod.object({
+    running: zod.boolean(),
+    available: zod.boolean(),
+    disabled: zod.boolean(),
+    mode: zod.string(),
+    poll_interval_seconds: zod.number(),
+    timezone: zod.string(),
+    reason: zod.union([zod.string(), zod.null()]),
+    last_poll_at: zod.union([zod.string(), zod.null()]),
+    last_error: zod.union([zod.string(), zod.null()]),
+  }),
+});
+
+/**
+ * @summary History
+ */
+export const ChannelHistoryParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const channelHistoryQueryKindRegExp = new RegExp(
+  "^(config|basis|calculation|export|readback|run)$",
+);
+export const channelHistoryQueryOffsetDefault = 0;
+export const channelHistoryQueryOffsetMin = 0;
+
+export const channelHistoryQueryLimitDefault = 50;
+export const channelHistoryQueryLimitMax = 100;
+
+export const ChannelHistoryQueryParams = zod.object({
+  kind: zod.coerce.string().regex(channelHistoryQueryKindRegExp),
+  offset: zod.coerce
+    .number()
+    .min(channelHistoryQueryOffsetMin)
+    .default(channelHistoryQueryOffsetDefault),
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(channelHistoryQueryLimitMax)
+    .default(channelHistoryQueryLimitDefault),
+});
+
+export const ChannelHistoryResponse = zod.object({
+  items: zod.array(
+    zod.object({
+      id: zod.number(),
+      shop_id: zod.number(),
+      kind: zod.string(),
+      revision: zod.number(),
+      status: zod.string(),
+      created_at: zod.string(),
+      created_by: zod.string(),
+      data: zod.record(zod.string(), zod.unknown()),
+    }),
+  ),
+  has_more: zod.boolean(),
+});
+
+/**
+ * @summary Record
+ */
+export const ChannelRecordParams = zod.object({
+  shop_id: zod.coerce.number(),
+  record_id: zod.coerce.number(),
+});
+
+export const ChannelRecordResponse = zod.object({
+  id: zod.number(),
+  shop_id: zod.number(),
+  kind: zod.string(),
+  revision: zod.number(),
+  status: zod.string(),
+  created_at: zod.string(),
+  created_by: zod.string(),
+  data: zod.record(zod.string(), zod.unknown()),
+});
+
+/**
+ * @summary Configure
+ */
+export const ChannelConfigureParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const channelConfigureBodyNotesMax = 2000;
+
+export const channelConfigureBodyExpectedRevisionMin = 0;
+
+export const channelConfigureBodyConfigCurrencyRegExp = new RegExp(
+  "^[A-Z]{3}$",
+);
+export const channelConfigureBodyConfigPrecisionDefault = 2;
+export const channelConfigureBodyConfigPrecisionMin = 0;
+export const channelConfigureBodyConfigPrecisionMax = 4;
+
+export const channelConfigureBodyConfigIncrementDefault = `0.01`;
+export const channelConfigureBodyConfigRoundingDefault = `HALF_UP`;
+export const channelConfigureBodyConfigReadbackToleranceDefault = `0`;
+export const channelConfigureBodyConfigDelimiterDefault = `;`;
+export const channelConfigureBodyConfigDecimalDefault = `.`;
+export const channelConfigureBodyConfigScheduleEnabledDefault = false;
+export const channelConfigureBodyConfigScheduleSourceShopIdOneExclusiveMin = 0;
+
+export const channelConfigureBodyConfigScheduleHourUtcDefault = 2;
+export const channelConfigureBodyConfigScheduleHourUtcMin = 0;
+export const channelConfigureBodyConfigScheduleHourUtcMax = 23;
+
+export const ChannelConfigureBody = zod.object({
+  notes: zod.string().min(1).max(channelConfigureBodyNotesMax),
+  expected_revision: zod.number().min(channelConfigureBodyExpectedRevisionMin),
+  config: zod.object({
+    currency: zod.string().regex(channelConfigureBodyConfigCurrencyRegExp),
+    price_basis: zod.enum(["net", "gross"]),
+    vat_rate: zod.string(),
+    rule: zod.object({
+      kind: zod.enum(["fixed", "percentage"]),
+      value: zod.string(),
+    }),
+    category_overrides: zod
+      .record(
+        zod.string(),
+        zod.object({
+          kind: zod.enum(["fixed", "percentage"]),
+          value: zod.string(),
+        }),
+      )
+      .optional(),
+    sku_overrides: zod
+      .record(
+        zod.string(),
+        zod.object({
+          kind: zod.enum(["fixed", "percentage"]),
+          value: zod.string(),
+        }),
+      )
+      .optional(),
+    precision: zod
+      .number()
+      .min(channelConfigureBodyConfigPrecisionMin)
+      .max(channelConfigureBodyConfigPrecisionMax)
+      .default(channelConfigureBodyConfigPrecisionDefault),
+    increment: zod.string().default(channelConfigureBodyConfigIncrementDefault),
+    rounding: zod
+      .enum(["HALF_UP", "HALF_EVEN", "DOWN", "UP"])
+      .default(channelConfigureBodyConfigRoundingDefault),
+    min_price: zod.union([zod.string(), zod.null()]).optional(),
+    min_margin: zod.union([zod.string(), zod.null()]).optional(),
+    max_change_absolute: zod.union([zod.string(), zod.null()]).optional(),
+    max_change_percent: zod.union([zod.string(), zod.null()]).optional(),
+    readback_tolerance: zod
+      .string()
+      .default(channelConfigureBodyConfigReadbackToleranceDefault),
+    export_columns: zod
+      .record(
+        zod.string(),
+        zod.enum(["sku", "name", "category", "target_price"]),
+      )
+      .optional(),
+    delimiter: zod
+      .enum([",", ";", "	", "|"])
+      .default(channelConfigureBodyConfigDelimiterDefault),
+    decimal: zod
+      .enum([".", ","])
+      .default(channelConfigureBodyConfigDecimalDefault),
+    schedule_enabled: zod
+      .boolean()
+      .default(channelConfigureBodyConfigScheduleEnabledDefault),
+    schedule_source_shop_id: zod
+      .union([
+        zod
+          .number()
+          .gt(channelConfigureBodyConfigScheduleSourceShopIdOneExclusiveMin),
+        zod.null(),
+      ])
+      .optional(),
+    schedule_hour_utc: zod
+      .number()
+      .min(channelConfigureBodyConfigScheduleHourUtcMin)
+      .max(channelConfigureBodyConfigScheduleHourUtcMax)
+      .default(channelConfigureBodyConfigScheduleHourUtcDefault),
+  }),
+});
+
+export const ChannelConfigureResponse = zod.object({
+  id: zod.number(),
+  shop_id: zod.number(),
+  kind: zod.string(),
+  revision: zod.number(),
+  status: zod.string(),
+  created_at: zod.string(),
+  created_by: zod.string(),
+  data: zod.record(zod.string(), zod.unknown()),
+});
+
+/**
+ * @summary Basis
+ */
+export const ChannelBasisParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const channelBasisBodyCurrencyRegExp = new RegExp("^[A-Z]{3}$");
+export const channelBasisBodyNotesMax = 2000;
+
+export const channelBasisBodyRowsItemSkuMax = 500;
+
+export const channelBasisBodyRowsItemNameDefault = ``;
+export const channelBasisBodyRowsItemNameMax = 500;
+
+export const channelBasisBodyRowsItemCategoryDefault = ``;
+export const channelBasisBodyRowsItemCategoryMax = 500;
+
+export const channelBasisBodyRowsMax = 5000;
+
+export const ChannelBasisBody = zod.object({
+  currency: zod.string().regex(channelBasisBodyCurrencyRegExp),
+  price_basis: zod.enum(["net", "gross"]),
+  vat_rate: zod.string(),
+  cost_basis: zod.literal("net"),
+  provenance: zod.enum(["manual_csv", "PriceShape_unverified"]),
+  notes: zod.string().min(1).max(channelBasisBodyNotesMax),
+  rows: zod
+    .array(
+      zod.object({
+        sku: zod.string().min(1).max(channelBasisBodyRowsItemSkuMax),
+        name: zod
+          .string()
+          .max(channelBasisBodyRowsItemNameMax)
+          .default(channelBasisBodyRowsItemNameDefault),
+        category: zod
+          .string()
+          .max(channelBasisBodyRowsItemCategoryMax)
+          .default(channelBasisBodyRowsItemCategoryDefault),
+        base_price: zod.string(),
+        cost: zod.union([zod.string(), zod.null()]).optional(),
+        current_price: zod.union([zod.string(), zod.null()]).optional(),
+      }),
+    )
+    .min(1)
+    .max(channelBasisBodyRowsMax),
+});
+
+export const ChannelBasisResponse = zod.object({
+  id: zod.number(),
+  shop_id: zod.number(),
+  kind: zod.string(),
+  revision: zod.number(),
+  status: zod.string(),
+  created_at: zod.string(),
+  created_by: zod.string(),
+  data: zod.record(zod.string(), zod.unknown()),
+});
+
+/**
+ * @summary Basis Csv
+ */
+export const ChannelBasisCsvParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const ChannelBasisCsvBody = zod.object({
+  settings: zod.string(),
+  file: zod.instanceof(File),
+});
+
+export const ChannelBasisCsvResponse = zod.object({
+  id: zod.number(),
+  shop_id: zod.number(),
+  kind: zod.string(),
+  revision: zod.number(),
+  status: zod.string(),
+  created_at: zod.string(),
+  created_by: zod.string(),
+  data: zod.record(zod.string(), zod.unknown()),
+});
+
+/**
+ * @summary Approve Basis
+ */
+export const ChannelApproveBasisParams = zod.object({
+  shop_id: zod.coerce.number(),
+  record_id: zod.coerce.number(),
+});
+
+export const channelApproveBasisBodyNotesMax = 2000;
+
+export const ChannelApproveBasisBody = zod.object({
+  notes: zod.string().min(1).max(channelApproveBasisBodyNotesMax),
+});
+
+export const ChannelApproveBasisResponse = zod.object({
+  id: zod.number(),
+  shop_id: zod.number(),
+  kind: zod.string(),
+  revision: zod.number(),
+  status: zod.string(),
+  created_at: zod.string(),
+  created_by: zod.string(),
+  data: zod.record(zod.string(), zod.unknown()),
+});
+
+/**
+ * @summary Calculate Route
+ */
+export const ChannelCalculateRouteParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const channelCalculateRouteBodySourceShopIdExclusiveMin = 0;
+
+export const channelCalculateRouteBodyBasisIdExclusiveMin = 0;
+
+export const ChannelCalculateRouteBody = zod.object({
+  source_shop_id: zod
+    .number()
+    .gt(channelCalculateRouteBodySourceShopIdExclusiveMin),
+  basis_id: zod.number().gt(channelCalculateRouteBodyBasisIdExclusiveMin),
+});
+
+export const ChannelCalculateRouteResponse = zod.object({
+  id: zod.number(),
+  shop_id: zod.number(),
+  kind: zod.string(),
+  revision: zod.number(),
+  status: zod.string(),
+  created_at: zod.string(),
+  created_by: zod.string(),
+  data: zod.record(zod.string(), zod.unknown()),
+});
+
+/**
+ * @summary Approve Calculation
+ */
+export const ChannelApproveCalculationParams = zod.object({
+  shop_id: zod.coerce.number(),
+  record_id: zod.coerce.number(),
+});
+
+export const channelApproveCalculationBodyNotesMax = 2000;
+
+export const ChannelApproveCalculationBody = zod.object({
+  notes: zod.string().min(1).max(channelApproveCalculationBodyNotesMax),
+});
+
+export const ChannelApproveCalculationResponse = zod.object({
+  id: zod.number(),
+  shop_id: zod.number(),
+  kind: zod.string(),
+  revision: zod.number(),
+  status: zod.string(),
+  created_at: zod.string(),
+  created_by: zod.string(),
+  data: zod.record(zod.string(), zod.unknown()),
+});
+
+/**
+ * @summary Export
+ */
+export const ChannelExportParams = zod.object({
+  shop_id: zod.coerce.number(),
+  record_id: zod.coerce.number(),
+});
+
+export const channelExportBodyNotesMax = 2000;
+
+export const ChannelExportBody = zod.object({
+  notes: zod.string().min(1).max(channelExportBodyNotesMax),
+});
+
+export const ChannelExportResponse = zod.object({
+  id: zod.number(),
+  shop_id: zod.number(),
+  kind: zod.string(),
+  revision: zod.number(),
+  status: zod.string(),
+  created_at: zod.string(),
+  created_by: zod.string(),
+  data: zod.record(zod.string(), zod.unknown()),
+});
+
+/**
+ * @summary Download
+ */
+export const ChannelDownloadParams = zod.object({
+  shop_id: zod.coerce.number(),
+  record_id: zod.coerce.number(),
+});
+
+export const ChannelDownloadResponse = zod.unknown();
+
+/**
+ * @summary Readback
+ */
+export const ChannelReadbackParams = zod.object({
+  shop_id: zod.coerce.number(),
+  record_id: zod.coerce.number(),
+});
+
+export const ChannelReadbackBody = zod.object({
+  settings: zod.string(),
+  file: zod.instanceof(File),
+});
+
+export const ChannelReadbackResponse = zod.object({
+  id: zod.number(),
+  shop_id: zod.number(),
+  kind: zod.string(),
+  revision: zod.number(),
+  status: zod.string(),
+  created_at: zod.string(),
+  created_by: zod.string(),
+  data: zod.record(zod.string(), zod.unknown()),
+});
+
+/**
+ * @summary Run
+ */
+export const ChannelRunParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const ChannelRunResponse = zod.object({
+  id: zod.number(),
+  shop_id: zod.number(),
+  kind: zod.string(),
+  revision: zod.number(),
+  status: zod.string(),
+  created_at: zod.string(),
+  created_by: zod.string(),
+  data: zod.record(zod.string(), zod.unknown()),
+});
+
 export const GetCostPriorityShopsResponse = zod.object({
   shops: zod.array(
     zod.object({

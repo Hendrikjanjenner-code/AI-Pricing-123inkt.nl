@@ -93,6 +93,7 @@ def _setup_test_database() -> None:
 _setup_test_database()
 
 os.environ.setdefault("DISABLE_HEALTH_MONITOR", "true")
+os.environ.setdefault("DISABLE_CHANNELMANAGER_SCHEDULER", "true")
 os.environ.setdefault("DISABLE_FEED_SYNC", "true")
 os.environ.setdefault("DISABLE_DQ_SCAN", "true")
 # Let op: de in-app scheduler in main.py leest DISABLE_DATA_QUALITY_SCAN

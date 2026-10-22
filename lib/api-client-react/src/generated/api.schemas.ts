@@ -5,6 +5,246 @@
  * AI Pricing Decision Engine API
  * OpenAPI spec version: 0.1.0
  */
+export type ChannelBasisInputPriceBasis =
+  (typeof ChannelBasisInputPriceBasis)[keyof typeof ChannelBasisInputPriceBasis];
+
+export const ChannelBasisInputPriceBasis = {
+  net: "net",
+  gross: "gross",
+} as const;
+
+export type ChannelBasisInputProvenance =
+  (typeof ChannelBasisInputProvenance)[keyof typeof ChannelBasisInputProvenance];
+
+export const ChannelBasisInputProvenance = {
+  manual_csv: "manual_csv",
+  PriceShape_unverified: "PriceShape_unverified",
+} as const;
+
+export interface ChannelInputRow {
+  /**
+   * @minLength 1
+   * @maxLength 500
+   */
+  sku: string;
+  /** @maxLength 500 */
+  name?: string;
+  /** @maxLength 500 */
+  category?: string;
+  base_price: string;
+  cost?: string | null;
+  current_price?: string | null;
+}
+
+export interface ChannelBasisInput {
+  /** @pattern ^[A-Z]{3}$ */
+  currency: string;
+  price_basis: ChannelBasisInputPriceBasis;
+  vat_rate: string;
+  cost_basis: "net";
+  provenance: ChannelBasisInputProvenance;
+  /**
+   * @minLength 1
+   * @maxLength 2000
+   */
+  notes: string;
+  /**
+   * @minItems 1
+   * @maxItems 5000
+   */
+  rows: ChannelInputRow[];
+}
+
+export interface ChannelBodyBasisCsvApiChannelmanagerShopIdBasisCsvPost {
+  settings: string;
+  file: Blob;
+}
+
+export interface ChannelBodyReadbackApiChannelmanagerShopIdExportsRecordIdReadbackPost {
+  settings: string;
+  file: Blob;
+}
+
+export interface ChannelCalculationInput {
+  /** @exclusiveMinimum 0 */
+  source_shop_id: number;
+  /** @exclusiveMinimum 0 */
+  basis_id: number;
+}
+
+export type ChannelChannelConfigPriceBasis =
+  (typeof ChannelChannelConfigPriceBasis)[keyof typeof ChannelChannelConfigPriceBasis];
+
+export const ChannelChannelConfigPriceBasis = {
+  net: "net",
+  gross: "gross",
+} as const;
+
+export type ChannelRuleKind =
+  (typeof ChannelRuleKind)[keyof typeof ChannelRuleKind];
+
+export const ChannelRuleKind = {
+  fixed: "fixed",
+  percentage: "percentage",
+} as const;
+
+export interface ChannelRule {
+  kind: ChannelRuleKind;
+  value: string;
+}
+
+export type ChannelChannelConfigCategoryOverrides = {
+  [key: string]: ChannelRule;
+};
+
+export type ChannelChannelConfigSkuOverrides = { [key: string]: ChannelRule };
+
+export type ChannelChannelConfigRounding =
+  (typeof ChannelChannelConfigRounding)[keyof typeof ChannelChannelConfigRounding];
+
+export const ChannelChannelConfigRounding = {
+  HALF_UP: "HALF_UP",
+  HALF_EVEN: "HALF_EVEN",
+  DOWN: "DOWN",
+  UP: "UP",
+} as const;
+
+export type ChannelChannelConfigExportColumns = {
+  [key: string]: "sku" | "name" | "category" | "target_price";
+};
+
+export type ChannelChannelConfigDelimiter =
+  (typeof ChannelChannelConfigDelimiter)[keyof typeof ChannelChannelConfigDelimiter];
+
+export const ChannelChannelConfigDelimiter = {
+  ",": ",",
+  ";": ";",
+  "	": "	",
+  "|": "|",
+} as const;
+
+export type ChannelChannelConfigDecimal =
+  (typeof ChannelChannelConfigDecimal)[keyof typeof ChannelChannelConfigDecimal];
+
+export const ChannelChannelConfigDecimal = {
+  ".": ".",
+  ",": ",",
+} as const;
+
+export interface ChannelChannelConfig {
+  /** @pattern ^[A-Z]{3}$ */
+  currency: string;
+  price_basis: ChannelChannelConfigPriceBasis;
+  vat_rate: string;
+  rule: ChannelRule;
+  category_overrides?: ChannelChannelConfigCategoryOverrides;
+  sku_overrides?: ChannelChannelConfigSkuOverrides;
+  /**
+   * @minimum 0
+   * @maximum 4
+   */
+  precision?: number;
+  increment?: string;
+  rounding?: ChannelChannelConfigRounding;
+  min_price?: string | null;
+  min_margin?: string | null;
+  max_change_absolute?: string | null;
+  max_change_percent?: string | null;
+  readback_tolerance?: string;
+  export_columns?: ChannelChannelConfigExportColumns;
+  delimiter?: ChannelChannelConfigDelimiter;
+  decimal?: ChannelChannelConfigDecimal;
+  schedule_enabled?: boolean;
+  schedule_source_shop_id?: number | null;
+  /**
+   * @minimum 0
+   * @maximum 23
+   */
+  schedule_hour_utc?: number;
+}
+
+export interface ChannelConfigInput {
+  /**
+   * @minLength 1
+   * @maxLength 2000
+   */
+  notes: string;
+  /** @minimum 0 */
+  expected_revision: number;
+  config: ChannelChannelConfig;
+}
+
+export type ChannelValidationErrorCtx = { [key: string]: unknown };
+
+export interface ChannelValidationError {
+  loc: (string | number)[];
+  msg: string;
+  type: string;
+  input?: unknown;
+  ctx?: ChannelValidationErrorCtx;
+}
+
+export interface ChannelHTTPValidationError {
+  detail?: ChannelValidationError[];
+}
+
+export type ChannelSnapshotOutputData = { [key: string]: unknown };
+
+export interface ChannelSnapshotOutput {
+  id: number;
+  shop_id: number;
+  kind: string;
+  revision: number;
+  status: string;
+  created_at: string;
+  created_by: string;
+  data: ChannelSnapshotOutputData;
+}
+
+export interface ChannelHistoryOutput {
+  items: ChannelSnapshotOutput[];
+  has_more: boolean;
+}
+
+export interface ChannelNotes {
+  /**
+   * @minLength 1
+   * @maxLength 2000
+   */
+  notes: string;
+}
+
+export type ChannelOverviewOutputQueues = { [key: string]: number };
+
+export type ChannelOverviewOutputCounts = { [key: string]: number };
+
+export interface ChannelSchedulerOutput {
+  running: boolean;
+  available: boolean;
+  disabled: boolean;
+  mode: string;
+  poll_interval_seconds: number;
+  timezone: string;
+  reason: string | null;
+  last_poll_at: string | null;
+  last_error: string | null;
+}
+
+export interface ChannelOverviewOutput {
+  config: ChannelSnapshotOutput | null;
+  basis: ChannelSnapshotOutput | null;
+  last_run: ChannelSnapshotOutput | null;
+  history_limit: number;
+  external_formats: string;
+  schedule_timezone: string;
+  can_propose: boolean;
+  can_approve: boolean;
+  can_export: boolean;
+  queues: ChannelOverviewOutputQueues;
+  counts: ChannelOverviewOutputCounts;
+  scheduler: ChannelSchedulerOutput;
+}
+
 export interface CostPriorityShop {
   id: number;
   name: string;
@@ -1652,6 +1892,22 @@ export interface CreateShopRequest {
   legal_entity?: string | null;
   channel?: string;
 }
+
+export type ChannelHistoryParams = {
+  /**
+   * @pattern ^(config|basis|calculation|export|readback|run)$
+   */
+  kind: string;
+  /**
+   * @minimum 0
+   */
+  offset?: number;
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  limit?: number;
+};
 
 export type GetDrsDailyUnresolvedParams = {
   /**

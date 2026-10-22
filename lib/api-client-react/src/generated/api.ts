@@ -23,6 +23,17 @@ import type {
   Category,
   CategoryMarginItem,
   CategoryStrategy,
+  ChannelBasisInput,
+  ChannelBodyBasisCsvApiChannelmanagerShopIdBasisCsvPost,
+  ChannelBodyReadbackApiChannelmanagerShopIdExportsRecordIdReadbackPost,
+  ChannelCalculationInput,
+  ChannelConfigInput,
+  ChannelHTTPValidationError,
+  ChannelHistoryOutput,
+  ChannelHistoryParams,
+  ChannelNotes,
+  ChannelOverviewOutput,
+  ChannelSnapshotOutput,
   CompareCompetitorProfiles200,
   CompareCompetitorProfilesParams,
   CompetitorScoreDetail,
@@ -157,6 +168,1339 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+/**
+ * @summary Shops
+ */
+export const getChannelShopsUrl = () => {
+  return `/api/channelmanager/shops/available`;
+};
+
+export const channelShops = async (options?: RequestInit): Promise<unknown> => {
+  return customFetch<unknown>(getChannelShopsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getChannelShopsQueryKey = () => {
+  return [`/api/channelmanager/shops/available`] as const;
+};
+
+export const getChannelShopsQueryOptions = <
+  TData = Awaited<ReturnType<typeof channelShops>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof channelShops>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getChannelShopsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof channelShops>>> = ({
+    signal,
+  }) => channelShops({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof channelShops>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ChannelShopsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof channelShops>>
+>;
+export type ChannelShopsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Shops
+ */
+
+export function useChannelShops<
+  TData = Awaited<ReturnType<typeof channelShops>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof channelShops>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getChannelShopsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Overview
+ */
+export const getChannelOverviewUrl = (shopId: number) => {
+  return `/api/channelmanager/${shopId}/overview`;
+};
+
+export const channelOverview = async (
+  shopId: number,
+  options?: RequestInit,
+): Promise<ChannelOverviewOutput> => {
+  return customFetch<ChannelOverviewOutput>(getChannelOverviewUrl(shopId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getChannelOverviewQueryKey = (shopId: number) => {
+  return [`/api/channelmanager/${shopId}/overview`] as const;
+};
+
+export const getChannelOverviewQueryOptions = <
+  TData = Awaited<ReturnType<typeof channelOverview>>,
+  TError = ErrorType<ChannelHTTPValidationError>,
+>(
+  shopId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof channelOverview>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getChannelOverviewQueryKey(shopId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof channelOverview>>> = ({
+    signal,
+  }) => channelOverview(shopId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!shopId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof channelOverview>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ChannelOverviewQueryResult = NonNullable<
+  Awaited<ReturnType<typeof channelOverview>>
+>;
+export type ChannelOverviewQueryError = ErrorType<ChannelHTTPValidationError>;
+
+/**
+ * @summary Overview
+ */
+
+export function useChannelOverview<
+  TData = Awaited<ReturnType<typeof channelOverview>>,
+  TError = ErrorType<ChannelHTTPValidationError>,
+>(
+  shopId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof channelOverview>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getChannelOverviewQueryOptions(shopId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary History
+ */
+export const getChannelHistoryUrl = (
+  shopId: number,
+  params: ChannelHistoryParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/channelmanager/${shopId}/history?${stringifiedParams}`
+    : `/api/channelmanager/${shopId}/history`;
+};
+
+export const channelHistory = async (
+  shopId: number,
+  params: ChannelHistoryParams,
+  options?: RequestInit,
+): Promise<ChannelHistoryOutput> => {
+  return customFetch<ChannelHistoryOutput>(
+    getChannelHistoryUrl(shopId, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getChannelHistoryQueryKey = (
+  shopId: number,
+  params?: ChannelHistoryParams,
+) => {
+  return [
+    `/api/channelmanager/${shopId}/history`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getChannelHistoryQueryOptions = <
+  TData = Awaited<ReturnType<typeof channelHistory>>,
+  TError = ErrorType<ChannelHTTPValidationError>,
+>(
+  shopId: number,
+  params: ChannelHistoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof channelHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getChannelHistoryQueryKey(shopId, params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof channelHistory>>> = ({
+    signal,
+  }) => channelHistory(shopId, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!shopId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof channelHistory>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ChannelHistoryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof channelHistory>>
+>;
+export type ChannelHistoryQueryError = ErrorType<ChannelHTTPValidationError>;
+
+/**
+ * @summary History
+ */
+
+export function useChannelHistory<
+  TData = Awaited<ReturnType<typeof channelHistory>>,
+  TError = ErrorType<ChannelHTTPValidationError>,
+>(
+  shopId: number,
+  params: ChannelHistoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof channelHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getChannelHistoryQueryOptions(shopId, params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Record
+ */
+export const getChannelRecordUrl = (shopId: number, recordId: number) => {
+  return `/api/channelmanager/${shopId}/records/${recordId}`;
+};
+
+export const channelRecord = async (
+  shopId: number,
+  recordId: number,
+  options?: RequestInit,
+): Promise<ChannelSnapshotOutput> => {
+  return customFetch<ChannelSnapshotOutput>(
+    getChannelRecordUrl(shopId, recordId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getChannelRecordQueryKey = (shopId: number, recordId: number) => {
+  return [`/api/channelmanager/${shopId}/records/${recordId}`] as const;
+};
+
+export const getChannelRecordQueryOptions = <
+  TData = Awaited<ReturnType<typeof channelRecord>>,
+  TError = ErrorType<ChannelHTTPValidationError>,
+>(
+  shopId: number,
+  recordId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof channelRecord>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getChannelRecordQueryKey(shopId, recordId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof channelRecord>>> = ({
+    signal,
+  }) => channelRecord(shopId, recordId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(shopId && recordId),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof channelRecord>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ChannelRecordQueryResult = NonNullable<
+  Awaited<ReturnType<typeof channelRecord>>
+>;
+export type ChannelRecordQueryError = ErrorType<ChannelHTTPValidationError>;
+
+/**
+ * @summary Record
+ */
+
+export function useChannelRecord<
+  TData = Awaited<ReturnType<typeof channelRecord>>,
+  TError = ErrorType<ChannelHTTPValidationError>,
+>(
+  shopId: number,
+  recordId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof channelRecord>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getChannelRecordQueryOptions(shopId, recordId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Configure
+ */
+export const getChannelConfigureUrl = (shopId: number) => {
+  return `/api/channelmanager/${shopId}/config`;
+};
+
+export const channelConfigure = async (
+  shopId: number,
+  channelConfigInput: ChannelConfigInput,
+  options?: RequestInit,
+): Promise<ChannelSnapshotOutput> => {
+  return customFetch<ChannelSnapshotOutput>(getChannelConfigureUrl(shopId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(channelConfigInput),
+  });
+};
+
+export const getChannelConfigureMutationOptions = <
+  TError = ErrorType<ChannelHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelConfigure>>,
+    TError,
+    { shopId: number; data: BodyType<ChannelConfigInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof channelConfigure>>,
+  TError,
+  { shopId: number; data: BodyType<ChannelConfigInput> },
+  TContext
+> => {
+  const mutationKey = ["channelConfigure"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof channelConfigure>>,
+    { shopId: number; data: BodyType<ChannelConfigInput> }
+  > = (props) => {
+    const { shopId, data } = props ?? {};
+
+    return channelConfigure(shopId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChannelConfigureMutationResult = NonNullable<
+  Awaited<ReturnType<typeof channelConfigure>>
+>;
+export type ChannelConfigureMutationBody = BodyType<ChannelConfigInput>;
+export type ChannelConfigureMutationError =
+  ErrorType<ChannelHTTPValidationError>;
+
+/**
+ * @summary Configure
+ */
+export const useChannelConfigure = <
+  TError = ErrorType<ChannelHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelConfigure>>,
+    TError,
+    { shopId: number; data: BodyType<ChannelConfigInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof channelConfigure>>,
+  TError,
+  { shopId: number; data: BodyType<ChannelConfigInput> },
+  TContext
+> => {
+  return useMutation(getChannelConfigureMutationOptions(options));
+};
+
+/**
+ * @summary Basis
+ */
+export const getChannelBasisUrl = (shopId: number) => {
+  return `/api/channelmanager/${shopId}/basis`;
+};
+
+export const channelBasis = async (
+  shopId: number,
+  channelBasisInput: ChannelBasisInput,
+  options?: RequestInit,
+): Promise<ChannelSnapshotOutput> => {
+  return customFetch<ChannelSnapshotOutput>(getChannelBasisUrl(shopId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(channelBasisInput),
+  });
+};
+
+export const getChannelBasisMutationOptions = <
+  TError = ErrorType<ChannelHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelBasis>>,
+    TError,
+    { shopId: number; data: BodyType<ChannelBasisInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof channelBasis>>,
+  TError,
+  { shopId: number; data: BodyType<ChannelBasisInput> },
+  TContext
+> => {
+  const mutationKey = ["channelBasis"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof channelBasis>>,
+    { shopId: number; data: BodyType<ChannelBasisInput> }
+  > = (props) => {
+    const { shopId, data } = props ?? {};
+
+    return channelBasis(shopId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChannelBasisMutationResult = NonNullable<
+  Awaited<ReturnType<typeof channelBasis>>
+>;
+export type ChannelBasisMutationBody = BodyType<ChannelBasisInput>;
+export type ChannelBasisMutationError = ErrorType<ChannelHTTPValidationError>;
+
+/**
+ * @summary Basis
+ */
+export const useChannelBasis = <
+  TError = ErrorType<ChannelHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelBasis>>,
+    TError,
+    { shopId: number; data: BodyType<ChannelBasisInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof channelBasis>>,
+  TError,
+  { shopId: number; data: BodyType<ChannelBasisInput> },
+  TContext
+> => {
+  return useMutation(getChannelBasisMutationOptions(options));
+};
+
+/**
+ * @summary Basis Csv
+ */
+export const getChannelBasisCsvUrl = (shopId: number) => {
+  return `/api/channelmanager/${shopId}/basis-csv`;
+};
+
+export const channelBasisCsv = async (
+  shopId: number,
+  channelBodyBasisCsvApiChannelmanagerShopIdBasisCsvPost: ChannelBodyBasisCsvApiChannelmanagerShopIdBasisCsvPost,
+  options?: RequestInit,
+): Promise<ChannelSnapshotOutput> => {
+  const formData = new FormData();
+  formData.append(
+    `settings`,
+    channelBodyBasisCsvApiChannelmanagerShopIdBasisCsvPost.settings,
+  );
+  formData.append(
+    `file`,
+    channelBodyBasisCsvApiChannelmanagerShopIdBasisCsvPost.file,
+  );
+
+  return customFetch<ChannelSnapshotOutput>(getChannelBasisCsvUrl(shopId), {
+    ...options,
+    method: "POST",
+    body: formData,
+  });
+};
+
+export const getChannelBasisCsvMutationOptions = <
+  TError = ErrorType<ChannelHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelBasisCsv>>,
+    TError,
+    {
+      shopId: number;
+      data: BodyType<ChannelBodyBasisCsvApiChannelmanagerShopIdBasisCsvPost>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof channelBasisCsv>>,
+  TError,
+  {
+    shopId: number;
+    data: BodyType<ChannelBodyBasisCsvApiChannelmanagerShopIdBasisCsvPost>;
+  },
+  TContext
+> => {
+  const mutationKey = ["channelBasisCsv"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof channelBasisCsv>>,
+    {
+      shopId: number;
+      data: BodyType<ChannelBodyBasisCsvApiChannelmanagerShopIdBasisCsvPost>;
+    }
+  > = (props) => {
+    const { shopId, data } = props ?? {};
+
+    return channelBasisCsv(shopId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChannelBasisCsvMutationResult = NonNullable<
+  Awaited<ReturnType<typeof channelBasisCsv>>
+>;
+export type ChannelBasisCsvMutationBody =
+  BodyType<ChannelBodyBasisCsvApiChannelmanagerShopIdBasisCsvPost>;
+export type ChannelBasisCsvMutationError =
+  ErrorType<ChannelHTTPValidationError>;
+
+/**
+ * @summary Basis Csv
+ */
+export const useChannelBasisCsv = <
+  TError = ErrorType<ChannelHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelBasisCsv>>,
+    TError,
+    {
+      shopId: number;
+      data: BodyType<ChannelBodyBasisCsvApiChannelmanagerShopIdBasisCsvPost>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof channelBasisCsv>>,
+  TError,
+  {
+    shopId: number;
+    data: BodyType<ChannelBodyBasisCsvApiChannelmanagerShopIdBasisCsvPost>;
+  },
+  TContext
+> => {
+  return useMutation(getChannelBasisCsvMutationOptions(options));
+};
+
+/**
+ * @summary Approve Basis
+ */
+export const getChannelApproveBasisUrl = (shopId: number, recordId: number) => {
+  return `/api/channelmanager/${shopId}/basis/${recordId}/approve`;
+};
+
+export const channelApproveBasis = async (
+  shopId: number,
+  recordId: number,
+  channelNotes: ChannelNotes,
+  options?: RequestInit,
+): Promise<ChannelSnapshotOutput> => {
+  return customFetch<ChannelSnapshotOutput>(
+    getChannelApproveBasisUrl(shopId, recordId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(channelNotes),
+    },
+  );
+};
+
+export const getChannelApproveBasisMutationOptions = <
+  TError = ErrorType<ChannelHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelApproveBasis>>,
+    TError,
+    { shopId: number; recordId: number; data: BodyType<ChannelNotes> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof channelApproveBasis>>,
+  TError,
+  { shopId: number; recordId: number; data: BodyType<ChannelNotes> },
+  TContext
+> => {
+  const mutationKey = ["channelApproveBasis"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof channelApproveBasis>>,
+    { shopId: number; recordId: number; data: BodyType<ChannelNotes> }
+  > = (props) => {
+    const { shopId, recordId, data } = props ?? {};
+
+    return channelApproveBasis(shopId, recordId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChannelApproveBasisMutationResult = NonNullable<
+  Awaited<ReturnType<typeof channelApproveBasis>>
+>;
+export type ChannelApproveBasisMutationBody = BodyType<ChannelNotes>;
+export type ChannelApproveBasisMutationError =
+  ErrorType<ChannelHTTPValidationError>;
+
+/**
+ * @summary Approve Basis
+ */
+export const useChannelApproveBasis = <
+  TError = ErrorType<ChannelHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelApproveBasis>>,
+    TError,
+    { shopId: number; recordId: number; data: BodyType<ChannelNotes> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof channelApproveBasis>>,
+  TError,
+  { shopId: number; recordId: number; data: BodyType<ChannelNotes> },
+  TContext
+> => {
+  return useMutation(getChannelApproveBasisMutationOptions(options));
+};
+
+/**
+ * @summary Calculate Route
+ */
+export const getChannelCalculateRouteUrl = (shopId: number) => {
+  return `/api/channelmanager/${shopId}/calculate`;
+};
+
+export const channelCalculateRoute = async (
+  shopId: number,
+  channelCalculationInput: ChannelCalculationInput,
+  options?: RequestInit,
+): Promise<ChannelSnapshotOutput> => {
+  return customFetch<ChannelSnapshotOutput>(
+    getChannelCalculateRouteUrl(shopId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(channelCalculationInput),
+    },
+  );
+};
+
+export const getChannelCalculateRouteMutationOptions = <
+  TError = ErrorType<ChannelHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelCalculateRoute>>,
+    TError,
+    { shopId: number; data: BodyType<ChannelCalculationInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof channelCalculateRoute>>,
+  TError,
+  { shopId: number; data: BodyType<ChannelCalculationInput> },
+  TContext
+> => {
+  const mutationKey = ["channelCalculateRoute"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof channelCalculateRoute>>,
+    { shopId: number; data: BodyType<ChannelCalculationInput> }
+  > = (props) => {
+    const { shopId, data } = props ?? {};
+
+    return channelCalculateRoute(shopId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChannelCalculateRouteMutationResult = NonNullable<
+  Awaited<ReturnType<typeof channelCalculateRoute>>
+>;
+export type ChannelCalculateRouteMutationBody =
+  BodyType<ChannelCalculationInput>;
+export type ChannelCalculateRouteMutationError =
+  ErrorType<ChannelHTTPValidationError>;
+
+/**
+ * @summary Calculate Route
+ */
+export const useChannelCalculateRoute = <
+  TError = ErrorType<ChannelHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelCalculateRoute>>,
+    TError,
+    { shopId: number; data: BodyType<ChannelCalculationInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof channelCalculateRoute>>,
+  TError,
+  { shopId: number; data: BodyType<ChannelCalculationInput> },
+  TContext
+> => {
+  return useMutation(getChannelCalculateRouteMutationOptions(options));
+};
+
+/**
+ * @summary Approve Calculation
+ */
+export const getChannelApproveCalculationUrl = (
+  shopId: number,
+  recordId: number,
+) => {
+  return `/api/channelmanager/${shopId}/calculations/${recordId}/approve`;
+};
+
+export const channelApproveCalculation = async (
+  shopId: number,
+  recordId: number,
+  channelNotes: ChannelNotes,
+  options?: RequestInit,
+): Promise<ChannelSnapshotOutput> => {
+  return customFetch<ChannelSnapshotOutput>(
+    getChannelApproveCalculationUrl(shopId, recordId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(channelNotes),
+    },
+  );
+};
+
+export const getChannelApproveCalculationMutationOptions = <
+  TError = ErrorType<ChannelHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelApproveCalculation>>,
+    TError,
+    { shopId: number; recordId: number; data: BodyType<ChannelNotes> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof channelApproveCalculation>>,
+  TError,
+  { shopId: number; recordId: number; data: BodyType<ChannelNotes> },
+  TContext
+> => {
+  const mutationKey = ["channelApproveCalculation"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof channelApproveCalculation>>,
+    { shopId: number; recordId: number; data: BodyType<ChannelNotes> }
+  > = (props) => {
+    const { shopId, recordId, data } = props ?? {};
+
+    return channelApproveCalculation(shopId, recordId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChannelApproveCalculationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof channelApproveCalculation>>
+>;
+export type ChannelApproveCalculationMutationBody = BodyType<ChannelNotes>;
+export type ChannelApproveCalculationMutationError =
+  ErrorType<ChannelHTTPValidationError>;
+
+/**
+ * @summary Approve Calculation
+ */
+export const useChannelApproveCalculation = <
+  TError = ErrorType<ChannelHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelApproveCalculation>>,
+    TError,
+    { shopId: number; recordId: number; data: BodyType<ChannelNotes> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof channelApproveCalculation>>,
+  TError,
+  { shopId: number; recordId: number; data: BodyType<ChannelNotes> },
+  TContext
+> => {
+  return useMutation(getChannelApproveCalculationMutationOptions(options));
+};
+
+/**
+ * @summary Export
+ */
+export const getChannelExportUrl = (shopId: number, recordId: number) => {
+  return `/api/channelmanager/${shopId}/calculations/${recordId}/export`;
+};
+
+export const channelExport = async (
+  shopId: number,
+  recordId: number,
+  channelNotes: ChannelNotes,
+  options?: RequestInit,
+): Promise<ChannelSnapshotOutput> => {
+  return customFetch<ChannelSnapshotOutput>(
+    getChannelExportUrl(shopId, recordId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(channelNotes),
+    },
+  );
+};
+
+export const getChannelExportMutationOptions = <
+  TError = ErrorType<ChannelHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelExport>>,
+    TError,
+    { shopId: number; recordId: number; data: BodyType<ChannelNotes> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof channelExport>>,
+  TError,
+  { shopId: number; recordId: number; data: BodyType<ChannelNotes> },
+  TContext
+> => {
+  const mutationKey = ["channelExport"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof channelExport>>,
+    { shopId: number; recordId: number; data: BodyType<ChannelNotes> }
+  > = (props) => {
+    const { shopId, recordId, data } = props ?? {};
+
+    return channelExport(shopId, recordId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChannelExportMutationResult = NonNullable<
+  Awaited<ReturnType<typeof channelExport>>
+>;
+export type ChannelExportMutationBody = BodyType<ChannelNotes>;
+export type ChannelExportMutationError = ErrorType<ChannelHTTPValidationError>;
+
+/**
+ * @summary Export
+ */
+export const useChannelExport = <
+  TError = ErrorType<ChannelHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelExport>>,
+    TError,
+    { shopId: number; recordId: number; data: BodyType<ChannelNotes> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof channelExport>>,
+  TError,
+  { shopId: number; recordId: number; data: BodyType<ChannelNotes> },
+  TContext
+> => {
+  return useMutation(getChannelExportMutationOptions(options));
+};
+
+/**
+ * @summary Download
+ */
+export const getChannelDownloadUrl = (shopId: number, recordId: number) => {
+  return `/api/channelmanager/${shopId}/exports/${recordId}/download`;
+};
+
+export const channelDownload = async (
+  shopId: number,
+  recordId: number,
+  options?: RequestInit,
+): Promise<unknown> => {
+  return customFetch<unknown>(getChannelDownloadUrl(shopId, recordId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getChannelDownloadQueryKey = (
+  shopId: number,
+  recordId: number,
+) => {
+  return [
+    `/api/channelmanager/${shopId}/exports/${recordId}/download`,
+  ] as const;
+};
+
+export const getChannelDownloadQueryOptions = <
+  TData = Awaited<ReturnType<typeof channelDownload>>,
+  TError = ErrorType<ChannelHTTPValidationError>,
+>(
+  shopId: number,
+  recordId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof channelDownload>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getChannelDownloadQueryKey(shopId, recordId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof channelDownload>>> = ({
+    signal,
+  }) => channelDownload(shopId, recordId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!(shopId && recordId),
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof channelDownload>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ChannelDownloadQueryResult = NonNullable<
+  Awaited<ReturnType<typeof channelDownload>>
+>;
+export type ChannelDownloadQueryError = ErrorType<ChannelHTTPValidationError>;
+
+/**
+ * @summary Download
+ */
+
+export function useChannelDownload<
+  TData = Awaited<ReturnType<typeof channelDownload>>,
+  TError = ErrorType<ChannelHTTPValidationError>,
+>(
+  shopId: number,
+  recordId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof channelDownload>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getChannelDownloadQueryOptions(
+    shopId,
+    recordId,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Readback
+ */
+export const getChannelReadbackUrl = (shopId: number, recordId: number) => {
+  return `/api/channelmanager/${shopId}/exports/${recordId}/readback`;
+};
+
+export const channelReadback = async (
+  shopId: number,
+  recordId: number,
+  channelBodyReadbackApiChannelmanagerShopIdExportsRecordIdReadbackPost: ChannelBodyReadbackApiChannelmanagerShopIdExportsRecordIdReadbackPost,
+  options?: RequestInit,
+): Promise<ChannelSnapshotOutput> => {
+  const formData = new FormData();
+  formData.append(
+    `settings`,
+    channelBodyReadbackApiChannelmanagerShopIdExportsRecordIdReadbackPost.settings,
+  );
+  formData.append(
+    `file`,
+    channelBodyReadbackApiChannelmanagerShopIdExportsRecordIdReadbackPost.file,
+  );
+
+  return customFetch<ChannelSnapshotOutput>(
+    getChannelReadbackUrl(shopId, recordId),
+    {
+      ...options,
+      method: "POST",
+      body: formData,
+    },
+  );
+};
+
+export const getChannelReadbackMutationOptions = <
+  TError = ErrorType<ChannelHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelReadback>>,
+    TError,
+    {
+      shopId: number;
+      recordId: number;
+      data: BodyType<ChannelBodyReadbackApiChannelmanagerShopIdExportsRecordIdReadbackPost>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof channelReadback>>,
+  TError,
+  {
+    shopId: number;
+    recordId: number;
+    data: BodyType<ChannelBodyReadbackApiChannelmanagerShopIdExportsRecordIdReadbackPost>;
+  },
+  TContext
+> => {
+  const mutationKey = ["channelReadback"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof channelReadback>>,
+    {
+      shopId: number;
+      recordId: number;
+      data: BodyType<ChannelBodyReadbackApiChannelmanagerShopIdExportsRecordIdReadbackPost>;
+    }
+  > = (props) => {
+    const { shopId, recordId, data } = props ?? {};
+
+    return channelReadback(shopId, recordId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChannelReadbackMutationResult = NonNullable<
+  Awaited<ReturnType<typeof channelReadback>>
+>;
+export type ChannelReadbackMutationBody =
+  BodyType<ChannelBodyReadbackApiChannelmanagerShopIdExportsRecordIdReadbackPost>;
+export type ChannelReadbackMutationError =
+  ErrorType<ChannelHTTPValidationError>;
+
+/**
+ * @summary Readback
+ */
+export const useChannelReadback = <
+  TError = ErrorType<ChannelHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelReadback>>,
+    TError,
+    {
+      shopId: number;
+      recordId: number;
+      data: BodyType<ChannelBodyReadbackApiChannelmanagerShopIdExportsRecordIdReadbackPost>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof channelReadback>>,
+  TError,
+  {
+    shopId: number;
+    recordId: number;
+    data: BodyType<ChannelBodyReadbackApiChannelmanagerShopIdExportsRecordIdReadbackPost>;
+  },
+  TContext
+> => {
+  return useMutation(getChannelReadbackMutationOptions(options));
+};
+
+/**
+ * @summary Run
+ */
+export const getChannelRunUrl = (shopId: number) => {
+  return `/api/channelmanager/${shopId}/run`;
+};
+
+export const channelRun = async (
+  shopId: number,
+  options?: RequestInit,
+): Promise<ChannelSnapshotOutput> => {
+  return customFetch<ChannelSnapshotOutput>(getChannelRunUrl(shopId), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getChannelRunMutationOptions = <
+  TError = ErrorType<ChannelHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelRun>>,
+    TError,
+    { shopId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof channelRun>>,
+  TError,
+  { shopId: number },
+  TContext
+> => {
+  const mutationKey = ["channelRun"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof channelRun>>,
+    { shopId: number }
+  > = (props) => {
+    const { shopId } = props ?? {};
+
+    return channelRun(shopId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChannelRunMutationResult = NonNullable<
+  Awaited<ReturnType<typeof channelRun>>
+>;
+
+export type ChannelRunMutationError = ErrorType<ChannelHTTPValidationError>;
+
+/**
+ * @summary Run
+ */
+export const useChannelRun = <
+  TError = ErrorType<ChannelHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelRun>>,
+    TError,
+    { shopId: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof channelRun>>,
+  TError,
+  { shopId: number },
+  TContext
+> => {
+  return useMutation(getChannelRunMutationOptions(options));
+};
 
 export const getGetCostPriorityShopsUrl = () => {
   return `/api/cost-priority/shops/available`;

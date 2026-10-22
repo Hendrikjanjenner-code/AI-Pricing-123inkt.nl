@@ -82,3 +82,5 @@
 - [Concurrentprofiel Excel-schema](competitor-profile-excel-schema.md) — v1 gebruikt lange bedrijfskenmerk-rijen; juridische en commerciële relaties blijven strikt gescheiden.
 - [DRS dagverkoop-semantiek](drs-daily-semantics.md) — itemGroupId is niet uniek; retouren zijn niet geverifieerd; getekende bedragen exact behouden en historische kosten niet afleiden.
 - [Pricing Hub kostprijsprioriteiten](pricing-hub-cost-priorities.md) — gebruiker bevestigt exacte Excel-default inclusief marktprijs-terugval; volgorde instelbaar met drag-and-drop.
+- [Channelmanager voorlopige koppelingen](channelmanager-provisional-contracts.md) — gebruiker wil volledige interne keten nu; ontbrekende bestanden later via instelbare mappings en regels aansluiten.
+- [Generieke JSX en preview](jsx-generic-preview-transform.md) — expliciete JSX-typeargumenten kunnen na metadata-injectie breken ondanks geslaagde typecheck; laat props het type bepalen.

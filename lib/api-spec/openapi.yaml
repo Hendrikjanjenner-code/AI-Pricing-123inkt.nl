@@ -43,6 +43,493 @@ tags:
     description: Commercial AI Copilot (AI Gateway)
 
 paths:
+  # CHANNELMANAGER PATHS BEGIN
+  /channelmanager/shops/available:
+    get:
+      tags:
+      - channelmanager
+      summary: Shops
+      operationId: channelShops
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+      security:
+      - HTTPBearer: []
+  /channelmanager/{shop_id}/overview:
+    get:
+      tags:
+      - channelmanager
+      summary: Overview
+      operationId: channelOverview
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelOverviewOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelHTTPValidationError'
+  /channelmanager/{shop_id}/history:
+    get:
+      tags:
+      - channelmanager
+      summary: History
+      operationId: channelHistory
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: kind
+        in: query
+        required: true
+        schema:
+          type: string
+          pattern: ^(config|basis|calculation|export|readback|run)$
+          title: Kind
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 50
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelHistoryOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelHTTPValidationError'
+  /channelmanager/{shop_id}/records/{record_id}:
+    get:
+      tags:
+      - channelmanager
+      summary: Record
+      operationId: channelRecord
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: record_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Record Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelSnapshotOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelHTTPValidationError'
+  /channelmanager/{shop_id}/config:
+    post:
+      tags:
+      - channelmanager
+      summary: Configure
+      operationId: channelConfigure
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelConfigInput'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelSnapshotOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelHTTPValidationError'
+  /channelmanager/{shop_id}/basis:
+    post:
+      tags:
+      - channelmanager
+      summary: Basis
+      operationId: channelBasis
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelBasisInput'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelSnapshotOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelHTTPValidationError'
+  /channelmanager/{shop_id}/basis-csv:
+    post:
+      tags:
+      - channelmanager
+      summary: Basis Csv
+      operationId: channelBasisCsv
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChannelBody_basis_csv_api_channelmanager__shop_id__basis_csv_post'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelSnapshotOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelHTTPValidationError'
+  /channelmanager/{shop_id}/basis/{record_id}/approve:
+    post:
+      tags:
+      - channelmanager
+      summary: Approve Basis
+      operationId: channelApproveBasis
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: record_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Record Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelNotes'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelSnapshotOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelHTTPValidationError'
+  /channelmanager/{shop_id}/calculate:
+    post:
+      tags:
+      - channelmanager
+      summary: Calculate Route
+      operationId: channelCalculateRoute
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelCalculationInput'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelSnapshotOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelHTTPValidationError'
+  /channelmanager/{shop_id}/calculations/{record_id}/approve:
+    post:
+      tags:
+      - channelmanager
+      summary: Approve Calculation
+      operationId: channelApproveCalculation
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: record_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Record Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelNotes'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelSnapshotOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelHTTPValidationError'
+  /channelmanager/{shop_id}/calculations/{record_id}/export:
+    post:
+      tags:
+      - channelmanager
+      summary: Export
+      operationId: channelExport
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: record_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Record Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelNotes'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelSnapshotOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelHTTPValidationError'
+  /channelmanager/{shop_id}/exports/{record_id}/download:
+    get:
+      tags:
+      - channelmanager
+      summary: Download
+      operationId: channelDownload
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: record_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Record Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelHTTPValidationError'
+  /channelmanager/{shop_id}/exports/{record_id}/readback:
+    post:
+      tags:
+      - channelmanager
+      summary: Readback
+      operationId: channelReadback
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: record_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Record Id
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChannelBody_readback_api_channelmanager__shop_id__exports__record_id__readback_post'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelSnapshotOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelHTTPValidationError'
+  /channelmanager/{shop_id}/run:
+    post:
+      tags:
+      - channelmanager
+      summary: Run
+      operationId: channelRun
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelSnapshotOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelHTTPValidationError'
+  # CHANNELMANAGER PATHS END
   /cost-priority/shops/available:
     get:
       operationId: getCostPriorityShops
@@ -2549,6 +3036,507 @@ components:
       required: true
       schema: {type: integer}
   schemas:
+    # CHANNELMANAGER SCHEMAS BEGIN
+    ChannelBasisInput:
+      properties:
+        currency:
+          type: string
+          pattern: ^[A-Z]{3}$
+          title: Currency
+        price_basis:
+          type: string
+          enum:
+          - net
+          - gross
+          title: Price Basis
+        vat_rate:
+          type: string
+          title: Vat Rate
+        cost_basis:
+          type: string
+          const: net
+          title: Cost Basis
+        provenance:
+          type: string
+          enum:
+          - manual_csv
+          - PriceShape_unverified
+          title: Provenance
+        notes:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Notes
+        rows:
+          items:
+            $ref: '#/components/schemas/ChannelInputRow'
+          type: array
+          maxItems: 5000
+          minItems: 1
+          title: Rows
+      additionalProperties: false
+      type: object
+      required:
+      - currency
+      - price_basis
+      - vat_rate
+      - cost_basis
+      - provenance
+      - notes
+      - rows
+      title: BasisInput
+    ChannelBody_basis_csv_api_channelmanager__shop_id__basis_csv_post:
+      properties:
+        settings:
+          type: string
+          title: Settings
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+      - settings
+      - file
+      title: Body_basis_csv_api_channelmanager__shop_id__basis_csv_post
+    ChannelBody_readback_api_channelmanager__shop_id__exports__record_id__readback_post:
+      properties:
+        settings:
+          type: string
+          title: Settings
+        file:
+          type: string
+          contentMediaType: application/octet-stream
+          title: File
+      type: object
+      required:
+      - settings
+      - file
+      title: Body_readback_api_channelmanager__shop_id__exports__record_id__readback_post
+    ChannelCalculationInput:
+      properties:
+        source_shop_id:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Source Shop Id
+        basis_id:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Basis Id
+      additionalProperties: false
+      type: object
+      required:
+      - source_shop_id
+      - basis_id
+      title: CalculationInput
+    ChannelChannelConfig:
+      properties:
+        currency:
+          type: string
+          pattern: ^[A-Z]{3}$
+          title: Currency
+        price_basis:
+          type: string
+          enum:
+          - net
+          - gross
+          title: Price Basis
+        vat_rate:
+          type: string
+          title: Vat Rate
+        rule:
+          $ref: '#/components/schemas/ChannelRule'
+        category_overrides:
+          additionalProperties:
+            $ref: '#/components/schemas/ChannelRule'
+          type: object
+          maxProperties: 500
+          title: Category Overrides
+        sku_overrides:
+          additionalProperties:
+            $ref: '#/components/schemas/ChannelRule'
+          type: object
+          maxProperties: 5000
+          title: Sku Overrides
+        precision:
+          type: integer
+          maximum: 4.0
+          minimum: 0.0
+          title: Precision
+          default: 2
+        increment:
+          type: string
+          title: Increment
+          default: '0.01'
+        rounding:
+          type: string
+          enum:
+          - HALF_UP
+          - HALF_EVEN
+          - DOWN
+          - UP
+          title: Rounding
+          default: HALF_UP
+        min_price:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Min Price
+        min_margin:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Min Margin
+        max_change_absolute:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Max Change Absolute
+        max_change_percent:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Max Change Percent
+        readback_tolerance:
+          type: string
+          title: Readback Tolerance
+          default: '0'
+        export_columns:
+          additionalProperties:
+            type: string
+            enum:
+            - sku
+            - name
+            - category
+            - target_price
+          type: object
+          maxProperties: 10
+          minProperties: 2
+          title: Export Columns
+        delimiter:
+          type: string
+          enum:
+          - ','
+          - ;
+          - "\t"
+          - '|'
+          title: Delimiter
+          default: ;
+        decimal:
+          type: string
+          enum:
+          - .
+          - ','
+          title: Decimal
+          default: .
+        schedule_enabled:
+          type: boolean
+          title: Schedule Enabled
+          default: false
+        schedule_source_shop_id:
+          anyOf:
+          - type: integer
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Schedule Source Shop Id
+        schedule_hour_utc:
+          type: integer
+          maximum: 23.0
+          minimum: 0.0
+          title: Schedule Hour Utc
+          default: 2
+      additionalProperties: false
+      type: object
+      required:
+      - currency
+      - price_basis
+      - vat_rate
+      - rule
+      title: ChannelConfig
+    ChannelConfigInput:
+      properties:
+        notes:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Notes
+        expected_revision:
+          type: integer
+          minimum: 0.0
+          title: Expected Revision
+        config:
+          $ref: '#/components/schemas/ChannelChannelConfig'
+      additionalProperties: false
+      type: object
+      required:
+      - notes
+      - expected_revision
+      - config
+      title: ConfigInput
+    ChannelHTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ChannelValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    ChannelHistoryOutput:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/ChannelSnapshotOutput'
+          type: array
+          title: Items
+        has_more:
+          type: boolean
+          title: Has More
+      additionalProperties: false
+      type: object
+      required:
+      - items
+      - has_more
+      title: HistoryOutput
+    ChannelInputRow:
+      properties:
+        sku:
+          type: string
+          maxLength: 500
+          minLength: 1
+          title: Sku
+        name:
+          type: string
+          maxLength: 500
+          title: Name
+          default: ''
+        category:
+          type: string
+          maxLength: 500
+          title: Category
+          default: ''
+        base_price:
+          type: string
+          title: Base Price
+        cost:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Cost
+        current_price:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Current Price
+      additionalProperties: false
+      type: object
+      required:
+      - sku
+      - base_price
+      title: InputRow
+    ChannelNotes:
+      properties:
+        notes:
+          type: string
+          maxLength: 2000
+          minLength: 1
+          title: Notes
+      additionalProperties: false
+      type: object
+      required:
+      - notes
+      title: Notes
+    ChannelOverviewOutput:
+      properties:
+        config:
+          anyOf:
+          - $ref: '#/components/schemas/ChannelSnapshotOutput'
+          - type: 'null'
+        basis:
+          anyOf:
+          - $ref: '#/components/schemas/ChannelSnapshotOutput'
+          - type: 'null'
+        last_run:
+          anyOf:
+          - $ref: '#/components/schemas/ChannelSnapshotOutput'
+          - type: 'null'
+        history_limit:
+          type: integer
+          title: History Limit
+        external_formats:
+          type: string
+          title: External Formats
+        schedule_timezone:
+          type: string
+          title: Schedule Timezone
+        can_propose:
+          type: boolean
+          title: Can Propose
+        can_approve:
+          type: boolean
+          title: Can Approve
+        can_export:
+          type: boolean
+          title: Can Export
+        queues:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Queues
+        counts:
+          additionalProperties:
+            type: integer
+          type: object
+          title: Counts
+        scheduler:
+          $ref: '#/components/schemas/ChannelSchedulerOutput'
+      additionalProperties: false
+      type: object
+      required:
+      - config
+      - basis
+      - last_run
+      - history_limit
+      - external_formats
+      - schedule_timezone
+      - can_propose
+      - can_approve
+      - can_export
+      - queues
+      - counts
+      - scheduler
+      title: OverviewOutput
+    ChannelRule:
+      properties:
+        kind:
+          type: string
+          enum:
+          - fixed
+          - percentage
+          title: Kind
+        value:
+          type: string
+          title: Value
+      additionalProperties: false
+      type: object
+      required:
+      - kind
+      - value
+      title: Rule
+    ChannelSchedulerOutput:
+      properties:
+        running:
+          type: boolean
+          title: Running
+        available:
+          type: boolean
+          title: Available
+        disabled:
+          type: boolean
+          title: Disabled
+        mode:
+          type: string
+          title: Mode
+        poll_interval_seconds:
+          type: integer
+          title: Poll Interval Seconds
+        timezone:
+          type: string
+          title: Timezone
+        reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+        last_poll_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last Poll At
+        last_error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last Error
+      additionalProperties: false
+      type: object
+      required:
+      - running
+      - available
+      - disabled
+      - mode
+      - poll_interval_seconds
+      - timezone
+      - reason
+      - last_poll_at
+      - last_error
+      title: SchedulerOutput
+    ChannelSnapshotOutput:
+      properties:
+        id:
+          type: integer
+          title: Id
+        shop_id:
+          type: integer
+          title: Shop Id
+        kind:
+          type: string
+          title: Kind
+        revision:
+          type: integer
+          title: Revision
+        status:
+          type: string
+          title: Status
+        created_at:
+          type: string
+          title: Created At
+        created_by:
+          type: string
+          title: Created By
+        data:
+          additionalProperties: true
+          type: object
+          title: Data
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - shop_id
+      - kind
+      - revision
+      - status
+      - created_at
+      - created_by
+      - data
+      title: SnapshotOutput
+    ChannelValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    # CHANNELMANAGER SCHEMAS END
     CostPriorityShop:
       type: object
       required: [id, name, is_default, active]

@@ -59,6 +59,7 @@ ROUTE_PERMISSIONS: dict[str, str] = {
     # Pricing
     "recommendations": "pricing.view",
     "cost-priority": "pricing.view",
+    "channelmanager": "pricing.view",
     "elasticiteit": "pricing.view",
     "break-even": "pricing.view",
     "ppfs": "pricing.view",
@@ -349,6 +350,7 @@ _APPROVE_HINTS = ("approve", "reject", "decision", "override", "goedkeur", "afwi
 
 # Segment → default schrijf-permissie.
 WRITE_PERMISSIONS: dict[str, str] = {
+    "channelmanager": "pricing.propose",
     "recommendations": "pricing.propose",
     "recommendation": "pricing.propose",
     "competition": "competition.edit",
@@ -368,6 +370,7 @@ WRITE_PERMISSIONS: dict[str, str] = {
 
 # Segment → approve-permissie voor paden met een approve/besluit-hint.
 APPROVE_PERMISSIONS: dict[str, str] = {
+    "channelmanager": "pricing.approve",
     "recommendations": "pricing.approve",
     "recommendation": "pricing.approve",
     "competition": "competition.approve",
@@ -383,6 +386,8 @@ def required_action_permission(path: str, method: str) -> str | None:
     rest = path[5:].split("?", 1)[0]
     segment = rest.split("/", 1)[0]
     lower = rest.lower()
+    if segment == "channelmanager" and lower.endswith("/export"):
+        return "pricing.approve"
     if segment in APPROVE_PERMISSIONS and any(h in lower for h in _APPROVE_HINTS):
         return APPROVE_PERMISSIONS[segment]
     return WRITE_PERMISSIONS.get(segment)
