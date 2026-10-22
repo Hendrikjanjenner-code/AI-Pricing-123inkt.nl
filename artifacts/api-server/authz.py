@@ -58,6 +58,7 @@ ROUTE_PERMISSIONS: dict[str, str] = {
     "monitoring": "competition.view",
     # Pricing
     "recommendations": "pricing.view",
+    "cost-priority": "pricing.view",
     "elasticiteit": "pricing.view",
     "break-even": "pricing.view",
     "ppfs": "pricing.view",

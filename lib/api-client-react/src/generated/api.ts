@@ -35,6 +35,13 @@ import type {
   CopilotCreateConversationRequest,
   CopilotModelCall,
   CopilotStatus,
+  CostPriorityActivationInput,
+  CostPriorityConfiguration,
+  CostPriorityHistory,
+  CostPriorityPreview,
+  CostPriorityScenarioInput,
+  CostPriorityShops,
+  CostPriorityWorkbookInput,
   CreateShopRequest,
   CreateSignalRequest,
   CreateUserRequest,
@@ -150,6 +157,494 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+export const getGetCostPriorityShopsUrl = () => {
+  return `/api/cost-priority/shops/available`;
+};
+
+export const getCostPriorityShops = async (
+  options?: RequestInit,
+): Promise<CostPriorityShops> => {
+  return customFetch<CostPriorityShops>(getGetCostPriorityShopsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetCostPriorityShopsQueryKey = () => {
+  return [`/api/cost-priority/shops/available`] as const;
+};
+
+export const getGetCostPriorityShopsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCostPriorityShops>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getCostPriorityShops>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetCostPriorityShopsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getCostPriorityShops>>
+  > = ({ signal }) => getCostPriorityShops({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCostPriorityShops>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetCostPriorityShopsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCostPriorityShops>>
+>;
+export type GetCostPriorityShopsQueryError = ErrorType<unknown>;
+
+export function useGetCostPriorityShops<
+  TData = Awaited<ReturnType<typeof getCostPriorityShops>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getCostPriorityShops>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetCostPriorityShopsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getGetCostPriorityUrl = (shopId: number) => {
+  return `/api/cost-priority/${shopId}`;
+};
+
+export const getCostPriority = async (
+  shopId: number,
+  options?: RequestInit,
+): Promise<CostPriorityConfiguration> => {
+  return customFetch<CostPriorityConfiguration>(getGetCostPriorityUrl(shopId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetCostPriorityQueryKey = (shopId: number) => {
+  return [`/api/cost-priority/${shopId}`] as const;
+};
+
+export const getGetCostPriorityQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCostPriority>>,
+  TError = ErrorType<unknown>,
+>(
+  shopId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCostPriority>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetCostPriorityQueryKey(shopId);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getCostPriority>>> = ({
+    signal,
+  }) => getCostPriority(shopId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!shopId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCostPriority>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetCostPriorityQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCostPriority>>
+>;
+export type GetCostPriorityQueryError = ErrorType<unknown>;
+
+export function useGetCostPriority<
+  TData = Awaited<ReturnType<typeof getCostPriority>>,
+  TError = ErrorType<unknown>,
+>(
+  shopId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCostPriority>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetCostPriorityQueryOptions(shopId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getPreviewCostPriorityUrl = (shopId: number) => {
+  return `/api/cost-priority/${shopId}/preview`;
+};
+
+export const previewCostPriority = async (
+  shopId: number,
+  costPriorityScenarioInput: CostPriorityScenarioInput,
+  options?: RequestInit,
+): Promise<CostPriorityPreview> => {
+  return customFetch<CostPriorityPreview>(getPreviewCostPriorityUrl(shopId), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(costPriorityScenarioInput),
+  });
+};
+
+export const getPreviewCostPriorityMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewCostPriority>>,
+    TError,
+    { shopId: number; data: BodyType<CostPriorityScenarioInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof previewCostPriority>>,
+  TError,
+  { shopId: number; data: BodyType<CostPriorityScenarioInput> },
+  TContext
+> => {
+  const mutationKey = ["previewCostPriority"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof previewCostPriority>>,
+    { shopId: number; data: BodyType<CostPriorityScenarioInput> }
+  > = (props) => {
+    const { shopId, data } = props ?? {};
+
+    return previewCostPriority(shopId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PreviewCostPriorityMutationResult = NonNullable<
+  Awaited<ReturnType<typeof previewCostPriority>>
+>;
+export type PreviewCostPriorityMutationBody =
+  BodyType<CostPriorityScenarioInput>;
+export type PreviewCostPriorityMutationError = ErrorType<void>;
+
+export const usePreviewCostPriority = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewCostPriority>>,
+    TError,
+    { shopId: number; data: BodyType<CostPriorityScenarioInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof previewCostPriority>>,
+  TError,
+  { shopId: number; data: BodyType<CostPriorityScenarioInput> },
+  TContext
+> => {
+  return useMutation(getPreviewCostPriorityMutationOptions(options));
+};
+
+export const getPreviewCostPriorityWorkbookUrl = (shopId: number) => {
+  return `/api/cost-priority/${shopId}/preview-workbook`;
+};
+
+export const previewCostPriorityWorkbook = async (
+  shopId: number,
+  costPriorityWorkbookInput: CostPriorityWorkbookInput,
+  options?: RequestInit,
+): Promise<CostPriorityPreview> => {
+  const formData = new FormData();
+  formData.append(`draft`, costPriorityWorkbookInput.draft);
+  formData.append(`file`, costPriorityWorkbookInput.file);
+
+  return customFetch<CostPriorityPreview>(
+    getPreviewCostPriorityWorkbookUrl(shopId),
+    {
+      ...options,
+      method: "POST",
+      body: formData,
+    },
+  );
+};
+
+export const getPreviewCostPriorityWorkbookMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewCostPriorityWorkbook>>,
+    TError,
+    { shopId: number; data: BodyType<CostPriorityWorkbookInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof previewCostPriorityWorkbook>>,
+  TError,
+  { shopId: number; data: BodyType<CostPriorityWorkbookInput> },
+  TContext
+> => {
+  const mutationKey = ["previewCostPriorityWorkbook"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof previewCostPriorityWorkbook>>,
+    { shopId: number; data: BodyType<CostPriorityWorkbookInput> }
+  > = (props) => {
+    const { shopId, data } = props ?? {};
+
+    return previewCostPriorityWorkbook(shopId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PreviewCostPriorityWorkbookMutationResult = NonNullable<
+  Awaited<ReturnType<typeof previewCostPriorityWorkbook>>
+>;
+export type PreviewCostPriorityWorkbookMutationBody =
+  BodyType<CostPriorityWorkbookInput>;
+export type PreviewCostPriorityWorkbookMutationError = ErrorType<void>;
+
+export const usePreviewCostPriorityWorkbook = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewCostPriorityWorkbook>>,
+    TError,
+    { shopId: number; data: BodyType<CostPriorityWorkbookInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof previewCostPriorityWorkbook>>,
+  TError,
+  { shopId: number; data: BodyType<CostPriorityWorkbookInput> },
+  TContext
+> => {
+  return useMutation(getPreviewCostPriorityWorkbookMutationOptions(options));
+};
+
+export const getActivateCostPriorityUrl = (shopId: number) => {
+  return `/api/cost-priority/${shopId}/activate`;
+};
+
+export const activateCostPriority = async (
+  shopId: number,
+  costPriorityActivationInput: CostPriorityActivationInput,
+  options?: RequestInit,
+): Promise<CostPriorityConfiguration> => {
+  return customFetch<CostPriorityConfiguration>(
+    getActivateCostPriorityUrl(shopId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(costPriorityActivationInput),
+    },
+  );
+};
+
+export const getActivateCostPriorityMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof activateCostPriority>>,
+    TError,
+    { shopId: number; data: BodyType<CostPriorityActivationInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof activateCostPriority>>,
+  TError,
+  { shopId: number; data: BodyType<CostPriorityActivationInput> },
+  TContext
+> => {
+  const mutationKey = ["activateCostPriority"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof activateCostPriority>>,
+    { shopId: number; data: BodyType<CostPriorityActivationInput> }
+  > = (props) => {
+    const { shopId, data } = props ?? {};
+
+    return activateCostPriority(shopId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ActivateCostPriorityMutationResult = NonNullable<
+  Awaited<ReturnType<typeof activateCostPriority>>
+>;
+export type ActivateCostPriorityMutationBody =
+  BodyType<CostPriorityActivationInput>;
+export type ActivateCostPriorityMutationError = ErrorType<void>;
+
+export const useActivateCostPriority = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof activateCostPriority>>,
+    TError,
+    { shopId: number; data: BodyType<CostPriorityActivationInput> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof activateCostPriority>>,
+  TError,
+  { shopId: number; data: BodyType<CostPriorityActivationInput> },
+  TContext
+> => {
+  return useMutation(getActivateCostPriorityMutationOptions(options));
+};
+
+export const getGetCostPriorityHistoryUrl = (shopId: number) => {
+  return `/api/cost-priority/${shopId}/history`;
+};
+
+export const getCostPriorityHistory = async (
+  shopId: number,
+  options?: RequestInit,
+): Promise<CostPriorityHistory> => {
+  return customFetch<CostPriorityHistory>(
+    getGetCostPriorityHistoryUrl(shopId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetCostPriorityHistoryQueryKey = (shopId: number) => {
+  return [`/api/cost-priority/${shopId}/history`] as const;
+};
+
+export const getGetCostPriorityHistoryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getCostPriorityHistory>>,
+  TError = ErrorType<unknown>,
+>(
+  shopId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCostPriorityHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetCostPriorityHistoryQueryKey(shopId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getCostPriorityHistory>>
+  > = ({ signal }) =>
+    getCostPriorityHistory(shopId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!shopId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getCostPriorityHistory>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetCostPriorityHistoryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getCostPriorityHistory>>
+>;
+export type GetCostPriorityHistoryQueryError = ErrorType<unknown>;
+
+export function useGetCostPriorityHistory<
+  TData = Awaited<ReturnType<typeof getCostPriorityHistory>>,
+  TError = ErrorType<unknown>,
+>(
+  shopId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getCostPriorityHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetCostPriorityHistoryQueryOptions(shopId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 export const getGetDrsDailyTemplatesUrl = () => {
   return `/api/uploads/drs-daily/templates`;

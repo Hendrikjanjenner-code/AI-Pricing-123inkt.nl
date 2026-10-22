@@ -5,6 +5,156 @@
  * AI Pricing Decision Engine API
  * OpenAPI spec version: 0.1.0
  */
+export interface CostPriorityShop {
+  id: number;
+  name: string;
+  is_default: boolean;
+  active: boolean;
+}
+
+export interface CostPriorityShops {
+  shops: CostPriorityShop[];
+}
+
+export type CostPriorityRulesCategories = { [key: string]: string[] };
+
+export interface CostPriorityRules {
+  /**
+   * @minItems 4
+   * @maxItems 5
+   */
+  print: string[];
+  /**
+   * @minItems 4
+   * @maxItems 5
+   */
+  other: string[];
+  /**
+   * @maxLength 80
+   * @nullable
+   */
+  custom_source: string | null;
+  categories: CostPriorityRulesCategories;
+}
+
+export type CostPriorityConfigurationScope =
+  (typeof CostPriorityConfigurationScope)[keyof typeof CostPriorityConfigurationScope];
+
+export const CostPriorityConfigurationScope = {
+  configuration_only: "configuration_only",
+} as const;
+
+export interface CostPriorityConfiguration {
+  shop_id: number;
+  revision: number;
+  version_id?: number;
+  rules: CostPriorityRules;
+  sources: string[];
+  can_edit: boolean;
+  scope: CostPriorityConfigurationScope;
+}
+
+export type CostPriorityScenarioValues = {
+  [key: string]: string | number | null;
+};
+
+export interface CostPriorityScenario {
+  /** @maxLength 100 */
+  row_id: string;
+  /** @maxLength 100 */
+  category: string;
+  values: CostPriorityScenarioValues;
+}
+
+export interface CostPriorityScenarioInput {
+  /** @minimum 0 */
+  base_revision: number;
+  rules: CostPriorityRules;
+  /**
+   * @minItems 1
+   * @maxItems 500
+   */
+  rows: CostPriorityScenario[];
+}
+
+export interface CostPriorityWorkbookInput {
+  /** JSON object containing base_revision and rules */
+  draft: string;
+  file: Blob;
+}
+
+export interface CostPriorityActivationInput {
+  /** @maxLength 64 */
+  preview_token: string;
+  /** @minimum 0 */
+  base_revision: number;
+}
+
+export interface CostPriorityTrace {
+  priority: number;
+  source: string;
+  /** @nullable */
+  value: string | null;
+  status: string;
+}
+
+export interface CostPrioritySelection {
+  /** @nullable */
+  source: string | null;
+  /** @nullable */
+  value: string | null;
+  reason: string;
+  fallback_warning: boolean;
+  trace: CostPriorityTrace[];
+}
+
+export type CostPriorityResultValues = { [key: string]: string | null };
+
+export interface CostPriorityResult {
+  row_id: string;
+  category: string;
+  values: CostPriorityResultValues;
+  current: CostPrioritySelection;
+  proposed: CostPrioritySelection;
+  /** Nonblocking comparison warnings; unavailable current-only inputs do not block proposed activation */
+  warnings: string[];
+  errors: string[];
+}
+
+export type CostPriorityPreviewInputKind =
+  (typeof CostPriorityPreviewInputKind)[keyof typeof CostPriorityPreviewInputKind];
+
+export const CostPriorityPreviewInputKind = {
+  manual: "manual",
+  workbook: "workbook",
+} as const;
+
+export interface CostPriorityPreview {
+  preview_token: string;
+  shop_id: number;
+  base_revision: number;
+  rules: CostPriorityRules;
+  input_kind: CostPriorityPreviewInputKind;
+  rows: CostPriorityResult[];
+  errors: string[];
+  can_activate: boolean;
+  expires_at: string;
+}
+
+export interface CostPriorityVersion {
+  version_id: number;
+  revision: number;
+  rules: CostPriorityRules;
+  activated_by: string;
+  activated_at: string;
+  input_kind: string;
+  row_count: number;
+}
+
+export interface CostPriorityHistory {
+  versions: CostPriorityVersion[];
+}
+
 export interface DrsApiError {
   detail: string;
 }

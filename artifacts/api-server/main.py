@@ -670,6 +670,8 @@ app.include_router(traffic.router)
 app.include_router(traffic.conversie_router)
 app.include_router(search_demand.router)
 app.include_router(cost.router)
+from routes import cost_priority
+app.include_router(cost_priority.router)
 app.include_router(procurement.router)
 app.include_router(economic.router)
 app.include_router(reporting.router)

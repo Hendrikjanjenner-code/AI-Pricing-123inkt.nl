@@ -130,6 +130,7 @@ import Begrippen from "@/pages/begrippen";
 import DevBacklog from "@/pages/dev-backlog";
 import Toegangsbeheer from "@/pages/toegangsbeheer";
 import Eindevaluatie from "@/pages/eindevaluatie";
+import PricingHub from "@/pages/pricing-hub";
 
 // ---------------------------------------------------------------------------
 // Domeinen (13) — sidebar-volgorde
@@ -290,6 +291,7 @@ export const ROUTES: RouteDef[] = [
   r("/margebescherming", "Margebescherming", "pricing", Margebescherming, 5, { icon: Shield, department: "pricing" }),
   r("/bcg/pricing-power", "Pricing Power", "pricing", BcgPricingPower, 6, { icon: Zap, department: "pricing" }),
   r("/uitvoering", "Uitvoering prijswijzigingen", "pricing", Uitvoering, 7, { icon: Zap, permission: "pricing_manager", department: "pricing" }),
+  r("/pricing-hub", "Pricing Hub — Kostprioriteit", "pricing", PricingHub, 9, { icon: ArrowUpDown, permission: "pricing_manager", department: "pricing" }),
   r("/export", "Prijsexport", "pricing", ExportPrijsShape, 8, { icon: Download, permission: "pricing_manager", department: "pricing" }),
 
   // --- CatMan ---------------------------------------------------------------

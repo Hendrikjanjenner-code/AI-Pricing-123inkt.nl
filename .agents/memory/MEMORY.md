@@ -81,3 +81,4 @@
 - [Testsuite in eigen testdatabase](parallel-suite-runs.md) — pytest draait sinds taak #312 in "<appdb>_test" (guard tegen dbname-bypass); app-data veilig, maar parallelle suite-runs delen die test-DB nog.
 - [Concurrentprofiel Excel-schema](competitor-profile-excel-schema.md) — v1 gebruikt lange bedrijfskenmerk-rijen; juridische en commerciële relaties blijven strikt gescheiden.
 - [DRS dagverkoop-semantiek](drs-daily-semantics.md) — itemGroupId is niet uniek; retouren zijn niet geverifieerd; getekende bedragen exact behouden en historische kosten niet afleiden.
+- [Pricing Hub kostprijsprioriteiten](pricing-hub-cost-priorities.md) — gebruiker bevestigt exacte Excel-default inclusief marktprijs-terugval; volgorde instelbaar met drag-and-drop.

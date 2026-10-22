@@ -7,6 +7,349 @@
  */
 import * as zod from "zod";
 
+export const GetCostPriorityShopsResponse = zod.object({
+  shops: zod.array(
+    zod.object({
+      id: zod.number(),
+      name: zod.string(),
+      is_default: zod.boolean(),
+      active: zod.boolean(),
+    }),
+  ),
+});
+
+export const GetCostPriorityParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const getCostPriorityResponseRulesPrintMin = 4;
+export const getCostPriorityResponseRulesPrintMax = 5;
+
+export const getCostPriorityResponseRulesOtherMin = 4;
+export const getCostPriorityResponseRulesOtherMax = 5;
+
+export const getCostPriorityResponseRulesCustomSourceMax = 80;
+
+export const GetCostPriorityResponse = zod.object({
+  shop_id: zod.number(),
+  revision: zod.number(),
+  version_id: zod.number().optional(),
+  rules: zod.object({
+    print: zod
+      .array(zod.string())
+      .min(getCostPriorityResponseRulesPrintMin)
+      .max(getCostPriorityResponseRulesPrintMax),
+    other: zod
+      .array(zod.string())
+      .min(getCostPriorityResponseRulesOtherMin)
+      .max(getCostPriorityResponseRulesOtherMax),
+    custom_source: zod
+      .string()
+      .max(getCostPriorityResponseRulesCustomSourceMax)
+      .nullable(),
+    categories: zod.record(zod.string(), zod.array(zod.string())),
+  }),
+  sources: zod.array(zod.string()),
+  can_edit: zod.boolean(),
+  scope: zod.enum(["configuration_only"]),
+});
+
+export const PreviewCostPriorityParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const previewCostPriorityBodyBaseRevisionMin = 0;
+
+export const previewCostPriorityBodyRulesPrintMin = 4;
+export const previewCostPriorityBodyRulesPrintMax = 5;
+
+export const previewCostPriorityBodyRulesOtherMin = 4;
+export const previewCostPriorityBodyRulesOtherMax = 5;
+
+export const previewCostPriorityBodyRulesCustomSourceMax = 80;
+
+export const previewCostPriorityBodyRowsItemRowIdMax = 100;
+
+export const previewCostPriorityBodyRowsItemCategoryMax = 100;
+
+export const previewCostPriorityBodyRowsMax = 500;
+
+export const PreviewCostPriorityBody = zod.object({
+  base_revision: zod.number().min(previewCostPriorityBodyBaseRevisionMin),
+  rules: zod.object({
+    print: zod
+      .array(zod.string())
+      .min(previewCostPriorityBodyRulesPrintMin)
+      .max(previewCostPriorityBodyRulesPrintMax),
+    other: zod
+      .array(zod.string())
+      .min(previewCostPriorityBodyRulesOtherMin)
+      .max(previewCostPriorityBodyRulesOtherMax),
+    custom_source: zod
+      .string()
+      .max(previewCostPriorityBodyRulesCustomSourceMax)
+      .nullable(),
+    categories: zod.record(zod.string(), zod.array(zod.string())),
+  }),
+  rows: zod
+    .array(
+      zod.object({
+        row_id: zod.string().max(previewCostPriorityBodyRowsItemRowIdMax),
+        category: zod.string().max(previewCostPriorityBodyRowsItemCategoryMax),
+        values: zod.record(
+          zod.string(),
+          zod.union([zod.string(), zod.number()]).nullable(),
+        ),
+      }),
+    )
+    .min(1)
+    .max(previewCostPriorityBodyRowsMax),
+});
+
+export const previewCostPriorityResponseRulesPrintMin = 4;
+export const previewCostPriorityResponseRulesPrintMax = 5;
+
+export const previewCostPriorityResponseRulesOtherMin = 4;
+export const previewCostPriorityResponseRulesOtherMax = 5;
+
+export const previewCostPriorityResponseRulesCustomSourceMax = 80;
+
+export const PreviewCostPriorityResponse = zod.object({
+  preview_token: zod.string(),
+  shop_id: zod.number(),
+  base_revision: zod.number(),
+  rules: zod.object({
+    print: zod
+      .array(zod.string())
+      .min(previewCostPriorityResponseRulesPrintMin)
+      .max(previewCostPriorityResponseRulesPrintMax),
+    other: zod
+      .array(zod.string())
+      .min(previewCostPriorityResponseRulesOtherMin)
+      .max(previewCostPriorityResponseRulesOtherMax),
+    custom_source: zod
+      .string()
+      .max(previewCostPriorityResponseRulesCustomSourceMax)
+      .nullable(),
+    categories: zod.record(zod.string(), zod.array(zod.string())),
+  }),
+  input_kind: zod.enum(["manual", "workbook"]),
+  rows: zod.array(
+    zod.object({
+      row_id: zod.string(),
+      category: zod.string(),
+      values: zod.record(zod.string(), zod.string().nullable()),
+      current: zod.object({
+        source: zod.string().nullable(),
+        value: zod.string().nullable(),
+        reason: zod.string(),
+        fallback_warning: zod.boolean(),
+        trace: zod.array(
+          zod.object({
+            priority: zod.number(),
+            source: zod.string(),
+            value: zod.string().nullable(),
+            status: zod.string(),
+          }),
+        ),
+      }),
+      proposed: zod.object({
+        source: zod.string().nullable(),
+        value: zod.string().nullable(),
+        reason: zod.string(),
+        fallback_warning: zod.boolean(),
+        trace: zod.array(
+          zod.object({
+            priority: zod.number(),
+            source: zod.string(),
+            value: zod.string().nullable(),
+            status: zod.string(),
+          }),
+        ),
+      }),
+      warnings: zod
+        .array(zod.string())
+        .describe(
+          "Nonblocking comparison warnings; unavailable current-only inputs do not block proposed activation",
+        ),
+      errors: zod.array(zod.string()),
+    }),
+  ),
+  errors: zod.array(zod.string()),
+  can_activate: zod.boolean(),
+  expires_at: zod.string(),
+});
+
+export const PreviewCostPriorityWorkbookParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const PreviewCostPriorityWorkbookBody = zod.object({
+  draft: zod
+    .string()
+    .describe("JSON object containing base_revision and rules"),
+  file: zod.instanceof(File),
+});
+
+export const previewCostPriorityWorkbookResponseRulesPrintMin = 4;
+export const previewCostPriorityWorkbookResponseRulesPrintMax = 5;
+
+export const previewCostPriorityWorkbookResponseRulesOtherMin = 4;
+export const previewCostPriorityWorkbookResponseRulesOtherMax = 5;
+
+export const previewCostPriorityWorkbookResponseRulesCustomSourceMax = 80;
+
+export const PreviewCostPriorityWorkbookResponse = zod.object({
+  preview_token: zod.string(),
+  shop_id: zod.number(),
+  base_revision: zod.number(),
+  rules: zod.object({
+    print: zod
+      .array(zod.string())
+      .min(previewCostPriorityWorkbookResponseRulesPrintMin)
+      .max(previewCostPriorityWorkbookResponseRulesPrintMax),
+    other: zod
+      .array(zod.string())
+      .min(previewCostPriorityWorkbookResponseRulesOtherMin)
+      .max(previewCostPriorityWorkbookResponseRulesOtherMax),
+    custom_source: zod
+      .string()
+      .max(previewCostPriorityWorkbookResponseRulesCustomSourceMax)
+      .nullable(),
+    categories: zod.record(zod.string(), zod.array(zod.string())),
+  }),
+  input_kind: zod.enum(["manual", "workbook"]),
+  rows: zod.array(
+    zod.object({
+      row_id: zod.string(),
+      category: zod.string(),
+      values: zod.record(zod.string(), zod.string().nullable()),
+      current: zod.object({
+        source: zod.string().nullable(),
+        value: zod.string().nullable(),
+        reason: zod.string(),
+        fallback_warning: zod.boolean(),
+        trace: zod.array(
+          zod.object({
+            priority: zod.number(),
+            source: zod.string(),
+            value: zod.string().nullable(),
+            status: zod.string(),
+          }),
+        ),
+      }),
+      proposed: zod.object({
+        source: zod.string().nullable(),
+        value: zod.string().nullable(),
+        reason: zod.string(),
+        fallback_warning: zod.boolean(),
+        trace: zod.array(
+          zod.object({
+            priority: zod.number(),
+            source: zod.string(),
+            value: zod.string().nullable(),
+            status: zod.string(),
+          }),
+        ),
+      }),
+      warnings: zod
+        .array(zod.string())
+        .describe(
+          "Nonblocking comparison warnings; unavailable current-only inputs do not block proposed activation",
+        ),
+      errors: zod.array(zod.string()),
+    }),
+  ),
+  errors: zod.array(zod.string()),
+  can_activate: zod.boolean(),
+  expires_at: zod.string(),
+});
+
+export const ActivateCostPriorityParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const activateCostPriorityBodyPreviewTokenMax = 64;
+
+export const activateCostPriorityBodyBaseRevisionMin = 0;
+
+export const ActivateCostPriorityBody = zod.object({
+  preview_token: zod.string().max(activateCostPriorityBodyPreviewTokenMax),
+  base_revision: zod.number().min(activateCostPriorityBodyBaseRevisionMin),
+});
+
+export const activateCostPriorityResponseRulesPrintMin = 4;
+export const activateCostPriorityResponseRulesPrintMax = 5;
+
+export const activateCostPriorityResponseRulesOtherMin = 4;
+export const activateCostPriorityResponseRulesOtherMax = 5;
+
+export const activateCostPriorityResponseRulesCustomSourceMax = 80;
+
+export const ActivateCostPriorityResponse = zod.object({
+  shop_id: zod.number(),
+  revision: zod.number(),
+  version_id: zod.number().optional(),
+  rules: zod.object({
+    print: zod
+      .array(zod.string())
+      .min(activateCostPriorityResponseRulesPrintMin)
+      .max(activateCostPriorityResponseRulesPrintMax),
+    other: zod
+      .array(zod.string())
+      .min(activateCostPriorityResponseRulesOtherMin)
+      .max(activateCostPriorityResponseRulesOtherMax),
+    custom_source: zod
+      .string()
+      .max(activateCostPriorityResponseRulesCustomSourceMax)
+      .nullable(),
+    categories: zod.record(zod.string(), zod.array(zod.string())),
+  }),
+  sources: zod.array(zod.string()),
+  can_edit: zod.boolean(),
+  scope: zod.enum(["configuration_only"]),
+});
+
+export const GetCostPriorityHistoryParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const getCostPriorityHistoryResponseVersionsItemRulesPrintMin = 4;
+export const getCostPriorityHistoryResponseVersionsItemRulesPrintMax = 5;
+
+export const getCostPriorityHistoryResponseVersionsItemRulesOtherMin = 4;
+export const getCostPriorityHistoryResponseVersionsItemRulesOtherMax = 5;
+
+export const getCostPriorityHistoryResponseVersionsItemRulesCustomSourceMax = 80;
+
+export const GetCostPriorityHistoryResponse = zod.object({
+  versions: zod.array(
+    zod.object({
+      version_id: zod.number(),
+      revision: zod.number(),
+      rules: zod.object({
+        print: zod
+          .array(zod.string())
+          .min(getCostPriorityHistoryResponseVersionsItemRulesPrintMin)
+          .max(getCostPriorityHistoryResponseVersionsItemRulesPrintMax),
+        other: zod
+          .array(zod.string())
+          .min(getCostPriorityHistoryResponseVersionsItemRulesOtherMin)
+          .max(getCostPriorityHistoryResponseVersionsItemRulesOtherMax),
+        custom_source: zod
+          .string()
+          .max(getCostPriorityHistoryResponseVersionsItemRulesCustomSourceMax)
+          .nullable(),
+        categories: zod.record(zod.string(), zod.array(zod.string())),
+      }),
+      activated_by: zod.string(),
+      activated_at: zod.string(),
+      input_kind: zod.string(),
+      row_count: zod.number(),
+    }),
+  ),
+});
+
 export const GetDrsDailyTemplatesResponseItem = zod.object({
   id: zod.string(),
   name: zod.string(),

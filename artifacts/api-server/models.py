@@ -57,6 +57,30 @@ class DimShop(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class CostPriorityVersion(Base):
+    __tablename__ = "cost_priority_version"
+    __table_args__ = (UniqueConstraint("shop_id", "revision"),)
+    id = Column(Integer, primary_key=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id", ondelete="CASCADE"), nullable=False, index=True)
+    revision = Column(Integer, nullable=False)
+    rules = Column(JSON, nullable=False)
+    activated_by = Column(String(100), nullable=False)
+    activated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    input_kind = Column(String(20), nullable=False)
+    row_count = Column(Integer, nullable=False)
+
+
+class CostPriorityPreview(Base):
+    __tablename__ = "cost_priority_preview"
+    token = Column(String(64), primary_key=True)
+    shop_id = Column(Integer, ForeignKey("dim_shop.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, nullable=False)
+    base_revision = Column(Integer, nullable=False)
+    snapshot = Column(JSON, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    consumed = Column(Boolean, default=False, nullable=False)
+
+
 class IntelligenceSignal(Base):
     """
     Gestandaardiseerd Commercial Intelligence Signal (masterprompt §7).

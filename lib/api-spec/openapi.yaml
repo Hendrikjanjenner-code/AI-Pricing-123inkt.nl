@@ -43,6 +43,99 @@ tags:
     description: Commercial AI Copilot (AI Gateway)
 
 paths:
+  /cost-priority/shops/available:
+    get:
+      operationId: getCostPriorityShops
+      tags: [cost-priority]
+      responses:
+        '200':
+          description: Active shops accessible to the pricing viewer; no administration permission required
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CostPriorityShops'}
+  /cost-priority/{shop_id}:
+    parameters:
+      - $ref: '#/components/parameters/CostPriorityShopId'
+    get:
+      operationId: getCostPriority
+      tags: [cost-priority]
+      responses:
+        '200':
+          description: Active version or read-only Excel defaults
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CostPriorityConfiguration'}
+  /cost-priority/{shop_id}/preview:
+    parameters:
+      - $ref: '#/components/parameters/CostPriorityShopId'
+    post:
+      operationId: previewCostPriority
+      tags: [cost-priority]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CostPriorityScenarioInput'}
+      responses:
+        '200':
+          description: Immutable server preview of reference scenarios only
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CostPriorityPreview'}
+        '409':
+          description: Stale base revision
+  /cost-priority/{shop_id}/preview-workbook:
+    parameters:
+      - $ref: '#/components/parameters/CostPriorityShopId'
+    post:
+      operationId: previewCostPriorityWorkbook
+      tags: [cost-priority]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: {$ref: '#/components/schemas/CostPriorityWorkbookInput'}
+      responses:
+        '200':
+          description: Parsed workbook preview; binary discarded
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CostPriorityPreview'}
+        '409':
+          description: Stale base revision
+  /cost-priority/{shop_id}/activate:
+    parameters:
+      - $ref: '#/components/parameters/CostPriorityShopId'
+    post:
+      operationId: activateCostPriority
+      tags: [cost-priority]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CostPriorityActivationInput'}
+      responses:
+        '200':
+          description: Exact preview configuration activated; no product or feed mutation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CostPriorityConfiguration'}
+        '409':
+          description: Stale, expired, consumed or unavailable preview
+        '422':
+          description: Preview has input errors
+  /cost-priority/{shop_id}/history:
+    parameters:
+      - $ref: '#/components/parameters/CostPriorityShopId'
+    get:
+      operationId: getCostPriorityHistory
+      tags: [cost-priority]
+      responses:
+        '200':
+          description: Latest 100 immutable versions
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CostPriorityHistory'}
   /uploads/drs-daily/templates:
     get:
       operationId: getDrsDailyTemplates
@@ -2449,7 +2542,171 @@ paths:
                 $ref: "#/components/schemas/ProductFilterResolveScopeResponse"
 
 components:
+  parameters:
+    CostPriorityShopId:
+      name: shop_id
+      in: path
+      required: true
+      schema: {type: integer}
   schemas:
+    CostPriorityShop:
+      type: object
+      required: [id, name, is_default, active]
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        is_default: {type: boolean}
+        active: {type: boolean}
+    CostPriorityShops:
+      type: object
+      required: [shops]
+      properties:
+        shops:
+          type: array
+          items: {$ref: '#/components/schemas/CostPriorityShop'}
+    CostPriorityRules:
+      type: object
+      required: [print, other, custom_source, categories]
+      properties:
+        print:
+          type: array
+          minItems: 4
+          maxItems: 5
+          items: {type: string}
+        other:
+          type: array
+          minItems: 4
+          maxItems: 5
+          items: {type: string}
+        custom_source:
+          type: [string, "null"]
+          maxLength: 80
+        categories:
+          type: object
+          additionalProperties:
+            type: array
+            items: {type: string}
+    CostPriorityConfiguration:
+      type: object
+      required: [shop_id, revision, rules, sources, can_edit, scope]
+      properties:
+        shop_id: {type: integer}
+        revision: {type: integer}
+        version_id: {type: integer}
+        rules: {$ref: '#/components/schemas/CostPriorityRules'}
+        sources:
+          type: array
+          items: {type: string}
+        can_edit: {type: boolean}
+        scope: {type: string, enum: [configuration_only]}
+    CostPriorityScenario:
+      type: object
+      required: [row_id, category, values]
+      properties:
+        row_id: {type: string, maxLength: 100}
+        category: {type: string, maxLength: 100}
+        values:
+          type: object
+          additionalProperties:
+            type: [string, number, "null"]
+    CostPriorityScenarioInput:
+      type: object
+      required: [base_revision, rules, rows]
+      properties:
+        base_revision: {type: integer, minimum: 0}
+        rules: {$ref: '#/components/schemas/CostPriorityRules'}
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: {$ref: '#/components/schemas/CostPriorityScenario'}
+    CostPriorityWorkbookInput:
+      type: object
+      required: [draft, file]
+      properties:
+        draft:
+          type: string
+          description: JSON object containing base_revision and rules
+        file: {type: string, format: binary}
+    CostPriorityActivationInput:
+      type: object
+      required: [preview_token, base_revision]
+      properties:
+        preview_token: {type: string, maxLength: 64}
+        base_revision: {type: integer, minimum: 0}
+    CostPriorityTrace:
+      type: object
+      required: [priority, source, value, status]
+      properties:
+        priority: {type: integer}
+        source: {type: string}
+        value: {type: [string, "null"]}
+        status: {type: string}
+    CostPrioritySelection:
+      type: object
+      required: [source, value, reason, fallback_warning, trace]
+      properties:
+        source: {type: [string, "null"]}
+        value: {type: [string, "null"]}
+        reason: {type: string}
+        fallback_warning: {type: boolean}
+        trace:
+          type: array
+          items: {$ref: '#/components/schemas/CostPriorityTrace'}
+    CostPriorityResult:
+      type: object
+      required: [row_id, category, values, current, proposed, errors, warnings]
+      properties:
+        row_id: {type: string}
+        category: {type: string}
+        values:
+          type: object
+          additionalProperties:
+            type: [string, "null"]
+        current: {$ref: '#/components/schemas/CostPrioritySelection'}
+        proposed: {$ref: '#/components/schemas/CostPrioritySelection'}
+        warnings:
+          type: array
+          description: Nonblocking comparison warnings; unavailable current-only inputs do not block proposed activation
+          items: {type: string}
+        errors:
+          type: array
+          items: {type: string}
+    CostPriorityPreview:
+      type: object
+      required: [preview_token, shop_id, base_revision, rules, input_kind, rows, errors, can_activate, expires_at]
+      properties:
+        preview_token: {type: string}
+        shop_id: {type: integer}
+        base_revision: {type: integer}
+        rules: {$ref: '#/components/schemas/CostPriorityRules'}
+        input_kind: {type: string, enum: [manual, workbook]}
+        rows:
+          type: array
+          items: {$ref: '#/components/schemas/CostPriorityResult'}
+        errors:
+          type: array
+          items: {type: string}
+        can_activate: {type: boolean}
+        expires_at: {type: string}
+    CostPriorityVersion:
+      type: object
+      required: [version_id, revision, rules, activated_by, activated_at, input_kind, row_count]
+      properties:
+        version_id: {type: integer}
+        revision: {type: integer}
+        rules: {$ref: '#/components/schemas/CostPriorityRules'}
+        activated_by: {type: string}
+        activated_at: {type: string}
+        input_kind: {type: string}
+        row_count: {type: integer}
+    CostPriorityHistory:
+      type: object
+      required: [versions]
+      properties:
+        versions:
+          type: array
+          items: {$ref: '#/components/schemas/CostPriorityVersion'}
     DrsApiError:
       type: object
       required: [detail]
