@@ -1,11 +1,12 @@
-import { useState } from "react";
-import { AlertTriangle, CalendarClock, Play, RefreshCw } from "lucide-react";
+import { useMemo, useState } from "react";
+import { AlertTriangle, CalendarClock, ChevronRight, Play, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCostPriorityScope } from "@/hooks/use-cost-priority-scope";
 import { setActiveShopId } from "@/hooks/use-shop-id";
 import { useCmAction, useCmOverview } from "@/hooks/use-channelmanager";
 import type { CmScope } from "@/hooks/use-channelmanager";
+import { useChannelRegistry } from "@/hooks/use-channel-registry";
 import { cmApi, fmtDate } from "@/lib/channelmanager/api";
 import { COUNT_KEYS, QUEUE_KEYS, parseConfig, parseRun } from "@/lib/channelmanager/model";
 import type { Overview } from "@/lib/channelmanager/model";
@@ -14,6 +15,8 @@ import { ConfigPanel } from "@/components/channelmanager/ConfigPanel";
 import { BasisPanel } from "@/components/channelmanager/BasisPanel";
 import { CalcPanel } from "@/components/channelmanager/CalcPanel";
 import { ExportPanel } from "@/components/channelmanager/ExportPanel";
+import { ChannelList } from "@/components/channelmanager/ChannelList";
+import { ChannelSetup, useTargetScope } from "@/components/channelmanager/ChannelSetup";
 import { FeedProfilesPanel } from "@/components/feeds/FeedProfilesPanel";
 import { PrinterPanel } from "@/components/feeds/PrinterPanel";
 
@@ -34,39 +37,99 @@ const REASON_NL: Record<string, string> = {
   application_scheduler_not_started: "planner is in deze applicatie niet gestart",
 };
 
+type View =
+  | { kind: "list" }
+  | { kind: "setup"; channelId: string }
+  | { kind: "workspace"; shopId: number; tab: Tab; fromChannel: string | null };
+
 export default function Channelmanager() {
   const { shops, shopId, userKey, scopeToken, isCurrent, shopsQuery } = useCostPriorityScope();
-  const [tab, setTab] = useState<Tab>("regels");
-  const [exportFocus, setExportFocus] = useState(0);
+  const shopList = useMemo(() => shops.map(s => ({ id: s.id, name: s.name })), [shops]);
+  const scope = useMemo<CmScope | null>(() => shopId === undefined || !scopeToken ? null : { shopId, userKey, scopeToken, isCurrent }, [shopId, userKey, scopeToken, isCurrent]);
 
   return (
-    <div className="mx-auto max-w-[1500px] space-y-5 p-4 md:p-6">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Pricing</p>
-          <h1 className="text-2xl font-semibold tracking-tight">Channelmanager</h1>
-          <p className="text-sm text-muted-foreground max-w-2xl">Van goedgekeurde basisprijs naar controleerbare shopprijs: regels, proefberekening, export en DRS-terugmelding. Er worden nooit automatisch prijzen gepubliceerd.</p>
-        </div>
-        {shops.length > 0 && (
-          <label className="flex items-center gap-2 text-sm">Winkel
-            <select className="h-9 rounded-md border bg-background px-3" value={shopId ?? ""} onChange={e => setActiveShopId(Number(e.target.value))} data-testid="select-cm-shop" aria-label="Channelmanager winkel">
-              {shopId === undefined && <option value="" disabled>Kies een winkel</option>}
-              {shops.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </label>
-        )}
-      </header>
-
-      {shopId === undefined || !scopeToken ? (
-        shopsQuery.isLoading ? <Skeleton className="h-48" data-testid="skeleton-shops" /> :
-          shopsQuery.isError ? <ErrorBox error={shopsQuery.error} onRetry={() => shopsQuery.refetch()} /> :
-            <p className="rounded-md border p-4 text-sm" data-testid="status-no-shop">Er is geen winkel waarvoor je gemachtigd bent.</p>
+    <div className="mx-auto w-full max-w-[1240px] min-w-0 space-y-6 px-3 py-5 sm:px-5 md:px-8 md:py-8">
+      {!scope ? (
+        <>
+          <h1 className="text-3xl font-light tracking-tight">Kanalen</h1>
+          {shopsQuery.isLoading ? <Skeleton className="h-48" data-testid="skeleton-shops" /> :
+            shopsQuery.isError ? <ErrorBox error={shopsQuery.error} onRetry={() => shopsQuery.refetch()} /> :
+              <p className="rounded-md border p-4 text-sm" data-testid="status-no-shop">Er is geen winkel waarvoor je gemachtigd bent.</p>}
+        </>
       ) : (
-        <ShopWorkspace key={scopeToken} scope={{ shopId, userKey, scopeToken, isCurrent }} shops={shops.map(s => ({ id: s.id, name: s.name }))}
-          tab={tab} setTab={setTab} exportFocus={exportFocus} onExported={() => { setExportFocus(x => x + 1); setTab("export"); }} />
+        <SourceScope key={scope.scopeToken} scope={scope} shops={shopList} />
       )}
     </div>
   );
+}
+
+function SourceScope({ scope, shops }: { scope: CmScope; shops: { id: number; name: string }[] }) {
+  const [view, setView] = useState<View>({ kind: "list" });
+  const reg = useChannelRegistry(scope);
+  const sourceName = shops.find(s => s.id === scope.shopId)?.name ?? `winkel #${scope.shopId}`;
+  const channel = view.kind === "setup" ? reg.data?.channels.find(c => c.id === view.channelId) : undefined;
+  const wsChannel = view.kind === "workspace" && view.fromChannel !== null ? reg.data?.channels.find(c => c.id === view.fromChannel) : undefined;
+
+  const crumbs: { label: string; onClick?: () => void }[] = [{ label: "Kanalen", onClick: view.kind === "list" ? undefined : () => setView({ kind: "list" }) }];
+  if (view.kind === "setup") crumbs.push({ label: channel?.name ?? "Kanaal" });
+  if (view.kind === "workspace") {
+    if (wsChannel) crumbs.push({ label: wsChannel.name, onClick: () => setView({ kind: "setup", channelId: wsChannel.id }) });
+    crumbs.push({ label: `Werkruimte ${shops.find(s => s.id === view.shopId)?.name ?? `#${view.shopId}`}` });
+  }
+
+  return (
+    <>
+      <header className="space-y-3">
+        <nav aria-label="Kruimelpad" className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground" data-testid="breadcrumb">
+          <span className="font-mono">{sourceName}</span>
+          {crumbs.map((c, i) => (
+            <span key={i} className="flex items-center gap-1"><ChevronRight className="h-3 w-3" />
+              {c.onClick ? <button className="text-primary hover:underline" onClick={c.onClick}>{c.label}</button> : <span className="text-foreground">{c.label}</span>}
+            </span>
+          ))}
+        </nav>
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <h1 className="text-3xl md:text-4xl font-light tracking-tight" data-testid="text-page-title">
+            {view.kind === "list" ? "Kanalen" : view.kind === "setup" ? channel?.name ?? "Kanaal" : "Werkruimte"}
+          </h1>
+          <div className="flex flex-wrap items-center gap-2">
+            {view.kind === "list" && (
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">Bronwinkel
+                <select className="h-9 rounded-md border bg-card px-3 text-foreground" value={scope.shopId} onChange={e => setActiveShopId(Number(e.target.value))} data-testid="select-cm-shop" aria-label="Bronwinkel">
+                  {shops.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </label>
+            )}
+            {view.kind !== "workspace" && <Button variant="outline" size="sm" onClick={() => setView({ kind: "workspace", shopId: scope.shopId, tab: "regels", fromChannel: null })} data-testid="button-open-workspace">Werkruimte bronwinkel</Button>}
+          </div>
+        </div>
+      </header>
+
+      {view.kind === "workspace" ? (
+        <WorkspaceScope key={`${view.shopId}`} source={scope} shopId={view.shopId} initialTab={view.tab} shops={shops} />
+      ) : reg.isLoading ? (
+        <div className="space-y-2" data-testid="skeleton-registry">{[0, 1, 2, 3].map(i => <Skeleton key={i} className="h-14" />)}</div>
+      ) : reg.isError || !reg.data ? (
+        <ErrorBox error={reg.error} onRetry={() => reg.refetch()} />
+      ) : view.kind === "list" ? (
+        <ChannelList scope={scope} reg={reg.data} shops={shops} onSetup={id => setView({ kind: "setup", channelId: id })} />
+      ) : !channel ? (
+        <ErrorBox error={new Error("Dit kanaal bestaat niet meer in het register.")} onRetry={() => setView({ kind: "list" })} />
+      ) : (
+        <ChannelSetup key={channel.id} scope={scope} reg={reg.data} channel={channel} shops={shops}
+          onOpenTarget={(shopId, tab) => setView({ kind: "workspace", shopId, tab, fromChannel: channel.id })} />
+      )}
+    </>
+  );
+}
+
+/** Bestaande zes tabbladen; doel-scope lokaal, globale winkel blijft ongewijzigd. */
+function WorkspaceScope({ source, shopId, initialTab, shops }: { source: CmScope; shopId: number; initialTab: Tab; shops: { id: number; name: string }[] }) {
+  const target = useTargetScope(source, shopId);
+  const scope = shopId === source.shopId ? source : target;
+  const [tab, setTab] = useState<Tab>(initialTab);
+  const [exportFocus, setExportFocus] = useState(0);
+  return <ShopWorkspace scope={scope} shops={shops} tab={tab} setTab={setTab} exportFocus={exportFocus} onExported={() => { setExportFocus(x => x + 1); setTab("export"); }} />;
 }
 
 function ShopWorkspace({ scope, shops, tab, setTab, exportFocus, onExported }: {
@@ -77,7 +140,7 @@ function ShopWorkspace({ scope, shops, tab, setTab, exportFocus, onExported }: {
   if (q.isError || !q.data) return <ErrorBox error={q.error} onRetry={() => q.refetch()} />;
   const ov = q.data;
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 min-w-0">
       <Summary scope={scope} ov={ov} onRefresh={() => q.refetch()} refreshing={q.isFetching} />
       <nav className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-1 rounded-lg border bg-muted/40 p-1" role="tablist">
         {TABS.map((t, i) => (

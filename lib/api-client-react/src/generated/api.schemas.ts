@@ -5,6 +5,122 @@
  * AI Pricing Decision Engine API
  * OpenAPI spec version: 0.1.0
  */
+export type ChannelDirectoryChannelOutputStatus =
+  (typeof ChannelDirectoryChannelOutputStatus)[keyof typeof ChannelDirectoryChannelOutputStatus];
+
+export const ChannelDirectoryChannelOutputStatus = {
+  setup: "setup",
+  ready: "ready",
+  active: "active",
+  paused: "paused",
+  needs_validation: "needs_validation",
+  restricted: "restricted",
+} as const;
+
+export interface ChannelDirectoryMapping {
+  /**
+   * @minLength 1
+   * @maxLength 200
+   */
+  source_productcode: string;
+  /**
+   * @minLength 1
+   * @maxLength 200
+   */
+  target_productcode: string;
+}
+
+export interface ChannelDirectoryChannelOutput {
+  id: string;
+  name: string;
+  domain: string;
+  hidden: boolean;
+  status: ChannelDirectoryChannelOutputStatus;
+  target_shop_id: number | null;
+  product_profile_id: number | null;
+  mappings: ChannelDirectoryMapping[];
+  mapping_confirmed: boolean;
+  mapped_products: number | null;
+  last_success_at: string | null;
+  validation_errors: string[];
+  validated_at: string | null;
+  can_edit: boolean;
+  can_activate: boolean;
+  external_connected?: boolean;
+}
+
+export interface ChannelDirectoryDirectoryOutput {
+  revision: number;
+  channels: ChannelDirectoryChannelOutput[];
+  can_edit: boolean;
+  can_activate: boolean;
+}
+
+export type ChannelDirectoryValidationErrorCtx = { [key: string]: unknown };
+
+export interface ChannelDirectoryValidationError {
+  loc: (string | number)[];
+  msg: string;
+  type: string;
+  input?: unknown;
+  ctx?: ChannelDirectoryValidationErrorCtx;
+}
+
+export interface ChannelDirectoryHTTPValidationError {
+  detail?: ChannelDirectoryValidationError[];
+}
+
+export interface ChannelDirectoryNewChannel {
+  /** @minimum 1 */
+  expected_revision: number;
+  /**
+   * @minLength 1
+   * @maxLength 120
+   */
+  name: string;
+  domain: string;
+}
+
+export interface ChannelDirectoryReorder {
+  /** @minimum 1 */
+  expected_revision: number;
+  channel_ids: string[];
+}
+
+export interface ChannelDirectoryRevision {
+  /** @minimum 1 */
+  expected_revision: number;
+}
+
+export interface ChannelDirectorySetup {
+  /** @minimum 1 */
+  expected_revision: number;
+  target_shop_id?: number | null;
+  product_profile_id?: number | null;
+  /** @maxItems 200000 */
+  mappings?: ChannelDirectoryMapping[];
+  mapping_confirmed?: boolean;
+}
+
+export type ChannelDirectorySnapshotOutputData = { [key: string]: unknown };
+
+export interface ChannelDirectorySnapshotOutput {
+  id: number;
+  shop_id: number;
+  kind: string;
+  revision: number;
+  status: string;
+  created_at: string;
+  created_by: string;
+  data: ChannelDirectorySnapshotOutputData;
+}
+
+export interface ChannelDirectoryVisibility {
+  /** @minimum 1 */
+  expected_revision: number;
+  hidden: boolean;
+}
+
 export interface PrinterWorkflowAdviceInput {
   /**
    * @minLength 1

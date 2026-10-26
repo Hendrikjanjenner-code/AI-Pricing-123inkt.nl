@@ -8,6 +8,632 @@
 import * as zod from "zod";
 
 /**
+ * @summary Listing
+ */
+export const ChannelDirectoryListingParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const channelDirectoryListingResponseChannelsItemMappingsItemSourceProductcodeMax = 200;
+
+export const channelDirectoryListingResponseChannelsItemMappingsItemTargetProductcodeMax = 200;
+
+export const channelDirectoryListingResponseChannelsItemExternalConnectedDefault = false;
+
+export const ChannelDirectoryListingResponse = zod.object({
+  revision: zod.number(),
+  channels: zod.array(
+    zod.object({
+      id: zod.string(),
+      name: zod.string(),
+      domain: zod.string(),
+      hidden: zod.boolean(),
+      status: zod.enum([
+        "setup",
+        "ready",
+        "active",
+        "paused",
+        "needs_validation",
+        "restricted",
+      ]),
+      target_shop_id: zod.union([zod.number(), zod.null()]),
+      product_profile_id: zod.union([zod.number(), zod.null()]),
+      mappings: zod.array(
+        zod.object({
+          source_productcode: zod
+            .string()
+            .min(1)
+            .max(
+              channelDirectoryListingResponseChannelsItemMappingsItemSourceProductcodeMax,
+            ),
+          target_productcode: zod
+            .string()
+            .min(1)
+            .max(
+              channelDirectoryListingResponseChannelsItemMappingsItemTargetProductcodeMax,
+            ),
+        }),
+      ),
+      mapping_confirmed: zod.boolean(),
+      mapped_products: zod.union([zod.number(), zod.null()]),
+      last_success_at: zod.union([zod.string(), zod.null()]),
+      validation_errors: zod.array(zod.string()),
+      validated_at: zod.union([zod.string(), zod.null()]),
+      can_edit: zod.boolean(),
+      can_activate: zod.boolean(),
+      external_connected: zod
+        .boolean()
+        .default(
+          channelDirectoryListingResponseChannelsItemExternalConnectedDefault,
+        ),
+    }),
+  ),
+  can_edit: zod.boolean(),
+  can_activate: zod.boolean(),
+});
+
+/**
+ * @summary Create
+ */
+export const ChannelDirectoryCreateParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const channelDirectoryCreateBodyNameMax = 120;
+
+export const ChannelDirectoryCreateBody = zod.object({
+  expected_revision: zod.number().min(1),
+  name: zod.string().min(1).max(channelDirectoryCreateBodyNameMax),
+  domain: zod.string(),
+});
+
+export const channelDirectoryCreateResponseChannelsItemMappingsItemSourceProductcodeMax = 200;
+
+export const channelDirectoryCreateResponseChannelsItemMappingsItemTargetProductcodeMax = 200;
+
+export const channelDirectoryCreateResponseChannelsItemExternalConnectedDefault = false;
+
+export const ChannelDirectoryCreateResponse = zod.object({
+  revision: zod.number(),
+  channels: zod.array(
+    zod.object({
+      id: zod.string(),
+      name: zod.string(),
+      domain: zod.string(),
+      hidden: zod.boolean(),
+      status: zod.enum([
+        "setup",
+        "ready",
+        "active",
+        "paused",
+        "needs_validation",
+        "restricted",
+      ]),
+      target_shop_id: zod.union([zod.number(), zod.null()]),
+      product_profile_id: zod.union([zod.number(), zod.null()]),
+      mappings: zod.array(
+        zod.object({
+          source_productcode: zod
+            .string()
+            .min(1)
+            .max(
+              channelDirectoryCreateResponseChannelsItemMappingsItemSourceProductcodeMax,
+            ),
+          target_productcode: zod
+            .string()
+            .min(1)
+            .max(
+              channelDirectoryCreateResponseChannelsItemMappingsItemTargetProductcodeMax,
+            ),
+        }),
+      ),
+      mapping_confirmed: zod.boolean(),
+      mapped_products: zod.union([zod.number(), zod.null()]),
+      last_success_at: zod.union([zod.string(), zod.null()]),
+      validation_errors: zod.array(zod.string()),
+      validated_at: zod.union([zod.string(), zod.null()]),
+      can_edit: zod.boolean(),
+      can_activate: zod.boolean(),
+      external_connected: zod
+        .boolean()
+        .default(
+          channelDirectoryCreateResponseChannelsItemExternalConnectedDefault,
+        ),
+    }),
+  ),
+  can_edit: zod.boolean(),
+  can_activate: zod.boolean(),
+});
+
+/**
+ * @summary Reorder
+ */
+export const ChannelDirectoryReorderParams = zod.object({
+  shop_id: zod.coerce.number(),
+});
+
+export const ChannelDirectoryReorderBody = zod.object({
+  expected_revision: zod.number().min(1),
+  channel_ids: zod.array(zod.string()),
+});
+
+export const channelDirectoryReorderResponseChannelsItemMappingsItemSourceProductcodeMax = 200;
+
+export const channelDirectoryReorderResponseChannelsItemMappingsItemTargetProductcodeMax = 200;
+
+export const channelDirectoryReorderResponseChannelsItemExternalConnectedDefault = false;
+
+export const ChannelDirectoryReorderResponse = zod.object({
+  revision: zod.number(),
+  channels: zod.array(
+    zod.object({
+      id: zod.string(),
+      name: zod.string(),
+      domain: zod.string(),
+      hidden: zod.boolean(),
+      status: zod.enum([
+        "setup",
+        "ready",
+        "active",
+        "paused",
+        "needs_validation",
+        "restricted",
+      ]),
+      target_shop_id: zod.union([zod.number(), zod.null()]),
+      product_profile_id: zod.union([zod.number(), zod.null()]),
+      mappings: zod.array(
+        zod.object({
+          source_productcode: zod
+            .string()
+            .min(1)
+            .max(
+              channelDirectoryReorderResponseChannelsItemMappingsItemSourceProductcodeMax,
+            ),
+          target_productcode: zod
+            .string()
+            .min(1)
+            .max(
+              channelDirectoryReorderResponseChannelsItemMappingsItemTargetProductcodeMax,
+            ),
+        }),
+      ),
+      mapping_confirmed: zod.boolean(),
+      mapped_products: zod.union([zod.number(), zod.null()]),
+      last_success_at: zod.union([zod.string(), zod.null()]),
+      validation_errors: zod.array(zod.string()),
+      validated_at: zod.union([zod.string(), zod.null()]),
+      can_edit: zod.boolean(),
+      can_activate: zod.boolean(),
+      external_connected: zod
+        .boolean()
+        .default(
+          channelDirectoryReorderResponseChannelsItemExternalConnectedDefault,
+        ),
+    }),
+  ),
+  can_edit: zod.boolean(),
+  can_activate: zod.boolean(),
+});
+
+/**
+ * @summary Configure
+ */
+export const ChannelDirectoryConfigureParams = zod.object({
+  shop_id: zod.coerce.number(),
+  channel_id: zod.coerce.string(),
+});
+
+export const channelDirectoryConfigureBodyTargetShopIdOneExclusiveMin = 0;
+
+export const channelDirectoryConfigureBodyProductProfileIdOneExclusiveMin = 0;
+
+export const channelDirectoryConfigureBodyMappingsItemSourceProductcodeMax = 200;
+
+export const channelDirectoryConfigureBodyMappingsItemTargetProductcodeMax = 200;
+
+export const channelDirectoryConfigureBodyMappingsMax = 200000;
+
+export const channelDirectoryConfigureBodyMappingConfirmedDefault = false;
+
+export const ChannelDirectoryConfigureBody = zod.object({
+  expected_revision: zod.number().min(1),
+  target_shop_id: zod
+    .union([
+      zod.number().gt(channelDirectoryConfigureBodyTargetShopIdOneExclusiveMin),
+      zod.null(),
+    ])
+    .optional(),
+  product_profile_id: zod
+    .union([
+      zod
+        .number()
+        .gt(channelDirectoryConfigureBodyProductProfileIdOneExclusiveMin),
+      zod.null(),
+    ])
+    .optional(),
+  mappings: zod
+    .array(
+      zod.object({
+        source_productcode: zod
+          .string()
+          .min(1)
+          .max(channelDirectoryConfigureBodyMappingsItemSourceProductcodeMax),
+        target_productcode: zod
+          .string()
+          .min(1)
+          .max(channelDirectoryConfigureBodyMappingsItemTargetProductcodeMax),
+      }),
+    )
+    .max(channelDirectoryConfigureBodyMappingsMax)
+    .optional(),
+  mapping_confirmed: zod
+    .boolean()
+    .default(channelDirectoryConfigureBodyMappingConfirmedDefault),
+});
+
+export const channelDirectoryConfigureResponseChannelsItemMappingsItemSourceProductcodeMax = 200;
+
+export const channelDirectoryConfigureResponseChannelsItemMappingsItemTargetProductcodeMax = 200;
+
+export const channelDirectoryConfigureResponseChannelsItemExternalConnectedDefault = false;
+
+export const ChannelDirectoryConfigureResponse = zod.object({
+  revision: zod.number(),
+  channels: zod.array(
+    zod.object({
+      id: zod.string(),
+      name: zod.string(),
+      domain: zod.string(),
+      hidden: zod.boolean(),
+      status: zod.enum([
+        "setup",
+        "ready",
+        "active",
+        "paused",
+        "needs_validation",
+        "restricted",
+      ]),
+      target_shop_id: zod.union([zod.number(), zod.null()]),
+      product_profile_id: zod.union([zod.number(), zod.null()]),
+      mappings: zod.array(
+        zod.object({
+          source_productcode: zod
+            .string()
+            .min(1)
+            .max(
+              channelDirectoryConfigureResponseChannelsItemMappingsItemSourceProductcodeMax,
+            ),
+          target_productcode: zod
+            .string()
+            .min(1)
+            .max(
+              channelDirectoryConfigureResponseChannelsItemMappingsItemTargetProductcodeMax,
+            ),
+        }),
+      ),
+      mapping_confirmed: zod.boolean(),
+      mapped_products: zod.union([zod.number(), zod.null()]),
+      last_success_at: zod.union([zod.string(), zod.null()]),
+      validation_errors: zod.array(zod.string()),
+      validated_at: zod.union([zod.string(), zod.null()]),
+      can_edit: zod.boolean(),
+      can_activate: zod.boolean(),
+      external_connected: zod
+        .boolean()
+        .default(
+          channelDirectoryConfigureResponseChannelsItemExternalConnectedDefault,
+        ),
+    }),
+  ),
+  can_edit: zod.boolean(),
+  can_activate: zod.boolean(),
+});
+
+/**
+ * @summary Validate
+ */
+export const ChannelDirectoryValidateParams = zod.object({
+  shop_id: zod.coerce.number(),
+  channel_id: zod.coerce.string(),
+});
+
+export const ChannelDirectoryValidateBody = zod.object({
+  expected_revision: zod.number().min(1),
+});
+
+export const channelDirectoryValidateResponseChannelsItemMappingsItemSourceProductcodeMax = 200;
+
+export const channelDirectoryValidateResponseChannelsItemMappingsItemTargetProductcodeMax = 200;
+
+export const channelDirectoryValidateResponseChannelsItemExternalConnectedDefault = false;
+
+export const ChannelDirectoryValidateResponse = zod.object({
+  revision: zod.number(),
+  channels: zod.array(
+    zod.object({
+      id: zod.string(),
+      name: zod.string(),
+      domain: zod.string(),
+      hidden: zod.boolean(),
+      status: zod.enum([
+        "setup",
+        "ready",
+        "active",
+        "paused",
+        "needs_validation",
+        "restricted",
+      ]),
+      target_shop_id: zod.union([zod.number(), zod.null()]),
+      product_profile_id: zod.union([zod.number(), zod.null()]),
+      mappings: zod.array(
+        zod.object({
+          source_productcode: zod
+            .string()
+            .min(1)
+            .max(
+              channelDirectoryValidateResponseChannelsItemMappingsItemSourceProductcodeMax,
+            ),
+          target_productcode: zod
+            .string()
+            .min(1)
+            .max(
+              channelDirectoryValidateResponseChannelsItemMappingsItemTargetProductcodeMax,
+            ),
+        }),
+      ),
+      mapping_confirmed: zod.boolean(),
+      mapped_products: zod.union([zod.number(), zod.null()]),
+      last_success_at: zod.union([zod.string(), zod.null()]),
+      validation_errors: zod.array(zod.string()),
+      validated_at: zod.union([zod.string(), zod.null()]),
+      can_edit: zod.boolean(),
+      can_activate: zod.boolean(),
+      external_connected: zod
+        .boolean()
+        .default(
+          channelDirectoryValidateResponseChannelsItemExternalConnectedDefault,
+        ),
+    }),
+  ),
+  can_edit: zod.boolean(),
+  can_activate: zod.boolean(),
+});
+
+/**
+ * @summary Activate
+ */
+export const ChannelDirectoryActivateParams = zod.object({
+  shop_id: zod.coerce.number(),
+  channel_id: zod.coerce.string(),
+});
+
+export const ChannelDirectoryActivateBody = zod.object({
+  expected_revision: zod.number().min(1),
+});
+
+export const channelDirectoryActivateResponseChannelsItemMappingsItemSourceProductcodeMax = 200;
+
+export const channelDirectoryActivateResponseChannelsItemMappingsItemTargetProductcodeMax = 200;
+
+export const channelDirectoryActivateResponseChannelsItemExternalConnectedDefault = false;
+
+export const ChannelDirectoryActivateResponse = zod.object({
+  revision: zod.number(),
+  channels: zod.array(
+    zod.object({
+      id: zod.string(),
+      name: zod.string(),
+      domain: zod.string(),
+      hidden: zod.boolean(),
+      status: zod.enum([
+        "setup",
+        "ready",
+        "active",
+        "paused",
+        "needs_validation",
+        "restricted",
+      ]),
+      target_shop_id: zod.union([zod.number(), zod.null()]),
+      product_profile_id: zod.union([zod.number(), zod.null()]),
+      mappings: zod.array(
+        zod.object({
+          source_productcode: zod
+            .string()
+            .min(1)
+            .max(
+              channelDirectoryActivateResponseChannelsItemMappingsItemSourceProductcodeMax,
+            ),
+          target_productcode: zod
+            .string()
+            .min(1)
+            .max(
+              channelDirectoryActivateResponseChannelsItemMappingsItemTargetProductcodeMax,
+            ),
+        }),
+      ),
+      mapping_confirmed: zod.boolean(),
+      mapped_products: zod.union([zod.number(), zod.null()]),
+      last_success_at: zod.union([zod.string(), zod.null()]),
+      validation_errors: zod.array(zod.string()),
+      validated_at: zod.union([zod.string(), zod.null()]),
+      can_edit: zod.boolean(),
+      can_activate: zod.boolean(),
+      external_connected: zod
+        .boolean()
+        .default(
+          channelDirectoryActivateResponseChannelsItemExternalConnectedDefault,
+        ),
+    }),
+  ),
+  can_edit: zod.boolean(),
+  can_activate: zod.boolean(),
+});
+
+/**
+ * @summary Pause
+ */
+export const ChannelDirectoryPauseParams = zod.object({
+  shop_id: zod.coerce.number(),
+  channel_id: zod.coerce.string(),
+});
+
+export const ChannelDirectoryPauseBody = zod.object({
+  expected_revision: zod.number().min(1),
+});
+
+export const channelDirectoryPauseResponseChannelsItemMappingsItemSourceProductcodeMax = 200;
+
+export const channelDirectoryPauseResponseChannelsItemMappingsItemTargetProductcodeMax = 200;
+
+export const channelDirectoryPauseResponseChannelsItemExternalConnectedDefault = false;
+
+export const ChannelDirectoryPauseResponse = zod.object({
+  revision: zod.number(),
+  channels: zod.array(
+    zod.object({
+      id: zod.string(),
+      name: zod.string(),
+      domain: zod.string(),
+      hidden: zod.boolean(),
+      status: zod.enum([
+        "setup",
+        "ready",
+        "active",
+        "paused",
+        "needs_validation",
+        "restricted",
+      ]),
+      target_shop_id: zod.union([zod.number(), zod.null()]),
+      product_profile_id: zod.union([zod.number(), zod.null()]),
+      mappings: zod.array(
+        zod.object({
+          source_productcode: zod
+            .string()
+            .min(1)
+            .max(
+              channelDirectoryPauseResponseChannelsItemMappingsItemSourceProductcodeMax,
+            ),
+          target_productcode: zod
+            .string()
+            .min(1)
+            .max(
+              channelDirectoryPauseResponseChannelsItemMappingsItemTargetProductcodeMax,
+            ),
+        }),
+      ),
+      mapping_confirmed: zod.boolean(),
+      mapped_products: zod.union([zod.number(), zod.null()]),
+      last_success_at: zod.union([zod.string(), zod.null()]),
+      validation_errors: zod.array(zod.string()),
+      validated_at: zod.union([zod.string(), zod.null()]),
+      can_edit: zod.boolean(),
+      can_activate: zod.boolean(),
+      external_connected: zod
+        .boolean()
+        .default(
+          channelDirectoryPauseResponseChannelsItemExternalConnectedDefault,
+        ),
+    }),
+  ),
+  can_edit: zod.boolean(),
+  can_activate: zod.boolean(),
+});
+
+/**
+ * @summary Visibility
+ */
+export const ChannelDirectoryVisibilityParams = zod.object({
+  shop_id: zod.coerce.number(),
+  channel_id: zod.coerce.string(),
+});
+
+export const ChannelDirectoryVisibilityBody = zod.object({
+  expected_revision: zod.number().min(1),
+  hidden: zod.boolean(),
+});
+
+export const channelDirectoryVisibilityResponseChannelsItemMappingsItemSourceProductcodeMax = 200;
+
+export const channelDirectoryVisibilityResponseChannelsItemMappingsItemTargetProductcodeMax = 200;
+
+export const channelDirectoryVisibilityResponseChannelsItemExternalConnectedDefault = false;
+
+export const ChannelDirectoryVisibilityResponse = zod.object({
+  revision: zod.number(),
+  channels: zod.array(
+    zod.object({
+      id: zod.string(),
+      name: zod.string(),
+      domain: zod.string(),
+      hidden: zod.boolean(),
+      status: zod.enum([
+        "setup",
+        "ready",
+        "active",
+        "paused",
+        "needs_validation",
+        "restricted",
+      ]),
+      target_shop_id: zod.union([zod.number(), zod.null()]),
+      product_profile_id: zod.union([zod.number(), zod.null()]),
+      mappings: zod.array(
+        zod.object({
+          source_productcode: zod
+            .string()
+            .min(1)
+            .max(
+              channelDirectoryVisibilityResponseChannelsItemMappingsItemSourceProductcodeMax,
+            ),
+          target_productcode: zod
+            .string()
+            .min(1)
+            .max(
+              channelDirectoryVisibilityResponseChannelsItemMappingsItemTargetProductcodeMax,
+            ),
+        }),
+      ),
+      mapping_confirmed: zod.boolean(),
+      mapped_products: zod.union([zod.number(), zod.null()]),
+      last_success_at: zod.union([zod.string(), zod.null()]),
+      validation_errors: zod.array(zod.string()),
+      validated_at: zod.union([zod.string(), zod.null()]),
+      can_edit: zod.boolean(),
+      can_activate: zod.boolean(),
+      external_connected: zod
+        .boolean()
+        .default(
+          channelDirectoryVisibilityResponseChannelsItemExternalConnectedDefault,
+        ),
+    }),
+  ),
+  can_edit: zod.boolean(),
+  can_activate: zod.boolean(),
+});
+
+/**
+ * @summary Prepare Basis
+ */
+export const ChannelDirectoryPrepareBasisParams = zod.object({
+  shop_id: zod.coerce.number(),
+  channel_id: zod.coerce.string(),
+});
+
+export const ChannelDirectoryPrepareBasisBody = zod.object({
+  expected_revision: zod.number().min(1),
+});
+
+export const ChannelDirectoryPrepareBasisResponse = zod.object({
+  id: zod.number(),
+  shop_id: zod.number(),
+  kind: zod.string(),
+  revision: zod.number(),
+  status: zod.string(),
+  created_at: zod.string(),
+  created_by: zod.string(),
+  data: zod.record(zod.string(), zod.unknown()),
+});
+
+/**
  * @summary Overview
  */
 export const PrinterWorkflowOverviewParams = zod.object({

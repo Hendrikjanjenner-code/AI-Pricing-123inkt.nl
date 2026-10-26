@@ -399,6 +399,8 @@ def required_action_permission(path: str, method: str) -> str | None:
         return WRITE_PERMISSIONS[segment]
     if segment == "channelmanager":
         if method.upper() == "POST":
+            if len(parts) == 5 and parts[1] == "channels" and parts[4] == "activate":
+                return "pricing.approve"
             if len(parts) >= 2 and parts[1] == "printer":
                 if ((len(parts) == 4 and parts[3] == "advice")
                         or (len(parts) == 5 and parts[3] in {"approve", "export", "readback"})):

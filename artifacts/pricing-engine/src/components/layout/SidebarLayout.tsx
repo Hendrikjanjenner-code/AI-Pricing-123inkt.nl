@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useAuth } from "@/lib/auth";
 import { Link, useLocation } from "wouter";
-import { Box, LogOut, ChevronDown, ChevronRight, Star, Clock } from "lucide-react";
+import { Box, Menu, LogOut, ChevronDown, ChevronRight, Star, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GlobalSearch } from "@/components/layout/GlobalSearch";
 import { useDepartmentDefaultView } from "@/components/filters/SavedViewsMenu";
@@ -169,6 +169,11 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
     return open;
   });
 
+  // Alleen Channelmanager: inklapbare zijbalk op mobiel; overige routes ongewijzigd.
+  const cmMobile = location.split("?")[0].startsWith("/channelmanager");
+  const [cmNavOpen, setCmNavOpen] = useState(false);
+  useEffect(() => { setCmNavOpen(false); }, [location]);
+
   if (!user) return null;
 
   // Workspace-gedreven sidebar (taak 219): domeinen en items worden
@@ -187,7 +192,8 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
-      <div className="w-64 bg-sidebar border-r border-sidebar-border text-sidebar-foreground flex flex-col flex-shrink-0">
+      {cmMobile && cmNavOpen && <div className="fixed inset-0 z-40 bg-black/30 md:hidden" onClick={() => setCmNavOpen(false)} aria-hidden="true" />}
+      <div className={`w-64 bg-sidebar border-r border-sidebar-border text-sidebar-foreground flex-col flex-shrink-0 ${cmMobile ? `${cmNavOpen ? "fixed inset-y-0 left-0 z-50 flex" : "hidden"} md:static md:flex` : "flex"}`} data-testid={cmMobile ? "sidebar-cm" : undefined}>
         <div className="h-16 flex items-center px-6 border-b border-sidebar-border font-bold text-xl tracking-tight text-sidebar-primary">
           <Box className="w-6 h-6 mr-3" />
           Pricing Engine
@@ -260,8 +266,9 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
       </div>
 
       <main className="flex-1 flex flex-col overflow-hidden bg-background">
-        <header className="h-16 border-b bg-card flex items-center justify-between px-8 shrink-0 gap-4">
-          <Breadcrumbs />
+        <header className={`h-16 border-b bg-card flex items-center justify-between shrink-0 gap-4 ${cmMobile ? "px-3 md:px-8" : "px-8"}`}>
+          {cmMobile && <Button variant="ghost" size="icon" className="md:hidden shrink-0" onClick={() => setCmNavOpen(true)} aria-label="Menu openen" data-testid="button-cm-mobile-nav"><Menu className="h-5 w-5" /></Button>}
+          <div className={cmMobile ? "hidden md:block min-w-0" : undefined}><Breadcrumbs /></div>
           <div className="flex items-center gap-2 shrink-0">
             <GlobalSearch />
             {user.role === "admin" && <ShopSwitcher />}
@@ -270,8 +277,8 @@ export function SidebarLayout({ children }: { children: React.ReactNode }) {
             <NotificationBell />
           </div>
         </header>
-        <div className="flex-1 overflow-auto p-8">
-          <div className="mx-auto max-w-7xl">
+        <div className={`flex-1 overflow-auto ${cmMobile ? "p-0 md:p-8" : "p-8"}`}>
+          <div className="mx-auto max-w-7xl min-w-0">
             {children}
           </div>
         </div>

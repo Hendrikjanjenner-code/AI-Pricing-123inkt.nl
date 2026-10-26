@@ -32,3 +32,9 @@ Readback accepts a full post-change price snapshot, but asserts only the non-sup
 **Why:** A full DRS readback naturally contains unchanged products and zero-price channels that were deliberately excluded from the export.
 
 **How to apply:** Missing or different exported targets must block confirmation; unrelated rows must not. Shop authorization and numeric validation still apply to the entire input.
+
+The user wants Kabelshop.nl, Sneltoner.nl, Printabout.nl and Tonershop.nl as the standard channels, using the supplied SiteMinder-style channel list as the reference.
+
+**Why:** The user explicitly named these four shops and supplied the channel-list screenshot.
+
+**How to apply:** Treat these as the intended channel choices, not evidence that integrations are already connected or that Kabelshop should replace an existing printer-workbook label.

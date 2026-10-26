@@ -165,6 +165,25 @@ def reference_access(db, user, record):
         source = record.data["config"].get("schedule_source_shop_id")
     if source:
         access(db, user, source)
+    if record.data.get("protected_source_shop_id"):
+        access(db, user, record.data["protected_source_shop_id"])
+
+
+def channel_basis_fresh(db, user, basis):
+    origin = basis.data.get("channel_origin")
+    if not origin:
+        return
+    from routes.channel_registry import KIND, fingerprint, setup_signature
+    source = basis.data["source_shop_id"]
+    access(db, user, source)
+    registry = latest(db, source, KIND)
+    channel = next((c for c in registry.data["channels"] if c["id"] == origin["channel_id"]), None) if registry else None
+    current_basis = latest(db, source, "basis", True)
+    if (not registry or not channel or setup_signature(channel) != origin["setup_signature"]
+            or not channel["active"] or channel["hidden"] or not channel["validation"]
+            or fingerprint(db, source, channel) != channel["validation"]["fingerprint"]
+            or not current_basis or current_basis.id != origin["source_basis_id"]):
+        raise HTTPException(409, "Kanaal of bronbasis gewijzigd; maak een nieuwe kanaalbasis")
 
 
 @router.get("/{shop_id}/overview", response_model=OverviewOutput)
@@ -178,7 +197,10 @@ def overview(shop_id: int, db: Session = Depends(get_db), user=Depends(get_curre
     if last_run:
         reference_access(db, user, last_run)
     permissions = effective_permissions(db, user)
-    return {"config": dump(config), "basis": dump(latest(db, shop_id, "basis", True)),
+    basis = latest(db, shop_id, "basis", True)
+    if basis:
+        reference_access(db, user, basis)
+    return {"config": dump(config), "basis": dump(basis),
             "last_run": dump(last_run), "history_limit": 50,
             "external_formats": "provisional_unconfirmed", "schedule_timezone": "UTC",
             "scheduler": scheduler_status(),
@@ -264,6 +286,8 @@ def approve_basis(shop_id: int, record_id: int, body: Notes, db: Session = Depen
     access(db, user, shop_id, "pricing.approve")
     lock(db, shop_id)
     item = get_record(db, shop_id, record_id, "basis")
+    reference_access(db, user, item)
+    channel_basis_fresh(db, user, item)
     db.refresh(item)
     if item.status != "staged":
         raise HTTPException(409, "Basis is not staged")
@@ -280,6 +304,8 @@ def approve_basis(shop_id: int, record_id: int, body: Notes, db: Session = Depen
 def make_calculation(db, user, shop_id, source_shop_id, basis_id):
     config = latest(db, shop_id, "config")
     basis = get_record(db, source_shop_id, basis_id, "basis")
+    reference_access(db, user, basis)
+    channel_basis_fresh(db, user, basis)
     if not config or basis.status != "approved":
         raise HTTPException(409, "Active configuration and approved basis required")
     if latest(db, source_shop_id, "basis", True).id != basis.id:
@@ -296,6 +322,7 @@ def make_calculation(db, user, shop_id, source_shop_id, basis_id):
         raise HTTPException(422, str(exc)) from exc
     return add(db, user, shop_id, "calculation",
                {"source_shop_id": source_shop_id, "basis_id": basis.id, "config_id": config.id,
+                 "protected_source_shop_id": basis.data.get("source_shop_id") if basis.data.get("channel_origin") else None,
                 "config": config.data["config"], "rows": rows,
                 "current_price_note": "Destination current price unavailable; source current prices are not destination actuals."
                     if cross_shop else "Current prices supplied explicitly in this shop's approved basis.",
@@ -320,6 +347,9 @@ def fresh(db, user, shop_id, item):
     access(db, user, source)
     lock(db, shop_id, source)
     config, basis = latest(db, shop_id, "config"), latest(db, source, "basis", True)
+    if basis:
+        reference_access(db, user, basis)
+        channel_basis_fresh(db, user, basis)
     if not config or not basis or config.id != item.data["config_id"] or basis.id != item.data["basis_id"]:
         raise HTTPException(409, "Stale calculation: basis or configuration changed")
     if item.data["blocked_rows"]:

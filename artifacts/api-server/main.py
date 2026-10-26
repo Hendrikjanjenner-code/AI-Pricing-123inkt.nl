@@ -686,6 +686,8 @@ from routes import cost_priority
 app.include_router(cost_priority.router)
 from routes import channelmanager
 app.include_router(channelmanager.router)
+from routes import channel_registry
+app.include_router(channel_registry.router)
 from routes import hub_feeds
 app.include_router(hub_feeds.router)
 from routes import printer_workflow

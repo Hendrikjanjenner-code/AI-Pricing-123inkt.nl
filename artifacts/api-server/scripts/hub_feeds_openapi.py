@@ -11,11 +11,13 @@ from fastapi import FastAPI
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from routes.hub_feeds import router as feeds
 from routes.printer_workflow import router as printer
+from routes.channel_registry import router as directory
 
 
 target = Path(__file__).resolve().parents[3] / "lib/api-spec/openapi.yaml"
 original = target.read_text()
-for label, prefix, router in (("HUBFEEDS", "HubFeeds", feeds), ("PRINTERWORKFLOW", "PrinterWorkflow", printer)):
+for label, prefix, router in (("HUBFEEDS", "HubFeeds", feeds), ("PRINTERWORKFLOW", "PrinterWorkflow", printer),
+                              ("CHANNELDIRECTORY", "ChannelDirectory", directory)):
     app = FastAPI()
     app.include_router(router)
     schema = app.openapi()

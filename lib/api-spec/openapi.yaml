@@ -43,6 +43,343 @@ tags:
     description: Commercial AI Copilot (AI Gateway)
 
 paths:
+  # CHANNELDIRECTORY PATHS BEGIN
+  /channelmanager/channels/{shop_id}:
+    get:
+      tags:
+      - channel-directory
+      summary: Listing
+      operationId: channelDirectoryListing
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelDirectoryDirectoryOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelDirectoryHTTPValidationError'
+    post:
+      tags:
+      - channel-directory
+      summary: Create
+      operationId: channelDirectoryCreate
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelDirectoryNewChannel'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelDirectoryDirectoryOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelDirectoryHTTPValidationError'
+  /channelmanager/channels/{shop_id}/reorder:
+    post:
+      tags:
+      - channel-directory
+      summary: Reorder
+      operationId: channelDirectoryReorder
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelDirectoryReorder'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelDirectoryDirectoryOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelDirectoryHTTPValidationError'
+  /channelmanager/channels/{shop_id}/{channel_id}:
+    put:
+      tags:
+      - channel-directory
+      summary: Configure
+      operationId: channelDirectoryConfigure
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: channel_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Channel Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelDirectorySetup'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelDirectoryDirectoryOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelDirectoryHTTPValidationError'
+  /channelmanager/channels/{shop_id}/{channel_id}/validate:
+    post:
+      tags:
+      - channel-directory
+      summary: Validate
+      operationId: channelDirectoryValidate
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: channel_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Channel Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelDirectoryRevision'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelDirectoryDirectoryOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelDirectoryHTTPValidationError'
+  /channelmanager/channels/{shop_id}/{channel_id}/activate:
+    post:
+      tags:
+      - channel-directory
+      summary: Activate
+      operationId: channelDirectoryActivate
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: channel_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Channel Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelDirectoryRevision'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelDirectoryDirectoryOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelDirectoryHTTPValidationError'
+  /channelmanager/channels/{shop_id}/{channel_id}/pause:
+    post:
+      tags:
+      - channel-directory
+      summary: Pause
+      operationId: channelDirectoryPause
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: channel_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Channel Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelDirectoryRevision'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelDirectoryDirectoryOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelDirectoryHTTPValidationError'
+  /channelmanager/channels/{shop_id}/{channel_id}/visibility:
+    post:
+      tags:
+      - channel-directory
+      summary: Visibility
+      operationId: channelDirectoryVisibility
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: channel_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Channel Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelDirectoryVisibility'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelDirectoryDirectoryOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelDirectoryHTTPValidationError'
+  /channelmanager/channels/{shop_id}/{channel_id}/prepare-basis:
+    post:
+      tags:
+      - channel-directory
+      summary: Prepare Basis
+      operationId: channelDirectoryPrepareBasis
+      security:
+      - HTTPBearer: []
+      parameters:
+      - name: shop_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          title: Shop Id
+      - name: channel_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Channel Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelDirectoryRevision'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelDirectorySnapshotOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelDirectoryHTTPValidationError'
+  # CHANNELDIRECTORY PATHS END
   # PRINTERWORKFLOW PATHS BEGIN
   /channelmanager/printer/{shop_id}:
     get:
@@ -3944,6 +4281,312 @@ components:
       required: true
       schema: {type: integer}
   schemas:
+    # CHANNELDIRECTORY SCHEMAS BEGIN
+    ChannelDirectoryChannelOutput:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        domain:
+          type: string
+          title: Domain
+        hidden:
+          type: boolean
+          title: Hidden
+        status:
+          type: string
+          enum:
+          - setup
+          - ready
+          - active
+          - paused
+          - needs_validation
+          - restricted
+          title: Status
+        target_shop_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Target Shop Id
+        product_profile_id:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Product Profile Id
+        mappings:
+          items:
+            $ref: '#/components/schemas/ChannelDirectoryMapping'
+          type: array
+          title: Mappings
+        mapping_confirmed:
+          type: boolean
+          title: Mapping Confirmed
+        mapped_products:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Mapped Products
+        last_success_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Last Success At
+        validation_errors:
+          items:
+            type: string
+          type: array
+          title: Validation Errors
+        validated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Validated At
+        can_edit:
+          type: boolean
+          title: Can Edit
+        can_activate:
+          type: boolean
+          title: Can Activate
+        external_connected:
+          type: boolean
+          title: External Connected
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - name
+      - domain
+      - hidden
+      - status
+      - target_shop_id
+      - product_profile_id
+      - mappings
+      - mapping_confirmed
+      - mapped_products
+      - last_success_at
+      - validation_errors
+      - validated_at
+      - can_edit
+      - can_activate
+      title: ChannelOutput
+    ChannelDirectoryDirectoryOutput:
+      properties:
+        revision:
+          type: integer
+          title: Revision
+        channels:
+          items:
+            $ref: '#/components/schemas/ChannelDirectoryChannelOutput'
+          type: array
+          title: Channels
+        can_edit:
+          type: boolean
+          title: Can Edit
+        can_activate:
+          type: boolean
+          title: Can Activate
+      additionalProperties: false
+      type: object
+      required:
+      - revision
+      - channels
+      - can_edit
+      - can_activate
+      title: DirectoryOutput
+    ChannelDirectoryHTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ChannelDirectoryValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    ChannelDirectoryMapping:
+      properties:
+        source_productcode:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Source Productcode
+        target_productcode:
+          type: string
+          maxLength: 200
+          minLength: 1
+          title: Target Productcode
+      additionalProperties: false
+      type: object
+      required:
+      - source_productcode
+      - target_productcode
+      title: Mapping
+    ChannelDirectoryNewChannel:
+      properties:
+        expected_revision:
+          type: integer
+          minimum: 1.0
+          title: Expected Revision
+        name:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Name
+        domain:
+          type: string
+          title: Domain
+      additionalProperties: false
+      type: object
+      required:
+      - expected_revision
+      - name
+      - domain
+      title: NewChannel
+    ChannelDirectoryReorder:
+      properties:
+        expected_revision:
+          type: integer
+          minimum: 1.0
+          title: Expected Revision
+        channel_ids:
+          items:
+            type: string
+          type: array
+          title: Channel Ids
+      additionalProperties: false
+      type: object
+      required:
+      - expected_revision
+      - channel_ids
+      title: Reorder
+    ChannelDirectoryRevision:
+      properties:
+        expected_revision:
+          type: integer
+          minimum: 1.0
+          title: Expected Revision
+      additionalProperties: false
+      type: object
+      required:
+      - expected_revision
+      title: Revision
+    ChannelDirectorySetup:
+      properties:
+        expected_revision:
+          type: integer
+          minimum: 1.0
+          title: Expected Revision
+        target_shop_id:
+          anyOf:
+          - type: integer
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Target Shop Id
+        product_profile_id:
+          anyOf:
+          - type: integer
+            exclusiveMinimum: 0.0
+          - type: 'null'
+          title: Product Profile Id
+        mappings:
+          items:
+            $ref: '#/components/schemas/ChannelDirectoryMapping'
+          type: array
+          maxItems: 200000
+          title: Mappings
+        mapping_confirmed:
+          type: boolean
+          title: Mapping Confirmed
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - expected_revision
+      title: Setup
+    ChannelDirectorySnapshotOutput:
+      properties:
+        id:
+          type: integer
+          title: Id
+        shop_id:
+          type: integer
+          title: Shop Id
+        kind:
+          type: string
+          title: Kind
+        revision:
+          type: integer
+          title: Revision
+        status:
+          type: string
+          title: Status
+        created_at:
+          type: string
+          title: Created At
+        created_by:
+          type: string
+          title: Created By
+        data:
+          additionalProperties: true
+          type: object
+          title: Data
+      additionalProperties: false
+      type: object
+      required:
+      - id
+      - shop_id
+      - kind
+      - revision
+      - status
+      - created_at
+      - created_by
+      - data
+      title: SnapshotOutput
+    ChannelDirectoryValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    ChannelDirectoryVisibility:
+      properties:
+        expected_revision:
+          type: integer
+          minimum: 1.0
+          title: Expected Revision
+        hidden:
+          type: boolean
+          title: Hidden
+      additionalProperties: false
+      type: object
+      required:
+      - expected_revision
+      - hidden
+      title: Visibility
+    # CHANNELDIRECTORY SCHEMAS END
     # PRINTERWORKFLOW SCHEMAS BEGIN
     PrinterWorkflowAdviceInput:
       properties:

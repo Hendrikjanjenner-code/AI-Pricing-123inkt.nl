@@ -28,6 +28,14 @@ import type {
   ChannelBodyReadbackApiChannelmanagerShopIdExportsRecordIdReadbackPost,
   ChannelCalculationInput,
   ChannelConfigInput,
+  ChannelDirectoryDirectoryOutput,
+  ChannelDirectoryHTTPValidationError,
+  ChannelDirectoryNewChannel,
+  ChannelDirectoryReorder,
+  ChannelDirectoryRevision,
+  ChannelDirectorySetup,
+  ChannelDirectorySnapshotOutput,
+  ChannelDirectoryVisibility,
   ChannelHTTPValidationError,
   ChannelHistoryOutput,
   ChannelHistoryParams,
@@ -182,6 +190,972 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+/**
+ * @summary Listing
+ */
+export const getChannelDirectoryListingUrl = (shopId: number) => {
+  return `/api/channelmanager/channels/${shopId}`;
+};
+
+export const channelDirectoryListing = async (
+  shopId: number,
+  options?: RequestInit,
+): Promise<ChannelDirectoryDirectoryOutput> => {
+  return customFetch<ChannelDirectoryDirectoryOutput>(
+    getChannelDirectoryListingUrl(shopId),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getChannelDirectoryListingQueryKey = (shopId: number) => {
+  return [`/api/channelmanager/channels/${shopId}`] as const;
+};
+
+export const getChannelDirectoryListingQueryOptions = <
+  TData = Awaited<ReturnType<typeof channelDirectoryListing>>,
+  TError = ErrorType<ChannelDirectoryHTTPValidationError>,
+>(
+  shopId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof channelDirectoryListing>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getChannelDirectoryListingQueryKey(shopId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof channelDirectoryListing>>
+  > = ({ signal }) =>
+    channelDirectoryListing(shopId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!shopId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof channelDirectoryListing>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ChannelDirectoryListingQueryResult = NonNullable<
+  Awaited<ReturnType<typeof channelDirectoryListing>>
+>;
+export type ChannelDirectoryListingQueryError =
+  ErrorType<ChannelDirectoryHTTPValidationError>;
+
+/**
+ * @summary Listing
+ */
+
+export function useChannelDirectoryListing<
+  TData = Awaited<ReturnType<typeof channelDirectoryListing>>,
+  TError = ErrorType<ChannelDirectoryHTTPValidationError>,
+>(
+  shopId: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof channelDirectoryListing>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getChannelDirectoryListingQueryOptions(shopId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create
+ */
+export const getChannelDirectoryCreateUrl = (shopId: number) => {
+  return `/api/channelmanager/channels/${shopId}`;
+};
+
+export const channelDirectoryCreate = async (
+  shopId: number,
+  channelDirectoryNewChannel: ChannelDirectoryNewChannel,
+  options?: RequestInit,
+): Promise<ChannelDirectoryDirectoryOutput> => {
+  return customFetch<ChannelDirectoryDirectoryOutput>(
+    getChannelDirectoryCreateUrl(shopId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(channelDirectoryNewChannel),
+    },
+  );
+};
+
+export const getChannelDirectoryCreateMutationOptions = <
+  TError = ErrorType<ChannelDirectoryHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelDirectoryCreate>>,
+    TError,
+    { shopId: number; data: BodyType<ChannelDirectoryNewChannel> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof channelDirectoryCreate>>,
+  TError,
+  { shopId: number; data: BodyType<ChannelDirectoryNewChannel> },
+  TContext
+> => {
+  const mutationKey = ["channelDirectoryCreate"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof channelDirectoryCreate>>,
+    { shopId: number; data: BodyType<ChannelDirectoryNewChannel> }
+  > = (props) => {
+    const { shopId, data } = props ?? {};
+
+    return channelDirectoryCreate(shopId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChannelDirectoryCreateMutationResult = NonNullable<
+  Awaited<ReturnType<typeof channelDirectoryCreate>>
+>;
+export type ChannelDirectoryCreateMutationBody =
+  BodyType<ChannelDirectoryNewChannel>;
+export type ChannelDirectoryCreateMutationError =
+  ErrorType<ChannelDirectoryHTTPValidationError>;
+
+/**
+ * @summary Create
+ */
+export const useChannelDirectoryCreate = <
+  TError = ErrorType<ChannelDirectoryHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelDirectoryCreate>>,
+    TError,
+    { shopId: number; data: BodyType<ChannelDirectoryNewChannel> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof channelDirectoryCreate>>,
+  TError,
+  { shopId: number; data: BodyType<ChannelDirectoryNewChannel> },
+  TContext
+> => {
+  return useMutation(getChannelDirectoryCreateMutationOptions(options));
+};
+
+/**
+ * @summary Reorder
+ */
+export const getChannelDirectoryReorderUrl = (shopId: number) => {
+  return `/api/channelmanager/channels/${shopId}/reorder`;
+};
+
+export const channelDirectoryReorder = async (
+  shopId: number,
+  channelDirectoryReorder: ChannelDirectoryReorder,
+  options?: RequestInit,
+): Promise<ChannelDirectoryDirectoryOutput> => {
+  return customFetch<ChannelDirectoryDirectoryOutput>(
+    getChannelDirectoryReorderUrl(shopId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(channelDirectoryReorder),
+    },
+  );
+};
+
+export const getChannelDirectoryReorderMutationOptions = <
+  TError = ErrorType<ChannelDirectoryHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelDirectoryReorder>>,
+    TError,
+    { shopId: number; data: BodyType<ChannelDirectoryReorder> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof channelDirectoryReorder>>,
+  TError,
+  { shopId: number; data: BodyType<ChannelDirectoryReorder> },
+  TContext
+> => {
+  const mutationKey = ["channelDirectoryReorder"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof channelDirectoryReorder>>,
+    { shopId: number; data: BodyType<ChannelDirectoryReorder> }
+  > = (props) => {
+    const { shopId, data } = props ?? {};
+
+    return channelDirectoryReorder(shopId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChannelDirectoryReorderMutationResult = NonNullable<
+  Awaited<ReturnType<typeof channelDirectoryReorder>>
+>;
+export type ChannelDirectoryReorderMutationBody =
+  BodyType<ChannelDirectoryReorder>;
+export type ChannelDirectoryReorderMutationError =
+  ErrorType<ChannelDirectoryHTTPValidationError>;
+
+/**
+ * @summary Reorder
+ */
+export const useChannelDirectoryReorder = <
+  TError = ErrorType<ChannelDirectoryHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelDirectoryReorder>>,
+    TError,
+    { shopId: number; data: BodyType<ChannelDirectoryReorder> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof channelDirectoryReorder>>,
+  TError,
+  { shopId: number; data: BodyType<ChannelDirectoryReorder> },
+  TContext
+> => {
+  return useMutation(getChannelDirectoryReorderMutationOptions(options));
+};
+
+/**
+ * @summary Configure
+ */
+export const getChannelDirectoryConfigureUrl = (
+  shopId: number,
+  channelId: string,
+) => {
+  return `/api/channelmanager/channels/${shopId}/${channelId}`;
+};
+
+export const channelDirectoryConfigure = async (
+  shopId: number,
+  channelId: string,
+  channelDirectorySetup: ChannelDirectorySetup,
+  options?: RequestInit,
+): Promise<ChannelDirectoryDirectoryOutput> => {
+  return customFetch<ChannelDirectoryDirectoryOutput>(
+    getChannelDirectoryConfigureUrl(shopId, channelId),
+    {
+      ...options,
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(channelDirectorySetup),
+    },
+  );
+};
+
+export const getChannelDirectoryConfigureMutationOptions = <
+  TError = ErrorType<ChannelDirectoryHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelDirectoryConfigure>>,
+    TError,
+    {
+      shopId: number;
+      channelId: string;
+      data: BodyType<ChannelDirectorySetup>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof channelDirectoryConfigure>>,
+  TError,
+  { shopId: number; channelId: string; data: BodyType<ChannelDirectorySetup> },
+  TContext
+> => {
+  const mutationKey = ["channelDirectoryConfigure"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof channelDirectoryConfigure>>,
+    { shopId: number; channelId: string; data: BodyType<ChannelDirectorySetup> }
+  > = (props) => {
+    const { shopId, channelId, data } = props ?? {};
+
+    return channelDirectoryConfigure(shopId, channelId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChannelDirectoryConfigureMutationResult = NonNullable<
+  Awaited<ReturnType<typeof channelDirectoryConfigure>>
+>;
+export type ChannelDirectoryConfigureMutationBody =
+  BodyType<ChannelDirectorySetup>;
+export type ChannelDirectoryConfigureMutationError =
+  ErrorType<ChannelDirectoryHTTPValidationError>;
+
+/**
+ * @summary Configure
+ */
+export const useChannelDirectoryConfigure = <
+  TError = ErrorType<ChannelDirectoryHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelDirectoryConfigure>>,
+    TError,
+    {
+      shopId: number;
+      channelId: string;
+      data: BodyType<ChannelDirectorySetup>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof channelDirectoryConfigure>>,
+  TError,
+  { shopId: number; channelId: string; data: BodyType<ChannelDirectorySetup> },
+  TContext
+> => {
+  return useMutation(getChannelDirectoryConfigureMutationOptions(options));
+};
+
+/**
+ * @summary Validate
+ */
+export const getChannelDirectoryValidateUrl = (
+  shopId: number,
+  channelId: string,
+) => {
+  return `/api/channelmanager/channels/${shopId}/${channelId}/validate`;
+};
+
+export const channelDirectoryValidate = async (
+  shopId: number,
+  channelId: string,
+  channelDirectoryRevision: ChannelDirectoryRevision,
+  options?: RequestInit,
+): Promise<ChannelDirectoryDirectoryOutput> => {
+  return customFetch<ChannelDirectoryDirectoryOutput>(
+    getChannelDirectoryValidateUrl(shopId, channelId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(channelDirectoryRevision),
+    },
+  );
+};
+
+export const getChannelDirectoryValidateMutationOptions = <
+  TError = ErrorType<ChannelDirectoryHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelDirectoryValidate>>,
+    TError,
+    {
+      shopId: number;
+      channelId: string;
+      data: BodyType<ChannelDirectoryRevision>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof channelDirectoryValidate>>,
+  TError,
+  {
+    shopId: number;
+    channelId: string;
+    data: BodyType<ChannelDirectoryRevision>;
+  },
+  TContext
+> => {
+  const mutationKey = ["channelDirectoryValidate"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof channelDirectoryValidate>>,
+    {
+      shopId: number;
+      channelId: string;
+      data: BodyType<ChannelDirectoryRevision>;
+    }
+  > = (props) => {
+    const { shopId, channelId, data } = props ?? {};
+
+    return channelDirectoryValidate(shopId, channelId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChannelDirectoryValidateMutationResult = NonNullable<
+  Awaited<ReturnType<typeof channelDirectoryValidate>>
+>;
+export type ChannelDirectoryValidateMutationBody =
+  BodyType<ChannelDirectoryRevision>;
+export type ChannelDirectoryValidateMutationError =
+  ErrorType<ChannelDirectoryHTTPValidationError>;
+
+/**
+ * @summary Validate
+ */
+export const useChannelDirectoryValidate = <
+  TError = ErrorType<ChannelDirectoryHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelDirectoryValidate>>,
+    TError,
+    {
+      shopId: number;
+      channelId: string;
+      data: BodyType<ChannelDirectoryRevision>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof channelDirectoryValidate>>,
+  TError,
+  {
+    shopId: number;
+    channelId: string;
+    data: BodyType<ChannelDirectoryRevision>;
+  },
+  TContext
+> => {
+  return useMutation(getChannelDirectoryValidateMutationOptions(options));
+};
+
+/**
+ * @summary Activate
+ */
+export const getChannelDirectoryActivateUrl = (
+  shopId: number,
+  channelId: string,
+) => {
+  return `/api/channelmanager/channels/${shopId}/${channelId}/activate`;
+};
+
+export const channelDirectoryActivate = async (
+  shopId: number,
+  channelId: string,
+  channelDirectoryRevision: ChannelDirectoryRevision,
+  options?: RequestInit,
+): Promise<ChannelDirectoryDirectoryOutput> => {
+  return customFetch<ChannelDirectoryDirectoryOutput>(
+    getChannelDirectoryActivateUrl(shopId, channelId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(channelDirectoryRevision),
+    },
+  );
+};
+
+export const getChannelDirectoryActivateMutationOptions = <
+  TError = ErrorType<ChannelDirectoryHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelDirectoryActivate>>,
+    TError,
+    {
+      shopId: number;
+      channelId: string;
+      data: BodyType<ChannelDirectoryRevision>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof channelDirectoryActivate>>,
+  TError,
+  {
+    shopId: number;
+    channelId: string;
+    data: BodyType<ChannelDirectoryRevision>;
+  },
+  TContext
+> => {
+  const mutationKey = ["channelDirectoryActivate"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof channelDirectoryActivate>>,
+    {
+      shopId: number;
+      channelId: string;
+      data: BodyType<ChannelDirectoryRevision>;
+    }
+  > = (props) => {
+    const { shopId, channelId, data } = props ?? {};
+
+    return channelDirectoryActivate(shopId, channelId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChannelDirectoryActivateMutationResult = NonNullable<
+  Awaited<ReturnType<typeof channelDirectoryActivate>>
+>;
+export type ChannelDirectoryActivateMutationBody =
+  BodyType<ChannelDirectoryRevision>;
+export type ChannelDirectoryActivateMutationError =
+  ErrorType<ChannelDirectoryHTTPValidationError>;
+
+/**
+ * @summary Activate
+ */
+export const useChannelDirectoryActivate = <
+  TError = ErrorType<ChannelDirectoryHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelDirectoryActivate>>,
+    TError,
+    {
+      shopId: number;
+      channelId: string;
+      data: BodyType<ChannelDirectoryRevision>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof channelDirectoryActivate>>,
+  TError,
+  {
+    shopId: number;
+    channelId: string;
+    data: BodyType<ChannelDirectoryRevision>;
+  },
+  TContext
+> => {
+  return useMutation(getChannelDirectoryActivateMutationOptions(options));
+};
+
+/**
+ * @summary Pause
+ */
+export const getChannelDirectoryPauseUrl = (
+  shopId: number,
+  channelId: string,
+) => {
+  return `/api/channelmanager/channels/${shopId}/${channelId}/pause`;
+};
+
+export const channelDirectoryPause = async (
+  shopId: number,
+  channelId: string,
+  channelDirectoryRevision: ChannelDirectoryRevision,
+  options?: RequestInit,
+): Promise<ChannelDirectoryDirectoryOutput> => {
+  return customFetch<ChannelDirectoryDirectoryOutput>(
+    getChannelDirectoryPauseUrl(shopId, channelId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(channelDirectoryRevision),
+    },
+  );
+};
+
+export const getChannelDirectoryPauseMutationOptions = <
+  TError = ErrorType<ChannelDirectoryHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelDirectoryPause>>,
+    TError,
+    {
+      shopId: number;
+      channelId: string;
+      data: BodyType<ChannelDirectoryRevision>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof channelDirectoryPause>>,
+  TError,
+  {
+    shopId: number;
+    channelId: string;
+    data: BodyType<ChannelDirectoryRevision>;
+  },
+  TContext
+> => {
+  const mutationKey = ["channelDirectoryPause"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof channelDirectoryPause>>,
+    {
+      shopId: number;
+      channelId: string;
+      data: BodyType<ChannelDirectoryRevision>;
+    }
+  > = (props) => {
+    const { shopId, channelId, data } = props ?? {};
+
+    return channelDirectoryPause(shopId, channelId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChannelDirectoryPauseMutationResult = NonNullable<
+  Awaited<ReturnType<typeof channelDirectoryPause>>
+>;
+export type ChannelDirectoryPauseMutationBody =
+  BodyType<ChannelDirectoryRevision>;
+export type ChannelDirectoryPauseMutationError =
+  ErrorType<ChannelDirectoryHTTPValidationError>;
+
+/**
+ * @summary Pause
+ */
+export const useChannelDirectoryPause = <
+  TError = ErrorType<ChannelDirectoryHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelDirectoryPause>>,
+    TError,
+    {
+      shopId: number;
+      channelId: string;
+      data: BodyType<ChannelDirectoryRevision>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof channelDirectoryPause>>,
+  TError,
+  {
+    shopId: number;
+    channelId: string;
+    data: BodyType<ChannelDirectoryRevision>;
+  },
+  TContext
+> => {
+  return useMutation(getChannelDirectoryPauseMutationOptions(options));
+};
+
+/**
+ * @summary Visibility
+ */
+export const getChannelDirectoryVisibilityUrl = (
+  shopId: number,
+  channelId: string,
+) => {
+  return `/api/channelmanager/channels/${shopId}/${channelId}/visibility`;
+};
+
+export const channelDirectoryVisibility = async (
+  shopId: number,
+  channelId: string,
+  channelDirectoryVisibility: ChannelDirectoryVisibility,
+  options?: RequestInit,
+): Promise<ChannelDirectoryDirectoryOutput> => {
+  return customFetch<ChannelDirectoryDirectoryOutput>(
+    getChannelDirectoryVisibilityUrl(shopId, channelId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(channelDirectoryVisibility),
+    },
+  );
+};
+
+export const getChannelDirectoryVisibilityMutationOptions = <
+  TError = ErrorType<ChannelDirectoryHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelDirectoryVisibility>>,
+    TError,
+    {
+      shopId: number;
+      channelId: string;
+      data: BodyType<ChannelDirectoryVisibility>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof channelDirectoryVisibility>>,
+  TError,
+  {
+    shopId: number;
+    channelId: string;
+    data: BodyType<ChannelDirectoryVisibility>;
+  },
+  TContext
+> => {
+  const mutationKey = ["channelDirectoryVisibility"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof channelDirectoryVisibility>>,
+    {
+      shopId: number;
+      channelId: string;
+      data: BodyType<ChannelDirectoryVisibility>;
+    }
+  > = (props) => {
+    const { shopId, channelId, data } = props ?? {};
+
+    return channelDirectoryVisibility(shopId, channelId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChannelDirectoryVisibilityMutationResult = NonNullable<
+  Awaited<ReturnType<typeof channelDirectoryVisibility>>
+>;
+export type ChannelDirectoryVisibilityMutationBody =
+  BodyType<ChannelDirectoryVisibility>;
+export type ChannelDirectoryVisibilityMutationError =
+  ErrorType<ChannelDirectoryHTTPValidationError>;
+
+/**
+ * @summary Visibility
+ */
+export const useChannelDirectoryVisibility = <
+  TError = ErrorType<ChannelDirectoryHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelDirectoryVisibility>>,
+    TError,
+    {
+      shopId: number;
+      channelId: string;
+      data: BodyType<ChannelDirectoryVisibility>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof channelDirectoryVisibility>>,
+  TError,
+  {
+    shopId: number;
+    channelId: string;
+    data: BodyType<ChannelDirectoryVisibility>;
+  },
+  TContext
+> => {
+  return useMutation(getChannelDirectoryVisibilityMutationOptions(options));
+};
+
+/**
+ * @summary Prepare Basis
+ */
+export const getChannelDirectoryPrepareBasisUrl = (
+  shopId: number,
+  channelId: string,
+) => {
+  return `/api/channelmanager/channels/${shopId}/${channelId}/prepare-basis`;
+};
+
+export const channelDirectoryPrepareBasis = async (
+  shopId: number,
+  channelId: string,
+  channelDirectoryRevision: ChannelDirectoryRevision,
+  options?: RequestInit,
+): Promise<ChannelDirectorySnapshotOutput> => {
+  return customFetch<ChannelDirectorySnapshotOutput>(
+    getChannelDirectoryPrepareBasisUrl(shopId, channelId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(channelDirectoryRevision),
+    },
+  );
+};
+
+export const getChannelDirectoryPrepareBasisMutationOptions = <
+  TError = ErrorType<ChannelDirectoryHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelDirectoryPrepareBasis>>,
+    TError,
+    {
+      shopId: number;
+      channelId: string;
+      data: BodyType<ChannelDirectoryRevision>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof channelDirectoryPrepareBasis>>,
+  TError,
+  {
+    shopId: number;
+    channelId: string;
+    data: BodyType<ChannelDirectoryRevision>;
+  },
+  TContext
+> => {
+  const mutationKey = ["channelDirectoryPrepareBasis"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof channelDirectoryPrepareBasis>>,
+    {
+      shopId: number;
+      channelId: string;
+      data: BodyType<ChannelDirectoryRevision>;
+    }
+  > = (props) => {
+    const { shopId, channelId, data } = props ?? {};
+
+    return channelDirectoryPrepareBasis(
+      shopId,
+      channelId,
+      data,
+      requestOptions,
+    );
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChannelDirectoryPrepareBasisMutationResult = NonNullable<
+  Awaited<ReturnType<typeof channelDirectoryPrepareBasis>>
+>;
+export type ChannelDirectoryPrepareBasisMutationBody =
+  BodyType<ChannelDirectoryRevision>;
+export type ChannelDirectoryPrepareBasisMutationError =
+  ErrorType<ChannelDirectoryHTTPValidationError>;
+
+/**
+ * @summary Prepare Basis
+ */
+export const useChannelDirectoryPrepareBasis = <
+  TError = ErrorType<ChannelDirectoryHTTPValidationError>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof channelDirectoryPrepareBasis>>,
+    TError,
+    {
+      shopId: number;
+      channelId: string;
+      data: BodyType<ChannelDirectoryRevision>;
+    },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof channelDirectoryPrepareBasis>>,
+  TError,
+  {
+    shopId: number;
+    channelId: string;
+    data: BodyType<ChannelDirectoryRevision>;
+  },
+  TContext
+> => {
+  return useMutation(getChannelDirectoryPrepareBasisMutationOptions(options));
+};
 
 /**
  * @summary Overview
